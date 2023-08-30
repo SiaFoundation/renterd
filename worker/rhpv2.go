@@ -359,116 +359,125 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP, hostVersion st
 
 		// range over the batches and delete the sectors batch per batch
 		for i, batch := range batches {
-			w.logger.Debugw(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
+			if err := func() error {
+				var cost types.Currency
+				start := time.Now()
+				w.logger.Debugw(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
+				defer func() {
+					w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
+				}()
 
-			numSectors := rev.NumSectors()
+				numSectors := rev.NumSectors()
 
-			// build a set of actions that move the sectors we want to delete
-			// towards the end of the contract, preparing them to be trimmed off
-			var actions []rhpv2.RPCWriteAction
-			cIndex := numSectors - 1
-			for _, rIndex := range batch {
-				if cIndex != rIndex {
-					actions = append(actions, rhpv2.RPCWriteAction{
-						Type: rhpv2.RPCWriteActionSwap,
-						A:    uint64(cIndex),
-						B:    uint64(rIndex),
-					})
+				// build a set of actions that move the sectors we want to delete
+				// towards the end of the contract, preparing them to be trimmed off
+				var actions []rhpv2.RPCWriteAction
+				cIndex := numSectors - 1
+				for _, rIndex := range batch {
+					if cIndex != rIndex {
+						actions = append(actions, rhpv2.RPCWriteAction{
+							Type: rhpv2.RPCWriteActionSwap,
+							A:    uint64(cIndex),
+							B:    uint64(rIndex),
+						})
+					}
+					cIndex--
 				}
-				cIndex--
-			}
-			actions = append(actions, rhpv2.RPCWriteAction{
-				Type: rhpv2.RPCWriteActionTrim,
-				A:    uint64(len(batch)),
-			})
+				actions = append(actions, rhpv2.RPCWriteAction{
+					Type: rhpv2.RPCWriteActionTrim,
+					A:    uint64(len(batch)),
+				})
 
-			// check funds
-			proofSize := uint64(len(batch)) * 2 * uint64(bits.Len64(numSectors)) * 32
-			if proofSize < 4096 {
-				proofSize = 4096
-			}
+				// check funds
+				proofSize := uint64(len(batch)) * 2 * uint64(bits.Len64(numSectors)) * 32
+				if proofSize < 4096 {
+					proofSize = 4096
+				}
 
-			cost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
-			cost = cost.Mul64(125).Div64(100)
-			if rev.RenterFunds().Cmp(cost) < 0 {
-				return ErrInsufficientFunds
-			}
+				cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
+				cost = cost.Mul64(125).Div64(100)
+				if rev.RenterFunds().Cmp(cost) < 0 {
+					return ErrInsufficientFunds
+				}
 
-			// update the revision number
-			if rev.Revision.RevisionNumber == math.MaxUint64 {
-				return ErrContractFinalized
-			}
-			rev.Revision.RevisionNumber++
+				// update the revision number
+				if rev.Revision.RevisionNumber == math.MaxUint64 {
+					return ErrContractFinalized
+				}
+				rev.Revision.RevisionNumber++
 
-			// update the revision filesize
-			rev.Revision.Filesize -= rhpv2.SectorSize * actions[len(actions)-1].A
+				// update the revision filesize
+				rev.Revision.Filesize -= rhpv2.SectorSize * actions[len(actions)-1].A
 
-			// update the revision outputs
-			newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
-			if err != nil {
+				// update the revision outputs
+				newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
+				if err != nil {
+					return err
+				}
+
+				// create request
+				wReq := &rhpv2.RPCWriteRequest{
+					Actions:     actions,
+					MerkleProof: true,
+
+					RevisionNumber:    rev.Revision.RevisionNumber,
+					ValidProofValues:  newValid,
+					MissedProofValues: newMissed,
+				}
+
+				// send request and read merkle proof
+				var merkleResp rhpv2.RPCWriteMerkleProof
+				if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
+					return err
+				} else if err := t.ReadResponse(&merkleResp, 4096+proofSize); err != nil {
+					return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
+				}
+
+				// verify proof
+				proofHashes := merkleResp.OldSubtreeHashes
+				leafHashes := merkleResp.OldLeafHashes
+				oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
+				if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
+					err := ErrInvalidMerkleProof
+					t.WriteResponseErr(err)
+					return err
+				}
+
+				// update merkle root
+				copy(rev.Revision.FileMerkleRoot[:], newRoot[:])
+
+				// build the write response
+				revisionHash := hashRevision(rev.Revision)
+				renterSig := &rhpv2.RPCWriteResponse{
+					Signature: renterKey.SignHash(revisionHash),
+				}
+
+				// exchange signatures
+				var hostSig rhpv2.RPCWriteResponse
+				if err := t.WriteResponse(renterSig); err != nil {
+					return fmt.Errorf("couldn't write signature response: %w", err)
+				} else if err := t.ReadResponse(&hostSig, 4096); err != nil {
+					return fmt.Errorf("couldn't read signature response, err: %v", err)
+				}
+
+				// verify the host signature
+				if !hostKey.VerifyHash(revisionHash, hostSig.Signature) {
+					return errors.New("host's signature is invalid")
+				}
+				rev.Signatures[0].Signature = renterSig.Signature[:]
+				rev.Signatures[1].Signature = hostSig.Signature[:]
+
+				// update total cost
+				totalCost = totalCost.Add(cost)
+				recordSpending = true
+				deleted += int64(len(batch))
+
+				return nil
+			}(); err != nil {
 				return err
 			}
-
-			// create request
-			wReq := &rhpv2.RPCWriteRequest{
-				Actions:     actions,
-				MerkleProof: true,
-
-				RevisionNumber:    rev.Revision.RevisionNumber,
-				ValidProofValues:  newValid,
-				MissedProofValues: newMissed,
-			}
-
-			// send request and read merkle proof
-			start := time.Now()
-			var merkleResp rhpv2.RPCWriteMerkleProof
-			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
-				return err
-			} else if err := t.ReadResponse(&merkleResp, 4096+proofSize); err != nil {
-				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
-			}
-
-			// verify proof
-			proofHashes := merkleResp.OldSubtreeHashes
-			leafHashes := merkleResp.OldLeafHashes
-			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
-			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
-				err := ErrInvalidMerkleProof
-				t.WriteResponseErr(err)
-				return err
-			}
-
-			// update merkle root
-			copy(rev.Revision.FileMerkleRoot[:], newRoot[:])
-
-			// build the write response
-			revisionHash := hashRevision(rev.Revision)
-			renterSig := &rhpv2.RPCWriteResponse{
-				Signature: renterKey.SignHash(revisionHash),
-			}
-
-			// exchange signatures
-			var hostSig rhpv2.RPCWriteResponse
-			if err := t.WriteResponse(renterSig); err != nil {
-				return fmt.Errorf("couldn't write signature response: %w", err)
-			} else if err := t.ReadResponse(&hostSig, 4096); err != nil {
-				return fmt.Errorf("couldn't read signature response, err: %v", err)
-			}
-
-			// verify the host signature
-			if !hostKey.VerifyHash(revisionHash, hostSig.Signature) {
-				return errors.New("host's signature is invalid")
-			}
-			rev.Signatures[0].Signature = renterSig.Signature[:]
-			rev.Signatures[1].Signature = hostSig.Signature[:]
-
-			// update total cost
-			totalCost = totalCost.Add(cost)
-			recordSpending = true
-			deleted += int64(len(batch))
-
-			w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
 		}
+
 		return nil
 	})
 	return deleted, err
