@@ -518,25 +518,32 @@ func main() {
 		log.Fatal("Fatal autopilot error:", err)
 	}
 
+	// Give each service a fraction of the total shutdown timeout. One service
+	// timing out shouldn't prevent the others from attempting a shutdown.
+	timeout := cfg.ShutdownTimeout / time.Duration(len(shutdownFns)+2)
+	shutdown := func(fn func(ctx context.Context) error) error {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return fn(ctx)
+	}
+
 	// Shut down the autopilot first, then the rest of the services in reverse order.
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
 	exitCode := 0
 	if autopilotShutdownFn != nil {
-		if err := autopilotShutdownFn(ctx); err != nil {
+		if err := shutdown(autopilotShutdownFn); err != nil {
 			log.Printf("Failed to shut down autopilot: %v", err)
 			exitCode = 1
 		}
 	}
 	for i := len(shutdownFns) - 1; i >= 0; i-- {
-		if err := shutdownFns[i](ctx); err != nil {
+		if err := shutdown(shutdownFns[i]); err != nil {
 			log.Printf("Shutdown function %v failed: %v", i+1, err)
 			exitCode = 1
 		}
 	}
 	// Shut down the API last so that the other services can finish any pending
 	// requests as part of their shutdown procedures.
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := shutdown(srv.Shutdown); err != nil {
 		log.Printf("Failed to shut down API server: %v", err)
 		exitCode = 1
 	}
