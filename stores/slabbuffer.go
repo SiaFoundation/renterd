@@ -171,8 +171,6 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		if used {
 			usedBuffers = append(usedBuffers, buffer)
 			slabs = append(slabs, slab)
-		}
-		if len(usedBuffers) == 1 {
 			break
 		}
 	}
@@ -218,17 +216,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		}
 		// Move the buffer from incomplete to complete if it is now complete.
 		if complete {
-			mgr.mu.Lock()
-			if _, exists := mgr.incompleteBuffers[gid]; exists {
-				mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], buffer)
-				for i := range mgr.incompleteBuffers[gid] {
-					if mgr.incompleteBuffers[gid][i] == buffer {
-						mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid][:i], mgr.incompleteBuffers[gid][i+1:]...)
-						break
-					}
-				}
-			}
-			mgr.mu.Unlock()
+			mgr.markBufferComplete(buffer, gid)
 		}
 		// Remember to update the db with the new size if necessary.
 		dbUpdates = append(dbUpdates, dbUpdate{
@@ -297,8 +285,7 @@ func (mgr *SlabBufferManager) FetchPartialSlab(ctx context.Context, ec object.En
 	return data, err
 }
 
-func (mgr *SlabBufferManager) SlabBuffers() []api.SlabBuffer {
-	var sbs []api.SlabBuffer
+func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	convertBuffer := func(buffer *SlabBuffer, complete bool) api.SlabBuffer {
@@ -324,8 +311,7 @@ func (mgr *SlabBufferManager) SlabBuffers() []api.SlabBuffer {
 	return sbs
 }
 
-func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) ([]api.PackedSlab, error) {
-	var slabs []api.PackedSlab
+func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
 	mgr.mu.Lock()
 	buffers := mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]
 	mgr.mu.Unlock()
@@ -362,7 +348,7 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 	return slabs, nil
 }
 
-func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) error {
+func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	buffersToDelete := make(map[string]struct{})
@@ -375,11 +361,13 @@ func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) error {
 			if _, exists := buffersToDelete[buffers[i].filename]; !exists {
 				continue
 			}
+			// Close the file and remove it from disk. If this fails we only log
+			// an error because the buffers are not meant to be used anymore
+			// anyway.
 			if err := buffers[i].file.Close(); err != nil {
-				return fmt.Errorf("failed to close buffer %v: %v", buffers[i].filename, err)
-			}
-			if err := os.Remove(filepath.Join(mgr.dir, buffers[i].filename)); err != nil {
-				return fmt.Errorf("failed to remove buffer %v: %v", buffers[i].filename, err)
+				mgr.s.logger.Errorf("failed to close buffer %v: %v", buffers[i].filename, err)
+			} else if err := os.RemoveAll(filepath.Join(mgr.dir, buffers[i].filename)); err != nil {
+				mgr.s.logger.Errorf("failed to remove buffer %v: %v", buffers[i].filename, err)
 			}
 			delete(mgr.buffersByKey, buffers[i].slabKey.String())
 			buffers[i] = buffers[len(buffers)-1]
@@ -388,7 +376,6 @@ func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) error {
 		}
 		mgr.completeBuffers[gid] = buffers
 	}
-	return nil
 }
 
 func (buf *SlabBuffer) acquireForUpload(lockingDuration time.Duration) bool {
@@ -466,6 +453,20 @@ func (buf *SlabBuffer) updateDBSize(size int64) {
 		buf.dbSize = size
 	}
 	buf.mu.Unlock()
+}
+
+func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferGroupID) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if _, exists := mgr.incompleteBuffers[gid]; exists {
+		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], buffer)
+		for i := range mgr.incompleteBuffers[gid] {
+			if mgr.incompleteBuffers[gid][i] == buffer {
+				mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid][:i], mgr.incompleteBuffers[gid][i+1:]...)
+				break
+			}
+		}
+	}
 }
 
 func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {

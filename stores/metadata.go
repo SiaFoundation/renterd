@@ -1532,9 +1532,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	}
 
 	// Delete buffer from disk.
-	if err := s.slabBufferMgr.RemoveBuffers(fileName); err != nil {
-		return fmt.Errorf("removing buffer after marking it as uploaded failed: %w", err)
-	}
+	s.slabBufferMgr.RemoveBuffers(fileName)
 	return nil
 }
 
