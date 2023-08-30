@@ -14,6 +14,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/siad/build"
 )
 
 var (
@@ -265,7 +266,7 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 	return rev, err
 }
 
-func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) (int64, error) {
+func (w *worker) DeleteContractRoots(ctx context.Context, hostIP, hostVersion string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) (int64, error) {
 	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", hostKey, "fcid", contractID)
 
 	// escape early if no indices are given
@@ -278,8 +279,13 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 		return indices[i] > indices[j]
 	})
 
-	// split the indices into batches of ~20mib of sector data
+	// decide on the batch size, defaults to ~20mib of sector data
 	batchSize := int(batchSizeDeleteSectors)
+	if build.VersionCmp(hostVersion, "1.6.0") < 0 {
+		batchSize = 500
+	}
+
+	// split the indices into batches
 	var batches [][]uint64
 	for {
 		if len(indices) == 0 {
@@ -353,6 +359,8 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 
 		// range over the batches and delete the sectors batch per batch
 		for i, batch := range batches {
+			w.logger.Debugw(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
+
 			numSectors := rev.NumSectors()
 
 			// build a set of actions that move the sectors we want to delete
@@ -420,8 +428,6 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
 			}
 
-			w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
-
 			// verify proof
 			proofHashes := merkleResp.OldSubtreeHashes
 			leafHashes := merkleResp.OldLeafHashes
@@ -460,6 +466,8 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey
 			totalCost = totalCost.Add(cost)
 			recordSpending = true
 			deleted += int64(len(batch))
+
+			w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
 		}
 		return nil
 	})

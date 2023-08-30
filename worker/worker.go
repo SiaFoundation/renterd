@@ -644,10 +644,20 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	// fetch the contract from the bus
+	h, err := w.bus.Host(ctx, c.HostKey)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch host", err) != nil {
+		return
+	}
+
 	// convenience variables
 	hk := c.HostKey
 	hostIP := c.HostIP
 	hostAddr := c.SiamuxAddr
+	hostVersion := h.Settings.Version
 
 	// prune sectors from contracts
 	var deleted int64
@@ -683,7 +693,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		}
 
 		// delete the roots from the contract
-		n, err := w.DeleteContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
+		n, err := w.DeleteContractRoots(ctx, hostIP, hostVersion, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
 		deleted += n
 		return err
 	})
