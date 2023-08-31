@@ -9,6 +9,7 @@ import (
 	"math"
 	"mime"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,8 +77,26 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "delimiter must be '/'")
 	}
 
+	// Workaround for empty prefix
+	prefix.HasPrefix = prefix.Prefix != ""
+
+	// Handle prefix.
+	path := name + "/" // root of bucket
+	var opts []api.ObjectsOption
+	if prefix.HasPrefix {
+		idx := strings.LastIndex(prefix.Prefix, "/")
+		if idx == -1 {
+			// path remains the same and the prefix becomes the prefix
+			opts = append(opts, api.ObjectsWithPrefix(name+"/"+prefix.Prefix))
+		} else {
+			// part of the prefix becomes the path
+			path = name + "/" + prefix.Prefix[:idx+1]
+			opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix[idx+1:]))
+		}
+	}
+
 	// Fetch all objects of bucket with the given prefix.
-	_, objects, err := s.b.Object(context.Background(), name+"/", api.ObjectsWithPrefix(prefix.Prefix))
+	_, objects, err := s.b.Object(context.Background(), path, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -86,25 +105,27 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 	// add it as a prefix to the response and otherwise as an object.
 	resp := gofakes3.NewObjectList()
 	for _, object := range objects {
-		objectKey := object.Name[len(name)+1:] // trim bucket name
+		objectKey := object.Name[len(name)+2:] // trim bucket name
 
-		var matchResult gofakes3.PrefixMatch
-		if prefix.Match(objectKey, &matchResult) {
-			if matchResult.CommonPrefix {
-				resp.AddPrefix(gofakes3.URLEncode(objectKey))
-				continue
-			}
-
-			item := &gofakes3.Content{
-				Key:          gofakes3.URLEncode(objectKey),
-				LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
-				ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
-				Size:         object.Size,
-				StorageClass: gofakes3.StorageStandard,
-			}
-			resp.Add(item)
+		if strings.HasSuffix(objectKey, "/") {
+			resp.AddPrefix(gofakes3.URLEncode(objectKey))
+			continue
 		}
+
+		item := &gofakes3.Content{
+			Key:          gofakes3.URLEncode(objectKey),
+			LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
+			ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
+			Size:         object.Size,
+			StorageClass: gofakes3.StorageStandard,
+		}
+		resp.Add(item)
 	}
+
+	// Sort by alphabet.
+	sort.Slice(resp.CommonPrefixes, func(i, j int) bool {
+		return resp.CommonPrefixes[i].Prefix < resp.CommonPrefixes[j].Prefix
+	})
 
 	// Apply pagination.
 	if page.MaxKeys == 0 {

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/Mikubill/gofakes3"
+	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
+	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
 )
 
@@ -75,7 +77,7 @@ func TestS3(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s3.PutObject(context.Background(), "bucket2", "object2", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "The specified bucket does not exist") {
 		t.Fatal(err)
 	}
 
@@ -121,5 +123,90 @@ func TestS3(t *testing.T) {
 	err = s3.RemoveBucket(context.Background(), "bucket2")
 	if err == nil || !strings.Contains(err.Error(), "The specified bucket does not exist") {
 		t.Fatal(err)
+	}
+}
+
+func TestS3List(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	s3 := cluster.S3
+
+	// Enable upload packing to speed up test.
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bucket.
+	err = s3.MakeBucket(context.Background(), "bucket", minio.MakeBucketOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	objects := []string{
+		"sample.jpg",
+		"photos/2006/January/sample.jpg",
+		"photos2/2006/February/sample3.jpg",
+		"photos/2006/February/sample2.jpg",
+		"photos2/2006/February/sample4.jpg",
+	}
+	for _, object := range objects {
+		data := frand.Bytes(10)
+		_, err = s3.PutObject(context.Background(), "bucket", object, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		prefix string
+		result []string
+	}{
+		{
+			prefix: "",
+			result: []string{
+				"sample.jpg",
+				"photos/",
+				"photos2/",
+			},
+		},
+		{
+			prefix: "photos/2006/Feb",
+			result: []string{
+				"photos/2006/February/", // @reviewer: not sure if this is correct
+			},
+		},
+	}
+	for i, test := range tests {
+		var response []string
+		for objInfo := range s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{
+			Prefix: test.prefix,
+		}) {
+			if objInfo.Err != nil {
+				t.Fatal(err)
+			}
+			response = append(response, objInfo.Key)
+		}
+		if !cmp.Equal(test.result, response) {
+			t.Errorf("test %d: unexpected response: %v", i, cmp.Diff(test.result, response))
+		}
 	}
 }
