@@ -376,6 +376,17 @@ func main() {
 		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
 	}
 
+	// Create logger.
+	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
+	if cfg.Log.Path != "" {
+		renterdLog = cfg.Log.Path
+	}
+	logger, closeFn, err := node.NewLogger(renterdLog)
+	if err != nil {
+		log.Fatalln("failed to create logger:", err)
+	}
+	defer closeFn(context.Background())
+
 	busCfg.DBLoggerConfig = stores.LoggerConfig{
 		LogLevel:                  level,
 		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
@@ -389,23 +400,23 @@ func main() {
 	if cfg.Tracing.Enabled {
 		shutdownFn, err := tracing.Init(cfg.Tracing.InstanceID)
 		if err != nil {
-			log.Fatal("failed to init tracing", err)
+			logger.Fatal("failed to init tracing: " + err.Error())
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 	}
 
 	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
-		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
+		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
 	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
-		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
+		logger.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
 
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
 	l, err := net.Listen("tcp", cfg.HTTP.Address)
 	if err != nil {
-		log.Fatal("failed to create listener", err)
+		logger.Fatal("failed to create listener: " + err.Error())
 	}
 	shutdownFns = append(shutdownFns, func(_ context.Context) error {
 		_ = l.Close()
@@ -420,25 +431,14 @@ func main() {
 	}
 
 	if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
-		log.Fatal("failed to create directory:", err)
+		logger.Fatal("failed to create directory: " + err.Error())
 	}
-
-	// Create logger.
-	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
-	if cfg.Log.Path != "" {
-		renterdLog = cfg.Log.Path
-	}
-	logger, closeFn, err := node.NewLogger(renterdLog)
-	if err != nil {
-		log.Fatalln("failed to create logger:", err)
-	}
-	shutdownFns = append(shutdownFns, closeFn)
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
 		b, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
-			log.Fatal("failed to create bus, err: ", err)
+			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
 		shutdownFns = append(shutdownFns, shutdownFn)
 
@@ -449,7 +449,7 @@ func main() {
 		// only serve the UI if a bus is created
 		mux.h = renterd.Handler()
 	} else {
-		fmt.Println("connecting to remote bus at", busAddr)
+		logger.Info("connecting to remote bus at " + busAddr)
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
@@ -458,7 +458,7 @@ func main() {
 		if cfg.Worker.Enabled {
 			w, shutdownFn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
 			if err != nil {
-				log.Fatal("failed to create worker", err)
+				logger.Fatal("failed to create worker: " + err.Error())
 			}
 			shutdownFns = append(shutdownFns, shutdownFn)
 
@@ -469,7 +469,7 @@ func main() {
 	} else {
 		for _, remote := range cfg.Worker.Remotes {
 			workers = append(workers, worker.NewClient(remote.Address, remote.Password))
-			fmt.Println("connecting to remote worker at", remote.Address)
+			logger.Info("connecting to remote worker at " + remote.Address)
 		}
 	}
 
@@ -482,7 +482,7 @@ func main() {
 		}
 		ap, runFn, shutdownFn, err := node.NewAutopilot(apCfg, bc, workers, logger)
 		if err != nil {
-			log.Fatal("failed to create autopilot", err)
+			logger.Fatal("failed to create autopilot: " + err.Error())
 		}
 
 		// NOTE: the autopilot shutdown function is not added to the shutdown
@@ -495,17 +495,17 @@ func main() {
 
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(l)
-	log.Println("api: Listening on", l.Addr())
+	logger.Info("api: Listening on " + l.Addr().String())
 
 	syncerAddress, err := bc.SyncerAddress(context.Background())
 	if err != nil {
-		log.Fatal("failed to fetch syncer address", err)
+		logger.Fatal("failed to fetch syncer address: " + err.Error())
 	}
-	log.Println("bus: Listening on", syncerAddress)
+	logger.Info("bus: Listening on " + syncerAddress)
 
 	if cfg.Autopilot.Enabled {
 		if err := runCompatMigrateAutopilotJSONToStore(bc, "autopilot", autopilotDir); err != nil {
-			log.Fatal("failed to migrate autopilot JSON", err)
+			logger.Fatal("failed to migrate autopilot JSON: " + err.Error())
 		}
 	}
 
@@ -513,9 +513,9 @@ func main() {
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	select {
 	case <-signalCh:
-		log.Println("Shutting down...")
+		logger.Info("Shutting down...")
 	case err := <-autopilotErr:
-		log.Fatal("Fatal autopilot error:", err)
+		logger.Fatal("Fatal autopilot error: " + err.Error())
 	}
 
 	// Give each service a fraction of the total shutdown timeout. One service
@@ -531,23 +531,23 @@ func main() {
 	exitCode := 0
 	if autopilotShutdownFn != nil {
 		if err := shutdown(autopilotShutdownFn); err != nil {
-			log.Printf("Failed to shut down autopilot: %v", err)
+			logger.Error("Failed to shut down autopilot: " + err.Error())
 			exitCode = 1
 		}
 	}
 	for i := len(shutdownFns) - 1; i >= 0; i-- {
 		if err := shutdown(shutdownFns[i]); err != nil {
-			log.Printf("Shutdown function %v failed: %v", i+1, err)
+			logger.Sugar().Errorf("Shutdown function %v failed: %v", i+1, err)
 			exitCode = 1
 		}
 	}
 	// Shut down the API last so that the other services can finish any pending
 	// requests as part of their shutdown procedures.
 	if err := shutdown(srv.Shutdown); err != nil {
-		log.Printf("Failed to shut down API server: %v", err)
+		logger.Error("Failed to shut down API server: " + err.Error())
 		exitCode = 1
 	}
-	log.Println("Shutdown complete")
+	logger.Info("Shutdown complete")
 	os.Exit(exitCode)
 }
 
