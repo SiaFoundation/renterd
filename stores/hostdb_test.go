@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -148,7 +149,7 @@ func TestSQLHostDB(t *testing.T) {
 	// Connect to the same DB again.
 	conn2 := NewEphemeralSQLiteConnection(dbName)
 	am := alerts.WithOrigin(alerts.NewManager(), "test")
-	hdb2, ccid, err := NewSQLStore(conn2, am, dir, false, time.Second, types.Address{}, 0, nil)
+	hdb2, ccid, err := NewSQLStore(conn2, am, dir, false, time.Second, types.Address{}, 0, zap.NewNop().Sugar(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
