@@ -293,24 +293,17 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	defer close(nextSlabChan)
 
 	// create the response channel
-	var ongoingUploads uint64
 	respChan := make(chan slabUploadResponse)
-	defer func() {
-		// wait for ongoing uploads to send their response down the channel before closing it
-		if atomic.LoadUint64(&ongoingUploads) > 0 {
-			for range respChan {
-				if atomic.LoadUint64(&ongoingUploads) == 0 {
-					break
-				}
-			}
-		}
-		close(respChan)
-	}()
+	defer close(respChan)
 
 	// collect the responses
 	var responses []slabUploadResponse
 	var slabIndex int
 	numSlabs := -1
+
+	// keep track of the first response error and number of ongoing uploads
+	var uploadErr error
+	var ongoingUploads uint64
 
 	// prepare slab size
 	size := int64(rs.MinShards) * rhpv2.SectorSize
@@ -338,7 +331,12 @@ loop:
 				}
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
-				return object.Object{}, nil, err
+				if atomic.LoadUint64(&ongoingUploads) == 0 {
+					return object.Object{}, nil, err
+				} else {
+					uploadErr = err
+					continue
+				}
 			}
 			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
@@ -355,12 +353,26 @@ loop:
 			}
 			slabIndex++
 		case res := <-respChan:
-			if res.err != nil {
-				return object.Object{}, nil, res.err
+			// collect the response and potentially break out of the loop
+			if res.err == nil {
+				responses = append(responses, res)
+				if len(responses) == numSlabs {
+					break loop
+				} else {
+					continue loop
+				}
 			}
-			responses = append(responses, res)
-			if len(responses) == numSlabs {
-				break loop
+
+			// only if the upload error is nil update the error
+			if uploadErr == nil {
+				uploadErr = res.err
+			}
+
+			// only if there's no ongoing uploads we return, otherwise we wait
+			// until all ongoing uploads sent their responses so we can safely
+			// close the response channel
+			if atomic.LoadUint64(&ongoingUploads) == 0 {
+				return object.Object{}, nil, uploadErr
 			}
 		}
 	}
