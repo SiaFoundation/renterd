@@ -1476,8 +1476,12 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return err
 		}
 
-		// invalidate health
-		if err := tx.Model(&slab).Where(&slab).Update("health_valid", false).Error; err != nil {
+		// invalidate health but optimistically indicate the slab's health is 1
+		if err := tx.Model(&slab).
+			Where(&slab).
+			Update("health_valid", false).
+			Update("health", 1).
+			Error; err != nil {
 			return err
 		}
 
