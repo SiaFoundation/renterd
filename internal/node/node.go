@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"gitlab.com/NebulousLabs/encoding"
@@ -233,7 +232,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, sqlLogger)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -279,7 +278,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 
 	shutdownFn := func(ctx context.Context) error {
-		return joinErrors([]error{
+		return errors.Join(
 			func() error {
 				close(cancelSubscribe)
 				return nil
@@ -289,7 +288,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			tp.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-		})
+		)
 	}
 	return b.Handler(), shutdownFn, nil
 }
@@ -350,26 +349,4 @@ func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
 		closeFn()
 		return nil
 	}, nil
-}
-
-func joinErrors(errs []error) error {
-	filtered := errs[:0]
-	for _, err := range errs {
-		if err != nil {
-			filtered = append(filtered, err)
-		}
-	}
-
-	switch len(filtered) {
-	case 0:
-		return nil
-	case 1:
-		return filtered[0]
-	default:
-		strs := make([]string, len(filtered))
-		for i := range strs {
-			strs[i] = filtered[i].Error()
-		}
-		return errors.New(strings.Join(strs, ";"))
-	}
 }

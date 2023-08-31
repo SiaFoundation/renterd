@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/go-gormigrate/gormigrate/v2"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
-	glogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -48,9 +48,8 @@ var (
 
 // migrateShards performs the migrations necessary for removing the 'shards'
 // table.
-func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error {
+func migrateShards(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger) error {
 	m := db.Migrator()
-	logger := l.LogMode(glogger.Info)
 
 	// add columns
 	if !m.HasColumn(&dbSlice{}, "db_slab_id") {
@@ -125,7 +124,7 @@ func migrateShards(ctx context.Context, db *gorm.DB, l glogger.Interface) error 
 	return nil
 }
 
-func performMigrations(db *gorm.DB, logger glogger.Interface) error {
+func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	migrations := []*gormigrate.Migration{
 		{
 			ID: "00001_gormigrate",
@@ -209,6 +208,12 @@ func performMigrations(db *gorm.DB, logger glogger.Interface) error {
 				return performMigration00012_webhooks(tx, logger)
 			},
 		},
+		{
+			ID: "00013_uploadPackingOptimisations",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00013_uploadPackingOptimisations(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -286,7 +291,7 @@ func setupJoinTables(tx *gorm.DB) error {
 
 // performMigration00001_gormigrate performs the first migration before
 // introducing gormigrate.
-func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00001_gormigrate(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	ctx := context.Background()
 	m := txn.Migrator()
 
@@ -387,7 +392,7 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger glogger.Interface) er
 	return nil
 }
 
-func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	ctx := context.Background()
 	m := txn.Migrator()
 
@@ -431,7 +436,7 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger glogger.I
 	return nil
 }
 
-func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00003_healthcache(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00003_healthcache")
 	if !txn.Migrator().HasColumn(&dbSlab{}, "health") {
 		if err := txn.Migrator().AddColumn(&dbSlab{}, "health"); err != nil {
@@ -442,7 +447,7 @@ func performMigration00003_healthcache(txn *gorm.DB, logger glogger.Interface) e
 	return nil
 }
 
-func performMigration00004_objectID_collation(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00004_objectID_collation(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00004_objectID_collation")
 	if !isSQLite(txn) {
 		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
@@ -454,7 +459,7 @@ func performMigration00004_objectID_collation(txn *gorm.DB, logger glogger.Inter
 	return nil
 }
 
-func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00005_uploadPacking(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration performMigration00005_uploadPacking")
 	m := txn.Migrator()
 
@@ -512,7 +517,7 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 	return nil
 }
 
-func performMigration00006_contractspending(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00006_contractspending(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00006_contractspending")
 	if !txn.Migrator().HasColumn(&dbContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbContract{}, "delete_spending"); err != nil {
@@ -528,7 +533,7 @@ func performMigration00006_contractspending(txn *gorm.DB, logger glogger.Interfa
 	return nil
 }
 
-func performMigration00007_archivedcontractspending(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00007_archivedcontractspending(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00007_archivedcontractspending")
 	if !txn.Migrator().HasColumn(&dbArchivedContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbArchivedContract{}, "delete_spending"); err != nil {
@@ -544,7 +549,7 @@ func performMigration00007_archivedcontractspending(txn *gorm.DB, logger glogger
 	return nil
 }
 
-func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00008_jointableindices(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00008_jointableindices")
 
 	indices := []struct {
@@ -582,7 +587,7 @@ func performMigration00008_jointableindices(txn *gorm.DB, logger glogger.Interfa
 	return nil
 }
 
-func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00009_dropInteractions(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00009_dropInteractions")
 	if !txn.Migrator().HasTable("host_interactions") {
 		if err := txn.Migrator().DropTable("host_interactions"); err != nil {
@@ -593,7 +598,7 @@ func performMigration00009_dropInteractions(txn *gorm.DB, logger glogger.Interfa
 	return nil
 }
 
-func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00010_distinctcontractsector(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00010_distinctcontractsector")
 
 	if !txn.Migrator().HasIndex(&dbContractSector{}, "DBSectorID") {
@@ -606,7 +611,7 @@ func performMigration00010_distinctcontractsector(txn *gorm.DB, logger glogger.I
 	return nil
 }
 
-func performMigration00011_healthValidColumn(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00011_healthValidColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00011_healthValidColumn")
 	if !txn.Migrator().HasColumn(&dbSlab{}, "health_valid") {
 		if err := txn.Migrator().AddColumn(&dbSlab{}, "health_valid"); err != nil {
@@ -617,7 +622,7 @@ func performMigration00011_healthValidColumn(txn *gorm.DB, logger glogger.Interf
 	return nil
 }
 
-func performMigration00012_webhooks(txn *gorm.DB, logger glogger.Interface) error {
+func performMigration00012_webhooks(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info(context.Background(), "performing migration 00012_webhooks")
 	if !txn.Migrator().HasTable(&dbWebhook{}) {
 		if err := txn.Migrator().CreateTable(&dbWebhook{}); err != nil {
@@ -625,5 +630,21 @@ func performMigration00012_webhooks(txn *gorm.DB, logger glogger.Interface) erro
 		}
 	}
 	logger.Info(context.Background(), "migration 00012_webhooks complete")
+	return nil
+}
+
+func performMigration00013_uploadPackingOptimisations(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info(context.Background(), "performing migration 00013_uploadPackingOptimisations")
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "lock_id") {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "lock_id"); err != nil {
+			return err
+		}
+	}
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "locked_until") {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "locked_until"); err != nil {
+			return err
+		}
+	}
+	logger.Info(context.Background(), "migration 00013_uploadPackingOptimisations complete")
 	return nil
 }

@@ -5,7 +5,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
+	"fmt"
 	"io"
 	"math"
 
@@ -34,7 +34,7 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 	if n, err := hex.Decode(k.entropy[:], []byte(bytes.TrimPrefix(b, []byte("key:")))); err != nil {
 		return err
 	} else if n != len(k.entropy) {
-		return errors.New("wrong seed length")
+		return fmt.Errorf("wrong key length: expected %v, got %v", len(k.entropy), n)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
+	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -36,12 +37,11 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts         alerts.Alerter
-		db             *gorm.DB
-		logger         glogger.Interface
-		partialSlabDir string
+		alerts alerts.Alerter
+		db     *gorm.DB
+		logger *zap.SugaredLogger
 
-		bufferedSlabCompletionThreshold int64
+		slabBufferMgr *SlabBufferManager
 
 		// Persistence buffer - related fields.
 		lastSave               time.Time
@@ -73,10 +73,9 @@ type (
 
 		knownContracts map[types.FileContractID]struct{}
 
-		spendingMu      sync.Mutex
-		interactionsMu  sync.Mutex
-		objectsMu       sync.Mutex
-		bufferedSlabsMu sync.Mutex
+		spendingMu     sync.Mutex
+		interactionsMu sync.Mutex
+		objectsMu      sync.Mutex
 	}
 
 	revisionUpdate struct {
@@ -127,20 +126,21 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
 	db, err := gorm.Open(conn, &gorm.Config{
-		Logger: logger, // custom logger
+		Logger: gormLogger, // custom logger
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+	l := logger.Named("sql")
 
 	// Perform migrations.
 	if migrate {
-		if err := performMigrations(db, logger); err != nil {
+		if err := performMigrations(db, l); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
 		}
 	}
@@ -177,31 +177,31 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
-	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("slabBufferCompletionThreshold must be between 0 and 4MiB")
-	}
 
 	ss := &SQLStore{
-		alerts:                          alerts,
-		db:                              db,
-		logger:                          logger,
-		knownContracts:                  isOurContract,
-		lastSave:                        time.Now(),
-		partialSlabDir:                  partialSlabDir,
-		persistInterval:                 persistInterval,
-		hasAllowlist:                    allowlistCnt > 0,
-		hasBlocklist:                    blocklistCnt > 0,
-		settings:                        make(map[string]string),
-		unappliedHostKeys:               make(map[types.PublicKey]struct{}),
-		unappliedRevisions:              make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:                 make(map[types.FileContractID]uint64),
-		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
+		alerts:             alerts,
+		db:                 db,
+		logger:             l,
+		knownContracts:     isOurContract,
+		lastSave:           time.Now(),
+		persistInterval:    persistInterval,
+		hasAllowlist:       allowlistCnt > 0,
+		hasBlocklist:       blocklistCnt > 0,
+		settings:           make(map[string]string),
+		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
+		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:    make(map[types.FileContractID]uint64),
 
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
 			ID:     types.BlockID(ci.BlockID),
 		},
+	}
+
+	ss.slabBufferMgr, err = newSlabBufferManager(ss, slabBufferCompletionThreshold, partialSlabDir)
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, err
 	}
 
 	return ss, ccid, nil
@@ -263,6 +263,11 @@ func (s *SQLStore) Close() error {
 	}
 
 	err = db.Close()
+	if err != nil {
+		return err
+	}
+
+	err = s.slabBufferMgr.Close()
 	if err != nil {
 		return err
 	}
