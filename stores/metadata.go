@@ -1479,8 +1479,10 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// invalidate health but optimistically indicate the slab's health is 1
 		if err := tx.Model(&slab).
 			Where(&slab).
-			Update("health_valid", false).
-			Update("health", 1).
+			Updates(map[string]interface{}{
+				"health_valid": false,
+				"health":       1,
+			}).
 			Error; err != nil {
 			return err
 		}
@@ -1547,16 +1549,17 @@ LIMIT ?
 `, refreshHealthBatchSize)
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
+			var res *gorm.DB
 			if isSQLite(s.db) {
-				if res := s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery); res.Error != nil {
-					return res.Error
-				} else {
-					rowsAffected = res.RowsAffected
-					return nil
-				}
+				res = s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
 			} else {
-				return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery).Error
+				res = s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
 			}
+			if res.Error != nil {
+				return res.Error
+			}
+			rowsAffected = res.RowsAffected
+			return nil
 		})
 		if err != nil {
 			return err
