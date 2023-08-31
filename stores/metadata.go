@@ -1773,16 +1773,16 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 	return
 }
 
-func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
+func deleteObjects(tx *gorm.DB, path string) (int64, error) {
 	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(path), path)
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
-	numDeleted = tx.RowsAffected
+	numDeleted := tx.RowsAffected
 	if err := pruneSlabs(tx); err != nil {
 		return 0, err
 	}
-	return
+	return numDeleted, nil
 }
 
 func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {

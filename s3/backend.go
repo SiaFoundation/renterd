@@ -2,13 +2,18 @@ package s3
 
 import (
 	"context"
+	"encoding/hex"
+	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/Mikubill/gofakes3"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 type s3 struct {
@@ -21,15 +26,18 @@ type s3 struct {
 // sender of the request.
 // https://docs.aws.amazon.com/AmazonS3/latest/API/RESTServiceGET.html
 func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
-	entries, err := s.b.SearchObjects(context.Background(), "", 0, -1)
+	_, entries, err := s.b.Object(context.Background(), "")
 	if err != nil {
 		return nil, err
 	}
 	buckets := make([]gofakes3.BucketInfo, len(entries))
 	for i, entry := range entries {
+		if !strings.HasSuffix(entry.Name, "/") {
+			continue // ignore files
+		}
 		buckets[i] = gofakes3.BucketInfo{
-			Name:         strings.TrimPrefix(entry.Name, "/"),
-			CreationDate: gofakes3.NewContentTime(time.Unix(0, 0)),
+			Name:         entry.Name[1 : len(entry.Name)-1],
+			CreationDate: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
 		}
 	}
 	return buckets, nil
@@ -54,8 +62,94 @@ func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
 // work fine if you ignore the pagination request, but this may not suit
 // your application. Not all backends bundled with gofakes3 correctly
 // support this pagination yet, but that will change.
+//
+// TODO: This implementation is not ideal because it fetches all objects. We
+// will eventually want to support this type of pagination in the bus.
 func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
-	panic("not implemented")
+	if prefix == nil {
+		prefix = &gofakes3.Prefix{}
+	} else if prefix.HasDelimiter && prefix.Delimiter != "/" {
+		// NOTE: this is a limitation of the current implementation of the bus.
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInvalidArgument, "delimiter must be '/'")
+	}
+
+	// Fetch all objects of bucket with the given prefix.
+	_, objects, err := s.b.Object(context.Background(), name+"/", api.ObjectsWithPrefix(prefix.Prefix))
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+
+	// Match objects against prefix. If the object is a common prefix (folder),
+	// add it as a prefix to the response and otherwise as an object.
+	resp := gofakes3.NewObjectList()
+	for _, object := range objects {
+		objectKey := object.Name[len(name)+1:] // trim bucket name
+
+		var matchResult gofakes3.PrefixMatch
+		if prefix.Match(objectKey, &matchResult) {
+			if matchResult.CommonPrefix {
+				resp.AddPrefix(gofakes3.URLEncode(objectKey))
+				continue
+			}
+
+			item := &gofakes3.Content{
+				Key:          gofakes3.URLEncode(objectKey),
+				LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
+				ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
+				Size:         object.Size,
+				StorageClass: gofakes3.StorageStandard,
+			}
+			resp.Add(item)
+		}
+	}
+
+	// Apply pagination.
+	if page.MaxKeys == 0 {
+		page.MaxKeys = math.MaxInt64 // no limit specified
+	}
+	if page.HasMarker {
+		// If there is a marker, remove all objects up until and including the
+		// marker.
+		for i, obj := range resp.Contents {
+			if obj.Key == page.Marker {
+				resp.Contents = resp.Contents[i+1:]
+				break
+			}
+		}
+		for i, obj := range resp.CommonPrefixes {
+			if obj.Prefix == page.Marker {
+				resp.CommonPrefixes = resp.CommonPrefixes[i+1:]
+				break
+			}
+		}
+	}
+
+	response := gofakes3.NewObjectList()
+	for _, obj := range resp.CommonPrefixes {
+		if page.MaxKeys <= 0 {
+			break
+		}
+		response.AddPrefix(obj.Prefix)
+		page.MaxKeys--
+	}
+
+	for _, obj := range resp.Contents {
+		if page.MaxKeys <= 0 {
+			break
+		}
+		response.Add(obj)
+		page.MaxKeys--
+	}
+
+	if len(resp.CommonPrefixes)+len(resp.Contents) > int(page.MaxKeys) {
+		response.IsTruncated = true
+		if len(response.Contents) > 0 {
+			response.NextMarker = response.Contents[len(response.Contents)-1].Key
+		} else {
+			response.NextMarker = response.CommonPrefixes[len(response.CommonPrefixes)-1].Prefix
+		}
+	}
+	return resp, nil
 }
 
 // CreateBucket creates the bucket if it does not already exist. The name
@@ -71,7 +165,7 @@ func (s *s3) CreateBucket(name string) error {
 	if params.ContractSet == "" {
 		return gofakes3.ErrorMessage(gofakes3.ErrInvalidArgument, "no default contract set specified")
 	}
-	err = s.b.AddObject(context.Background(), name, params.ContractSet, object.NewObject(), nil)
+	err = s.b.AddObject(context.Background(), name+"/", params.ContractSet, object.NewObject(), nil)
 	if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -80,8 +174,20 @@ func (s *s3) CreateBucket(name string) error {
 
 // BucketExists should return a boolean indicating the bucket existence, or
 // an error if the backend was unable to determine existence.
-func (s *s3) BucketExists(name string) (exists bool, err error) {
-	panic("not implemented")
+//
+// TODO: backend could be improved to allow for checking specific dir in root.
+func (s *s3) BucketExists(name string) (bool, error) {
+	bucketPath := fmt.Sprintf("/%s/", name)
+	_, entries, err := s.b.Object(context.Background(), "/")
+	if err != nil {
+		return false, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	for _, entry := range entries {
+		if entry.Name == bucketPath {
+			return true, nil
+		}
+	}
+	return false, gofakes3.BucketNotFound(name)
 }
 
 // DeleteBucket deletes a bucket if and only if it is empty.
@@ -93,7 +199,13 @@ func (s *s3) BucketExists(name string) (exists bool, err error) {
 //
 // AWS does not validate the bucket's name for anything other than existence.
 func (s *s3) DeleteBucket(name string) error {
-	panic("not implemented")
+	err := s.b.DeleteObject(context.Background(), name+"/", false)
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		return gofakes3.BucketNotFound(name)
+	} else if err != nil {
+		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return nil
 }
 
 // GetObject must return a gofakes3.ErrNoSuchKey error if the object does
@@ -110,6 +222,9 @@ func (s *s3) DeleteBucket(name string) error {
 //
 // If the backend is a VersionedBackend, GetObject retrieves the latest version.
 func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
+	if err := s.bucketMustExist(bucketName); err != nil {
+		return nil, err
+	}
 	panic("not implemented")
 }
 
@@ -123,6 +238,9 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
+	if err := s.bucketMustExist(bucketName); err != nil {
+		return nil, err
+	}
 	panic("not implemented")
 }
 
@@ -142,6 +260,9 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
+	if err := s.bucketMustExist(bucketName); err != nil {
+		return gofakes3.ObjectDeleteResult{}, err
+	}
 	panic("not implemented")
 }
 
@@ -151,13 +272,37 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 // The size can be used if the backend needs to read the whole reader; use
 // gofakes3.ReadAll() for this job rather than ioutil.ReadAll().
 func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
+	if err := s.bucketMustExist(bucketName); err != nil {
+		return gofakes3.PutObjectResult{}, err
+	}
 	panic("not implemented")
 }
 
 func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
+	if err := s.bucketMustExist(bucketName); err != nil {
+		return gofakes3.MultiDeleteResult{}, err
+	}
 	panic("not implemented")
 }
 
 func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
+	if err := s.bucketMustExist(srcBucket, dstBucket); err != nil {
+		return gofakes3.CopyObjectResult{}, err
+	}
 	panic("not implemented")
+}
+
+// bucketMustExist returns the right gofakes3 error if any of the buckets don't
+// exist.
+// TODO: This is a workaround which is not atomic. We should update the backend
+// to allow for atomically guaranteeing that a bucket exists.
+func (s *s3) bucketMustExist(names ...string) error {
+	for _, name := range names {
+		if exists, err := s.BucketExists(name); err != nil {
+			return err
+		} else if !exists {
+			return gofakes3.BucketNotFound(name)
+		}
+	}
+	return nil
 }

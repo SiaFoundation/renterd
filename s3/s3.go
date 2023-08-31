@@ -24,6 +24,8 @@ type Opts struct {
 
 type bus interface {
 	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error)
+	DeleteObject(ctx context.Context, path string, batch bool) (err error)
+	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, err error)
 	SearchObjects(ctx context.Context, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
@@ -73,7 +75,7 @@ func parsev4AuthKeys(keyPairs []string) (map[string]string, error) {
 	for _, pair := range keyPairs {
 		keys := strings.Split(pair, ",")
 		if len(keys) != 2 {
-			return nil, fmt.Errorf("Invalid auth keypair %s", pair)
+			return nil, fmt.Errorf("invalid auth keypair %s", pair)
 		}
 		pairs[keys[0]] = keys[1]
 	}
