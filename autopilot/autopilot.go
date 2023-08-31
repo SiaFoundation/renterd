@@ -173,7 +173,6 @@ func (ap *Autopilot) Handler() http.Handler {
 		"POST   /debug/trigger": ap.triggerHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /status":        ap.statusHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 	}))
 }
@@ -584,24 +583,6 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	jc.Encode(host)
 }
 
-func (ap *Autopilot) statusHandlerGET(jc jape.Context) {
-	migrating, mLastStart := ap.m.Status()
-	scanning, sLastStart := ap.s.Status()
-	_, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
-	if err != nil && !strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-	jc.Encode(api.AutopilotStatusResponse{
-		Configured:         err == nil,
-		Migrating:          migrating,
-		MigratingLastStart: api.ParamTime(mLastStart),
-		Scanning:           scanning,
-		ScanningLastStart:  api.ParamTime(sLastStart),
-		UptimeMS:           api.ParamDuration(ap.Uptime()),
-	})
-}
-
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
@@ -612,14 +593,13 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.AutopilotStateResponse{
-		AutopilotStatusResponse: api.AutopilotStatusResponse{
-			Configured:         err == nil,
-			Migrating:          migrating,
-			MigratingLastStart: api.ParamTime(mLastStart),
-			Scanning:           scanning,
-			ScanningLastStart:  api.ParamTime(sLastStart),
-			UptimeMS:           api.ParamDuration(ap.Uptime()),
-		},
+		Configured:         err == nil,
+		Migrating:          migrating,
+		MigratingLastStart: api.ParamTime(mLastStart),
+		Scanning:           scanning,
+		ScanningLastStart:  api.ParamTime(sLastStart),
+		UptimeMS:           api.ParamDuration(ap.Uptime()),
+
 		StartTime: ap.StartTime(),
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),

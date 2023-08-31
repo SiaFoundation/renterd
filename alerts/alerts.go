@@ -132,9 +132,15 @@ func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 
 // DismissAlerts implements the Alerter interface.
 func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
+	var dismissed []types.Hash256
 	m.mu.Lock()
 	for _, id := range ids {
+		_, exists := m.alerts[id]
+		if !exists {
+			continue
+		}
 		delete(m.alerts, id)
+		dismissed = append(dismissed, id)
 	}
 	if len(m.alerts) == 0 {
 		m.alerts = make(map[types.Hash256]Alert) // reclaim memory
@@ -142,10 +148,13 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	wb := m.webhookBroadcaster
 	m.mu.Unlock()
 
+	if len(dismissed) == 0 {
+		return nil // don't fire webhook to avoid spam
+	}
 	return wb.BroadcastAction(ctx, webhooks.Event{
 		Module:  webhookModule,
 		Event:   webhookEventDismiss,
-		Payload: ids,
+		Payload: dismissed,
 	})
 }
 

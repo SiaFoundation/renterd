@@ -88,21 +88,15 @@ type (
 		Triggered bool `json:"triggered"`
 	}
 
-	// AutopilotStatusResponse is the response type for the /autopilot/status
+	// AutopilotStateResponse is the response type for the /autopilot/state
 	// endpoint.
-	AutopilotStatusResponse struct {
+	AutopilotStateResponse struct {
 		Configured         bool          `json:"configured"`
 		Migrating          bool          `json:"migrating"`
 		MigratingLastStart ParamTime     `json:"migratingLastStart"`
 		Scanning           bool          `json:"scanning"`
 		ScanningLastStart  ParamTime     `json:"scanningLastStart"`
 		UptimeMS           ParamDuration `json:"uptimeMS"`
-	}
-
-	// AutopilotStateResponse is the response type for the /autopilot/state
-	// endpoint.
-	AutopilotStateResponse struct {
-		AutopilotStatusResponse // TODO: deprecate /autopilot/status
 
 		StartTime time.Time `json:"startTime"`
 		BuildState
