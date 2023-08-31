@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gotd/contrib/http_range"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -201,7 +202,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata, opts ...api.DownloadObjectOption) (err error) {
+func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, opts ...api.DownloadObjectOption) (_ io.ReadCloser, _ http.Header, err error) {
 	values := url.Values{}
 	values.Set("prefix", url.QueryEscape(prefix))
 	values.Set("offset", fmt.Sprint(offset))
@@ -219,26 +220,26 @@ func (c *Client) object(ctx context.Context, path, prefix string, offset, limit 
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer io.Copy(io.Discard, resp.Body)
-	defer resp.Body.Close()
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		err, _ := io.ReadAll(resp.Body)
-		return errors.New(string(err))
+		_ = resp.Body.Close()
+		return nil, nil, errors.New(string(err))
 	}
-	if w != nil {
-		_, err = io.Copy(w, resp.Body)
-	} else {
-		err = json.NewDecoder(resp.Body).Decode(entries)
-	}
-	return
+	return resp.Body, resp.Header, err
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
 func (c *Client) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, prefix, offset, limit, nil, &entries)
+	body, _, err := c.object(ctx, path, prefix, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer io.Copy(io.Discard, body)
+	defer body.Close()
+	err = json.NewDecoder(body).Decode(&entries)
 	return
 }
 
@@ -250,8 +251,64 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	}
 
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, "", 0, -1, w, nil, opts...)
-	return
+	body, _, err := c.object(ctx, path, "", 0, -1, opts...)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	_, err = io.Copy(w, body)
+	return err
+}
+
+func (c *Client) GetObject(ctx context.Context, path string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error) {
+	if strings.HasSuffix(path, "/") {
+		return api.DownloadObjectResult{}, errors.New("the given path is a directory, use ObjectEntries instead")
+	}
+
+	// Start download.
+	path = strings.TrimPrefix(path, "/")
+	body, header, err := c.object(ctx, path, "", 0, -1, opts...)
+	if err != nil {
+		return api.DownloadObjectResult{}, err
+	}
+	cleanup := func() {
+		_, _ = io.Copy(io.Discard, body)
+		_ = body.Close()
+	}
+
+	// Parse header.
+	var size int64
+	_, err = fmt.Sscan(header.Get("Content-Length"), &size)
+	if err != nil {
+		cleanup()
+		return api.DownloadObjectResult{}, err
+	}
+	var r *api.DownloadRange
+	ranges, err := http_range.ParseRange(header.Get("Content-Range"), size)
+	if err != nil {
+		cleanup()
+		return api.DownloadObjectResult{}, err
+	}
+	if len(ranges) > 0 {
+		r = &api.DownloadRange{
+			Start:  ranges[0].Start,
+			Length: ranges[0].Length,
+		}
+	}
+	// Parse Last-Modified
+	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
+	if err != nil {
+		cleanup()
+		return api.DownloadObjectResult{}, err
+	}
+
+	return api.DownloadObjectResult{
+		Content:     body,
+		ContentType: header.Get("Content-Type"),
+		ModTime:     modTime,
+		Range:       r,
+		Size:        size,
+	}, nil
 }
 
 // DeleteObject deletes the object at the given path.

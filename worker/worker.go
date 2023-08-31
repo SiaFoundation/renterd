@@ -981,6 +981,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 			jc.ResponseWriter.Header().Set("Content-Type", mimeType)
 		}
 	}
+	jc.ResponseWriter.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat)) // TODO: update this when object has a ModTime
 	rw := rangedResponseWriter{rw: jc.ResponseWriter, defaultStatusCode: status}
 
 	// fetch all contracts

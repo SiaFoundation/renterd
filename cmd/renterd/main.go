@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
@@ -298,6 +299,10 @@ func main() {
 	flag.Uint64Var(&cfg.Autopilot.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", cfg.Autopilot.MigratorParallelSlabsPerWorker, "number of slabs that the autopilot migrates in parallel per worker. Can be overwritten using the RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER environment variable")
 	flag.BoolVar(&cfg.Autopilot.Enabled, "autopilot.enabled", cfg.Autopilot.Enabled, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "the timeout applied to the node shutdown")
+
+	// s3
+	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "enable/disable the s3 API (only works if worker.enabled is also 'true') - can be overwritten using the RENTERD_S3_ENABLED environment variable (WARNING: S3 is currently not protected by any form of authentication by default)")
+
 	flag.Parse()
 
 	log.Println("renterd v0.5.0-beta")
@@ -341,6 +346,8 @@ func main() {
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
+
+	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
 
 	mustLoadAPIPassword()
 	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
@@ -480,7 +487,18 @@ func main() {
 
 			mux.sub["/api/worker"] = treeMux{h: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			workerAddr := cfg.HTTP.Address + "/api/worker"
-			workers = append(workers, worker.NewClient(workerAddr, cfg.HTTP.Password))
+			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
+			workers = append(workers, wc)
+
+			if cfg.S3.Enabled {
+				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
+					AuthKeyPairs: nil, // not yet in use
+				})
+				if err != nil {
+					log.Fatal("failed to create s3 client", err)
+				}
+				mux.sub["/api/s3"] = treeMux{h: s3Handler}
+			}
 		}
 	} else {
 		for _, remote := range cfg.Worker.Remotes {

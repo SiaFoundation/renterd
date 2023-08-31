@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -199,9 +200,21 @@ func UploadWithContractSet(set string) UploadOption {
 	}
 }
 
+type DownloadRange struct {
+	Start, Length int64
+}
+
+type DownloadObjectResult struct {
+	Content     io.ReadCloser
+	ContentType string
+	ModTime     time.Time
+	Range       *DownloadRange
+	Size        int64
+}
+
 type DownloadObjectOption func(http.Header)
 
-func DownloadWithRange(offset, length uint64) DownloadObjectOption {
+func DownloadWithRange(offset, length int64) DownloadObjectOption {
 	return func(h http.Header) {
 		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
 	}

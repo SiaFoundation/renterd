@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -31,6 +32,8 @@ type bus interface {
 }
 
 type worker interface {
+	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error)
+	GetObject(ctx context.Context, path string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error)
 }
 
 func (l *goFakeLogger) Print(level gofakes3.LogLevel, v ...interface{}) {

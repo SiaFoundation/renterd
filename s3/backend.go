@@ -1,11 +1,14 @@
 package s3
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
+	"mime"
+	"net/http"
 	"strings"
 	"time"
 
@@ -70,7 +73,7 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 		prefix = &gofakes3.Prefix{}
 	} else if prefix.HasDelimiter && prefix.Delimiter != "/" {
 		// NOTE: this is a limitation of the current implementation of the bus.
-		return nil, gofakes3.ErrorMessage(gofakes3.ErrInvalidArgument, "delimiter must be '/'")
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "delimiter must be '/'")
 	}
 
 	// Fetch all objects of bucket with the given prefix.
@@ -198,7 +201,14 @@ func (s *s3) BucketExists(name string) (bool, error) {
 // If the bucket does not exist, gofakes3.ErrNoSuchBucket MUST be returned.
 //
 // AWS does not validate the bucket's name for anything other than existence.
+// TODO: This check is not atomic. The backend needs to be updated to support
+// atomically checking whether a bucket is empty.
 func (s *s3) DeleteBucket(name string) error {
+	if _, entries, err := s.b.Object(context.Background(), name+"/"); err != nil {
+		return err
+	} else if len(entries) > 0 {
+		return gofakes3.ErrBucketNotEmpty
+	}
 	err := s.b.DeleteObject(context.Background(), name+"/", false)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.BucketNotFound(name)
@@ -221,11 +231,44 @@ func (s *s3) DeleteBucket(name string) error {
 // implementers MUST return ErrNotImplemented.
 //
 // If the backend is a VersionedBackend, GetObject retrieves the latest version.
+// TODO: Range requests starting from the end are not supported yet. Backend
+// needs to be updated for that.
 func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
 	if err := s.bucketMustExist(bucketName); err != nil {
 		return nil, err
+	} else if rangeRequest != nil && rangeRequest.FromEnd {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "range request from end not supported")
 	}
-	panic("not implemented")
+
+	var opts []api.DownloadObjectOption
+	if rangeRequest != nil {
+		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, rangeRequest.End))
+	}
+	res, err := s.w.GetObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), opts...)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	var objectRange *gofakes3.ObjectRange
+	if res.Range != nil {
+		objectRange = &gofakes3.ObjectRange{
+			Start:  res.Range.Start,
+			Length: res.Range.Length,
+		}
+	}
+
+	// TODO: When we support metadata we need to add it here.
+	metadata := map[string]string{
+		"Content-Type":  res.ContentType,
+		"Last-Modified": res.ModTime.Format(http.TimeFormat),
+	}
+
+	return &gofakes3.Object{
+		Name:     gofakes3.URLEncode(objectName),
+		Metadata: metadata,
+		Size:     res.Size,
+		Contents: res.Content,
+		Range:    objectRange,
+	}, nil
 }
 
 // HeadObject fetches the Object from the backend, but reading the Contents
@@ -241,7 +284,21 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 	if err := s.bucketMustExist(bucketName); err != nil {
 		return nil, err
 	}
-	panic("not implemented")
+	obj, _, err := s.b.Object(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName))
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		return nil, gofakes3.KeyNotFound(objectName)
+	}
+	// TODO: When we support metadata we need to add it here.
+	metadata := map[string]string{
+		"Content-Type":  mime.TypeByExtension(objectName),
+		"Last-Modified": time.Now().UTC().Format(http.TimeFormat), // TODO: update this when object has metadata
+	}
+	return &gofakes3.Object{
+		Name:     gofakes3.URLEncode(objectName),
+		Metadata: metadata,
+		Size:     obj.Size,
+		Contents: io.NopCloser(bytes.NewReader(nil)),
+	}, nil
 }
 
 // DeleteObject deletes an object from the bucket.
@@ -263,7 +320,14 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 	if err := s.bucketMustExist(bucketName); err != nil {
 		return gofakes3.ObjectDeleteResult{}, err
 	}
-	panic("not implemented")
+	err := s.b.DeleteObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), false)
+	if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return gofakes3.ObjectDeleteResult{
+		IsDeleteMarker: false, // not supported
+		VersionID:      "",    // not supported
+	}, nil
 }
 
 // PutObject should assume that the key is valid. The map containing meta
@@ -271,25 +335,51 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 //
 // The size can be used if the backend needs to read the whole reader; use
 // gofakes3.ReadAll() for this job rather than ioutil.ReadAll().
+// TODO: Metadata is currently ignored. The backend requires an update to
+// support it.
 func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
 	if err := s.bucketMustExist(bucketName); err != nil {
 		return gofakes3.PutObjectResult{}, err
 	}
-	panic("not implemented")
+	err := s.w.UploadObject(context.Background(), input, fmt.Sprintf("%s/%s", bucketName, key))
+	if err != nil {
+		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return gofakes3.PutObjectResult{
+		VersionID: "", // not supported
+	}, nil
 }
 
 func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	if err := s.bucketMustExist(bucketName); err != nil {
 		return gofakes3.MultiDeleteResult{}, err
 	}
-	panic("not implemented")
+	var res gofakes3.MultiDeleteResult
+	for _, objectName := range objects {
+		err := s.b.DeleteObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), false)
+		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+			res.Error = append(res.Error, gofakes3.ErrorResult{
+				Key:     objectName,
+				Code:    gofakes3.ErrInternal,
+				Message: err.Error(),
+			})
+		} else {
+			res.Deleted = append(res.Deleted, gofakes3.ObjectID{
+				Key:       objectName,
+				VersionID: "", // not supported
+			})
+		}
+	}
+	return res, nil
 }
 
+// TODO: use metadata when we have support for it
+// TODO: impelement once we have ability to copy objects in bus
 func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
 	if err := s.bucketMustExist(srcBucket, dstBucket); err != nil {
 		return gofakes3.CopyObjectResult{}, err
 	}
-	panic("not implemented")
+	return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "copying objects is not supported")
 }
 
 // bucketMustExist returns the right gofakes3 error if any of the buckets don't
