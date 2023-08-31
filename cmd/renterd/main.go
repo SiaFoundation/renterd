@@ -424,10 +424,6 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to create listener: " + err.Error())
 	}
-	shutdownFns = append(shutdownFns, shutdownFn{
-		name: "Listener",
-		fn:   func(ctx context.Context) error { return l.Close() },
-	})
 
 	// override the address with the actual one
 	cfg.HTTP.Address = "http://" + l.Addr().String()
