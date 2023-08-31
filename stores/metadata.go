@@ -1544,7 +1544,12 @@ LIMIT ?
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			if isSQLite(s.db) {
-				return s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery).Error
+				if res := s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery); res.Error != nil {
+					return res.Error
+				} else {
+					rowsAffected = res.RowsAffected
+					return nil
+				}
 			} else {
 				return s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery).Error
 			}
@@ -1580,7 +1585,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Select("slabs.key, slabs.health").
 		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
 		Model(&dbSlab{}).
-		Where("health <= ? AND cs.name = ?", healthCutoff, set).
+		Where("health <= ? AND health_valid = 1 AND cs.name = ?", healthCutoff, set).
 		Order("health ASC").
 		Limit(limit).
 		Find(&rows).
