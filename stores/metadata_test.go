@@ -1329,7 +1329,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	entries, err := db.ObjectEntries(context.Background(), "/", "", 0, -1)
+	entries, err := db.ObjectEntries(context.Background(), "/", "", 0, -1, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1339,7 +1339,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	entries, err = db.SearchObjects(context.Background(), "foo", 0, -1)
+	entries, err = db.SearchObjects(context.Background(), "foo", 0, -1, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1410,7 +1410,10 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, testContractSet, obj, ucs)
+		err := os.UpdateObject(ctx, o.path, testContractSet, obj, ucs)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	tests := []struct {
 		path   string
@@ -1430,7 +1433,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
-		got, err := os.ObjectEntries(ctx, test.path, test.prefix, 0, -1)
+		got, err := os.ObjectEntries(ctx, test.path, test.prefix, 0, -1, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1438,7 +1441,7 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := os.ObjectEntries(ctx, test.path, test.prefix, offset, 1)
+			got, err := os.ObjectEntries(ctx, test.path, test.prefix, offset, 1, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1483,7 +1486,7 @@ func TestSearchObjects(t *testing.T) {
 		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		got, err := os.SearchObjects(ctx, test.path, 0, -1)
+		got, err := os.SearchObjects(ctx, test.path, 0, -1, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1491,7 +1494,7 @@ func TestSearchObjects(t *testing.T) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := os.SearchObjects(ctx, test.path, offset, 1)
+			got, err := os.SearchObjects(ctx, test.path, offset, 1, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2427,7 +2430,7 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	objs, err := cs.SearchObjects(ctx, "/", 0, 100)
+	objs, err := cs.SearchObjects(ctx, "/", 0, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

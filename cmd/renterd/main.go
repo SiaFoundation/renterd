@@ -429,7 +429,7 @@ func main() {
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(cfg.HTTP.Password)
-	mux := treeMux{
+	mux := &treeMux{
 		sub: make(map[string]treeMux),
 	}
 

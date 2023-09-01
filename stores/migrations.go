@@ -16,6 +16,7 @@ var (
 		&dbContract{},
 		&dbContractSet{},
 		&dbObject{},
+		&dbBucket{},
 		&dbBufferedSlab{},
 		&dbSlab{},
 		&dbSector{},
@@ -247,9 +248,17 @@ func initSchema(tx *gorm.DB) error {
 	if err != nil {
 		return fmt.Errorf("failed to init schema: %w", err)
 	}
-	// Change the object_id colum to use case sensitive collation.
+
+	// Change the collation of columns that we need to be case sensitive.
 	if !isSQLite(tx) {
-		return tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = tx.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change buckets_name collation: %w", err)
+		}
 	}
 	return nil
 }

@@ -105,9 +105,9 @@ type (
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
 		Object(ctx context.Context, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
+		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error)
 		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
-		SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error)
+		SearchObjects(ctx context.Context, substring string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, path string) error
 		RemoveObjects(ctx context.Context, prefix string) error
@@ -844,7 +844,8 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
 		return
 	}
-	keys, err := b.ms.SearchObjects(jc.Request.Context(), key, offset, limit)
+	// TODO
+	keys, err := b.ms.SearchObjects(jc.Request.Context(), key, offset, limit, nil)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
@@ -884,7 +885,8 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	}
 
 	// look for object entries
-	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit)
+	// TODO
+	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit, nil)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}

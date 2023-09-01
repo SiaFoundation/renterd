@@ -67,7 +67,7 @@ type (
 	dbContractSet struct {
 		Model
 
-		Name      string       `gorm:"unique;index:length:255;"`
+		Name      string       `gorm:"unique;index:,length:255;"`
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
@@ -79,10 +79,18 @@ type (
 	dbObject struct {
 		Model
 
-		Key      []byte
-		ObjectID string    `gorm:"index;unique"`
-		Slabs    []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
-		Size     int64
+		DBBucketID uint   `gorm:"index;uniqueIndex:idx_object_bucket;default=NULL"`
+		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
+
+		Key   []byte
+		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+		Size  int64
+	}
+
+	dbBucket struct {
+		Model
+
+		Name string `gorm:"unique;index:,length:255;"`
 	}
 
 	dbSlice struct {
@@ -806,7 +814,17 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 	return contract.convert(), nil
 }
 
-func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
+func objectsByBucket(bucket *string) func(db *gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if bucket == nil {
+			return db.Where("objects.db_bucket_id IS NULL")
+		} else {
+			return db.Where("objects.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?", *bucket)
+		}
+	}
+}
+
+func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
@@ -815,6 +833,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 	err := s.db.
 		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
 		Model(&dbObject{}).
+		Scopes(objectsByBucket(bucket)).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
@@ -837,7 +856,7 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
@@ -846,6 +865,13 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
+
+	//	var whereBucket clause.Expr
+	//	if bucket == nil {
+	//		whereBucket = gorm.Expr("objects.db_bucket_id IS NULL")
+	//	} else {
+	//		whereBucket = gorm.Expr("objects.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", *bucket)
+	//	}
 
 	query := s.db.Raw(fmt.Sprintf(`
 SELECT
@@ -862,7 +888,7 @@ FROM (
 		FROM objects
 		LEFT JOIN slices ON objects.id = slices.db_object_id
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-		WHERE SUBSTR(object_id, 1, ?) = ?
+		WHERE objects.db_bucket_id IS NULL AND SUBSTR(object_id, 1, ?) = ?
 		GROUP BY object_id
 	) AS i
 ) AS m
@@ -875,6 +901,7 @@ LIMIT ? OFFSET ?`,
 		path,
 		path,
 		utf8.RuneCountInString(path)+1,
+		//whereBucket,
 		utf8.RuneCountInString(path),
 		path,
 		utf8.RuneCountInString(path+prefix),
