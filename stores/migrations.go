@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-gormigrate/gormigrate/v2"
+	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -260,7 +261,11 @@ func initSchema(tx *gorm.DB) error {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
 	}
-	return nil
+
+	// Add default bucket.
+	return tx.Create(&dbBucket{
+		Name: api.DefaultBucketName,
+	}).Error
 }
 
 func setupJoinTables(tx *gorm.DB) error {

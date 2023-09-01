@@ -29,9 +29,9 @@ const (
 	UsabilityFilterModeAll      = "all"
 	UsabilityFilterModeUsable   = "usable"
 	UsabilityFilterModeUnusable = "unusable"
-)
 
-const (
+	DefaultBucketName = "default"
+
 	SettingContractSet   = "contractset"
 	SettingGouging       = "gouging"
 	SettingRedundancy    = "redundancy"
