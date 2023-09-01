@@ -818,24 +818,6 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 	return contract.convert(), nil
 }
 
-func objectsByBucket(bucket *string) func(db *gorm.DB) *gorm.DB {
-	return func(db *gorm.DB) *gorm.DB {
-		if bucket == nil {
-			return db.Where("objects.db_bucket_id IS NULL")
-		} else {
-			return db.Where("objects.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?", *bucket)
-		}
-	}
-}
-
-func sqlWhereBucket(bucket *string) clause.Expr {
-	if bucket == nil {
-		return gorm.Expr("objects.db_bucket_id IS NULL")
-	} else {
-		return gorm.Expr("objects.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", *bucket)
-	}
-}
-
 func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -845,9 +827,8 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 	err := s.db.
 		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
 		Model(&dbObject{}).
-		Scopes(objectsByBucket(bucket)).
 		Table("objects o").
-		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id` AND ?", sqlWhereBucket("o", bucket)).
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Where("INSTR(o.object_id, ?) > 0", substring).
 		Group("o.object_id").
@@ -859,13 +840,6 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 	}
 
 	return objects, nil
-}
-
-func sqlConcat(db *gorm.DB, a, b string) string {
-	if isSQLite(db) {
-		return fmt.Sprintf("%s || %s", a, b)
-	}
-	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
 func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
@@ -906,7 +880,7 @@ LIMIT ? OFFSET ?`,
 		path,
 		path,
 		utf8.RuneCountInString(path)+1,
-		sqlWhereBucket(bucket),
+		sqlWhereBucket("objects", bucket),
 		utf8.RuneCountInString(path),
 		path,
 		utf8.RuneCountInString(path+prefix),
@@ -1034,7 +1008,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, bucket *string) error {
-	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket(bucket))
+	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -1471,13 +1445,12 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string, bucket
 	tx := s.db.
 		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
-		Scopes(objectsByBucket(bucket)).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
-		Where("o.object_id = ?", path).
+		Where("o.object_id = ? AND o.db_bucket_id = ?", path, sqlWhereBucket("o", bucket)).
 		Order("sli.id ASC").
 		Order("sec.id ASC").
 		Scan(&rows)
@@ -1539,7 +1512,7 @@ FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
 INNER JOIN objects obj ON sli.db_object_id = obj.id AND ?
 WHERE sla.key = ?
-	`, key, sqlWhereBucket(bucket)).
+	`, sqlWhereBucket("obj", bucket), key).
 		Scan(&objs).
 		Error
 	if err != nil {
@@ -1776,7 +1749,7 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
 func deleteObject(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _ error) {
-	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket(bucket)).
+	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
 		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
@@ -1793,7 +1766,7 @@ func deleteObject(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _
 
 func deleteObjects(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _ error) {
 	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-		utf8.RuneCountInString(path), path, sqlWhereBucket(bucket))
+		utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
@@ -1818,4 +1791,19 @@ UPDATE slabs SET health_valid = 0 WHERE id in (
 	) slab_ids
 )
 		`, fcids).Error
+}
+
+func sqlConcat(db *gorm.DB, a, b string) string {
+	if isSQLite(db) {
+		return fmt.Sprintf("%s || %s", a, b)
+	}
+	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+}
+
+func sqlWhereBucket(objTable string, bucket *string) clause.Expr {
+	if bucket == nil {
+		return gorm.Expr(fmt.Sprintf("%s.db_bucket_id IS NULL", objTable))
+	} else {
+		return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", *bucket))
+	}
 }
