@@ -1022,9 +1022,10 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObj := dbObject{
-		ObjectID: objID,
-		Key:      obj1Key,
-		Size:     obj1.TotalSize(),
+		DBBucketID: 1,
+		ObjectID:   objID,
+		Key:        obj1Key,
+		Size:       obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID: 1,
