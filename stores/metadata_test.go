@@ -3111,3 +3111,95 @@ func TestObjectsBySlabKey(t *testing.T) {
 		}
 	}
 }
+
+func TestBuckets(t *testing.T) {
+	db, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List the buckets. Should be the default one.
+	buckets, err := db.ListBuckets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(buckets) != 1 {
+		t.Fatal("expected 1 bucket", len(buckets))
+	} else if buckets[0] != api.DefaultBucketName {
+		t.Fatal("expected default bucket")
+	}
+
+	// Create 2 more buckets and delete the default one. This should result in
+	// 2 buckets.
+	b1, b2 := "bucket1", "bucket2"
+	if err := db.CreateBucket(context.Background(), b1); err != nil {
+		t.Fatal(err)
+	} else if err := db.CreateBucket(context.Background(), b2); err != nil {
+		t.Fatal(err)
+	} else if err := db.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+		t.Fatal(err)
+	} else if buckets, err := db.ListBuckets(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(buckets) != 2 {
+		t.Fatal("expected 2 buckets", len(buckets))
+	} else if buckets[0] != b1 {
+		t.Fatal("unexpected bucket", buckets[0])
+	} else if buckets[1] != b2 {
+		t.Fatal("unexpected bucket", buckets[1])
+	}
+
+	// Creating an existing buckets shouldn't work and neither should deleting
+	// one that doesn't exist.
+	if err := db.CreateBucket(context.Background(), b1); !errors.Is(err, api.ErrBucketExists) {
+		t.Fatal("expected ErrBucketExists", err)
+	} else if err := db.DeleteBucket(context.Background(), "foo"); !errors.Is(err, api.ErrBucketNotFound) {
+		t.Fatal("expected ErrBucketNotFound", err)
+	}
+}
+
+func TestBucketObjects(t *testing.T) {
+	os, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Adding an object to a bucket that doesn't exist shouldn't work.
+	obj, ucs := newTestObject(1)
+	err = os.UpdateObject(context.Background(), "foo", testContractSet, obj, ucs, "unknown-bucket")
+	if !errors.Is(err, api.ErrBucketNotFound) {
+		t.Fatal("expected ErrBucketNotFound", err)
+	}
+
+	// Create buckest for the test.
+	b1, b2 := "bucket1", "bucket2"
+	if err := os.CreateBucket(context.Background(), b1); err != nil {
+		t.Fatal(err)
+	} else if err := os.CreateBucket(context.Background(), b2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create some objects for the test spread over 2 buckets.
+	objects := []struct {
+		path   string
+		size   int64
+		bucket string
+	}{
+		{"/foo/bar", 1, b1},
+		{"/foo/bar", 2, b2},
+		{"/bar", 3, b1},
+		{"/bar", 4, b2},
+	}
+	ctx := context.Background()
+	for _, o := range objects {
+		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj.Slabs = obj.Slabs[:1]
+		obj.Slabs[0].Length = uint32(o.size)
+		err := os.UpdateObject(ctx, o.path, testContractSet, obj, ucs, o.bucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Deleting a bucket with objects shouldn't work.
+	if err := os.DeleteBucket(ctx, b1); !errors.Is(err, api.ErrBucketNotEmpty) {
+		t.Fatal(err)
+	}
+}
