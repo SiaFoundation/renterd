@@ -278,13 +278,6 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
-func (o dbObject) metadata() api.ObjectMetadata {
-	return api.ObjectMetadata{
-		Name: o.ObjectID,
-		Size: o.Size,
-	}
-}
-
 func (raw rawObject) convert(tx *gorm.DB, partialSlabDir string) (api.Object, error) {
 	if len(raw) == 0 {
 		return api.Object{}, errors.New("no slabs found")
@@ -620,9 +613,9 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.C
 	return contract.convert(), nil
 }
 
-func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
+func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots, uploading []types.Hash256, err error) {
 	if !s.isKnownContract(id) {
-		return nil, api.ErrContractNotFound
+		return nil, nil, api.ErrContractNotFound
 	}
 
 	var dbRoots []hash256
@@ -641,6 +634,7 @@ WHERE c.fcid = ?
 		}
 	}
 
+	uploading = s.uploadingSectors.sectors(id)
 	return
 }
 
@@ -685,9 +679,21 @@ GROUP BY c.fcid
 
 	sizes := make(map[types.FileContractID]api.ContractSize)
 	for _, row := range rows {
-		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
+		fcid := types.FileContractID(row.Fcid)
+		if fcid == (types.FileContractID{}) {
 			return nil, errors.New("invalid file contract id")
 		}
+
+		// adjust the amount of prunable data with the pending uploads, due to how
+		// we record contract spending a contract's size might already include
+		// pending sectors
+		pending := s.uploadingSectors.pending(fcid)
+		if pending > row.Prunable {
+			row.Prunable = 0
+		} else {
+			row.Prunable -= pending
+		}
+
 		sizes[types.FileContractID(row.Fcid)] = api.ContractSize{
 			Size:     row.Size,
 			Prunable: row.Prunable,
@@ -716,6 +722,16 @@ WHERE c.fcid = ?
 		Take(&size).
 		Error; err != nil {
 		return api.ContractSize{}, err
+	}
+
+	// adjust the amount of prunable data with the pending uploads, due to how
+	// we record contract spending a contract's size might already include
+	// pending sectors
+	pending := s.uploadingSectors.pending(id)
+	if pending > size.Prunable {
+		size.Prunable = 0
+	} else {
+		size.Prunable -= pending
 	}
 
 	return api.ContractSize{
@@ -1798,6 +1814,18 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 		return fmt.Errorf("removing buffer after marking it as uploaded failed: %w", err)
 	}
 	return nil
+}
+
+func (s *SQLStore) TrackUpload(uID api.UploadID) error {
+	return s.uploadingSectors.trackUpload(uID)
+}
+
+func (s *SQLStore) AddUploadingSector(uID api.UploadID, id types.FileContractID, root types.Hash256) error {
+	return s.uploadingSectors.addUploadingSector(uID, id, root)
+}
+
+func (s *SQLStore) FinishUpload(uID api.UploadID) {
+	s.uploadingSectors.finishUpload(uID)
 }
 
 func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {

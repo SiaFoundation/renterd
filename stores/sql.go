@@ -77,6 +77,8 @@ type (
 		interactionsMu  sync.Mutex
 		objectsMu       sync.Mutex
 		bufferedSlabsMu sync.Mutex
+
+		uploadingSectors *uploadingSectorsCache
 	}
 
 	revisionUpdate struct {
@@ -196,8 +198,8 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 		unappliedRevisions:              make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:                 make(map[types.FileContractID]uint64),
 		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
-
-		walletAddress: walletAddress,
+		uploadingSectors:                newUploadingSectorsCache(),
+		walletAddress:                   walletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
 			ID:     types.BlockID(ci.BlockID),
