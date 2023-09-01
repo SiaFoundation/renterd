@@ -43,7 +43,11 @@ var (
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
 
-	// ErrOBjectNotFound is returned when an object can't be retrieved from the
+	// ErrBucketNotFound is returned when an bucket can't be retrieved from the
+	// database.
+	ErrBucketNotFound = errors.New("bucket not found")
+
+	// ErrObjectNotFound is returned when an object can't be retrieved from the
 	// database.
 	ErrObjectNotFound = errors.New("object not found")
 

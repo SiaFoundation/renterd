@@ -104,15 +104,15 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
-		Object(ctx context.Context, path string) (api.Object, error)
+		Object(ctx context.Context, path string, bucket *string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error)
-		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
+		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey, bucket *string) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, substring string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-		RemoveObject(ctx context.Context, path string) error
-		RemoveObjects(ctx context.Context, prefix string) error
-		RenameObject(ctx context.Context, from, to string) error
-		RenameObjects(ctx context.Context, from, to string) error
+		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, bucket *string) error
+		RemoveObject(ctx context.Context, path string, bucket *string) error
+		RemoveObjects(ctx context.Context, prefix string, bucket *string) error
+		RenameObject(ctx context.Context, from, to string, bucket *string) error
+		RenameObjects(ctx context.Context, from, to string, bucket *string) error
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
@@ -859,7 +859,8 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	o, err := b.ms.Object(jc.Request.Context(), path)
+	// TODO
+	o, err := b.ms.Object(jc.Request.Context(), path, nil)
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -897,7 +898,8 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.ObjectAddRequest
 	if jc.Decode(&aor) == nil {
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts)) // TODO
+		// TODO
+		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts, nil))
 	}
 }
 
@@ -912,7 +914,8 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To))
+		// TODO
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To, nil))
 		return
 	} else if orr.Mode == api.ObjectsRenameModeMulti {
 		// Multi object rename.
@@ -920,7 +923,8 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To))
+		// TODO
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To, nil))
 		return
 	} else {
 		// Invalid mode.
@@ -936,9 +940,11 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	}
 	var err error
 	if batch {
-		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"))
+		// TODO
+		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"), nil)
 	} else {
-		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"))
+		// TODO
+		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"), nil)
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1000,7 +1006,7 @@ func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), key)
+	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), key, nil)
 	if jc.Check("failed to retrieve objects by slab", err) != nil {
 		return
 	}

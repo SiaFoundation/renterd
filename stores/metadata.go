@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -79,7 +80,7 @@ type (
 	dbObject struct {
 		Model
 
-		DBBucketID uint   `gorm:"index;uniqueIndex:idx_object_bucket;default=NULL"`
+		DBBucketID *uint  `gorm:"index;uniqueIndex:idx_object_bucket;default=NULL"`
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
 		Key   []byte
@@ -175,6 +176,9 @@ type (
 
 // TableName implements the gorm.Tabler interface.
 func (dbArchivedContract) TableName() string { return "archived_contracts" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbBucket) TableName() string { return "buckets" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContract) TableName() string { return "contracts" }
@@ -824,6 +828,14 @@ func objectsByBucket(bucket *string) func(db *gorm.DB) *gorm.DB {
 	}
 }
 
+func sqlWhereBucket(bucket *string) clause.Expr {
+	if bucket == nil {
+		return gorm.Expr("objects.db_bucket_id IS NULL")
+	} else {
+		return gorm.Expr("objects.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", *bucket)
+	}
+}
+
 func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -866,13 +878,6 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offse
 		limit = math.MaxInt
 	}
 
-	//	var whereBucket clause.Expr
-	//	if bucket == nil {
-	//		whereBucket = gorm.Expr("objects.db_bucket_id IS NULL")
-	//	} else {
-	//		whereBucket = gorm.Expr("objects.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", *bucket)
-	//	}
-
 	query := s.db.Raw(fmt.Sprintf(`
 SELECT
 	SUM(size) AS size,
@@ -886,9 +891,9 @@ FROM (
 	FROM (
 		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
 		FROM objects
-		LEFT JOIN slices ON objects.id = slices.db_object_id
+		LEFT JOIN slices ON objects.id = slices.db_object_id AND ?
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-		WHERE objects.db_bucket_id IS NULL AND SUBSTR(object_id, 1, ?) = ?
+		WHERE SUBSTR(object_id, 1, ?) = ?
 		GROUP BY object_id
 	) AS i
 ) AS m
@@ -901,7 +906,7 @@ LIMIT ? OFFSET ?`,
 		path,
 		path,
 		utf8.RuneCountInString(path)+1,
-		//whereBucket,
+		sqlWhereBucket(bucket),
 		utf8.RuneCountInString(path),
 		path,
 		utf8.RuneCountInString(path+prefix),
@@ -918,10 +923,10 @@ LIMIT ? OFFSET ?`,
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, path string) (api.Object, error) {
+func (s *SQLStore) Object(ctx context.Context, path string, bucket *string) (api.Object, error) {
 	var obj api.Object
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		o, err := s.object(ctx, tx, path)
+		o, err := s.object(ctx, tx, path, bucket)
 		if err != nil {
 			return err
 		}
@@ -1028,8 +1033,8 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string) error {
-	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ?`, keyNew, keyOld)
+func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, bucket *string) error {
+	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket(bucket))
 	if tx.Error != nil {
 		return tx.Error
 	}
@@ -1039,7 +1044,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string) erro
 	return nil
 }
 
-func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string) error {
+func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string, bucket *string) error {
 	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
 		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
 	if tx.Error != nil {
@@ -1063,7 +1068,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, bucket *string) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
 
@@ -1088,7 +1093,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 
 		// Try to delete. We want to get rid of the object and its
 		// slices if it exists.
-		_, err := deleteObject(tx, path)
+		_, err := deleteObject(tx, path, bucket)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
@@ -1098,10 +1103,21 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
+		var bucketID *uint
+		if bucket != nil {
+			err = tx.Where("(?)", gorm.Expr("SELECT id from buckets WHERE buckets.name = ?", *bucket)).
+				Take(bucketID).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("bucket %v not found: %w", *bucket, api.ErrBucketNotFound)
+			} else if err != nil {
+				return fmt.Errorf("failed to fetch bucket id: %w", err)
+			}
+		}
 		obj := dbObject{
-			ObjectID: path,
-			Key:      objKey,
-			Size:     o.TotalSize(),
+			DBBucketID: bucketID,
+			ObjectID:   path,
+			Key:        objKey,
+			Size:       o.TotalSize(),
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1205,11 +1221,11 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 	})
 }
 
-func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
+func (s *SQLStore) RemoveObject(ctx context.Context, key string, bucket *string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = deleteObject(tx, key)
+		rowsAffected, err = deleteObject(tx, key, bucket)
 		return err
 	})
 	if err != nil {
@@ -1221,11 +1237,11 @@ func (s *SQLStore) RemoveObject(ctx context.Context, key string) error {
 	return nil
 }
 
-func (s *SQLStore) RemoveObjects(ctx context.Context, prefix string) error {
+func (s *SQLStore) RemoveObjects(ctx context.Context, prefix string, bucket *string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = deleteObjects(tx, prefix)
+		rowsAffected, err = deleteObjects(tx, prefix, bucket)
 		return err
 	})
 	if err != nil {
@@ -1446,7 +1462,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 }
 
 // object retrieves a raw object from the store.
-func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string) (rawObject, error) {
+func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string, bucket *string) (rawObject, error) {
 	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
 	// included in the result set, when we convert the rawObject before
 	// returning it we'll check for SlabID and/or SectorID being 0 and act
@@ -1455,6 +1471,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string) (rawOb
 	tx := s.db.
 		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
+		Scopes(objectsByBucket(bucket)).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
@@ -1506,7 +1523,7 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, contractSetID, limit)
 }
 
-func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey, bucket *string) ([]api.ObjectMetadata, error) {
 	var objs []struct {
 		Name   string
 		Size   int64
@@ -1520,9 +1537,9 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.Encrypti
 SELECT DISTINCT obj.object_id as Name, obj.size as Size, sla.health as Health
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
-INNER JOIN objects obj ON sli.db_object_id = obj.id
+INNER JOIN objects obj ON sli.db_object_id = obj.id AND ?
 WHERE sla.key = ?
-	`, key).
+	`, key, sqlWhereBucket(bucket)).
 		Scan(&objs).
 		Error
 	if err != nil {
@@ -1758,8 +1775,9 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Where(&dbObject{ObjectID: path}).Delete(&dbObject{})
+func deleteObject(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _ error) {
+	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket(bucket)).
+		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
@@ -1773,8 +1791,9 @@ func deleteObject(tx *gorm.DB, path string) (numDeleted int64, _ error) {
 	return
 }
 
-func deleteObjects(tx *gorm.DB, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(path), path)
+func deleteObjects(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _ error) {
+	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
+		utf8.RuneCountInString(path), path, sqlWhereBucket(bucket))
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
