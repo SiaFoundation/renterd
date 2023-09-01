@@ -3,7 +3,6 @@ package stores
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -1001,14 +1000,6 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 		blocked = true
 	}
 	return
-}
-
-func extractCommonMetric(result json.RawMessage) (json.RawMessage, error) {
-	var mrc hostdb.MetricResultCommon
-	if err := json.Unmarshal(result, &mrc); err != nil {
-		return nil, err
-	}
-	return json.Marshal(mrc)
 }
 
 func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {

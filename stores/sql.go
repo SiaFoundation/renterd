@@ -425,7 +425,7 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		if abortRetry(err) {
 			return err
 		}
-		s.logger.Warn(context.Background(), fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(timeoutIntervals), timeoutIntervals[i], err))
+		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(timeoutIntervals), timeoutIntervals[i], err))
 		time.Sleep(timeoutIntervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
