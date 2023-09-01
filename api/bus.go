@@ -205,6 +205,7 @@ type ObjectMetadata struct {
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.
 type ObjectAddRequest struct {
+	Bucket        string                                   `json:"bucket"`
 	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
@@ -218,9 +219,10 @@ type ObjectsResponse struct {
 
 // ObjectsRenameRequest is the request type for the /objects/rename endpoint.
 type ObjectsRenameRequest struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Mode string `json:"mode"`
+	Bucket string `json:"bucket"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Mode   string `json:"mode"`
 }
 
 // ObjectsStatsResponse is the response type for the /stats/objects endpoint.

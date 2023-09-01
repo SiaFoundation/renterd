@@ -844,8 +844,13 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
 		return
 	}
-	// TODO
-	keys, err := b.ms.SearchObjects(jc.Request.Context(), key, offset, limit, api.DefaultBucketName)
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		bucket = api.DefaultBucketName
+	}
+	keys, err := b.ms.SearchObjects(jc.Request.Context(), key, offset, limit, bucket)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
@@ -858,9 +863,14 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 		b.objectEntriesHandlerGET(jc, path)
 		return
 	}
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		bucket = api.DefaultBucketName
+	}
 
-	// TODO
-	o, err := b.ms.Object(jc.Request.Context(), path, api.DefaultBucketName)
+	o, err := b.ms.Object(jc.Request.Context(), path, bucket)
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -884,10 +894,15 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
 	}
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		bucket = api.DefaultBucketName
+	}
 
 	// look for object entries
-	// TODO
-	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit, api.DefaultBucketName)
+	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit, bucket)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}
@@ -897,16 +912,20 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.ObjectAddRequest
-	if jc.Decode(&aor) == nil {
-		// TODO
-		jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts, api.DefaultBucketName))
+	if jc.Decode(&aor) != nil {
+		return
+	} else if aor.Bucket == "" {
+		aor.Bucket = api.DefaultBucketName
 	}
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts, aor.Bucket))
 }
 
 func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 	var orr api.ObjectsRenameRequest
 	if jc.Decode(&orr) != nil {
 		return
+	} else if orr.Bucket == "" {
+		orr.Bucket = api.DefaultBucketName
 	}
 	if orr.Mode == api.ObjectsRenameModeSingle {
 		// Single object rename.
@@ -914,8 +933,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		// TODO
-		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To, api.DefaultBucketName))
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To, orr.Bucket))
 		return
 	} else if orr.Mode == api.ObjectsRenameModeMulti {
 		// Multi object rename.
@@ -923,8 +941,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		// TODO
-		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To, api.DefaultBucketName))
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To, orr.Bucket))
 		return
 	} else {
 		// Invalid mode.
@@ -938,13 +955,17 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
 	}
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		bucket = api.DefaultBucketName
+	}
 	var err error
 	if batch {
-		// TODO
-		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"), api.DefaultBucketName)
+		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"), bucket)
 	} else {
-		// TODO
-		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"), api.DefaultBucketName)
+		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"), bucket)
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1006,7 +1027,13 @@ func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), key, api.DefaultBucketName)
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		bucket = api.DefaultBucketName
+	}
+	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), key, bucket)
 	if jc.Check("failed to retrieve objects by slab", err) != nil {
 		return
 	}
