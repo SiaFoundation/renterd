@@ -80,7 +80,7 @@ type (
 	dbObject struct {
 		Model
 
-		DBBucketID *uint  `gorm:"index;uniqueIndex:idx_object_bucket;default=NULL"`
+		DBBucketID uint   `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
 		Key   []byte
@@ -91,7 +91,7 @@ type (
 	dbBucket struct {
 		Model
 
-		Name string `gorm:"unique;index;"`
+		Name string `gorm:"unique;index;NOT NULL"`
 	}
 
 	dbSlice struct {
@@ -818,7 +818,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 	return contract.convert(), nil
 }
 
-func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, limit int, bucket string) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
@@ -842,7 +842,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, substring string, offset, 
 	return objects, nil
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket *string) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket string) ([]api.ObjectMetadata, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
@@ -897,7 +897,7 @@ LIMIT ? OFFSET ?`,
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, path string, bucket *string) (api.Object, error) {
+func (s *SQLStore) Object(ctx context.Context, path string, bucket string) (api.Object, error) {
 	var obj api.Object
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		o, err := s.object(ctx, tx, path, bucket)
@@ -1007,7 +1007,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, bucket *string) error {
+func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, bucket string) error {
 	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
 		return tx.Error
@@ -1018,7 +1018,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, buck
 	return nil
 }
 
-func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string, bucket *string) error {
+func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string, bucket string) error {
 	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
 		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
 	if tx.Error != nil {
@@ -1042,7 +1042,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, bucket *string) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, bucket string) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
 
@@ -1077,15 +1077,13 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
-		var bucketID *uint
-		if bucket != nil {
-			err = tx.Where("(?)", gorm.Expr("SELECT id from buckets WHERE buckets.name = ?", *bucket)).
-				Take(bucketID).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("bucket %v not found: %w", *bucket, api.ErrBucketNotFound)
-			} else if err != nil {
-				return fmt.Errorf("failed to fetch bucket id: %w", err)
-			}
+		var bucketID uint
+		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?)", bucket).
+			Take(&bucketID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
+		} else if err != nil {
+			return fmt.Errorf("failed to fetch bucket id: %w", err)
 		}
 		obj := dbObject{
 			DBBucketID: bucketID,
@@ -1195,7 +1193,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 	})
 }
 
-func (s *SQLStore) RemoveObject(ctx context.Context, key string, bucket *string) error {
+func (s *SQLStore) RemoveObject(ctx context.Context, key string, bucket string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
@@ -1211,7 +1209,7 @@ func (s *SQLStore) RemoveObject(ctx context.Context, key string, bucket *string)
 	return nil
 }
 
-func (s *SQLStore) RemoveObjects(ctx context.Context, prefix string, bucket *string) error {
+func (s *SQLStore) RemoveObjects(ctx context.Context, prefix string, bucket string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
@@ -1436,7 +1434,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 }
 
 // object retrieves a raw object from the store.
-func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string, bucket *string) (rawObject, error) {
+func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, path string, bucket string) (rawObject, error) {
 	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
 	// included in the result set, when we convert the rawObject before
 	// returning it we'll check for SlabID and/or SectorID being 0 and act
@@ -1496,7 +1494,7 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, contractSetID, limit)
 }
 
-func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey, bucket *string) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey, bucket string) ([]api.ObjectMetadata, error) {
 	var objs []struct {
 		Name   string
 		Size   int64
@@ -1748,7 +1746,7 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func deleteObject(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _ error) {
+func deleteObject(tx *gorm.DB, path string, bucket string) (numDeleted int64, _ error) {
 	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
 		Delete(&dbObject{})
 	if tx.Error != nil {
@@ -1764,7 +1762,7 @@ func deleteObject(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _
 	return
 }
 
-func deleteObjects(tx *gorm.DB, path string, bucket *string) (numDeleted int64, _ error) {
+func deleteObjects(tx *gorm.DB, path string, bucket string) (numDeleted int64, _ error) {
 	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
 		utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
@@ -1800,10 +1798,6 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
-func sqlWhereBucket(objTable string, bucket *string) clause.Expr {
-	if bucket == nil {
-		return gorm.Expr(fmt.Sprintf("%s.db_bucket_id IS NULL", objTable))
-	} else {
-		return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", *bucket))
-	}
+func sqlWhereBucket(objTable string, bucket string) clause.Expr {
+	return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", objTable), bucket)
 }
