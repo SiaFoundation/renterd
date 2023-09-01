@@ -283,7 +283,7 @@ func TestSectorPruning(t *testing.T) {
 
 	// prune all contracts
 	for _, c := range contracts {
-		if _, err := w.RHPPruneContract(context.Background(), c.ID); err != nil {
+		if _, err := w.RHPPruneContract(context.Background(), c.ID, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

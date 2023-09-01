@@ -30,7 +30,7 @@ func newTestSQLStore(dir string) (*SQLStore, string, modules.ConsensusChangeID, 
 	conn := NewEphemeralSQLiteConnection(dbName)
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, true, time.Second, walletAddrs, 0, newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, true, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
