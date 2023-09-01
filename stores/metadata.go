@@ -1374,7 +1374,7 @@ LIMIT ?
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
+		case <-time.After(time.Second):
 		}
 	}
 }

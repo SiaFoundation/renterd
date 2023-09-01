@@ -376,53 +376,6 @@ func main() {
 		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
 	}
 
-	busCfg.DBLoggerConfig = stores.LoggerConfig{
-		LogLevel:                  level,
-		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
-		SlowThreshold:             cfg.Database.Log.SlowThreshold,
-	}
-
-	var autopilotShutdownFn func(context.Context) error
-	var shutdownFns []func(context.Context) error
-
-	// Init tracing.
-	if cfg.Tracing.Enabled {
-		shutdownFn, err := tracing.Init(cfg.Tracing.InstanceID)
-		if err != nil {
-			log.Fatal("failed to init tracing", err)
-		}
-		shutdownFns = append(shutdownFns, shutdownFn)
-	}
-
-	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
-		log.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
-	}
-	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
-		log.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
-	}
-
-	// create listener first, so that we know the actual apiAddr if the user
-	// specifies port :0
-	l, err := net.Listen("tcp", cfg.HTTP.Address)
-	if err != nil {
-		log.Fatal("failed to create listener", err)
-	}
-	shutdownFns = append(shutdownFns, func(_ context.Context) error {
-		_ = l.Close()
-		return nil
-	})
-	// override the address with the actual one
-	cfg.HTTP.Address = "http://" + l.Addr().String()
-
-	auth := jape.BasicAuth(cfg.HTTP.Password)
-	mux := treeMux{
-		sub: make(map[string]treeMux),
-	}
-
-	if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
-		log.Fatal("failed to create directory:", err)
-	}
-
 	// Create logger.
 	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
 	if cfg.Log.Path != "" {
@@ -432,15 +385,75 @@ func main() {
 	if err != nil {
 		log.Fatalln("failed to create logger:", err)
 	}
-	shutdownFns = append(shutdownFns, closeFn)
+	defer closeFn(context.Background())
+
+	busCfg.DBLoggerConfig = stores.LoggerConfig{
+		LogLevel:                  level,
+		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
+		SlowThreshold:             cfg.Database.Log.SlowThreshold,
+	}
+
+	type shutdownFn struct {
+		name string
+		fn   func(context.Context) error
+	}
+	var shutdownFns []shutdownFn
+
+	// Init tracing.
+	if cfg.Tracing.Enabled {
+		fn, err := tracing.Init(cfg.Tracing.InstanceID)
+		if err != nil {
+			logger.Fatal("failed to init tracing: " + err.Error())
+		}
+		shutdownFns = append(shutdownFns, shutdownFn{
+			name: "Tracing",
+			fn:   fn,
+		})
+	}
+
+	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
+		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
+	}
+	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
+		logger.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
+	}
+
+	// create listener first, so that we know the actual apiAddr if the user
+	// specifies port :0
+	l, err := net.Listen("tcp", cfg.HTTP.Address)
+	if err != nil {
+		logger.Fatal("failed to create listener: " + err.Error())
+	}
+
+	// override the address with the actual one
+	cfg.HTTP.Address = "http://" + l.Addr().String()
+
+	auth := jape.BasicAuth(cfg.HTTP.Password)
+	mux := treeMux{
+		sub: make(map[string]treeMux),
+	}
+
+	// Create the webserver.
+	srv := &http.Server{Handler: mux}
+	shutdownFns = append(shutdownFns, shutdownFn{
+		name: "HTTP Server",
+		fn:   srv.Shutdown,
+	})
+
+	if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
+		logger.Fatal("failed to create directory: " + err.Error())
+	}
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, fn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
-			log.Fatal("failed to create bus, err: ", err)
+			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		shutdownFns = append(shutdownFns, shutdownFn)
+		shutdownFns = append(shutdownFns, shutdownFn{
+			name: "Bus",
+			fn:   fn,
+		})
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
 		busAddr = cfg.HTTP.Address + "/api/bus"
@@ -449,18 +462,21 @@ func main() {
 		// only serve the UI if a bus is created
 		mux.h = renterd.Handler()
 	} else {
-		fmt.Println("connecting to remote bus at", busAddr)
+		logger.Info("connecting to remote bus at " + busAddr)
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, shutdownFn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
+			w, fn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
 			if err != nil {
-				log.Fatal("failed to create worker", err)
+				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			shutdownFns = append(shutdownFns, shutdownFn)
+			shutdownFns = append(shutdownFns, shutdownFn{
+				name: "Worker",
+				fn:   fn,
+			})
 
 			mux.sub["/api/worker"] = treeMux{h: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			workerAddr := cfg.HTTP.Address + "/api/worker"
@@ -469,7 +485,7 @@ func main() {
 	} else {
 		for _, remote := range cfg.Worker.Remotes {
 			workers = append(workers, worker.NewClient(remote.Address, remote.Password))
-			fmt.Println("connecting to remote worker at", remote.Address)
+			logger.Info("connecting to remote worker at " + remote.Address)
 		}
 	}
 
@@ -480,32 +496,34 @@ func main() {
 			ID:        api.DefaultAutopilotID,
 			Autopilot: cfg.Autopilot,
 		}
-		ap, runFn, shutdownFn, err := node.NewAutopilot(apCfg, bc, workers, logger)
+		ap, runFn, fn, err := node.NewAutopilot(apCfg, bc, workers, logger)
 		if err != nil {
-			log.Fatal("failed to create autopilot", err)
+			logger.Fatal("failed to create autopilot: " + err.Error())
 		}
 
-		// NOTE: the autopilot shutdown function is not added to the shutdown
-		// functions array because it needs to be called first
-		autopilotShutdownFn = shutdownFn
+		// NOTE: the autopilot shutdown function needs to be called first.
+		shutdownFns = append(shutdownFns, shutdownFn{
+			name: "Autopilot",
+			fn:   fn,
+		})
 
 		go func() { autopilotErr <- runFn() }()
 		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
 	}
 
-	srv := &http.Server{Handler: mux}
+	// Start server.
 	go srv.Serve(l)
-	log.Println("api: Listening on", l.Addr())
+	logger.Info("api: Listening on " + l.Addr().String())
 
 	syncerAddress, err := bc.SyncerAddress(context.Background())
 	if err != nil {
-		log.Fatal("failed to fetch syncer address", err)
+		logger.Fatal("failed to fetch syncer address: " + err.Error())
 	}
-	log.Println("bus: Listening on", syncerAddress)
+	logger.Info("bus: Listening on " + syncerAddress)
 
 	if cfg.Autopilot.Enabled {
 		if err := runCompatMigrateAutopilotJSONToStore(bc, "autopilot", autopilotDir); err != nil {
-			log.Fatal("failed to migrate autopilot JSON", err)
+			logger.Fatal("failed to migrate autopilot JSON: " + err.Error())
 		}
 	}
 
@@ -513,26 +531,32 @@ func main() {
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	select {
 	case <-signalCh:
-		log.Println("Shutting down...")
-		shutdownFns = append(shutdownFns, srv.Shutdown)
+		logger.Info("Shutting down...")
 	case err := <-autopilotErr:
-		log.Fatal("Fatal autopilot error:", err)
+		logger.Fatal("Fatal autopilot error: " + err.Error())
 	}
 
-	// Shut down the autopilot first, then the rest of the services in reverse order.
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-	if autopilotShutdownFn != nil {
-		if err := autopilotShutdownFn(ctx); err != nil {
-			log.Fatalf("Failed to shut down autopilot: %v", err)
-		}
+	// Give each service a fraction of the total shutdown timeout. One service
+	// timing out shouldn't prevent the others from attempting a shutdown.
+	timeout := cfg.ShutdownTimeout / time.Duration(len(shutdownFns))
+	shutdown := func(fn func(ctx context.Context) error) error {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return fn(ctx)
 	}
+
+	// Shut down the autopilot first, then the rest of the services in reverse order and then
+	exitCode := 0
 	for i := len(shutdownFns) - 1; i >= 0; i-- {
-		if err := shutdownFns[i](ctx); err != nil {
-			log.Fatalf("Shutdown function %v failed: %v", i+1, err)
+		if err := shutdown(shutdownFns[i].fn); err != nil {
+			logger.Sugar().Errorf("Failed to shut down %v: %v", shutdownFns[i].name, err)
+			exitCode = 1
+		} else {
+			logger.Sugar().Infof("%v shut down successfully", shutdownFns[i].name)
 		}
 	}
-	log.Println("Shutdown complete")
+	logger.Info("Shutdown complete")
+	os.Exit(exitCode)
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
