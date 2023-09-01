@@ -80,7 +80,8 @@ type (
 	dbObject struct {
 		Model
 
-		DBBucketID uint   `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
+		DBBucketID uint `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
+		DBBucket   dbBucket
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
 		Key   []byte
@@ -407,6 +408,68 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	slice.Offset = raw[0].SliceOffset
 	slice.Length = raw[0].SliceLength
 	return slice, nil
+}
+
+func (s *SQLStore) CreateBucket(_ context.Context, bucket string) error {
+	// Create bucket.
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		res := tx.Clauses(clause.OnConflict{
+			DoNothing: true,
+		}).
+			Create(&dbBucket{Name: bucket})
+		if res.Error != nil {
+			return res.Error
+		} else if res.RowsAffected == 0 {
+			return api.ErrBucketExists
+		}
+		return nil
+	})
+}
+
+func (s *SQLStore) DeleteBucket(_ context.Context, bucket string) error {
+	// Delete bucket.
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		var b dbBucket
+		if err := tx.Take(&b, "name = ?", bucket).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrBucketNotFound
+		} else if err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&dbObject{}).Where("db_bucket_id = ?", b.ID).
+			Limit(1).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return api.ErrBucketNotEmpty
+		}
+		res := tx.Where("buckets.id = ?", b.ID).
+			Delete(&dbBucket{})
+		if res.Error != nil {
+			return res.Error
+		} else if res.RowsAffected == 0 {
+			return api.ErrBucketNotFound
+		}
+		return nil
+	})
+}
+
+func (s *SQLStore) ListBuckets(_ context.Context) ([]string, error) {
+	var buckets []dbBucket
+	err := s.db.
+		Model(&dbBucket{}).
+		Find(&buckets).
+		Error
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, len(buckets))
+	for i, b := range buckets {
+		names[i] = b.Name
+	}
+	return names, nil
 }
 
 // ObjectsStats returns some info related to the objects stored in the store. To
@@ -1078,7 +1141,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, path, contractSet string, o
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
 		var bucketID uint
-		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?)", bucket).
+		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
 			Take(&bucketID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)

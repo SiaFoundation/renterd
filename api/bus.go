@@ -39,13 +39,21 @@ const (
 )
 
 var (
-	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
-	// yet because it has been set too recently.
-	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
+	// ErrBucketExists is returned when trying to create a bucket that already
+	// exists.
+	ErrBucketExists = errors.New("bucket already exists")
+
+	// ErrBucketNotEmpty is returned when trying to delete a bucket that is not
+	// empty.
+	ErrBucketNotEmpty = errors.New("bucket not empty")
 
 	// ErrBucketNotFound is returned when an bucket can't be retrieved from the
 	// database.
 	ErrBucketNotFound = errors.New("bucket not found")
+
+	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
+	// yet because it has been set too recently.
+	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
 
 	// ErrObjectNotFound is returned when an object can't be retrieved from the
 	// database.
