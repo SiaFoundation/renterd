@@ -304,8 +304,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 				ongoingUploadsMu.Unlock()
 				break
 			}
-			ongoingUploadsMu.Unlock()
 			<-respChan
+			ongoingUploadsMu.Unlock()
 		}
 		close(respChan)
 	}()
@@ -364,7 +364,7 @@ loop:
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
-				return object.Object{}, nil, err
+				return object.Object{}, nil, res.err
 			}
 
 			// collect the response and potentially break out of the loop
