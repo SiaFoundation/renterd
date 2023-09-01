@@ -41,7 +41,8 @@ type (
 		db     *gorm.DB
 		logger *zap.SugaredLogger
 
-		slabBufferMgr *SlabBufferManager
+		slabBufferMgr    *SlabBufferManager
+		uploadingSectors *uploadingSectorsCache
 
 		// Persistence buffer - related fields.
 		lastSave               time.Time
@@ -73,10 +74,9 @@ type (
 
 		knownContracts map[types.FileContractID]struct{}
 
-		spendingMu       sync.Mutex
-		interactionsMu   sync.Mutex
-		objectsMu        sync.Mutex
-		uploadingSectors *uploadingSectorsCache
+		spendingMu     sync.Mutex
+		interactionsMu sync.Mutex
+		objectsMu      sync.Mutex
 	}
 
 	revisionUpdate struct {
