@@ -616,8 +616,20 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// check if there's prunable data for the contract
+	// decode potential timeout
+	var pcr api.RHPPruneContractRequest
+	if jc.Decode(&pcr) != nil {
+		return
+	}
+
 	ctx := jc.Request.Context()
+	if pcr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), pcr.Timeout)
+		defer cancel()
+	}
+
+	// check if there's prunable data for the contract
 	size, err := w.bus.ContractSize(ctx, id)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -697,15 +709,14 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		deleted += n
 		return err
 	})
-	if err != nil {
+	if err == nil || (errors.Is(err, context.Canceled) && deleted > 0) {
+		jc.Encode(deleted * rhpv2.SectorSize)
+	} else {
 		if deleted > 0 {
 			err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, len(toDelete))
 		}
 		jc.Error(err, http.StatusInternalServerError)
-		return
 	}
-
-	jc.Encode(deleted * rhpv2.SectorSize)
 }
 
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {

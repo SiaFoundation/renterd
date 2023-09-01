@@ -279,10 +279,12 @@ func (w *worker) DeleteContractRoots(ctx context.Context, hostIP, hostVersion st
 		return indices[i] > indices[j]
 	})
 
-	// decide on the batch size, defaults to ~20mib of sector data
+	// decide on the batch size, defaults to ~20mib of sector data but for old
+	// hosts we use a much smaller batch size to ensure we nibble away at the
+	// problem rather than outright failing or timing out
 	batchSize := int(batchSizeDeleteSectors)
 	if build.VersionCmp(hostVersion, "1.6.0") < 0 {
-		batchSize = 500
+		batchSize = 100
 	}
 
 	// split the indices into batches
