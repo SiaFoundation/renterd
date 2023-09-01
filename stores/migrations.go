@@ -514,7 +514,6 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger glogger.Interface)
 
 func performMigration00006_contractspending(txn *gorm.DB, logger glogger.Interface) error {
 	logger.Info(context.Background(), "performing migration 00006_contractspending")
-
 	if !txn.Migrator().HasColumn(&dbContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbContract{}, "delete_spending"); err != nil {
 			return err
@@ -525,7 +524,6 @@ func performMigration00006_contractspending(txn *gorm.DB, logger glogger.Interfa
 			return err
 		}
 	}
-
 	logger.Info(context.Background(), "migration 00006_contractspending complete")
 	return nil
 }
