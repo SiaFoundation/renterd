@@ -497,6 +497,10 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
+type Bucket struct {
+	Name string `json:"name"`
+}
+
 type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`
 	Limit           int               `json:"limit"`
