@@ -46,6 +46,24 @@ func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
 	return c.c.WithContext(ctx).POST("/alerts/register", alert, nil)
 }
 
+// CreateBucket creates a new bucket.
+func (c *Client) CreateBucket(ctx context.Context, name string) error {
+	return c.c.WithContext(ctx).PUT("/buckets", api.Bucket{
+		Name: name,
+	})
+}
+
+// DeleteBucket deletes an existing bucket. Fails if the bucket isn't empty.
+func (c *Client) DeleteBucket(ctx context.Context, name string) error {
+	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/buckets/%s", name))
+}
+
+// ListBuckets lists all available buckets.
+func (c *Client) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
+	err = c.c.WithContext(ctx).GET("/buckets", &buckets)
+	return
+}
+
 // RegisterWebhook registers a new webhook for the given URL.
 func (c *Client) RegisterWebhook(ctx context.Context, url, module, event string) error {
 	err := c.c.WithContext(ctx).POST("/webhooks", webhooks.Webhook{

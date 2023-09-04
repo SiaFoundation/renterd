@@ -104,6 +104,10 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
+		CreateBucket(_ context.Context, bucket string) error
+		DeleteBucket(_ context.Context, bucket string) error
+		ListBuckets(_ context.Context) ([]string, error)
+
 		Object(ctx context.Context, path string, bucket string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket string) ([]api.ObjectMetadata, error)
 		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey, bucket string) ([]api.ObjectMetadata, error)
@@ -227,6 +231,44 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Decode(&txnSet) == nil {
 		jc.Check("couldn't broadcast transaction set", b.tp.AddTransactionSet(txnSet))
+	}
+}
+
+func (b *bus) bucketsHandlerGET(jc jape.Context) {
+	buckets, err := b.ms.ListBuckets(jc.Request.Context())
+	if jc.Check("couldn't list buckets", err) != nil {
+		return
+	}
+	var resp []api.Bucket
+	for _, bucket := range buckets {
+		resp = append(resp, api.Bucket{
+			Name: bucket,
+		})
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) bucketHandlerPUT(jc jape.Context) {
+	var bucket api.Bucket
+	if jc.Decode(&bucket) != nil {
+		return
+	} else if bucket.Name == "" {
+		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to create bucket", b.ms.CreateBucket(jc.Request.Context(), bucket.Name)) != nil {
+		return
+	}
+}
+
+func (b *bus) bucketHandlerDELETE(jc jape.Context) {
+	var name string
+	if jc.DecodeParam("name", &name) != nil {
+		return
+	} else if name == "" {
+		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to create bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
+		return
 	}
 }
 
@@ -1784,6 +1826,10 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
+
+		"GET    /buckets":       b.bucketsHandlerGET,
+		"PUT    /buckets":       b.bucketHandlerPUT,
+		"DELETE /buckets/:name": b.bucketHandlerDELETE,
 
 		"GET    /objects/*path":  b.objectsHandlerGET,
 		"PUT    /objects/*path":  b.objectsHandlerPUT,
