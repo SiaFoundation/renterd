@@ -29,17 +29,17 @@ type bus interface {
 	DeleteBucket(ctx context.Context, name string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error)
-	DeleteObject(ctx context.Context, path string, batch bool) (err error)
+	AddObject(ctx context.Context, path, bucket, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error)
+	DeleteObject(ctx context.Context, path, bucket string, batch bool) (err error)
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, err error)
-	SearchObjects(ctx context.Context, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
+	SearchObjects(ctx context.Context, key, bucket string, offset, limit int) (entries []api.ObjectMetadata, err error)
 
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
 type worker interface {
 	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error)
-	GetObject(ctx context.Context, path string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error)
+	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error)
 }
 
 func (l *goFakeLogger) Print(level gofakes3.LogLevel, v ...interface{}) {

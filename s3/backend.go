@@ -245,8 +245,12 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 	if rangeRequest != nil {
 		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, rangeRequest.End))
 	}
-	res, err := s.w.GetObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), opts...)
-	if err != nil {
+	res, err := s.w.GetObject(context.Background(), objectName, bucketName, opts...)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		return nil, gofakes3.BucketNotFound(bucketName)
+	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		return nil, gofakes3.KeyNotFound(objectName)
+	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	var objectRange *gofakes3.ObjectRange
@@ -282,7 +286,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	obj, _, err := s.b.Object(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName))
+	obj, _, err := s.b.Object(context.Background(), "/"+objectName, api.ObjectsWithBucket(bucketName))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	}
@@ -315,7 +319,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), false)
+	err := s.b.DeleteObject(context.Background(), "/"+objectName, bucketName, false)
 	if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -333,7 +337,7 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	err := s.w.UploadObject(context.Background(), input, fmt.Sprintf("%s/%s", bucketName, key))
+	err := s.w.UploadObject(context.Background(), input, key, api.UploadWithBucket(bucketName))
 	if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -345,7 +349,7 @@ func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.
 func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
-		err := s.b.DeleteObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), false)
+		err := s.b.DeleteObject(context.Background(), objectName, bucketName, false)
 		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     objectName,
