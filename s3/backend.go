@@ -30,21 +30,18 @@ type s3 struct {
 // sender of the request.
 // https://docs.aws.amazon.com/AmazonS3/latest/API/RESTServiceGET.html
 func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
-	_, entries, err := s.b.Object(context.Background(), "")
+	buckets, err := s.b.ListBuckets(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list buckets: %w", err)
 	}
-	buckets := make([]gofakes3.BucketInfo, len(entries))
-	for i, entry := range entries {
-		if !strings.HasSuffix(entry.Name, "/") {
-			continue // ignore files
-		}
-		buckets[i] = gofakes3.BucketInfo{
-			Name:         entry.Name[1 : len(entry.Name)-1],
+	bucketInfos := make([]gofakes3.BucketInfo, len(buckets))
+	for i, bucket := range buckets {
+		bucketInfos[i] = gofakes3.BucketInfo{
+			Name:         bucket.Name,
 			CreationDate: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
 		}
 	}
-	return buckets, nil
+	return bucketInfos, nil
 }
 
 // ListBucket returns the contents of a bucket. Backends should use the
