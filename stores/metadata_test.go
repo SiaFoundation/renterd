@@ -3124,7 +3124,7 @@ func TestBuckets(t *testing.T) {
 		t.Fatal(err)
 	} else if len(buckets) != 1 {
 		t.Fatal("expected 1 bucket", len(buckets))
-	} else if buckets[0] != api.DefaultBucketName {
+	} else if buckets[0].Name != api.DefaultBucketName {
 		t.Fatal("expected default bucket")
 	}
 
@@ -3141,9 +3141,9 @@ func TestBuckets(t *testing.T) {
 		t.Fatal(err)
 	} else if len(buckets) != 2 {
 		t.Fatal("expected 2 buckets", len(buckets))
-	} else if buckets[0] != b1 {
+	} else if buckets[0].Name != b1 {
 		t.Fatal("unexpected bucket", buckets[0])
-	} else if buckets[1] != b2 {
+	} else if buckets[1].Name != b2 {
 		t.Fatal("unexpected bucket", buckets[1])
 	}
 

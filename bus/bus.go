@@ -106,7 +106,7 @@ type (
 
 		CreateBucket(_ context.Context, bucket string) error
 		DeleteBucket(_ context.Context, bucket string) error
-		ListBuckets(_ context.Context) ([]string, error)
+		ListBuckets(_ context.Context) ([]api.Bucket, error)
 
 		Object(ctx context.Context, path string, bucket string) (api.Object, error)
 		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket string) ([]api.ObjectMetadata, error)
@@ -235,15 +235,9 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 }
 
 func (b *bus) bucketsHandlerGET(jc jape.Context) {
-	buckets, err := b.ms.ListBuckets(jc.Request.Context())
+	resp, err := b.ms.ListBuckets(jc.Request.Context())
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
-	}
-	var resp []api.Bucket
-	for _, bucket := range buckets {
-		resp = append(resp, api.Bucket{
-			Name: bucket,
-		})
 	}
 	jc.Encode(resp)
 }
