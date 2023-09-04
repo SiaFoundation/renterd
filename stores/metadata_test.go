@@ -437,7 +437,7 @@ func TestContractRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roots, _, err := cs.ContractRoots(context.Background(), fcids[0])
+	roots, err := cs.ContractRoots(context.Background(), fcids[0])
 	if err != nil {
 		t.Fatal(err)
 	}

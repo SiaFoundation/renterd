@@ -100,7 +100,7 @@ type (
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
@@ -126,10 +126,6 @@ type (
 		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error
-
-		TrackUpload(uID api.UploadID) error
-		AddUploadingSector(uID api.UploadID, id types.FileContractID, root types.Hash256) error
-		FinishUpload(uID api.UploadID)
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -171,9 +167,10 @@ type bus struct {
 
 	eas EphemeralAccountStore
 
-	logger        *zap.SugaredLogger
-	accounts      *accounts
-	contractLocks *contractLocks
+	logger           *zap.SugaredLogger
+	accounts         *accounts
+	contractLocks    *contractLocks
+	uploadingSectors *uploadingSectorsCache
 
 	startTime time.Time
 }
@@ -719,6 +716,16 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// build the response
 	for fcid, size := range sizes {
+		// adjust the amount of prunable data with the pending uploads, due to
+		// how we record contract spending a contract's size might already
+		// include pending sectors
+		pending := b.uploadingSectors.pending(fcid)
+		if pending > size.Prunable {
+			size.Prunable = 0
+		} else {
+			size.Prunable -= pending
+		}
+
 		contracts = append(contracts, api.ContractPrunableData{
 			ID:           fcid,
 			ContractSize: size,
@@ -749,9 +756,21 @@ func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	} else if jc.Check("failed to fetch contract size", err) == nil {
-		jc.Encode(size)
+	} else if jc.Check("failed to fetch contract size", err) != nil {
+		return
 	}
+
+	// adjust the amount of prunable data with the pending uploads, due to how
+	// we record contract spending a contract's size might already include
+	// pending sectors
+	pending := b.uploadingSectors.pending(id)
+	if pending > size.Prunable {
+		size.Prunable = 0
+	} else {
+		size.Prunable -= pending
+	}
+
+	jc.Encode(size)
 }
 
 func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
@@ -819,11 +838,11 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	roots, uploading, err := b.ms.ContractRoots(jc.Request.Context(), id)
+	roots, err := b.ms.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
 		jc.Encode(api.ContractRootsResponse{
 			Roots:     roots,
-			Uploading: uploading,
+			Uploading: b.uploadingSectors.sectors(id),
 		})
 	}
 }
@@ -1509,7 +1528,7 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		jc.Check("failed to track upload", b.ms.TrackUpload(id))
+		jc.Check("failed to track upload", b.uploadingSectors.trackUpload(id))
 	}
 }
 
@@ -1522,13 +1541,13 @@ func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	jc.Check("failed to add sector", b.ms.AddUploadingSector(id, req.ContractID, req.Root))
+	jc.Check("failed to add sector", b.uploadingSectors.addUploadingSector(id, req.ContractID, req.Root))
 }
 
 func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		b.ms.FinishUpload(id)
+		b.uploadingSectors.finishUpload(id)
 	}
 }
 
@@ -1581,20 +1600,21 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 // New returns a new Bus.
 func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:        alerts.WithOrigin(am, "bus"),
-		alertMgr:      am,
-		hooks:         hm,
-		s:             s,
-		cm:            cm,
-		tp:            tp,
-		w:             w,
-		hdb:           hdb,
-		as:            as,
-		ms:            ms,
-		ss:            ss,
-		eas:           eas,
-		contractLocks: newContractLocks(),
-		logger:        l.Sugar().Named("bus"),
+		alerts:           alerts.WithOrigin(am, "bus"),
+		alertMgr:         am,
+		hooks:            hm,
+		s:                s,
+		cm:               cm,
+		tp:               tp,
+		w:                w,
+		hdb:              hdb,
+		as:               as,
+		ms:               ms,
+		ss:               ss,
+		eas:              eas,
+		contractLocks:    newContractLocks(),
+		uploadingSectors: newUploadingSectorsCache(),
+		logger:           l.Sugar().Named("bus"),
 
 		startTime: time.Now(),
 	}

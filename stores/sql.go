@@ -41,8 +41,7 @@ type (
 		db     *gorm.DB
 		logger *zap.SugaredLogger
 
-		slabBufferMgr    *SlabBufferManager
-		uploadingSectors *uploadingSectorsCache
+		slabBufferMgr *SlabBufferManager
 
 		// Persistence buffer - related fields.
 		lastSave               time.Time
@@ -192,7 +191,6 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
 		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:    make(map[types.FileContractID]uint64),
-		uploadingSectors:   newUploadingSectorsCache(),
 		walletAddress:      walletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
