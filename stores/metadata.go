@@ -455,7 +455,7 @@ func (s *SQLStore) DeleteBucket(_ context.Context, bucket string) error {
 	})
 }
 
-func (s *SQLStore) ListBuckets(_ context.Context) ([]string, error) {
+func (s *SQLStore) ListBuckets(_ context.Context) ([]api.Bucket, error) {
 	var buckets []dbBucket
 	err := s.db.
 		Model(&dbBucket{}).
@@ -465,11 +465,14 @@ func (s *SQLStore) ListBuckets(_ context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	names := make([]string, len(buckets))
+	resp := make([]api.Bucket, len(buckets))
 	for i, b := range buckets {
-		names[i] = b.Name
+		resp[i] = api.Bucket{
+			CreationDate: b.CreatedAt.UTC(),
+			Name:         b.Name,
+		}
 	}
-	return names, nil
+	return resp, nil
 }
 
 // ObjectsStats returns some info related to the objects stored in the store. To
