@@ -58,6 +58,12 @@ func (c *Client) DeleteBucket(ctx context.Context, name string) error {
 	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/buckets/%s", name))
 }
 
+// ExistsBucket returns whether a bucket exists.
+func (c *Client) Bucket(ctx context.Context, name string) (resp api.Bucket, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/buckets/%s", name), &resp)
+	return
+}
+
 // ListBuckets lists all available buckets.
 func (c *Client) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
 	err = c.c.WithContext(ctx).GET("/buckets", &buckets)

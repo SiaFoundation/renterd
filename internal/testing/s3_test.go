@@ -31,6 +31,11 @@ func TestS3(t *testing.T) {
 	}()
 	s3 := cluster.S3
 
+	// delete default bucket before testing.
+	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+		t.Fatal(err)
+	}
+
 	// add hosts
 	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
 		t.Fatal(err)

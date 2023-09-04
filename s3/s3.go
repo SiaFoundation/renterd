@@ -24,6 +24,7 @@ type Opts struct {
 }
 
 type bus interface {
+	Bucket(ctx context.Context, name string) (api.Bucket, error)
 	CreateBucket(ctx context.Context, name string) error
 	DeleteBucket(ctx context.Context, name string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)

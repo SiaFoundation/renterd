@@ -191,17 +191,13 @@ func (s *s3) CreateBucket(name string) error {
 //
 // TODO: backend could be improved to allow for checking specific dir in root.
 func (s *s3) BucketExists(name string) (bool, error) {
-	bucketPath := fmt.Sprintf("/%s/", name)
-	_, entries, err := s.b.Object(context.Background(), "/")
-	if err != nil {
+	_, err := s.b.Bucket(context.Background(), name)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		return false, nil
+	} else if err != nil {
 		return false, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
-	for _, entry := range entries {
-		if entry.Name == bucketPath {
-			return true, nil
-		}
-	}
-	return false, gofakes3.BucketNotFound(name)
+	return true, nil
 }
 
 // DeleteBucket deletes a bucket if and only if it is empty.
