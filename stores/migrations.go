@@ -216,6 +216,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00013_uploadPackingOptimisations(tx, logger)
 			},
 		},
+		{
+			ID: "00014_buckets",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00014_buckets(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -451,30 +457,30 @@ func performMigration00002_dropconstraintslabcsid(txn *gorm.DB, logger *zap.Suga
 }
 
 func performMigration00003_healthcache(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00003_healthcache")
+	logger.Info("performing migration 00003_healthcache")
 	if !txn.Migrator().HasColumn(&dbSlab{}, "health") {
 		if err := txn.Migrator().AddColumn(&dbSlab{}, "health"); err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00003_healthcheck complete")
+	logger.Info("migration 00003_healthcheck complete")
 	return nil
 }
 
 func performMigration00004_objectID_collation(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00004_objectID_collation")
+	logger.Info("performing migration 00004_objectID_collation")
 	if !isSQLite(txn) {
 		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00004_objectID_collation complete")
+	logger.Info("migration 00004_objectID_collation complete")
 	return nil
 }
 
 func performMigration00005_uploadPacking(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration performMigration00005_uploadPacking")
+	logger.Info("performing migration performMigration00005_uploadPacking")
 	m := txn.Migrator()
 
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
@@ -527,12 +533,12 @@ func performMigration00005_uploadPacking(txn *gorm.DB, logger *zap.SugaredLogger
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration performMigration00005_uploadPacking complete")
+	logger.Info("migration performMigration00005_uploadPacking complete")
 	return nil
 }
 
 func performMigration00006_contractspending(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00006_contractspending")
+	logger.Info("performing migration 00006_contractspending")
 	if !txn.Migrator().HasColumn(&dbContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbContract{}, "delete_spending"); err != nil {
 			return err
@@ -543,12 +549,12 @@ func performMigration00006_contractspending(txn *gorm.DB, logger *zap.SugaredLog
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00006_contractspending complete")
+	logger.Info("migration 00006_contractspending complete")
 	return nil
 }
 
 func performMigration00007_archivedcontractspending(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00007_archivedcontractspending")
+	logger.Info("performing migration 00007_archivedcontractspending")
 	if !txn.Migrator().HasColumn(&dbArchivedContract{}, "delete_spending") {
 		if err := txn.Migrator().AddColumn(&dbArchivedContract{}, "delete_spending"); err != nil {
 			return err
@@ -559,12 +565,12 @@ func performMigration00007_archivedcontractspending(txn *gorm.DB, logger *zap.Su
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00007_archivedcontractspending complete")
+	logger.Info("migration 00007_archivedcontractspending complete")
 	return nil
 }
 
 func performMigration00008_jointableindices(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00008_jointableindices")
+	logger.Info("performing migration 00008_jointableindices")
 
 	indices := []struct {
 		joinTable interface{ TableName() string }
@@ -597,23 +603,23 @@ func performMigration00008_jointableindices(txn *gorm.DB, logger *zap.SugaredLog
 		}
 	}
 
-	logger.Info(context.Background(), "migration 00008_jointableindices complete")
+	logger.Info("migration 00008_jointableindices complete")
 	return nil
 }
 
 func performMigration00009_dropInteractions(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00009_dropInteractions")
+	logger.Info("performing migration 00009_dropInteractions")
 	if !txn.Migrator().HasTable("host_interactions") {
 		if err := txn.Migrator().DropTable("host_interactions"); err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00009_dropInteractions complete")
+	logger.Info("migration 00009_dropInteractions complete")
 	return nil
 }
 
 func performMigration00010_distinctcontractsector(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00010_distinctcontractsector")
+	logger.Info("performing migration 00010_distinctcontractsector")
 
 	if !txn.Migrator().HasIndex(&dbContractSector{}, "DBSectorID") {
 		if err := txn.Migrator().CreateIndex(&dbContractSector{}, "DBSectorID"); err != nil {
@@ -621,34 +627,34 @@ func performMigration00010_distinctcontractsector(txn *gorm.DB, logger *zap.Suga
 		}
 	}
 
-	logger.Info(context.Background(), "migration 00010_distinctcontractsector complete")
+	logger.Info("migration 00010_distinctcontractsector complete")
 	return nil
 }
 
 func performMigration00011_healthValidColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00011_healthValidColumn")
+	logger.Info("performing migration 00011_healthValidColumn")
 	if !txn.Migrator().HasColumn(&dbSlab{}, "health_valid") {
 		if err := txn.Migrator().AddColumn(&dbSlab{}, "health_valid"); err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00011_healthValidColumn complete")
+	logger.Info("migration 00011_healthValidColumn complete")
 	return nil
 }
 
 func performMigration00012_webhooks(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00012_webhooks")
+	logger.Info("performing migration 00012_webhooks")
 	if !txn.Migrator().HasTable(&dbWebhook{}) {
 		if err := txn.Migrator().CreateTable(&dbWebhook{}); err != nil {
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00012_webhooks complete")
+	logger.Info("migration 00012_webhooks complete")
 	return nil
 }
 
 func performMigration00013_uploadPackingOptimisations(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info(context.Background(), "performing migration 00013_uploadPackingOptimisations")
+	logger.Info("performing migration 00013_uploadPackingOptimisations")
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "lock_id") {
 		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "lock_id"); err != nil {
 			return err
@@ -659,6 +665,71 @@ func performMigration00013_uploadPackingOptimisations(txn *gorm.DB, logger *zap.
 			return err
 		}
 	}
-	logger.Info(context.Background(), "migration 00013_uploadPackingOptimisations complete")
+	logger.Info("migration 00013_uploadPackingOptimisations complete")
+	return nil
+}
+
+func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00014_buckets")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Create buckets table
+	if !txn.Migrator().HasTable(&dbBucket{}) {
+		if err := txn.Migrator().CreateTable(&dbBucket{}); err != nil {
+			return err
+		}
+	}
+
+	// Add default bucket.
+	bucket := &dbBucket{
+		Name: api.DefaultBucketName,
+	}
+	if err := txn.FirstOrCreate(&bucket).Error; err != nil {
+		return err
+	}
+
+	// Add bucket id column to objects table.
+	if !txn.Migrator().HasColumn(&dbObject{}, "db_bucket_id") {
+		if err := txn.Migrator().AddColumn(&dbObject{}, "db_bucket_id"); err != nil {
+			return err
+		}
+	}
+
+	// Create missing composite index.
+	if !txn.Migrator().HasIndex(&dbObject{}, "idx_object_bucket") {
+		if err := txn.Migrator().CreateIndex(&dbObject{}, "idx_object_bucket"); err != nil {
+			return err
+		}
+	}
+
+	// Update objects to belong to default bucket
+	if err := txn.Model(&dbObject{}).
+		Where("db_bucket_id", 0).
+		Update("db_bucket_id", bucket.ID).Error; err != nil {
+		return err
+	}
+
+	// Add foreign key constraint between dbObject's db_bucket_id and dbBucket's id.
+	if !txn.Migrator().HasConstraint(&dbObject{}, "DBBucket") {
+		if err := txn.Migrator().CreateConstraint(&dbObject{}, "DBBucket"); err != nil {
+			return err
+		}
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00014_buckets complete")
 	return nil
 }
