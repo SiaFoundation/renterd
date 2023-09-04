@@ -15,7 +15,6 @@ import (
 
 	"github.com/Mikubill/gofakes3"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -179,15 +178,9 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 // If the bucket already exists, a gofakes3.ResourceError with
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(name string) error {
-	params, err := s.b.UploadParams(context.Background())
-	if err != nil {
-		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	}
-	if params.ContractSet == "" {
-		return gofakes3.ErrorMessage(gofakes3.ErrInvalidArgument, "no default contract set specified")
-	}
-	err = s.b.AddObject(context.Background(), name+"/", params.ContractSet, object.NewObject(), nil)
-	if err != nil {
+	if err := s.b.CreateBucket(context.Background(), name); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+		return gofakes3.ErrBucketAlreadyExists
+	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return nil
@@ -222,13 +215,9 @@ func (s *s3) BucketExists(name string) (bool, error) {
 // TODO: This check is not atomic. The backend needs to be updated to support
 // atomically checking whether a bucket is empty.
 func (s *s3) DeleteBucket(name string) error {
-	if _, entries, err := s.b.Object(context.Background(), name+"/"); err != nil {
-		return err
-	} else if len(entries) > 0 {
+	if err := s.b.DeleteBucket(context.Background(), name); err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
 		return gofakes3.ErrBucketNotEmpty
-	}
-	err := s.b.DeleteObject(context.Background(), name+"/", false)
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	} else if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.BucketNotFound(name)
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -252,9 +241,7 @@ func (s *s3) DeleteBucket(name string) error {
 // TODO: Range requests starting from the end are not supported yet. Backend
 // needs to be updated for that.
 func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
-	if err := s.bucketMustExist(bucketName); err != nil {
-		return nil, err
-	} else if rangeRequest != nil && rangeRequest.FromEnd {
+	if rangeRequest != nil && rangeRequest.FromEnd {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "range request from end not supported")
 	}
 
@@ -299,9 +286,6 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	if err := s.bucketMustExist(bucketName); err != nil {
-		return nil, err
-	}
 	obj, _, err := s.b.Object(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
@@ -335,9 +319,6 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	if err := s.bucketMustExist(bucketName); err != nil {
-		return gofakes3.ObjectDeleteResult{}, err
-	}
 	err := s.b.DeleteObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), false)
 	if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -356,9 +337,6 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	if err := s.bucketMustExist(bucketName); err != nil {
-		return gofakes3.PutObjectResult{}, err
-	}
 	err := s.w.UploadObject(context.Background(), input, fmt.Sprintf("%s/%s", bucketName, key))
 	if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -369,9 +347,6 @@ func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.
 }
 
 func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
-	if err := s.bucketMustExist(bucketName); err != nil {
-		return gofakes3.MultiDeleteResult{}, err
-	}
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
 		err := s.b.DeleteObject(context.Background(), fmt.Sprintf("%s/%s", bucketName, objectName), false)
@@ -394,23 +369,5 @@ func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDe
 // TODO: use metadata when we have support for it
 // TODO: impelement once we have ability to copy objects in bus
 func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
-	if err := s.bucketMustExist(srcBucket, dstBucket); err != nil {
-		return gofakes3.CopyObjectResult{}, err
-	}
 	return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "copying objects is not supported")
-}
-
-// bucketMustExist returns the right gofakes3 error if any of the buckets don't
-// exist.
-// TODO: This is a workaround which is not atomic. We should update the backend
-// to allow for atomically guaranteeing that a bucket exists.
-func (s *s3) bucketMustExist(names ...string) error {
-	for _, name := range names {
-		if exists, err := s.BucketExists(name); err != nil {
-			return err
-		} else if !exists {
-			return gofakes3.BucketNotFound(name)
-		}
-	}
-	return nil
 }
