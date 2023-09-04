@@ -199,6 +199,13 @@ func UploadWithContractSet(set string) UploadOption {
 	}
 }
 
+// UploadWithBucket sets the bucket that should be used for an upload
+func UploadWithBucket(bucket string) UploadOption {
+	return func(v url.Values) {
+		v.Set("bucket", bucket)
+	}
+}
+
 type DownloadObjectOption func(http.Header)
 
 func DownloadWithRange(offset, length uint64) DownloadObjectOption {
@@ -224,5 +231,11 @@ func ObjectsWithOffset(offset int) ObjectsOption {
 func ObjectsWithLimit(limit int) ObjectsOption {
 	return func(v url.Values) {
 		v.Set("limit", fmt.Sprint(limit))
+	}
+}
+
+func ObjectsWithBucket(bucket string) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("bucket", bucket)
 	}
 }

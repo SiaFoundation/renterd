@@ -157,8 +157,8 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.Object, []api.ObjectMetadata, error)
-	AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-	DeleteObject(ctx context.Context, path string, batch bool) error
+	AddObject(ctx context.Context, path, contractSet, bucket string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	DeleteObject(ctx context.Context, path, bucket string, batch bool) error
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
@@ -925,9 +925,13 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
 	}
+	var bucket string
+	if jc.DecodeForm("bucket", &prefix) != nil {
+		return
+	}
 
 	path := jc.PathParam("path")
-	obj, entries, err := w.bus.Object(ctx, path, api.ObjectsWithPrefix(prefix), api.ObjectsWithOffset(off), api.ObjectsWithLimit(limit))
+	obj, entries, err := w.bus.Object(ctx, path, api.ObjectsWithPrefix(prefix), api.ObjectsWithOffset(off), api.ObjectsWithLimit(limit), api.ObjectsWithBucket(bucket))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1014,6 +1018,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		up.ContractSet = contractset
 	}
 
+	// decode the bucket from the query string
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+
 	// cancel the upload if no contract set is specified
 	if up.ContractSet == "" {
 		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
@@ -1075,7 +1085,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), up.ContractSet, obj, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), bucket, up.ContractSet, obj, used)) != nil {
 		return
 	}
 
@@ -1138,7 +1148,11 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
 	}
-	err := w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path"), batch)
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+	err := w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path"), bucket, batch)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
