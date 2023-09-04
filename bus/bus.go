@@ -248,7 +248,7 @@ func (b *bus) bucketsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) bucketHandlerPUT(jc jape.Context) {
+func (b *bus) bucketsHandlerPUT(jc jape.Context) {
 	var bucket api.Bucket
 	if jc.Decode(&bucket) != nil {
 		return
@@ -1828,7 +1828,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"GET    /buckets":       b.bucketsHandlerGET,
-		"PUT    /buckets":       b.bucketHandlerPUT,
+		"PUT    /buckets":       b.bucketsHandlerPUT,
 		"DELETE /buckets/:name": b.bucketHandlerDELETE,
 
 		"GET    /objects/*path":  b.objectsHandlerGET,
