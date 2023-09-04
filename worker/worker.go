@@ -41,6 +41,7 @@ const (
 	batchSizeDeleteSectors = uint64(500000) // ~16MiB of roots
 	batchSizeFetchSectors  = uint64(130000) // ~4MiB of roots
 
+	defaultLockTimeout          = time.Minute
 	defaultRevisionFetchTimeout = 30 * time.Second
 
 	lockingPriorityActiveContractRevision = 100 // highest
@@ -325,9 +326,8 @@ func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.Public
 	}
 }
 
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
-	// lock the revision for the duration of the operation.
-	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
+func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
+	contractLock, err := w.acquireContractLock(ctx, fcid, priority)
 	if err != nil {
 		return err
 	}
@@ -337,13 +337,18 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		cancel()
 	}()
 
-	h := w.newHostV3(contractID, hk, siamuxAddr)
-	rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
-	if err != nil {
-		return err
-	}
+	return fn()
+}
 
-	return fn(rev)
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
+	return w.withContractLock(ctx, contractID, lockPriority, func() error {
+		h := w.newHostV3(contractID, hk, siamuxAddr)
+		rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
+		if err != nil {
+			return err
+		}
+		return fn(rev)
+	})
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -564,7 +569,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 
 	// Acquire lock before fetching revision.
 	ctx := jc.Request.Context()
-	unlocker, err := w.acquireRevision(ctx, fcid, lockingPriorityActiveContractRevision)
+	unlocker, err := w.acquireContractLock(ctx, fcid, lockingPriorityActiveContractRevision)
 	if jc.Check("could not acquire revision lock", err) != nil {
 		return
 	}
@@ -611,33 +616,23 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 
 func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	// decode fcid
-	var id types.FileContractID
-	if jc.DecodeParam("id", &id) != nil {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
 		return
 	}
 
-	// decode potential timeout
+	// decode timeout
 	var pcr api.RHPPruneContractRequest
 	if jc.Decode(&pcr) != nil {
 		return
 	}
 
+	// apply timeout
 	ctx := jc.Request.Context()
 	if pcr.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(jc.Request.Context(), pcr.Timeout)
 		defer cancel()
-	}
-
-	// check if there's prunable data for the contract
-	size, err := w.bus.ContractSize(ctx, id)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch prunable data for contract", err) != nil {
-		return
-	} else if size.Prunable == 0 {
-		return
 	}
 
 	// attach gouging checker
@@ -648,7 +643,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// fetch the contract from the bus
-	c, err := w.bus.Contract(ctx, id)
+	contract, err := w.bus.Contract(ctx, fcid)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -656,64 +651,21 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// fetch the contract from the bus
-	h, err := w.bus.Host(ctx, c.HostKey)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
+	// return early if there's no data to prune
+	size, err := w.bus.ContractSize(ctx, fcid)
+	if jc.Check("couldn't fetch contract size", err) != nil {
 		return
-	} else if jc.Check("couldn't fetch host", err) != nil {
+	} else if size.Prunable == 0 {
 		return
 	}
 
-	// convenience variables
-	hk := c.HostKey
-	hostIP := c.HostIP
-	hostAddr := c.SiamuxAddr
-	hostVersion := h.Settings.Version
-
-	// prune sectors from contracts
-	var deleted int64
-	var toDelete []uint64
-	err = w.withRevision(ctx, defaultRevisionFetchTimeout, id, hk, hostAddr, lockingPriorityPruning, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) error {
-		// fetch the roots from the host
-		renterKey := w.deriveRenterKey(c.HostKey)
-		got, err := w.FetchContractRoots(ctx, hostIP, hk, renterKey, id, rev.RevisionNumber, time.Minute)
-		if err != nil {
-			return err
-		}
-
-		// fetch the roots from the bus
-		want, pending, err := w.bus.ContractRoots(ctx, id)
-		if err != nil {
-			return err
-		}
-		keep := make(map[types.Hash256]struct{})
-		for _, root := range append(want, pending...) {
-			keep[root] = struct{}{}
-		}
-
-		// collect indices for roots we want to prune
-		for i, root := range got {
-			if _, wanted := keep[root]; wanted {
-				delete(keep, root) // prevent duplicates
-				continue
-			}
-			toDelete = append(toDelete, uint64(i))
-		}
-		if len(toDelete) == 0 {
-			return fmt.Errorf("no sectors to prune, database holds %d (%d pending), contract contains %d", len(want)+len(pending), len(pending), len(got))
-		}
-
-		// delete the roots from the contract
-		n, err := w.DeleteContractRoots(ctx, hostIP, hostVersion, hk, renterKey, id, rev.RevisionNumber+1, time.Minute, toDelete)
-		deleted += n
-		return err
-	})
+	// prune the contract
+	deleted, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
 	if err == nil || (errors.Is(err, context.Canceled) && deleted > 0) {
 		jc.Encode(deleted * rhpv2.SectorSize)
 	} else {
 		if deleted > 0 {
-			err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, len(toDelete))
+			err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, deleted+remaining)
 		}
 		jc.Error(err, http.StatusInternalServerError)
 	}
@@ -737,8 +689,7 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	}
 
 	// fetch the roots from the host
-	renterKey := w.deriveRenterKey(c.HostKey)
-	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, c.RevisionNumber, time.Minute)
+	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, id, c.RevisionNumber)
 	if jc.Check("couldn't fetch contract roots from host", err) == nil {
 		jc.Encode(roots)
 	}
@@ -1483,7 +1434,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
+func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
 	if err != nil {
 		return nil, err
