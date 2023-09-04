@@ -926,7 +926,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 	var bucket string
-	if jc.DecodeForm("bucket", &prefix) != nil {
+	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
 

@@ -394,7 +394,7 @@ func TestObjectEntries(t *testing.T) {
 		}
 
 		// use the worker client
-		got, err = w.ObjectEntries(context.Background(), test.path, test.prefix, 0, -1)
+		got, err = w.ObjectEntries(context.Background(), test.path, api.DefaultBucketName, test.prefix, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +419,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// assert root dir is empty
-	if entries, err := w.ObjectEntries(context.Background(), "/", "", 0, -1); err != nil {
+	if entries, err := w.ObjectEntries(context.Background(), "/", api.DefaultBucketName, "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("there should be no entries left", entries)
@@ -705,7 +705,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), "", "", 0, -1)
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), "", api.DefaultBucketName, "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +732,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/", "", 0, -1)
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/", api.DefaultBucketName, "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1847,7 +1847,7 @@ func TestUploadPacking(t *testing.T) {
 		if obj.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", obj.Size, len(data))
 		}
-		entries, err := w.ObjectEntries(context.Background(), "/", "", 0, -1)
+		entries, err := w.ObjectEntries(context.Background(), "/", api.DefaultBucketName, "", 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
