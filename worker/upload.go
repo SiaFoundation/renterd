@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -292,14 +293,10 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	defer close(nextSlabChan)
 
 	// create the response channel
-	var wg sync.WaitGroup
 	respChan := make(chan slabUploadResponse)
-	defer func() {
-		wg.Wait()
-		close(respChan)
-	}()
 
 	// collect the responses
+	var ongoingUploads uint64
 	var responses []slabUploadResponse
 	var slabIndex int
 	numSlabs := -1
@@ -339,10 +336,12 @@ loop:
 				<-nextSlabChan // trigger next iteration
 			} else {
 				// Otherwise we upload it.
-				wg.Add(1)
+				atomic.AddUint64(&ongoingUploads, 1)
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
 					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
-					wg.Done()
+					if atomic.AddUint64(&ongoingUploads, ^uint64(0)) == 0 {
+						close(respChan)
+					}
 				}(rs, data, length, slabIndex)
 			}
 			slabIndex++
@@ -350,6 +349,8 @@ loop:
 			if res.err != nil {
 				return object.Object{}, nil, res.err
 			}
+
+			// collect the response and potentially break out of the loop
 			responses = append(responses, res)
 			if len(responses) == numSlabs {
 				break loop
