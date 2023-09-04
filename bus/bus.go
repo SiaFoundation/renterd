@@ -104,6 +104,7 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
+		Bucket(_ context.Context, bucket string) (api.Bucket, error)
 		CreateBucket(_ context.Context, bucket string) error
 		DeleteBucket(_ context.Context, bucket string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
@@ -264,6 +265,24 @@ func (b *bus) bucketHandlerDELETE(jc jape.Context) {
 	} else if jc.Check("failed to create bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
 		return
 	}
+}
+
+func (b *bus) bucketHandlerGET(jc jape.Context) {
+	var name string
+	if jc.DecodeParam("name", &name) != nil {
+		return
+	} else if name == "" {
+		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
+		return
+	}
+	bucket, err := b.ms.Bucket(jc.Request.Context(), name)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch bucket", err) != nil {
+		return
+	}
+	jc.Encode(bucket)
 }
 
 func (b *bus) walletHandler(jc jape.Context) {
@@ -1824,6 +1843,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /buckets":       b.bucketsHandlerGET,
 		"PUT    /buckets":       b.bucketsHandlerPUT,
 		"DELETE /buckets/:name": b.bucketHandlerDELETE,
+		"GET    /buckets/:name": b.bucketHandlerGET,
 
 		"GET    /objects/*path":  b.objectsHandlerGET,
 		"PUT    /objects/*path":  b.objectsHandlerPUT,

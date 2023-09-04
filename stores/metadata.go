@@ -410,6 +410,24 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	return slice, nil
 }
 
+func (s *SQLStore) Bucket(_ context.Context, bucket string) (api.Bucket, error) {
+	var b dbBucket
+	err := s.db.
+		Model(&dbBucket{}).
+		Where("name = ?", bucket).
+		Take(&b).
+		Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return api.Bucket{}, api.ErrBucketNotFound
+	} else if err != nil {
+		return api.Bucket{}, err
+	}
+	return api.Bucket{
+		CreationDate: b.CreatedAt.UTC(),
+		Name:         b.Name,
+	}, nil
+}
+
 func (s *SQLStore) CreateBucket(_ context.Context, bucket string) error {
 	// Create bucket.
 	return s.retryTransaction(func(tx *gorm.DB) error {
