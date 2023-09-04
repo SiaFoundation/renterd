@@ -1967,6 +1967,11 @@ func TestWallet(t *testing.T) {
 	}()
 	b := cluster.Bus
 
+	// Shut down the autopilot to ensure it's not messing with our wallet.
+	// if err := cluster.ShutdownAutopilot(context.Background()); err != nil {
+	// 	t.Fatal(err)
+	// }
+
 	// Check wallet info is sane after startup.
 	wallet, err := b.Wallet(context.Background())
 	if err != nil {
