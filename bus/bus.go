@@ -109,15 +109,15 @@ type (
 		DeleteBucket(_ context.Context, bucket string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 
-		Object(ctx context.Context, path string, bucket string) (api.Object, error)
-		ObjectEntries(ctx context.Context, path, prefix string, offset, limit int, bucket string) ([]api.ObjectMetadata, error)
-		ObjectsBySlabKey(ctx context.Context, slabKey object.EncryptionKey, bucket string) ([]api.ObjectMetadata, error)
-		SearchObjects(ctx context.Context, substring string, offset, limit int, bucket string) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, bucket string) error
-		RemoveObject(ctx context.Context, path string, bucket string) error
-		RemoveObjects(ctx context.Context, prefix string, bucket string) error
-		RenameObject(ctx context.Context, from, to string, bucket string) error
-		RenameObjects(ctx context.Context, from, to string, bucket string) error
+		Object(ctx context.Context, bucket, path string) (api.Object, error)
+		ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
+		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
+		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
+		UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		RemoveObject(ctx context.Context, bucket, path string) error
+		RemoveObjects(ctx context.Context, bucket, prefix string) error
+		RenameObject(ctx context.Context, bucket, from, to string) error
+		RenameObjects(ctx context.Context, bucket, from, to string) error
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
@@ -243,7 +243,7 @@ func (b *bus) bucketsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) bucketsHandlerPUT(jc jape.Context) {
+func (b *bus) bucketsHandlerPOST(jc jape.Context) {
 	var bucket api.Bucket
 	if jc.Decode(&bucket) != nil {
 		return
@@ -899,13 +899,11 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
 		return
 	}
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	} else if bucket == "" {
-		bucket = api.DefaultBucketName
 	}
-	keys, err := b.ms.SearchObjects(jc.Request.Context(), key, offset, limit, bucket)
+	keys, err := b.ms.SearchObjects(jc.Request.Context(), bucket, key, offset, limit)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
@@ -918,14 +916,12 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 		b.objectEntriesHandlerGET(jc, path)
 		return
 	}
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	} else if bucket == "" {
-		bucket = api.DefaultBucketName
 	}
 
-	o, err := b.ms.Object(jc.Request.Context(), path, bucket)
+	o, err := b.ms.Object(jc.Request.Context(), bucket, path)
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -949,15 +945,13 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
 	}
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	} else if bucket == "" {
-		bucket = api.DefaultBucketName
 	}
 
 	// look for object entries
-	entries, err := b.ms.ObjectEntries(jc.Request.Context(), path, prefix, offset, limit, bucket)
+	entries, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, offset, limit)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}
@@ -972,7 +966,7 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts, aor.Bucket))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts))
 }
 
 func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
@@ -988,7 +982,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.From, orr.To, orr.Bucket))
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To))
 		return
 	} else if orr.Mode == api.ObjectsRenameModeMulti {
 		// Multi object rename.
@@ -996,7 +990,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.From, orr.To, orr.Bucket))
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To))
 		return
 	} else {
 		// Invalid mode.
@@ -1010,17 +1004,15 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
 	}
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	} else if bucket == "" {
-		bucket = api.DefaultBucketName
 	}
 	var err error
 	if batch {
-		err = b.ms.RemoveObjects(jc.Request.Context(), jc.PathParam("path"), bucket)
+		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("path"))
 	} else {
-		err = b.ms.RemoveObject(jc.Request.Context(), jc.PathParam("path"), bucket)
+		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("path"))
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1082,13 +1074,11 @@ func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	} else if bucket == "" {
-		bucket = api.DefaultBucketName
 	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), key, bucket)
+	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), bucket, key)
 	if jc.Check("failed to retrieve objects by slab", err) != nil {
 		return
 	}
@@ -1841,7 +1831,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
 		"GET    /buckets":       b.bucketsHandlerGET,
-		"PUT    /buckets":       b.bucketsHandlerPUT,
+		"POST   /buckets":       b.bucketsHandlerPOST,
 		"DELETE /buckets/:name": b.bucketHandlerDELETE,
 		"GET    /buckets/:name": b.bucketHandlerGET,
 

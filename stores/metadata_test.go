@@ -96,15 +96,15 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, want, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
-	}, api.DefaultBucketName); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch the object
-	got, err := db.Object(context.Background(), t.Name(), api.DefaultBucketName)
+	got, err := db.Object(context.Background(), api.DefaultBucketName, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = db.Object(context.Background(), t.Name(), api.DefaultBucketName)
+	_, err = db.Object(context.Background(), api.DefaultBucketName, t.Name())
 	if !errors.Is(err, api.ErrObjectCorrupted) {
 		t.Fatal("unexpected err", err)
 	}
@@ -135,12 +135,12 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), t.Name(), testContractSet, want2, make(map[types.PublicKey]types.FileContractID), api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, want2, make(map[types.PublicKey]types.FileContractID)); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch the object
-	got2, err := db.Object(context.Background(), t.Name(), api.DefaultBucketName)
+	got2, err := db.Object(context.Background(), api.DefaultBucketName, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestContractRoots(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), t.Name(), testContractSet, obj, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]}, api.DefaultBucketName); err != nil {
+	if err := cs.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, obj, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -545,10 +545,10 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
+	if err := cs.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk:  fcid1,
 		hk2: fcid2,
-	}, api.DefaultBucketName); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -985,12 +985,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1046,7 +1046,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it and verify again.
-	fullObj, err := db.Object(ctx, objID, api.DefaultBucketName)
+	fullObj, err := db.Object(ctx, api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1154,10 +1154,10 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := db.UpdateObject(ctx, objID, testContractSet, obj1, usedHosts, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
-	fullObj, err = db.Object(ctx, objID, api.DefaultBucketName)
+	fullObj, err = db.Object(ctx, api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1202,7 +1202,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
-	if err := db.RemoveObject(ctx, objID, api.DefaultBucketName); err != nil {
+	if err := db.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
 	if err := countCheck(0, 0, 0, 0); err != nil {
@@ -1289,13 +1289,13 @@ func TestObjectHealth(t *testing.T) {
 		},
 	}
 
-	if err := db.UpdateObject(context.Background(), "/foo", testContractSet, add, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, "/foo", testContractSet, add, map[types.PublicKey]types.FileContractID{
 		hks[0]: fcids[0],
 		hks[1]: fcids[1],
 		hks[2]: fcids[2],
 		hks[3]: fcids[3],
 		hks[4]: fcids[4],
-	}, api.DefaultBucketName); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1305,7 +1305,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health
-	obj, err := db.Object(context.Background(), "/foo", api.DefaultBucketName)
+	obj, err := db.Object(context.Background(), api.DefaultBucketName, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
@@ -1322,7 +1322,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth := float64(2) / float64(3)
 
 	// assert health
-	obj, err = db.Object(context.Background(), "/foo", api.DefaultBucketName)
+	obj, err = db.Object(context.Background(), api.DefaultBucketName, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1330,7 +1330,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	entries, err := db.ObjectEntries(context.Background(), "/", "", 0, -1, api.DefaultBucketName)
+	entries, err := db.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1340,7 +1340,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	entries, err = db.SearchObjects(context.Background(), "foo", 0, -1, api.DefaultBucketName)
+	entries, err = db.SearchObjects(context.Background(), api.DefaultBucketName, "foo", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1359,7 +1359,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth = float64(1) / float64(3)
 
 	// assert health is the min. health of the slabs
-	obj, err = db.Object(context.Background(), "/foo", api.DefaultBucketName)
+	obj, err = db.Object(context.Background(), api.DefaultBucketName, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1375,12 +1375,12 @@ func TestObjectHealth(t *testing.T) {
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: nil,
 	}
-	if err := db.UpdateObject(context.Background(), "/bar", testContractSet, add, nil, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, "/bar", testContractSet, add, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert the health is 1
-	obj, err = db.Object(context.Background(), "/bar", api.DefaultBucketName)
+	obj, err = db.Object(context.Background(), api.DefaultBucketName, "/bar")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
@@ -1411,7 +1411,7 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := os.UpdateObject(ctx, o.path, testContractSet, obj, ucs, api.DefaultBucketName)
+		err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, obj, ucs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1434,7 +1434,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
-		got, err := os.ObjectEntries(ctx, test.path, test.prefix, 0, -1, api.DefaultBucketName)
+		got, err := os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1442,7 +1442,7 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := os.ObjectEntries(ctx, test.path, test.prefix, offset, 1, api.DefaultBucketName)
+			got, err := os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, offset, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1475,7 +1475,9 @@ func TestSearchObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		os.UpdateObject(ctx, o.path, testContractSet, obj, ucs, api.DefaultBucketName)
+		if err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, obj, ucs); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tests := []struct {
 		path string
@@ -1487,7 +1489,7 @@ func TestSearchObjects(t *testing.T) {
 		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		got, err := os.SearchObjects(ctx, test.path, 0, -1, api.DefaultBucketName)
+		got, err := os.SearchObjects(ctx, api.DefaultBucketName, test.path, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1495,7 +1497,7 @@ func TestSearchObjects(t *testing.T) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := os.SearchObjects(ctx, test.path, offset, 1, api.DefaultBucketName)
+			got, err := os.SearchObjects(ctx, api.DefaultBucketName, test.path, offset, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1668,13 +1670,13 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
 		hk4: fcid4,
 		{5}: {5}, // deleted host and contract
-	}, api.DefaultBucketName); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1782,7 +1784,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1846,7 +1848,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1951,11 +1953,11 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
 		hk3: fcid3,
-	}, api.DefaultBucketName); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2024,7 +2026,7 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, usedContracts, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2050,12 +2052,12 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, usedContracts, api.DefaultBucketName); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete the object.
-	if err := db.RemoveObject(ctx, "foo", api.DefaultBucketName); err != nil {
+	if err := db.RemoveObject(ctx, api.DefaultBucketName, "foo"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2115,10 +2117,10 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, obj, map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk2: fcid2,
-	}, api.DefaultBucketName); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2380,34 +2382,36 @@ func TestRenameObjects(t *testing.T) {
 	ctx := context.Background()
 	for _, path := range objects {
 		obj, ucs := newTestObject(1)
-		cs.UpdateObject(ctx, path, testContractSet, obj, ucs, api.DefaultBucketName)
+		if err := cs.UpdateObject(ctx, api.DefaultBucketName, path, testContractSet, obj, ucs); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Try renaming objects that don't exist.
-	if err := cs.RenameObject(ctx, "/fileś", "/fileś2", api.DefaultBucketName); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := cs.RenameObject(ctx, api.DefaultBucketName, "/fileś", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
-	if err := cs.RenameObjects(ctx, "/fileś1", "/fileś2", api.DefaultBucketName); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := cs.RenameObjects(ctx, api.DefaultBucketName, "/fileś1", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// Perform some renames.
-	if err := cs.RenameObjects(ctx, "/fileś/dir/", "/fileś/", api.DefaultBucketName); err != nil {
+	if err := cs.RenameObjects(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.RenameObject(ctx, "/foo", "/fileś/foo", api.DefaultBucketName); err != nil {
+	if err := cs.RenameObject(ctx, api.DefaultBucketName, "/foo", "/fileś/foo"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.RenameObject(ctx, "/bar", "/fileś/bar", api.DefaultBucketName); err != nil {
+	if err := cs.RenameObject(ctx, api.DefaultBucketName, "/bar", "/fileś/bar"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.RenameObject(ctx, "/baz", "/fileś/baz", api.DefaultBucketName); err != nil {
+	if err := cs.RenameObject(ctx, api.DefaultBucketName, "/baz", "/fileś/baz"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.RenameObjects(ctx, "/fileś/case", "/fileś/case1", api.DefaultBucketName); err != nil {
+	if err := cs.RenameObjects(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.RenameObjects(ctx, "/fileś/CASE", "/fileś/case2", api.DefaultBucketName); err != nil {
+	if err := cs.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2431,7 +2435,7 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	objs, err := cs.SearchObjects(ctx, "/", 0, 100, api.DefaultBucketName)
+	objs, err := cs.SearchObjects(ctx, api.DefaultBucketName, "/", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2484,7 +2488,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), key, testContractSet, obj, contracts, api.DefaultBucketName)
+		err := cs.UpdateObject(context.Background(), api.DefaultBucketName, key, testContractSet, obj, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2665,11 +2669,11 @@ func TestPartialSlab(t *testing.T) {
 		}
 	}
 	obj := testObject(slabs)
-	err = db.UpdateObject(context.Background(), "key", testContractSet, obj, usedContracts, api.DefaultBucketName)
+	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key", testContractSet, obj, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fetched, err := db.Object(context.Background(), "key", api.DefaultBucketName)
+	fetched, err := db.Object(context.Background(), api.DefaultBucketName, "key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2702,11 +2706,11 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj2 := testObject(slabs)
-	err = db.UpdateObject(context.Background(), "key2", testContractSet, obj2, usedContracts, api.DefaultBucketName)
+	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key2", testContractSet, obj2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fetched, err = db.Object(context.Background(), "key2", api.DefaultBucketName)
+	fetched, err = db.Object(context.Background(), api.DefaultBucketName, "key2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2749,11 +2753,11 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj3 := testObject(slabs)
-	err = db.UpdateObject(context.Background(), "key3", testContractSet, obj3, usedContracts, api.DefaultBucketName)
+	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key3", testContractSet, obj3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fetched, err = db.Object(context.Background(), "key3", api.DefaultBucketName)
+	fetched, err = db.Object(context.Background(), api.DefaultBucketName, "key3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2913,7 +2917,7 @@ func TestContractSizes(t *testing.T) {
 
 	// add an object to both contracts
 	for i := 0; i < 2; i++ {
-		if err := db.UpdateObject(context.Background(), fmt.Sprintf("obj_%d", i+1), testContractSet, object.Object{
+		if err := db.UpdateObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("obj_%d", i+1), testContractSet, object.Object{
 			Key: object.GenerateEncryptionKey(),
 			Slabs: []object.SlabSlice{
 				{
@@ -2931,7 +2935,7 @@ func TestContractSizes(t *testing.T) {
 			},
 		}, map[types.PublicKey]types.FileContractID{
 			hks[i]: fcids[i],
-		}, api.DefaultBucketName); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if err := db.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
@@ -2960,7 +2964,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the first object
-	if err := db.RemoveObject(context.Background(), "obj_1", api.DefaultBucketName); err != nil {
+	if err := db.RemoveObject(context.Background(), api.DefaultBucketName, "obj_1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2973,7 +2977,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the second object
-	if err := db.RemoveObject(context.Background(), "obj_2", api.DefaultBucketName); err != nil {
+	if err := db.RemoveObject(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3088,14 +3092,14 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 	for _, name := range []string{"obj1", "obj2", "obj3"} {
 		obj.Slabs[0].Length++
-		err = db.UpdateObject(context.Background(), name, testContractSet, obj, usedContracts, api.DefaultBucketName)
+		err = db.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, obj, usedContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Fetch the objects by slab.
-	objs, err := db.ObjectsBySlabKey(context.Background(), slab.Key, api.DefaultBucketName)
+	objs, err := db.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3164,7 +3168,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// Adding an object to a bucket that doesn't exist shouldn't work.
 	obj, ucs := newTestObject(1)
-	err = os.UpdateObject(context.Background(), "foo", testContractSet, obj, ucs, "unknown-bucket")
+	err = os.UpdateObject(context.Background(), "unknown-bucket", "foo", testContractSet, obj, ucs)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
 	}
@@ -3174,6 +3178,8 @@ func TestBucketObjects(t *testing.T) {
 	if err := os.CreateBucket(context.Background(), b1); err != nil {
 		t.Fatal(err)
 	} else if err := os.CreateBucket(context.Background(), b2); err != nil {
+		t.Fatal(err)
+	} else if err := os.CreateBucket(context.Background(), b2); !errors.Is(err, api.ErrBucketExists) {
 		t.Fatal(err)
 	}
 
@@ -3193,24 +3199,25 @@ func TestBucketObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := os.UpdateObject(ctx, o.path, testContractSet, obj, ucs, o.bucket)
+		err := os.UpdateObject(ctx, o.bucket, o.path, testContractSet, obj, ucs)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	// Deleting a bucket with objects shouldn't work.
 	if err := os.DeleteBucket(ctx, b1); !errors.Is(err, api.ErrBucketNotEmpty) {
 		t.Fatal(err)
 	}
 
 	// List the objects in the buckets.
-	if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b1); err != nil {
+	if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b2); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3219,13 +3226,13 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Search the objects in the buckets.
-	if objects, err := os.SearchObjects(context.Background(), "", 0, -1, b1); err != nil {
+	if objects, err := os.SearchObjects(context.Background(), b1, "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 3 || objects[1].Size != 1 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
-	} else if objects, err := os.SearchObjects(context.Background(), "", 0, -1, b2); err != nil {
+	} else if objects, err := os.SearchObjects(context.Background(), b2, "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
@@ -3234,15 +3241,15 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := os.RenameObject(context.Background(), "/foo/bar", "/foo/baz", b1); err != nil {
+	if err := os.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b1); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b2); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3251,15 +3258,15 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := os.RenameObjects(context.Background(), "/foo/bar", "/foo/bam", b2); err != nil {
+	if err := os.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b1); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b2); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3268,57 +3275,57 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Delete foo/baz in bucket 1 but first try bucket 2 since that should fail.
-	if err := os.RemoveObject(context.Background(), "/foo/baz", b2); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := os.RemoveObject(context.Background(), b2, "/foo/baz"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
-	} else if err := os.RemoveObject(context.Background(), "/foo/baz", b1); err != nil {
+	} else if err := os.RemoveObject(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b1); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, err := os.ObjectEntries(context.Background(), "/foo/", "", 0, -1, b2); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if entries, err := os.ObjectEntries(context.Background(), "/", "", 0, -1, b2); err != nil {
+	if entries, err := os.ObjectEntries(context.Background(), b2, "/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if err := os.RemoveObjects(context.Background(), "/", b2); err != nil {
+	} else if err := os.RemoveObjects(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/", "", 0, -1, b2); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, err := os.ObjectEntries(context.Background(), "/", "", 0, -1, b1); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Fetch /bar from bucket 1.
-	if obj, err := os.Object(context.Background(), "/bar", b1); err != nil {
+	if obj, err := os.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if obj.Size != 3 {
 		t.Fatal("unexpected size", obj.Size)
-	} else if _, err := os.Object(context.Background(), "/bar", b2); !errors.Is(err, api.ErrObjectNotFound) {
+	} else if _, err := os.Object(context.Background(), b2, "/bar"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// See if we can fetch the object by slab.
 	var ec object.EncryptionKey
-	if obj, err := os.object(context.Background(), os.db, "/bar", b1); err != nil {
+	if obj, err := os.object(context.Background(), os.db, b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if err := ec.UnmarshalText(obj[0].SlabKey); err != nil {
 		t.Fatal(err)
-	} else if objects, err := os.ObjectsBySlabKey(context.Background(), ec, b1); err != nil {
+	} else if objects, err := os.ObjectsBySlabKey(context.Background(), b1, ec); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 1 {
 		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := os.ObjectsBySlabKey(context.Background(), ec, b2); err != nil {
+	} else if objects, err := os.ObjectsBySlabKey(context.Background(), b2, ec); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
