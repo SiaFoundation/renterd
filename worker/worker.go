@@ -925,7 +925,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
 	}
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
@@ -1019,7 +1019,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// decode the bucket from the query string
-	var bucket string
+	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}

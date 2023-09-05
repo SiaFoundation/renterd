@@ -917,12 +917,12 @@ func (c *Client) State() (state api.BusStateResponse, err error) {
 
 // RenameObject renames a single object.
 func (c *Client) RenameObject(ctx context.Context, bucket, from, to string) (err error) {
-	return c.renameObjects(ctx, from, to, bucket, api.ObjectsRenameModeSingle)
+	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeSingle)
 }
 
 // RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
 func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string) (err error) {
-	return c.renameObjects(ctx, from, to, bucket, api.ObjectsRenameModeMulti)
+	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeMulti)
 }
 
 func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string) (err error) {

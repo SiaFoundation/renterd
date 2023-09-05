@@ -394,7 +394,7 @@ func TestObjectEntries(t *testing.T) {
 		}
 
 		// use the worker client
-		got, err = w.ObjectEntries(context.Background(), test.path, api.DefaultBucketName, test.prefix, 0, -1)
+		got, err = w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, test.prefix, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +419,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// assert root dir is empty
-	if entries, err := w.ObjectEntries(context.Background(), "/", api.DefaultBucketName, "", 0, -1); err != nil {
+	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("there should be no entries left", entries)
@@ -471,10 +471,10 @@ func TestObjectsRename(t *testing.T) {
 	}
 
 	// rename
-	if err := b.RenameObjects(context.Background(), "/foo/", "/", api.DefaultBucketName); err != nil {
+	if err := b.RenameObjects(context.Background(), api.DefaultBucketName, "/foo/", "/"); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.RenameObject(context.Background(), "/baz/quuz", "/quuz", api.DefaultBucketName); err != nil {
+	if err := b.RenameObject(context.Background(), api.DefaultBucketName, "/baz/quuz", "/quuz"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -251,7 +251,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	}
 
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, api.DefaultBucketName, "", 0, -1, w, nil, opts...)
+	err = c.object(ctx, api.DefaultBucketName, path, "", 0, -1, w, nil, opts...)
 	return
 }
 
