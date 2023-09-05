@@ -1280,7 +1280,7 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = deleteObject(tx, key, bucket)
+		rowsAffected, err = deleteObject(tx, bucket, key)
 		return err
 	})
 	if err != nil {
