@@ -1090,7 +1090,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, bucket string) error {
+func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string) error {
 	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
 		return tx.Error
@@ -1101,7 +1101,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, keyOld, keyNew string, buck
 	return nil
 }
 
-func (s *SQLStore) RenameObjects(ctx context.Context, prefixOld, prefixNew string, bucket string) error {
+func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string) error {
 	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
 		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
 	if tx.Error != nil {
@@ -1296,7 +1296,7 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = deleteObjects(tx, prefix, bucket)
+		rowsAffected, err = deleteObjects(tx, bucket, prefix)
 		return err
 	})
 	if err != nil {

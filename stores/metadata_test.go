@@ -3245,7 +3245,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := os.RenameObject(context.Background(), "/foo/bar", "/foo/baz", b1); err != nil {
+	if err := os.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz"); err != nil {
 		t.Fatal(err)
 	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3262,7 +3262,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := os.RenameObjects(context.Background(), "/foo/bar", "/foo/bam", b2); err != nil {
+	if err := os.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam"); err != nil {
 		t.Fatal(err)
 	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3279,9 +3279,9 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Delete foo/baz in bucket 1 but first try bucket 2 since that should fail.
-	if err := os.RemoveObject(context.Background(), "/foo/baz", b2); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := os.RemoveObject(context.Background(), b2, "/foo/baz"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
-	} else if err := os.RemoveObject(context.Background(), "/foo/baz", b1); err != nil {
+	} else if err := os.RemoveObject(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
 	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3298,30 +3298,30 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if err := os.RemoveObjects(context.Background(), "/", b2); err != nil {
+	} else if err := os.RemoveObjects(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), "/", b2, "", 0, -1); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, err := os.ObjectEntries(context.Background(), "/", b1, "", 0, -1); err != nil {
+	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Fetch /bar from bucket 1.
-	if obj, err := os.Object(context.Background(), "/bar", b1); err != nil {
+	if obj, err := os.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if obj.Size != 3 {
 		t.Fatal("unexpected size", obj.Size)
-	} else if _, err := os.Object(context.Background(), "/bar", b2); !errors.Is(err, api.ErrObjectNotFound) {
+	} else if _, err := os.Object(context.Background(), b2, "/bar"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// See if we can fetch the object by slab.
 	var ec object.EncryptionKey
-	if obj, err := os.object(context.Background(), os.db, "/bar", b1); err != nil {
+	if obj, err := os.object(context.Background(), os.db, b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if err := ec.UnmarshalText(obj[0].SlabKey); err != nil {
 		t.Fatal(err)
