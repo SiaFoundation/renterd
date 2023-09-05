@@ -2026,9 +2026,14 @@ func TestWallet(t *testing.T) {
 			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", updated.Confirmed, wallet.Confirmed)
 		}
 
+		spendableDiff := wallet.Spendable.Sub(updated.Spendable)
+		unconfirmedDiff := updated.Unconfirmed.Sub(wallet.Unconfirmed)
+
 		// The diffs of the spendable balance and unconfirmed balance should add up
 		// to the amount of money sent as well as the miner fees used.
-		spendableDiff := wallet.Spendable.Sub(updated.Spendable)
+		if !unconfirmedDiff.IsZero() && spendableDiff.IsZero() {
+			return errors.New("spendable balance should have decreased")
+		}
 		if updated.Unconfirmed.Cmp(spendableDiff) > 0 {
 			t.Fatalf("unconfirmed balance can't be greater than the difference in spendable balance here, confirmed %v->%v unconfirmed %v->%v spendable %v->%v fee %v", wallet.Confirmed, updated.Confirmed, wallet.Unconfirmed, updated.Unconfirmed, wallet.Spendable, updated.Spendable, minerFee)
 		}
