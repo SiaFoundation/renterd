@@ -271,8 +271,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 				// delete roots
-				var got []types.Hash256
-				got, err = w.fetchContractRoots(t, &rev, settings)
+				got, err := w.fetchContractRoots(t, &rev, settings)
 				if err != nil {
 					return err
 				}

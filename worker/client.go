@@ -37,7 +37,7 @@ func (c *Client) RHPBroadcast(ctx context.Context, fcid types.FileContractID) (e
 }
 
 // RHPPruneContract prunes deleted sectors from the contract with given id.
-func (c *Client) RHPPruneContract(ctx context.Context, fcid types.FileContractID, timeout time.Duration) (pruned int64, err error) {
+func (c *Client) RHPPruneContract(ctx context.Context, fcid types.FileContractID, timeout time.Duration) (pruned uint64, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", fcid), api.RHPPruneContractRequest{
 		Timeout: timeout,
 	}, &pruned)

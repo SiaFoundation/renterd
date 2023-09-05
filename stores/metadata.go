@@ -670,8 +670,7 @@ GROUP BY c.fcid
 
 	sizes := make(map[types.FileContractID]api.ContractSize)
 	for _, row := range rows {
-		fcid := types.FileContractID(row.Fcid)
-		if fcid == (types.FileContractID{}) {
+		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
 			return nil, errors.New("invalid file contract id")
 		}
 		sizes[types.FileContractID(row.Fcid)] = api.ContractSize{
