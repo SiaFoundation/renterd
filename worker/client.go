@@ -261,7 +261,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	return err
 }
 
-func (c *Client) GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error) {
+func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error) {
 	if strings.HasSuffix(path, "/") {
 		return api.DownloadObjectResult{}, errors.New("the given path is a directory, use ObjectEntries instead")
 	}

@@ -76,17 +76,19 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 	// Workaround for empty prefix
 	prefix.HasPrefix = prefix.Prefix != ""
 
+	// Specify bucket.
+	opts := []api.ObjectsOption{api.ObjectsWithBucket(name)}
+
 	// Handle prefix.
-	path := name + "/" // root of bucket
-	var opts []api.ObjectsOption
+	path := "" // root of bucket
 	if prefix.HasPrefix {
 		idx := strings.LastIndex(prefix.Prefix, "/")
 		if idx == -1 {
 			// path remains the same and the prefix becomes the prefix
-			opts = append(opts, api.ObjectsWithPrefix(name+"/"+prefix.Prefix))
+			opts = append(opts, api.ObjectsWithPrefix("/"+prefix.Prefix))
 		} else {
 			// part of the prefix becomes the path
-			path = name + "/" + prefix.Prefix[:idx+1]
+			path = prefix.Prefix[:idx+1]
 			opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix[idx+1:]))
 		}
 	}
@@ -101,7 +103,7 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 	// add it as a prefix to the response and otherwise as an object.
 	resp := gofakes3.NewObjectList()
 	for _, object := range objects {
-		objectKey := object.Name[len(name)+2:] // trim bucket name
+		objectKey := object.Name[1:] // trim leading slash
 
 		if strings.HasSuffix(objectKey, "/") {
 			resp.AddPrefix(gofakes3.URLEncode(objectKey))
@@ -245,7 +247,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 	if rangeRequest != nil {
 		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, rangeRequest.End))
 	}
-	res, err := s.w.GetObject(context.Background(), objectName, bucketName, opts...)
+	res, err := s.w.GetObject(context.Background(), bucketName, objectName, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return nil, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
@@ -319,7 +321,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(context.Background(), "/"+objectName, bucketName, false)
+	err := s.b.DeleteObject(context.Background(), bucketName, "/"+objectName, false)
 	if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
