@@ -46,6 +46,30 @@ func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
 	return c.c.WithContext(ctx).POST("/alerts/register", alert, nil)
 }
 
+// CreateBucket creates a new bucket.
+func (c *Client) CreateBucket(ctx context.Context, name string) error {
+	return c.c.WithContext(ctx).POST("/buckets", api.Bucket{
+		Name: name,
+	}, nil)
+}
+
+// DeleteBucket deletes an existing bucket. Fails if the bucket isn't empty.
+func (c *Client) DeleteBucket(ctx context.Context, name string) error {
+	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/buckets/%s", name))
+}
+
+// Bucket returns information about a specific bucket.
+func (c *Client) Bucket(ctx context.Context, name string) (resp api.Bucket, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/buckets/%s", name), &resp)
+	return
+}
+
+// ListBuckets lists all available buckets.
+func (c *Client) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
+	err = c.c.WithContext(ctx).GET("/buckets", &buckets)
+	return
+}
+
 // RegisterWebhook registers a new webhook for the given URL.
 func (c *Client) RegisterWebhook(ctx context.Context, url, module, event string) error {
 	err := c.c.WithContext(ctx).POST("/webhooks", webhooks.Webhook{
@@ -596,17 +620,20 @@ func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressCont
 }
 
 // ObjectsBySlabKey returns all objects that reference a given slab.
-func (c *Client) ObjectsBySlabKey(ctx context.Context, key object.EncryptionKey) (objects []api.ObjectMetadata, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%v/objects", key), &objects)
+func (c *Client) ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error) {
+	values := url.Values{}
+	values.Set("bucket", bucket)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%v/objects?"+values.Encode(), key), &objects)
 	return
 }
 
 // SearchObjects returns all objects that contains a sub-string in their key.
-func (c *Client) SearchObjects(ctx context.Context, key string, offset, limit int) (entries []api.ObjectMetadata, err error) {
+func (c *Client) SearchObjects(ctx context.Context, bucket, key string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
 	values.Set("key", key)
+	values.Set("bucket", bucket)
 	err = c.c.WithContext(ctx).GET("/search/objects?"+values.Encode(), &entries)
 	return
 }
@@ -629,9 +656,10 @@ func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOpt
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
+		Bucket:        bucket,
 		ContractSet:   contractSet,
 		Object:        o,
 		UsedContracts: usedContract,
@@ -641,10 +669,11 @@ func (c *Client) AddObject(ctx context.Context, path, contractSet string, o obje
 
 // DeleteObject either deletes the object at the given path or if batch=true
 // deletes all objects that start with the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
+func (c *Client) DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
 	values.Set("batch", fmt.Sprint(batch))
+	values.Set("bucket", bucket)
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
@@ -887,20 +916,21 @@ func (c *Client) State() (state api.BusStateResponse, err error) {
 }
 
 // RenameObject renames a single object.
-func (c *Client) RenameObject(ctx context.Context, from, to string) (err error) {
-	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeSingle)
+func (c *Client) RenameObject(ctx context.Context, bucket, from, to string) (err error) {
+	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeSingle)
 }
 
 // RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
-func (c *Client) RenameObjects(ctx context.Context, from, to string) (err error) {
-	return c.renameObjects(ctx, from, to, api.ObjectsRenameModeMulti)
+func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string) (err error) {
+	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeMulti)
 }
 
-func (c *Client) renameObjects(ctx context.Context, from, to, mode string) (err error) {
+func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string) (err error) {
 	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
-		From: from,
-		To:   to,
-		Mode: mode,
+		Bucket: bucket,
+		From:   from,
+		To:     to,
+		Mode:   mode,
 	}, nil)
 	return
 }

@@ -265,7 +265,7 @@ func TestSectorPruning(t *testing.T) {
 	// delete a random number of objects
 	for i := 0; i < 10; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		if err := b.DeleteObject(context.Background(), filename, false); err != nil {
+		if err := b.DeleteObject(context.Background(), api.DefaultBucketName, filename, false); err != nil {
 			t.Fatal(err)
 		}
 	}

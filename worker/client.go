@@ -201,8 +201,9 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-func (c *Client) object(ctx context.Context, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata, opts ...api.DownloadObjectOption) (err error) {
+func (c *Client) object(ctx context.Context, bucket, path, prefix string, offset, limit int, w io.Writer, entries *[]api.ObjectMetadata, opts ...api.DownloadObjectOption) (err error) {
 	values := url.Values{}
+	values.Set("bucket", url.QueryEscape(bucket))
 	values.Set("prefix", url.QueryEscape(prefix))
 	values.Set("offset", fmt.Sprint(offset))
 	values.Set("limit", fmt.Sprint(limit))
@@ -236,9 +237,9 @@ func (c *Client) object(ctx context.Context, path, prefix string, offset, limit 
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
+func (c *Client) ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, prefix, offset, limit, nil, &entries)
+	err = c.object(ctx, bucket, path, prefix, offset, limit, nil, &entries)
 	return
 }
 
@@ -250,7 +251,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	}
 
 	path = strings.TrimPrefix(path, "/")
-	err = c.object(ctx, path, "", 0, -1, w, nil, opts...)
+	err = c.object(ctx, api.DefaultBucketName, path, "", 0, -1, w, nil, opts...)
 	return
 }
 

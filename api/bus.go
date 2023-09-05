@@ -29,9 +29,9 @@ const (
 	UsabilityFilterModeAll      = "all"
 	UsabilityFilterModeUsable   = "usable"
 	UsabilityFilterModeUnusable = "unusable"
-)
 
-const (
+	DefaultBucketName = "default"
+
 	SettingContractSet   = "contractset"
 	SettingGouging       = "gouging"
 	SettingRedundancy    = "redundancy"
@@ -39,11 +39,23 @@ const (
 )
 
 var (
+	// ErrBucketExists is returned when trying to create a bucket that already
+	// exists.
+	ErrBucketExists = errors.New("bucket already exists")
+
+	// ErrBucketNotEmpty is returned when trying to delete a bucket that is not
+	// empty.
+	ErrBucketNotEmpty = errors.New("bucket not empty")
+
+	// ErrBucketNotFound is returned when an bucket can't be retrieved from the
+	// database.
+	ErrBucketNotFound = errors.New("bucket not found")
+
 	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
 
-	// ErrOBjectNotFound is returned when an object can't be retrieved from the
+	// ErrObjectNotFound is returned when an object can't be retrieved from the
 	// database.
 	ErrObjectNotFound = errors.New("object not found")
 
@@ -193,6 +205,7 @@ type ObjectMetadata struct {
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.
 type ObjectAddRequest struct {
+	Bucket        string                                   `json:"bucket"`
 	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
@@ -206,9 +219,10 @@ type ObjectsResponse struct {
 
 // ObjectsRenameRequest is the request type for the /objects/rename endpoint.
 type ObjectsRenameRequest struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Mode string `json:"mode"`
+	Bucket string `json:"bucket"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Mode   string `json:"mode"`
 }
 
 // ObjectsStatsResponse is the response type for the /stats/objects endpoint.
@@ -481,6 +495,11 @@ func (gs GougingSettings) Validate() error {
 		return errors.New("MinPriceTableValidity must be at least 10 seconds")
 	}
 	return nil
+}
+
+type Bucket struct {
+	CreatedAt time.Time `json:"creationDate"`
+	Name      string    `json:"name"`
 }
 
 type SearchHostsRequest struct {
