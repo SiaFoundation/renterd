@@ -980,7 +980,7 @@ LIMIT ? OFFSET ?`,
 	return metadata, nil
 }
 
-func (s *SQLStore) Object(ctx context.Context, path string, bucket string) (api.Object, error) {
+func (s *SQLStore) Object(ctx context.Context, bucket, path string) (api.Object, error) {
 	var obj api.Object
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		o, err := s.object(ctx, tx, bucket, path)
