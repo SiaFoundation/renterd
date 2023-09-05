@@ -660,12 +660,15 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	}
 
 	// prune the contract
-	deleted, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
-	if err == nil || (errors.Is(err, context.Canceled) && deleted > 0) {
-		jc.Encode(deleted * rhpv2.SectorSize)
+	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
+	if err == nil || (errors.Is(err, context.Canceled) && pruned > 0) {
+		jc.Encode(api.RHPPruneContractResponse{
+			Pruned:    pruned,
+			Remaining: remaining,
+		})
 	} else {
-		if deleted > 0 {
-			err = fmt.Errorf("%w; couldn't prune all sectors, deleted %d/%d", err, deleted, deleted+remaining)
+		if pruned > 0 {
+			err = fmt.Errorf("%w; couldn't prune all sectors (%d/%d)", err, pruned, pruned+remaining)
 		}
 		jc.Error(err, http.StatusInternalServerError)
 	}
