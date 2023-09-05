@@ -232,7 +232,7 @@ func (c *Client) object(ctx context.Context, bucket, path, prefix string, offset
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, path, bucket, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
+func (c *Client) ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
 	body, _, err := c.object(ctx, bucket, path, prefix, offset, limit)
 	if err != nil {
