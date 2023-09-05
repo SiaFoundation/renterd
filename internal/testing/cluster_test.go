@@ -1934,7 +1934,7 @@ func TestUploadPacking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs, err := b.ObjectsBySlabKey(context.Background(), file1.Slabs[0].Key, api.DefaultBucketName)
+	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, file1.Slabs[0].Key)
 	if err != nil {
 		t.Fatal(err)
 	}
