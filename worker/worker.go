@@ -656,6 +656,10 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't fetch contract size", err) != nil {
 		return
 	} else if size.Prunable == 0 {
+		jc.Encode(api.RHPPruneContractResponse{
+			Pruned:    0,
+			Remaining: 0,
+		})
 		return
 	}
 

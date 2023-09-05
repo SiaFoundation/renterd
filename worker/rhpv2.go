@@ -300,7 +300,10 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 				}
 
 				// delete the roots from the contract
-				deleted, remaining, err = w.deleteContractRoots(t, &rev, settings, indices)
+				deleted, err = w.deleteContractRoots(t, &rev, settings, indices)
+				if deleted < uint64(len(indices)) {
+					remaining = uint64(len(indices)) - deleted
+				}
 				return
 			})
 		})
@@ -311,19 +314,22 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) (deleted, remaining uint64, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
-			deleted, remaining, err = w.deleteContractRoots(t, &rev, settings, indices)
+			deleted, err = w.deleteContractRoots(t, &rev, settings, indices)
+			if deleted < uint64(len(indices)) {
+				remaining = uint64(len(indices)) - deleted
+			}
 			return
 		})
 	})
 	return
 }
 
-func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted, remaining uint64, err error) {
+func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
 	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
 	if len(indices) == 0 {
-		return 0, 0, nil
+		return 0, nil
 	}
 
 	// record contract spending
@@ -364,7 +370,6 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 	renterKey := w.deriveRenterKey(rev.HostKey())
 
 	// range over the batches and delete the sectors batch per batch
-	remaining = uint64(len(indices))
 	for i, batch := range batches {
 		if err = func() error {
 			var cost types.Currency
@@ -477,7 +482,6 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			// update total cost
 			totalCost = totalCost.Add(cost)
 			deleted += uint64(len(batch))
-			remaining -= uint64(len(batch))
 			return nil
 		}(); err != nil {
 			return
