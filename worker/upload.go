@@ -706,7 +706,10 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	resp.slab.Slab.Shards, resp.err = u.uploadShards(ctx, shards, nextSlabChan)
 
 	// send the response
-	respChan <- resp
+	select {
+	case <-ctx.Done():
+	case respChan <- resp:
+	}
 }
 
 func (u *upload) markUsed(sID slabID, fcid types.FileContractID) {
