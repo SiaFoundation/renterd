@@ -334,11 +334,9 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 
 	// record contract spending
 	var totalCost types.Currency
-	defer func(initialRevNumber uint64) {
-		if rev.Revision.RevisionNumber > initialRevNumber {
-			w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: totalCost})
-		}
-	}(rev.Revision.RevisionNumber)
+	defer func() {
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: totalCost})
+	}()
 
 	// sort in descending order so that we can use 'range'
 	sort.Slice(indices, func(i, j int) bool {
@@ -506,11 +504,9 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 
 	// record contract spending
 	var totalCost types.Currency
-	defer func(initialRevNumber uint64) {
-		if rev.Revision.RevisionNumber > initialRevNumber {
-			w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: totalCost})
-		}
-	}(rev.Revision.RevisionNumber)
+	defer func() {
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: totalCost})
+	}()
 
 	// download the full set of SectorRoots
 	numsectors := rev.NumSectors()
@@ -527,10 +523,10 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		}
 
 		// update the revision number
-		rev.Revision.RevisionNumber++
 		if rev.Revision.RevisionNumber == math.MaxUint64 {
 			return nil, ErrContractFinalized
 		}
+		rev.Revision.RevisionNumber++
 
 		// update the revision outputs
 		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)

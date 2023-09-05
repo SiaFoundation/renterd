@@ -736,6 +736,9 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// sort contracts by the amount of prunable data
 	sort.Slice(contracts, func(i, j int) bool {
+		if contracts[i].Prunable == contracts[j].Prunable {
+			return contracts[i].Size > contracts[j].Size
+		}
 		return contracts[i].Prunable > contracts[j].Prunable
 	})
 

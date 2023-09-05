@@ -8,7 +8,6 @@ import (
 	"math"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -221,7 +220,7 @@ func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contract
 	if err != nil {
 		return nil, err
 	}
-	defer finishFn(ctx)
+	defer finishFn()
 
 	// upload the shards
 	return upload.uploadShards(ctx, shards, nil)
@@ -286,7 +285,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	if err != nil {
 		return object.Object{}, nil, err
 	}
-	defer finishFn(ctx)
+	defer finishFn()
 
 	// create the next slab channel
 	nextSlabChan := make(chan struct{}, 1)
@@ -296,7 +295,6 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	respChan := make(chan slabUploadResponse)
 
 	// collect the responses
-	var ongoingUploads uint64
 	var responses []slabUploadResponse
 	var slabIndex int
 	numSlabs := -1
@@ -336,12 +334,8 @@ loop:
 				<-nextSlabChan // trigger next iteration
 			} else {
 				// Otherwise we upload it.
-				atomic.AddUint64(&ongoingUploads, 1)
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
 					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
-					if atomic.AddUint64(&ongoingUploads, ^uint64(0)) == 0 {
-						close(respChan)
-					}
 				}(rs, data, length, slabIndex)
 			}
 			slabIndex++
@@ -383,7 +377,7 @@ func (mgr *uploadManager) launch(req *sectorUploadReq) error {
 	return nil
 }
 
-func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64) (*upload, func(context.Context), error) {
+func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64) (*upload, func(), error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
@@ -392,7 +386,7 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 
 	// check if we have enough contracts
 	if len(contracts) < totalShards {
-		return nil, func(_ context.Context) {}, errNotEnoughContracts
+		return nil, func() {}, errNotEnoughContracts
 	}
 
 	// create allowed map
@@ -408,7 +402,9 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 	}
 
 	// create a finish function to finish the upload
-	finishFn := func(ctx context.Context) {
+	finishFn := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
 		if err := mgr.b.FinishUpload(ctx, id); err != nil {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", id, err)
 		}
