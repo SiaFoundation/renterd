@@ -157,8 +157,8 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.Object, []api.ObjectMetadata, error)
-	AddObject(ctx context.Context, path, contractSet, bucket string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-	DeleteObject(ctx context.Context, path, bucket string, batch bool) error
+	AddObject(ctx context.Context, bucket string, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
@@ -1085,7 +1085,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, jc.PathParam("path"), bucket, up.ContractSet, obj, used)) != nil {
+	if jc.Check("couldn't add object", w.bus.AddObject(ctx, bucket, jc.PathParam("path"), up.ContractSet, obj, used)) != nil {
 		return
 	}
 
@@ -1152,7 +1152,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	err := w.bus.DeleteObject(jc.Request.Context(), jc.PathParam("path"), bucket, batch)
+	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), batch)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return

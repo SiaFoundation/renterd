@@ -498,8 +498,8 @@ func (gs GougingSettings) Validate() error {
 }
 
 type Bucket struct {
-	CreationDate time.Time `json:"creationDate"`
-	Name         string    `json:"name"`
+	CreatedAt time.Time `json:"creationDate"`
+	Name      string    `json:"name"`
 }
 
 type SearchHostsRequest struct {

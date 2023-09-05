@@ -683,6 +683,10 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 		if err := txn.Migrator().CreateTable(&dbBucket{}); err != nil {
 			return err
 		}
+		err := txn.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change buckets_name collation: %w", err)
+		}
 	}
 
 	// Add default bucket.
@@ -726,7 +730,7 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
 			return err
 		}
-		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+		if err := txn.Exec(`PRAGMA foreign_key_check(objects)`).Error; err != nil {
 			return err
 		}
 	}

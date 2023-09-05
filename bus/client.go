@@ -48,9 +48,9 @@ func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
 
 // CreateBucket creates a new bucket.
 func (c *Client) CreateBucket(ctx context.Context, name string) error {
-	return c.c.WithContext(ctx).PUT("/buckets", api.Bucket{
+	return c.c.WithContext(ctx).POST("/buckets", api.Bucket{
 		Name: name,
-	})
+	}, nil)
 }
 
 // DeleteBucket deletes an existing bucket. Fails if the bucket isn't empty.
@@ -58,7 +58,7 @@ func (c *Client) DeleteBucket(ctx context.Context, name string) error {
 	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/buckets/%s", name))
 }
 
-// ExistsBucket returns whether a bucket exists.
+// Bucket returns information about a specific bucket.
 func (c *Client) Bucket(ctx context.Context, name string) (resp api.Bucket, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/buckets/%s", name), &resp)
 	return
