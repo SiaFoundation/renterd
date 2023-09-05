@@ -705,7 +705,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), "", api.DefaultBucketName, "", 0, -1)
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +732,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), "bar/", api.DefaultBucketName, "", 0, -1)
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,21 +958,21 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), "", api.DefaultBucketName, 0, -1)
+	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "ata", api.DefaultBucketName, 0, -1)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "ata", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "1258", api.DefaultBucketName, 0, -1)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "1258", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1278,7 +1278,7 @@ func TestParallelUpload(t *testing.T) {
 	wg.Wait()
 
 	// Check if objects exist.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), "/dir/", api.DefaultBucketName, 0, 100)
+	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/dir/", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1291,7 +1291,7 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", api.DefaultBucketName, 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1300,10 +1300,10 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects under /dir/.
-	if err := cluster.Bus.DeleteObject(context.Background(), "/dir/", api.DefaultBucketName, true); err != nil {
+	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/dir/", true); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", api.DefaultBucketName, 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1312,10 +1312,10 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects under /.
-	if err := cluster.Bus.DeleteObject(context.Background(), "/", api.DefaultBucketName, true); err != nil {
+	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/", true); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), "/", api.DefaultBucketName, 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1847,7 +1847,7 @@ func TestUploadPacking(t *testing.T) {
 		if obj.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", obj.Size, len(data))
 		}
-		entries, err := w.ObjectEntries(context.Background(), "/", api.DefaultBucketName, "", 0, -1)
+		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
