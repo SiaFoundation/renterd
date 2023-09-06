@@ -683,9 +683,11 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 		if err := txn.Migrator().CreateTable(&dbBucket{}); err != nil {
 			return err
 		}
-		err := txn.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change buckets_name collation: %w", err)
+		if !isSQLite(txn) {
+			err := txn.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+			if err != nil {
+				return fmt.Errorf("failed to change buckets_name collation: %w", err)
+			}
 		}
 	}
 
@@ -699,8 +701,43 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 
 	// Add bucket id column to objects table.
 	if !txn.Migrator().HasColumn(&dbObject{}, "db_bucket_id") {
-		if err := txn.Migrator().AddColumn(&dbObject{}, "db_bucket_id"); err != nil {
-			return err
+		if !isSQLite(txn) {
+			// MySQL
+			if err := txn.Migrator().AddColumn(&dbObject{}, "db_bucket_id"); err != nil {
+				return err
+			}
+			// Update objects to belong to default bucket
+			if err := txn.Model(&dbObject{}).
+				Where("db_bucket_id", 0).
+				Update("db_bucket_id", bucket.ID).Error; err != nil {
+				return err
+			}
+		} else {
+			// SQLite
+			if txn.Migrator().HasTable("objects_temp") {
+				if err := txn.Migrator().DropTable("objects_temp"); err != nil {
+					return err
+				}
+			}
+			// Since SQLite doesn't support altering columns, we have to create
+			// a new temporary objects table, copy the objects over with the
+			// default bucket id and then delete the old table and rename the
+			// temporary one to 'objects'.
+			if err := txn.Table("objects_temp").Migrator().CreateTable(&dbObject{}); err != nil {
+				return fmt.Errorf("failed to create temporary table: %w", err)
+			} else if err := txn.Exec(`
+			INSERT INTO objects_temp (id, created_at, db_bucket_id, object_id, key, size)
+			SELECT objects.id, objects.created_at, ?, objects.object_id, objects.key, objects.size
+			FROM objects
+			`, bucket.ID).Error; err != nil {
+				return fmt.Errorf("failed to copy objects to temporary table: %w", err)
+			} else if err := txn.Migrator().DropTable("objects"); err != nil {
+				return fmt.Errorf("failed to drop objects table: %w", err)
+			} else if err := txn.Migrator().RenameTable("objects_temp", "objects"); err != nil {
+				return fmt.Errorf("failed to rename temporary table: %w", err)
+			} else if err := txn.Migrator().AutoMigrate(&dbObject{}); err != nil {
+				return fmt.Errorf("failed to auto-migrate objects table: %w", err)
+			}
 		}
 	}
 
@@ -709,13 +746,6 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 		if err := txn.Migrator().CreateIndex(&dbObject{}, "idx_object_bucket"); err != nil {
 			return err
 		}
-	}
-
-	// Update objects to belong to default bucket
-	if err := txn.Model(&dbObject{}).
-		Where("db_bucket_id", 0).
-		Update("db_bucket_id", bucket.ID).Error; err != nil {
-		return err
 	}
 
 	// Add foreign key constraint between dbObject's db_bucket_id and dbBucket's id.

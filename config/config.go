@@ -17,6 +17,7 @@ type (
 		HTTP      HTTP      `yaml:"http"`
 		Bus       Bus       `yaml:"bus"`
 		Worker    Worker    `yaml:"worker"`
+		S3        S3        `yaml:"s3"`
 		Autopilot Autopilot `yaml:"autopilot"`
 
 		Database Database `yaml:"database"`
@@ -74,6 +75,10 @@ type (
 	RemoteWorker struct {
 		Address  string `yaml:"address"`
 		Password string `yaml:"password"`
+	}
+
+	S3 struct {
+		Enabled bool `yaml:"enabled"`
 	}
 
 	// Worker contains the configuration for a worker.
