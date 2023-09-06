@@ -17,6 +17,11 @@ import (
 	"go.sia.tech/siad/build"
 )
 
+const (
+	// minMessageSize is the minimum size of an RPC message
+	minMessageSize = 4096
+)
+
 var (
 	// ErrInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
@@ -205,7 +210,7 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 
 	// read the host's signatures and merge them with our own
 	var hostSigs rhpv2.RPCFormContractSignatures
-	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
+	if err := t.ReadResponse(&hostSigs, minMessageSize); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
@@ -311,19 +316,6 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 	return
 }
 
-func (w *worker) DeleteContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration, indices []uint64) (deleted, remaining uint64, err error) {
-	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
-			deleted, err = w.deleteContractRoots(t, &rev, settings, indices)
-			if deleted < uint64(len(indices)) {
-				remaining = uint64(len(indices)) - deleted
-			}
-			return
-		})
-	})
-	return
-}
-
 func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
 	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
@@ -400,12 +392,15 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 
 			// check funds
 			proofSize := uint64(len(batch)) * 2 * uint64(bits.Len64(numSectors)) * 32
-			if proofSize < 4096 {
-				proofSize = 4096
+			if proofSize < minMessageSize {
+				proofSize = minMessageSize
 			}
 
+			// calculate the cost
+			//
+			// TODO: switch out for exact cost calculations once it is added to core
 			cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
-			cost = cost.Mul64(125).Div64(100)
+			cost = cost.Mul64(125).Div64(100) // leeway
 			if rev.RenterFunds().Cmp(cost) < 0 {
 				return ErrInsufficientFunds
 			}
@@ -439,7 +434,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			var merkleResp rhpv2.RPCWriteMerkleProof
 			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
-			} else if err := t.ReadResponse(&merkleResp, 4096+proofSize); err != nil {
+			} else if err := t.ReadResponse(&merkleResp, minMessageSize+proofSize); err != nil {
 				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
 			}
 
@@ -466,7 +461,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			var hostSig rhpv2.RPCWriteResponse
 			if err := t.WriteResponse(renterSig); err != nil {
 				return fmt.Errorf("couldn't write signature response: %w", err)
-			} else if err := t.ReadResponse(&hostSig, 4096); err != nil {
+			} else if err := t.ReadResponse(&hostSig, minMessageSize); err != nil {
 				return fmt.Errorf("couldn't read signature response, err: %v", err)
 			}
 
@@ -546,11 +541,14 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 			Signature:         renterKey.SignHash(revisionHash),
 		}
 
+		// calculate the proof size
+		proofSize := rhpv2.RangeProofSize(rev.NumSectors(), offset, n)
+
 		// execute the sector roots RPC
 		var rootsResp rhpv2.RPCSectorRootsResponse
 		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
 			return nil, err
-		} else if err := t.ReadResponse(&rootsResp, uint64(4096+32*n)); err != nil {
+		} else if err := t.ReadResponse(&rootsResp, uint64(minMessageSize+proofSize+32*n)); err != nil {
 			return nil, fmt.Errorf("couldn't read sector roots response: %w", err)
 		}
 
