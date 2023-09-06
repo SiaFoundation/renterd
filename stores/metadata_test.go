@@ -3205,10 +3205,6 @@ func TestBucketObjects(t *testing.T) {
 		}
 	}
 
-	var boing []dbObject
-	if err := os.db.Find(&boing).Error; err != nil {
-		t.Fatal(err)
-	}
 	// Deleting a bucket with objects shouldn't work.
 	if err := os.DeleteBucket(ctx, b1); !errors.Is(err, api.ErrBucketNotEmpty) {
 		t.Fatal(err)
