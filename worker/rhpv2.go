@@ -6,11 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
+	"sort"
 	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
+	"go.sia.tech/siad/build"
+)
+
+const (
+	// minMessageSize is the minimum size of an RPC message
+	minMessageSize = 4096
 )
 
 var (
@@ -201,7 +210,7 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 
 	// read the host's signatures and merge them with our own
 	var hostSigs rhpv2.RPCFormContractSignatures
-	if err := t.ReadResponse(&hostSigs, 4096); err != nil {
+	if err := t.ReadResponse(&hostSigs, minMessageSize); err != nil {
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
@@ -262,120 +271,375 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 	return rev, err
 }
 
-func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, lastKnownRevisionNumber uint64, timeout time.Duration) (roots []types.Hash256, err error) {
-	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		req := &rhpv2.RPCLockRequest{
-			ContractID: contractID,
-			Signature:  t.SignChallenge(renterKey),
-			Timeout:    uint64(time.Minute.Milliseconds()),
-		}
+func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
+	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
+		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+				// delete roots
+				got, err := w.fetchContractRoots(t, &rev, settings)
+				if err != nil {
+					return err
+				}
 
-		// execute lock RPC
-		var lockResp rhpv2.RPCLockResponse
-		if err := t.Call(rhpv2.RPCLockID, req, &lockResp); err != nil {
-			return err
-		}
-		t.SetChallenge(lockResp.NewChallenge)
-		revision := lockResp.Revision
-		sigs := lockResp.Signatures
+				// fetch the roots from the bus
+				want, pending, err := w.bus.ContractRoots(ctx, fcid)
+				if err != nil {
+					return err
+				}
+				keep := make(map[types.Hash256]struct{})
+				for _, root := range append(want, pending...) {
+					keep[root] = struct{}{}
+				}
 
-		// defer unlock RPC
-		defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
+				// collect indices for roots we want to prune
+				var indices []uint64
+				for i, root := range got {
+					if _, wanted := keep[root]; wanted {
+						delete(keep, root) // prevent duplicates
+						continue
+					}
+					indices = append(indices, uint64(i))
+				}
+				if len(indices) == 0 {
+					return fmt.Errorf("no sectors to prune, database holds %d (%d pending), contract contains %d", len(want)+len(pending), len(pending), len(got))
+				}
 
-		// sanity check the signature
-		var sig types.Signature
-		copy(sig[:], sigs[0].Signature)
-		if !renterKey.PublicKey().VerifyHash(hashRevision(revision), sig) {
-			return fmt.Errorf("unexpected renter signature on revision host revision")
-		}
+				// delete the roots from the contract
+				deleted, err = w.deleteContractRoots(t, &rev, settings, indices)
+				if deleted < uint64(len(indices)) {
+					remaining = uint64(len(indices)) - deleted
+				}
+				return
+			})
+		})
+	})
+	return
+}
 
-		// sanity check the revision number is not lower than our last known
-		// revision number, host might be slipping us an outdated revision
-		if revision.RevisionNumber < lastKnownRevisionNumber {
-			return fmt.Errorf("unexpected revision number, %v!=%v", revision.RevisionNumber, lastKnownRevisionNumber)
-		}
+func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
+	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
-		// extract the revision
-		rev := rhpv2.ContractRevision{
-			Revision:   revision,
-			Signatures: [2]types.TransactionSignature{sigs[0], sigs[1]},
-		}
+	// return early
+	if len(indices) == 0 {
+		return 0, nil
+	}
 
-		// execute settings RPC
-		var settingsResp rhpv2.RPCSettingsResponse
-		if err := t.Call(rhpv2.RPCSettingsID, nil, &settingsResp); err != nil {
-			return err
-		}
-		var settings rhpv2.HostSettings
-		if err := json.Unmarshal(settingsResp.Settings, &settings); err != nil {
-			return fmt.Errorf("couldn't unmarshal json: %w", err)
-		}
+	// record contract spending
+	var totalCost types.Currency
+	defer func() {
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: totalCost})
+	}()
 
-		// download all roots
-		numsectors := rev.NumSectors()
-		for offset := uint64(0); offset < numsectors; {
-			n := batchSizeFetchSectors
-			if offset+n > numsectors {
-				n = numsectors - offset
+	// sort in descending order so that we can use 'range'
+	sort.Slice(indices, func(i, j int) bool {
+		return indices[i] > indices[j]
+	})
+
+	// decide on the batch size, defaults to ~20mib of sector data but for old
+	// hosts we use a much smaller batch size to ensure we nibble away at the
+	// problem rather than outright failing or timing out
+	batchSize := int(batchSizeDeleteSectors)
+	if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+		batchSize = 100
+	}
+
+	// split the indices into batches
+	var batches [][]uint64
+	for {
+		if len(indices) < batchSize {
+			batchSize = len(indices)
+		}
+		batches = append(batches, indices[:batchSize])
+		indices = indices[batchSize:]
+		if len(indices) == 0 {
+			break
+		}
+	}
+
+	// derive the renter key
+	renterKey := w.deriveRenterKey(rev.HostKey())
+
+	// range over the batches and delete the sectors batch per batch
+	for i, batch := range batches {
+		if err = func() error {
+			var cost types.Currency
+			start := time.Now()
+			w.logger.Debugw(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
+			defer func() {
+				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
+			}()
+
+			numSectors := rev.NumSectors()
+
+			// build a set of actions that move the sectors we want to delete
+			// towards the end of the contract, preparing them to be trimmed off
+			var actions []rhpv2.RPCWriteAction
+			cIndex := numSectors - 1
+			for _, rIndex := range batch {
+				if cIndex != rIndex {
+					actions = append(actions, rhpv2.RPCWriteAction{
+						Type: rhpv2.RPCWriteActionSwap,
+						A:    uint64(cIndex),
+						B:    uint64(rIndex),
+					})
+				}
+				cIndex--
 			}
+			actions = append(actions, rhpv2.RPCWriteAction{
+				Type: rhpv2.RPCWriteActionTrim,
+				A:    uint64(len(batch)),
+			})
 
 			// check funds
-			price := rhpv2.RPCSectorRootsCost(settings, n)
-			if rev.RenterFunds().Cmp(price) < 0 {
+			proofSize := uint64(len(batch)) * 2 * uint64(bits.Len64(numSectors)) * 32
+			if proofSize < minMessageSize {
+				proofSize = minMessageSize
+			}
+
+			// calculate the cost
+			//
+			// TODO: switch out for exact cost calculations once it is added to core
+			cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
+			cost = cost.Mul64(125).Div64(100) // leeway
+			if rev.RenterFunds().Cmp(cost) < 0 {
 				return ErrInsufficientFunds
 			}
 
 			// update the revision number
-			rev.Revision.RevisionNumber++
 			if rev.Revision.RevisionNumber == math.MaxUint64 {
 				return ErrContractFinalized
 			}
+			rev.Revision.RevisionNumber++
+
+			// update the revision filesize
+			rev.Revision.Filesize -= rhpv2.SectorSize * actions[len(actions)-1].A
 
 			// update the revision outputs
-			newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, price, types.ZeroCurrency)
+			newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
 			if err != nil {
 				return err
 			}
 
-			// build the sector roots request
-			revisionHash := hashRevision(rev.Revision)
-			req := &rhpv2.RPCSectorRootsRequest{
-				RootOffset: uint64(offset),
-				NumRoots:   uint64(n),
+			// create request
+			wReq := &rhpv2.RPCWriteRequest{
+				Actions:     actions,
+				MerkleProof: true,
 
 				RevisionNumber:    rev.Revision.RevisionNumber,
 				ValidProofValues:  newValid,
 				MissedProofValues: newMissed,
-				Signature:         renterKey.SignHash(revisionHash),
 			}
 
-			// execute the sector roots RPC
-			var rootsResp rhpv2.RPCSectorRootsResponse
-			if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
+			// send request and read merkle proof
+			var merkleResp rhpv2.RPCWriteMerkleProof
+			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
-			} else if err := t.ReadResponse(&rootsResp, uint64(4096+32*n)); err != nil {
-				return fmt.Errorf("couldn't read sector roots response: %w", err)
+			} else if err := t.ReadResponse(&merkleResp, minMessageSize+proofSize); err != nil {
+				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
+			}
+
+			// verify proof
+			proofHashes := merkleResp.OldSubtreeHashes
+			leafHashes := merkleResp.OldLeafHashes
+			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
+			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
+				err := ErrInvalidMerkleProof
+				t.WriteResponseErr(err)
+				return err
+			}
+
+			// update merkle root
+			copy(rev.Revision.FileMerkleRoot[:], newRoot[:])
+
+			// build the write response
+			revisionHash := hashRevision(rev.Revision)
+			renterSig := &rhpv2.RPCWriteResponse{
+				Signature: renterKey.SignHash(revisionHash),
+			}
+
+			// exchange signatures
+			var hostSig rhpv2.RPCWriteResponse
+			if err := t.WriteResponse(renterSig); err != nil {
+				return fmt.Errorf("couldn't write signature response: %w", err)
+			} else if err := t.ReadResponse(&hostSig, minMessageSize); err != nil {
+				return fmt.Errorf("couldn't read signature response, err: %v", err)
 			}
 
 			// verify the host signature
-			if !hostKey.VerifyHash(revisionHash, rootsResp.Signature) {
+			if !rev.HostKey().VerifyHash(revisionHash, hostSig.Signature) {
 				return errors.New("host's signature is invalid")
 			}
-			rev.Signatures[0].Signature = req.Signature[:]
-			rev.Signatures[1].Signature = rootsResp.Signature[:]
+			rev.Signatures[0].Signature = renterSig.Signature[:]
+			rev.Signatures[1].Signature = hostSig.Signature[:]
 
-			// verify the proof
-			if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
-				return ErrInvalidMerkleProof
-			}
-
-			// append roots
-			roots = append(roots, rootsResp.SectorRoots...)
-			offset += n
-
-			// TODO: record contract spending
+			// update total cost
+			totalCost = totalCost.Add(cost)
+			deleted += uint64(len(batch))
+			return nil
+		}(); err != nil {
+			return
 		}
-		return nil
+	}
+	return
+}
+
+func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
+	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			roots, err = w.fetchContractRoots(t, &rev, settings)
+			return
+		})
 	})
 	return
+}
+
+func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, _ error) {
+	// derive the renter key
+	renterKey := w.deriveRenterKey(rev.HostKey())
+
+	// record contract spending
+	var totalCost types.Currency
+	defer func() {
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: totalCost})
+	}()
+
+	// download the full set of SectorRoots
+	numsectors := rev.NumSectors()
+	for offset := uint64(0); offset < numsectors; {
+		n := batchSizeFetchSectors
+		if offset+n > numsectors {
+			n = numsectors - offset
+		}
+
+		// check funds
+		cost := rhpv2.RPCSectorRootsCost(settings, n)
+		if rev.RenterFunds().Cmp(cost) < 0 {
+			return nil, ErrInsufficientFunds
+		}
+
+		// update the revision number
+		if rev.Revision.RevisionNumber == math.MaxUint64 {
+			return nil, ErrContractFinalized
+		}
+		rev.Revision.RevisionNumber++
+
+		// update the revision outputs
+		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
+		if err != nil {
+			return nil, err
+		}
+
+		// build the sector roots request
+		revisionHash := hashRevision(rev.Revision)
+		req := &rhpv2.RPCSectorRootsRequest{
+			RootOffset: uint64(offset),
+			NumRoots:   uint64(n),
+
+			RevisionNumber:    rev.Revision.RevisionNumber,
+			ValidProofValues:  newValid,
+			MissedProofValues: newMissed,
+			Signature:         renterKey.SignHash(revisionHash),
+		}
+
+		// calculate the proof size
+		proofSize := rhpv2.RangeProofSize(rev.NumSectors(), offset, n)
+
+		// execute the sector roots RPC
+		var rootsResp rhpv2.RPCSectorRootsResponse
+		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
+			return nil, err
+		} else if err := t.ReadResponse(&rootsResp, uint64(minMessageSize+proofSize+32*n)); err != nil {
+			return nil, fmt.Errorf("couldn't read sector roots response: %w", err)
+		}
+
+		// verify the host signature
+		if !rev.HostKey().VerifyHash(revisionHash, rootsResp.Signature) {
+			return nil, errors.New("host's signature is invalid")
+		}
+		rev.Signatures[0].Signature = req.Signature[:]
+		rev.Signatures[1].Signature = rootsResp.Signature[:]
+
+		// verify the proof
+		if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
+			return nil, ErrInvalidMerkleProof
+		}
+
+		// update the total cost
+		totalCost = totalCost.Add(cost)
+
+		// append roots
+		roots = append(roots, rootsResp.SectorRoots...)
+		offset += n
+	}
+	return
+}
+
+func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
+	renterKey := w.deriveRenterKey(hk)
+
+	// execute lock RPC
+	var lockResp rhpv2.RPCLockResponse
+	err := t.Call(rhpv2.RPCLockID, &rhpv2.RPCLockRequest{
+		ContractID: fcid,
+		Signature:  t.SignChallenge(renterKey),
+		Timeout:    uint64(lockTimeout.Milliseconds()),
+	}, &lockResp)
+	if err != nil {
+		return err
+	}
+
+	// set transport challenge
+	t.SetChallenge(lockResp.NewChallenge)
+
+	// defer unlock RPC
+	defer t.WriteRequest(rhpv2.RPCUnlockID, nil)
+
+	// convenience variables
+	revision := lockResp.Revision
+	sigs := lockResp.Signatures
+
+	// sanity check the signature
+	var sig types.Signature
+	copy(sig[:], sigs[0].Signature)
+	if !renterKey.PublicKey().VerifyHash(hashRevision(revision), sig) {
+		return fmt.Errorf("unexpected renter signature on revision host revision")
+	}
+
+	// sanity check the revision number is not lower than our last known
+	// revision number, host might be slipping us an outdated revision
+	if revision.RevisionNumber < lastKnownRevisionNumber {
+		return fmt.Errorf("unexpected revision number, %v!=%v", revision.RevisionNumber, lastKnownRevisionNumber)
+	}
+
+	// extract the revision
+	rev := rhpv2.ContractRevision{
+		Revision:   revision,
+		Signatures: [2]types.TransactionSignature{sigs[0], sigs[1]},
+	}
+
+	// execute settings RPC
+	var settingsResp rhpv2.RPCSettingsResponse
+	if err := t.Call(rhpv2.RPCSettingsID, nil, &settingsResp); err != nil {
+		return err
+	}
+	var settings rhpv2.HostSettings
+	if err := json.Unmarshal(settingsResp.Settings, &settings); err != nil {
+		return fmt.Errorf("couldn't unmarshal json: %w", err)
+	}
+
+	return fn(t, rev, settings)
+}
+
+func humanReadableSize(b int) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB",
+		float64(b)/float64(div), "KMGTPE"[exp])
 }

@@ -45,7 +45,7 @@ func TestSQLHostDB(t *testing.T) {
 	ctx := context.Background()
 	hk := types.GeneratePrivateKey().PublicKey()
 	_, err = hdb.Host(ctx, hk)
-	if !errors.Is(err, ErrHostNotFound) {
+	if !errors.Is(err, api.ErrHostNotFound) {
 		t.Fatal(err)
 	}
 

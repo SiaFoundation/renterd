@@ -771,6 +771,16 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// build the response
 	for fcid, size := range sizes {
+		// adjust the amount of prunable data with the pending uploads, due to
+		// how we record contract spending a contract's size might already
+		// include pending sectors
+		pending := b.uploadingSectors.pending(fcid)
+		if pending > size.Prunable {
+			size.Prunable = 0
+		} else {
+			size.Prunable -= pending
+		}
+
 		contracts = append(contracts, api.ContractPrunableData{
 			ID:           fcid,
 			ContractSize: size,
@@ -781,6 +791,9 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// sort contracts by the amount of prunable data
 	sort.Slice(contracts, func(i, j int) bool {
+		if contracts[i].Prunable == contracts[j].Prunable {
+			return contracts[i].Size > contracts[j].Size
+		}
 		return contracts[i].Prunable > contracts[j].Prunable
 	})
 
@@ -801,9 +814,21 @@ func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	} else if jc.Check("failed to fetch contract size", err) == nil {
-		jc.Encode(size)
+	} else if jc.Check("failed to fetch contract size", err) != nil {
+		return
 	}
+
+	// adjust the amount of prunable data with the pending uploads, due to how
+	// we record contract spending a contract's size might already include
+	// pending sectors
+	pending := b.uploadingSectors.pending(id)
+	if pending > size.Prunable {
+		size.Prunable = 0
+	} else {
+		size.Prunable -= pending
+	}
+
+	jc.Encode(size)
 }
 
 func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
@@ -1858,14 +1883,13 @@ func (b *bus) Handler() http.Handler {
 		"POST /search/hosts":   b.searchHostsHandlerPOST,
 		"GET  /search/objects": b.searchObjectsHandlerGET,
 
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
-		"GET    /state": b.stateHandlerGET,
+		"GET    /state":         b.stateHandlerGET,
+		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,

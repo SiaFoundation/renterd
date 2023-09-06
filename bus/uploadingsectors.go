@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -63,6 +64,20 @@ func (usc *uploadingSectorsCache) addUploadingSector(uID api.UploadID, fcid type
 	}
 
 	return fmt.Errorf("%w; id '%v'", api.ErrUnknownUpload, uID)
+}
+
+func (usc *uploadingSectorsCache) pending(fcid types.FileContractID) (size uint64) {
+	usc.mu.Lock()
+	var uploads []*ongoingUpload
+	for _, ongoing := range usc.uploads {
+		uploads = append(uploads, ongoing)
+	}
+	usc.mu.Unlock()
+
+	for _, ongoing := range uploads {
+		size += uint64(len(ongoing.sectors(fcid))) * rhp.SectorSize
+	}
+	return
 }
 
 func (usc *uploadingSectorsCache) sectors(fcid types.FileContractID) (roots []types.Hash256) {

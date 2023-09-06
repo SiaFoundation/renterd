@@ -49,6 +49,19 @@ type RHPScanRequest struct {
 	Timeout time.Duration   `json:"timeout"`
 }
 
+// RHPPruneContractRequest is the request type for the /rhp/contract/:id/prune
+// endpoint.
+type RHPPruneContractRequest struct {
+	Timeout time.Duration `json:"timeout"`
+}
+
+// RHPPruneContractResponse is the response type for the /rhp/contract/:id/prune
+// endpoint.
+type RHPPruneContractResponse struct {
+	Pruned    uint64 `json:"pruned"`
+	Remaining uint64 `json:"remaining"`
+}
+
 // RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
 type RHPPriceTableRequest struct {
 	HostKey    types.PublicKey `json:"hostKey"`

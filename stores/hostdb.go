@@ -40,7 +40,6 @@ const (
 )
 
 var (
-	ErrHostNotFound        = errors.New("host doesn't exist in hostdb")
 	ErrNegativeOffset      = errors.New("offset can not be negative")
 	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
@@ -434,7 +433,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.H
 		Preload("Blocklist").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.HostInfo{}, ErrHostNotFound
+		return hostdb.HostInfo{}, api.ErrHostNotFound
 	} else if tx.Error != nil {
 		return hostdb.HostInfo{}, tx.Error
 	}

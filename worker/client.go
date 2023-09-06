@@ -36,6 +36,17 @@ func (c *Client) RHPBroadcast(ctx context.Context, fcid types.FileContractID) (e
 	return
 }
 
+// RHPPruneContract prunes deleted sectors from the contract with given id.
+func (c *Client) RHPPruneContract(ctx context.Context, fcid types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error) {
+	var res api.RHPPruneContractResponse
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", fcid), api.RHPPruneContractRequest{
+		Timeout: timeout,
+	}, &res)
+	pruned = res.Pruned
+	remaining = res.Remaining
+	return
+}
+
 // RHPContractRoots fetches the roots of the contract with given id.
 func (c *Client) RHPContractRoots(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", fcid), &roots)

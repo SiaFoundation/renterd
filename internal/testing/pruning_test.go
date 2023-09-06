@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +193,8 @@ func TestSectorPruning(t *testing.T) {
 	w := cluster.Worker
 	b := cluster.Bus
 
+	numObjects := 10
+
 	// add hosts
 	_, err = cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
 	if err != nil {
@@ -210,7 +213,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// add several objects
-	for i := 0; i < 10; i++ {
+	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
 		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
 			t.Fatal(err)
@@ -238,7 +241,7 @@ func TestSectorPruning(t *testing.T) {
 		}
 		n += len(cRoots)
 	}
-	if n != rs.TotalShards*10 {
+	if n != rs.TotalShards*numObjects {
 		t.Fatal("unexpected number of roots", n)
 	}
 
@@ -254,6 +257,7 @@ func TestSectorPruning(t *testing.T) {
 		}
 	}()
 	b = cluster2.Bus
+	w = cluster2.Worker
 
 	// assert prunable data is 0
 	if res, err := b.PrunableData(context.Background()); err != nil {
@@ -262,8 +266,8 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal("expected 0 prunable data", n)
 	}
 
-	// delete a random number of objects
-	for i := 0; i < 10; i += 2 {
+	// delete every other object
+	for i := 0; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
 		if err := b.DeleteObject(context.Background(), api.DefaultBucketName, filename, false); err != nil {
 			t.Fatal(err)
@@ -273,7 +277,40 @@ func TestSectorPruning(t *testing.T) {
 	// assert amount of prunable data
 	if res, err := b.PrunableData(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if res.TotalPrunable != 5*uint64(rs.TotalShards)*rhpv2.SectorSize {
+	} else if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
+	}
+
+	// prune all contracts
+	for _, c := range contracts {
+		if _, _, err := w.RHPPruneContract(context.Background(), c.ID, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert spending records were updated and prunable data is 0
+	if err = Retry(10, testBusFlushInterval, func() error {
+		if res, err := b.PrunableData(context.Background()); err != nil {
+			t.Fatal(err)
+		} else if res.TotalPrunable != 0 {
+			return fmt.Errorf("unexpected prunable data: %d", n)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert spending was updated
+	for _, c := range contracts {
+		c, err := b.Contract(context.Background(), c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Spending.SectorRoots.IsZero() {
+			t.Fatal("spending record not updated")
+		}
+		if c.Spending.Deletions.IsZero() {
+			t.Fatal("spending record not updated")
+		}
 	}
 }

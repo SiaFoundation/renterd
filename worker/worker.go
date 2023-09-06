@@ -38,8 +38,10 @@ import (
 )
 
 const (
-	batchSizeFetchSectors = uint64(130000) // ~4MiB of roots
+	batchSizeDeleteSectors = uint64(500000) // ~16MiB of roots
+	batchSizeFetchSectors  = uint64(130000) // ~4MiB of roots
 
+	defaultLockTimeout          = time.Minute
 	defaultRevisionFetchTimeout = 30 * time.Second
 
 	lockingPriorityActiveContractRevision = 100 // highest
@@ -47,6 +49,7 @@ const (
 	lockingPriorityPriceTable             = 60
 	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 20
+	lockingPriorityPruning                = 10
 	lockingPriorityUpload                 = 1 // lowest
 )
 
@@ -143,6 +146,7 @@ type Bus interface {
 	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+	ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
 	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
@@ -322,9 +326,8 @@ func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.Public
 	}
 }
 
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
-	// lock the revision for the duration of the operation.
-	contractLock, err := w.acquireRevision(ctx, contractID, lockPriority)
+func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
+	contractLock, err := w.acquireContractLock(ctx, fcid, priority)
 	if err != nil {
 		return err
 	}
@@ -334,13 +337,18 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		cancel()
 	}()
 
-	h := w.newHostV3(contractID, hk, siamuxAddr)
-	rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
-	if err != nil {
-		return err
-	}
+	return fn()
+}
 
-	return fn(rev)
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
+	return w.withContractLock(ctx, contractID, lockPriority, func() error {
+		h := w.newHostV3(contractID, hk, siamuxAddr)
+		rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
+		if err != nil {
+			return err
+		}
+		return fn(rev)
+	})
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -561,7 +569,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 
 	// Acquire lock before fetching revision.
 	ctx := jc.Request.Context()
-	unlocker, err := w.acquireRevision(ctx, fcid, lockingPriorityActiveContractRevision)
+	unlocker, err := w.acquireContractLock(ctx, fcid, lockingPriorityActiveContractRevision)
 	if jc.Check("could not acquire revision lock", err) != nil {
 		return
 	}
@@ -606,6 +614,70 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 }
 
+func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
+	// decode fcid
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode timeout
+	var pcr api.RHPPruneContractRequest
+	if jc.Decode(&pcr) != nil {
+		return
+	}
+
+	// apply timeout
+	ctx := jc.Request.Context()
+	if pcr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), pcr.Timeout)
+		defer cancel()
+	}
+
+	// attach gouging checker
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, w.bus, gp)
+
+	// fetch the contract from the bus
+	contract, err := w.bus.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// return early if there's no data to prune
+	size, err := w.bus.ContractSize(ctx, fcid)
+	if jc.Check("couldn't fetch contract size", err) != nil {
+		return
+	} else if size.Prunable == 0 {
+		jc.Encode(api.RHPPruneContractResponse{
+			Pruned:    0,
+			Remaining: 0,
+		})
+		return
+	}
+
+	// prune the contract
+	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
+	if err == nil || (errors.Is(err, context.Canceled) && pruned > 0) {
+		jc.Encode(api.RHPPruneContractResponse{
+			Pruned:    pruned,
+			Remaining: remaining,
+		})
+	} else {
+		if pruned > 0 {
+			err = fmt.Errorf("%w; couldn't prune all sectors (%d/%d)", err, pruned, pruned+remaining)
+		}
+		jc.Error(err, http.StatusInternalServerError)
+	}
+}
+
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	// decode fcid
 	var id types.FileContractID
@@ -624,8 +696,7 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	}
 
 	// fetch the roots from the host
-	renterKey := w.deriveRenterKey(c.HostKey)
-	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, renterKey, id, c.RevisionNumber, time.Minute)
+	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, id, c.RevisionNumber)
 	if jc.Check("couldn't fetch contract roots from host", err) == nil {
 		jc.Encode(roots)
 	}
@@ -1264,6 +1335,7 @@ func (w *worker) Handler() http.Handler {
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
+		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
 		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/form":                   w.rhpFormHandler,
@@ -1383,7 +1455,7 @@ func (cl *contractLock) keepaliveLoop() {
 	}
 }
 
-func (w *worker) acquireRevision(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
+func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
 	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
 	if err != nil {
 		return nil, err
