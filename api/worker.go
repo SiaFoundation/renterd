@@ -208,15 +208,16 @@ func UploadWithBucket(bucket string) UploadOption {
 }
 
 type DownloadRange struct {
-	Start, Length int64
+	Start  int64
+	Length int64
 }
 
-type DownloadObjectResult struct {
-	Content     io.ReadCloser
-	ContentType string
-	ModTime     time.Time
-	Range       *DownloadRange
-	Size        int64
+type GetObjectResponse struct {
+	Content     io.ReadCloser  `json:"content"`
+	ContentType string         `json:"contentType"`
+	ModTime     time.Time      `json:"modTime"`
+	Range       *DownloadRange `json:"range,omitempty"`
+	Size        int64          `json:"size"`
 }
 
 type DownloadObjectOption func(http.Header)

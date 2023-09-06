@@ -301,7 +301,7 @@ func main() {
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "the timeout applied to the node shutdown")
 
 	// s3
-	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "enable/disable the s3 API (only works if worker.enabled is also 'true') - can be overwritten using the RENTERD_S3_ENABLED environment variable (WARNING: S3 is currently not protected by any form of authentication by default)")
+	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "enable/disable the S3 API (only works if worker.enabled is also 'true') - can be overwritten using the RENTERD_S3_ENABLED environment variable (WARNING: S3 is currently not protected by any form of authentication by default)")
 
 	flag.Parse()
 

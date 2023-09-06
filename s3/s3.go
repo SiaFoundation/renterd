@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type goFakeLogger struct {
+type gofakes3Logger struct {
 	l *zap.SugaredLogger
 }
 
@@ -39,10 +39,10 @@ type bus interface {
 
 type worker interface {
 	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error)
-	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error)
+	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.GetObjectResponse, error)
 }
 
-func (l *goFakeLogger) Print(level gofakes3.LogLevel, v ...interface{}) {
+func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 	switch level {
 	case gofakes3.LogErr:
 		l.l.Error(fmt.Sprint(v...))
@@ -68,7 +68,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 	}
 	faker := gofakes3.New(backend,
 		gofakes3.WithHostBucket(false),
-		gofakes3.WithLogger(&goFakeLogger{
+		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,
 		}),
 		gofakes3.WithRequestID(rand.Uint64()),

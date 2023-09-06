@@ -37,7 +37,7 @@ func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
 	for i, bucket := range buckets {
 		bucketInfos[i] = gofakes3.BucketInfo{
 			Name:         bucket.Name,
-			CreationDate: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
+			CreationDate: gofakes3.NewContentTime(bucket.CreatedAt),
 		}
 	}
 	return bucketInfos, nil

@@ -261,34 +261,34 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	return err
 }
 
-func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (api.DownloadObjectResult, error) {
+func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (_ api.GetObjectResponse, err error) {
 	if strings.HasSuffix(path, "/") {
-		return api.DownloadObjectResult{}, errors.New("the given path is a directory, use ObjectEntries instead")
+		return api.GetObjectResponse{}, errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
 	// Start download.
 	path = strings.TrimPrefix(path, "/")
 	body, header, err := c.object(ctx, bucket, path, "", 0, -1, opts...)
 	if err != nil {
-		return api.DownloadObjectResult{}, err
+		return api.GetObjectResponse{}, err
 	}
-	cleanup := func() {
-		_, _ = io.Copy(io.Discard, body)
-		_ = body.Close()
-	}
+	defer func() {
+		if err != nil {
+			_, _ = io.Copy(io.Discard, body)
+			_ = body.Close()
+		}
+	}()
 
 	// Parse header.
 	var size int64
 	_, err = fmt.Sscan(header.Get("Content-Length"), &size)
 	if err != nil {
-		cleanup()
-		return api.DownloadObjectResult{}, err
+		return api.GetObjectResponse{}, err
 	}
 	var r *api.DownloadRange
 	ranges, err := http_range.ParseRange(header.Get("Content-Range"), size)
 	if err != nil {
-		cleanup()
-		return api.DownloadObjectResult{}, err
+		return api.GetObjectResponse{}, err
 	}
 	if len(ranges) > 0 {
 		r = &api.DownloadRange{
@@ -299,11 +299,10 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 	// Parse Last-Modified
 	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
 	if err != nil {
-		cleanup()
-		return api.DownloadObjectResult{}, err
+		return api.GetObjectResponse{}, err
 	}
 
-	return api.DownloadObjectResult{
+	return api.GetObjectResponse{
 		Content:     body,
 		ContentType: header.Get("Content-Type"),
 		ModTime:     modTime,
