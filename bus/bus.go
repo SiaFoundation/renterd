@@ -113,6 +113,7 @@ type (
 		ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
 		UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, bucket, path string) error
 		RemoveObjects(ctx context.Context, bucket, prefix string) error
@@ -994,6 +995,16 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts))
 }
 
+func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
+	var orr api.ObjectsCopyRequest
+	if jc.Decode(&orr) != nil {
+		return
+	}
+	if jc.Check("couldn't copy object", b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath)) != nil {
+		return
+	}
+}
+
 func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 	var orr api.ObjectsRenameRequest
 	if jc.Decode(&orr) != nil {
@@ -1863,6 +1874,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /objects/*path":  b.objectsHandlerGET,
 		"PUT    /objects/*path":  b.objectsHandlerPUT,
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
+		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
 
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
@@ -1880,8 +1892,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
-		"POST /search/hosts":   b.searchHostsHandlerPOST,
-		"GET  /search/objects": b.searchObjectsHandlerGET,
+		"POST   /search/hosts":   b.searchHostsHandlerPOST,
+		"GET    /search/objects": b.searchObjectsHandlerGET,
 
 		"GET    /settings":     b.settingsHandlerGET,
 		"GET    /setting/:key": b.settingKeyHandlerGET,
