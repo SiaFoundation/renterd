@@ -1136,6 +1136,18 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to fetch src object: %w", err)
 		}
 
+		var srcSlices []dbSlice
+		err = tx.Where("db_object_id = ?", srcObj.ID).
+			Find(&srcSlices).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch src slices: %w", err)
+		}
+		for i := range srcSlices {
+			srcSlices[i].Model = Model{} // clear model
+			srcSlices[i].DBObjectID = 0  // clear object id
+		}
+
 		var bucket dbBucket
 		err = tx.Where("name = ?", dstBucket).
 			Take(&bucket).
@@ -1149,6 +1161,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		dstObj.DBBucket = bucket      // set dst bucket
 		dstObj.ObjectID = dstPath     // set dst path
 		dstObj.DBBucketID = bucket.ID // set dst bucket id
+		dstObj.Slabs = srcSlices      // set slices
 		if err := tx.Create(&dstObj).Error; err != nil {
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
