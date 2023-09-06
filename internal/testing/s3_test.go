@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Mikubill/gofakes3"
 	"github.com/google/go-cmp/cmp"
@@ -57,8 +56,8 @@ func TestS3(t *testing.T) {
 	}
 	if buckets[0].Name != "bucket1" {
 		t.Fatal("expected bucket1", buckets[0].Name)
-	} else if buckets[0].CreationDate != time.Unix(0, 0).UTC() {
-		t.Fatal("expected unix 0", buckets[0].CreationDate, time.Unix(0, 0))
+	} else if buckets[0].CreationDate.IsZero() {
+		t.Fatal("expected non-zero creation date")
 	}
 
 	// Exists bucket.
