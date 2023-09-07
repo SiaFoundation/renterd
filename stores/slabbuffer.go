@@ -86,7 +86,8 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		// Open the file.
 		file, err := os.OpenFile(filepath.Join(partialSlabDir, buffer.Filename), os.O_RDWR, 0600)
 		if err != nil {
-			return nil, err
+			sqlStore.logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.DBSlab.Key, err)
+			continue
 		}
 		// Create the slab buffer.
 		var ec object.EncryptionKey
