@@ -3331,3 +3331,47 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal("expected 0 objects", len(objects))
 	}
 }
+
+func TestCopyObject(t *testing.T) {
+	os, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create the buckets.
+	ctx := context.Background()
+	if err := os.CreateBucket(ctx, "src"); err != nil {
+		t.Fatal(err)
+	} else if err := os.CreateBucket(ctx, "dst"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create one object.
+	obj, ucs := newTestObject(1)
+	err = os.UpdateObject(ctx, "src", "/foo", testContractSet, obj, ucs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Copy it within the same bucket.
+	if err := os.CopyObject(ctx, "src", "src", "/foo", "/bar"); err != nil {
+		t.Fatal(err)
+	} else if entries, err := os.ObjectEntries(ctx, "src", "/", "", 0, -1); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 2 {
+		t.Fatal("expected 2 entries", len(entries))
+	} else if entries[0].Name != "/bar" || entries[1].Name != "/foo" {
+		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	}
+
+	// Copy it cross buckets.
+	if err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar"); err != nil {
+		t.Fatal(err)
+	} else if entries, err := os.ObjectEntries(ctx, "dst", "/", "", 0, -1); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 1 {
+		t.Fatal("expected 1 entry", len(entries))
+	} else if entries[0].Name != "/bar" {
+		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	}
+}

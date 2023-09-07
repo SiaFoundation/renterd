@@ -1125,6 +1125,50 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
+func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		var srcObj dbObject
+		err := tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
+			Joins("DBBucket").
+			Take(&srcObj).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch src object: %w", err)
+		}
+
+		var srcSlices []dbSlice
+		err = tx.Where("db_object_id = ?", srcObj.ID).
+			Find(&srcSlices).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch src slices: %w", err)
+		}
+		for i := range srcSlices {
+			srcSlices[i].Model = Model{} // clear model
+			srcSlices[i].DBObjectID = 0  // clear object id
+		}
+
+		var bucket dbBucket
+		err = tx.Where("name = ?", dstBucket).
+			Take(&bucket).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch dst bucket: %w", err)
+		}
+
+		dstObj := srcObj
+		dstObj.Model = Model{}        // clear model
+		dstObj.DBBucket = bucket      // set dst bucket
+		dstObj.ObjectID = dstPath     // set dst path
+		dstObj.DBBucketID = bucket.ID // set dst bucket id
+		dstObj.Slabs = srcSlices      // set slices
+		if err := tx.Create(&dstObj).Error; err != nil {
+			return fmt.Errorf("failed to create copy of object: %w", err)
+		}
+		return nil
+	})
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
