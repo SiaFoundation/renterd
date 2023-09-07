@@ -376,7 +376,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		_, got, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
+		_, got, _, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
@@ -384,12 +384,34 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			_, got, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
+			_, got, hasMore, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+			}
+			moreRemaining := len(test.want)-offset-1 > 0
+			if hasMore != moreRemaining {
+				t.Errorf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
+			}
+
+			// make sure we stay within bounds
+			if offset+1 >= len(test.want) {
+				continue
+			}
+
+			_, got, hasMore, err = b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithMarker(test.want[offset].Name), api.ObjectsWithMaxKeys(1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0] != test.want[offset+1] {
+				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
+			}
+
+			moreRemaining = len(test.want)-offset-2 > 0
+			if hasMore != moreRemaining {
+				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
 			}
 		}
 
@@ -714,7 +736,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "file" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
+	_, entries, _, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +745,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "fileś" prefix
-	_, entries, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
+	_, entries, _, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -926,7 +948,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			_, entries, err := cluster.Bus.Object(context.Background(), "")
+			_, entries, _, err := cluster.Bus.Object(context.Background(), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1840,7 +1862,7 @@ func TestUploadPacking(t *testing.T) {
 			t.Fatal(err)
 		}
 		download(name, data, 0, int64(len(data)))
-		obj, _, err := b.Object(context.Background(), name)
+		obj, _, _, err := b.Object(context.Background(), name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1930,7 +1952,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.
-	file1, _, err := b.Object(context.Background(), "file1")
+	file1, _, _, err := b.Object(context.Background(), "file1")
 	if err != nil {
 		t.Fatal(err)
 	}

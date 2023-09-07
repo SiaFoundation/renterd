@@ -110,7 +110,7 @@ type (
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 
 		Object(ctx context.Context, bucket, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error)
+		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit, maxKeys int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
@@ -958,6 +958,18 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
+	bucket := api.DefaultBucketName
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+	var prefix string
+	if jc.DecodeForm("prefix", &prefix) != nil {
+		return
+	}
+	var marker string
+	if jc.DecodeForm("marker", &marker) != nil {
+		return
+	}
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
@@ -966,22 +978,18 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	var prefix string
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
+	maxKeys := -1
+	if jc.DecodeForm("maxKeys", &maxKeys) != nil {
 		return
 	}
 
 	// look for object entries
-	entries, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, offset, limit)
+	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, marker, offset, limit, maxKeys)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}
 
-	jc.Encode(api.ObjectsResponse{Entries: entries})
+	jc.Encode(api.ObjectsResponse{Entries: entries, HasMore: hasMore})
 }
 
 func (b *bus) objectsHandlerPUT(jc jape.Context) {

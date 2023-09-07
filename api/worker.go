@@ -272,3 +272,15 @@ func ObjectsWithBucket(bucket string) ObjectsOption {
 		v.Set("bucket", bucket)
 	}
 }
+
+func ObjectsWithMaxKeys(maxKeys int64) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("maxKeys", fmt.Sprint(maxKeys))
+	}
+}
+
+func ObjectsWithMarker(marker string) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("marker", marker)
+	}
+}

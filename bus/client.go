@@ -638,7 +638,7 @@ func (c *Client) SearchObjects(ctx context.Context, bucket, key string, offset, 
 	return
 }
 
-func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, err error) {
+func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, hasMore bool, err error) {
 	path = strings.TrimPrefix(path, "/")
 	values := url.Values{}
 	for _, opt := range opts {
@@ -651,6 +651,7 @@ func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOpt
 		o = *or.Object
 	} else {
 		entries = or.Entries
+		hasMore = or.HasMore
 	}
 	return
 }

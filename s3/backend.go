@@ -6,10 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"math"
 	"mime"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +16,8 @@ import (
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+const maxKeysDefault = 1000
 
 type s3 struct {
 	b      bus
@@ -93,20 +93,34 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 		}
 	}
 
+	// Handle pagination.
+	if page.MaxKeys == 0 {
+		page.MaxKeys = maxKeysDefault
+	}
+	if page.HasMarker {
+		opts = append(opts, api.ObjectsWithMarker(page.Marker))
+		opts = append(opts, api.ObjectsWithMaxKeys(page.MaxKeys))
+	}
+
 	// Fetch all objects of bucket with the given prefix.
-	_, objects, err := s.b.Object(context.Background(), path, opts...)
+	_, objects, hasMore, err := s.b.Object(context.Background(), path, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
-	// Match objects against prefix. If the object is a common prefix (folder),
-	// add it as a prefix to the response and otherwise as an object.
-	resp := gofakes3.NewObjectList()
+	// Create the list response
+	response := gofakes3.NewObjectList()
+	if hasMore {
+		response.IsTruncated = true
+		response.NextMarker = objects[len(objects)-1].Name
+	}
+
+	// Loop over the entries and add them to the response.
 	for _, object := range objects {
 		objectKey := object.Name[1:] // trim leading slash
 
 		if strings.HasSuffix(objectKey, "/") {
-			resp.AddPrefix(gofakes3.URLEncode(objectKey))
+			response.AddPrefix(gofakes3.URLEncode(objectKey))
 			continue
 		}
 
@@ -117,61 +131,10 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 			Size:         object.Size,
 			StorageClass: gofakes3.StorageStandard,
 		}
-		resp.Add(item)
+		response.Add(item)
 	}
 
-	// Sort by alphabet.
-	sort.Slice(resp.CommonPrefixes, func(i, j int) bool {
-		return resp.CommonPrefixes[i].Prefix < resp.CommonPrefixes[j].Prefix
-	})
-
-	// Apply pagination.
-	if page.MaxKeys == 0 {
-		page.MaxKeys = math.MaxInt64 // no limit specified
-	}
-	if page.HasMarker {
-		// If there is a marker, remove all objects up until and including the
-		// marker.
-		for i, obj := range resp.Contents {
-			if obj.Key == page.Marker {
-				resp.Contents = resp.Contents[i+1:]
-				break
-			}
-		}
-		for i, obj := range resp.CommonPrefixes {
-			if obj.Prefix == page.Marker {
-				resp.CommonPrefixes = resp.CommonPrefixes[i+1:]
-				break
-			}
-		}
-	}
-
-	response := gofakes3.NewObjectList()
-	for _, obj := range resp.CommonPrefixes {
-		if page.MaxKeys <= 0 {
-			break
-		}
-		response.AddPrefix(obj.Prefix)
-		page.MaxKeys--
-	}
-
-	for _, obj := range resp.Contents {
-		if page.MaxKeys <= 0 {
-			break
-		}
-		response.Add(obj)
-		page.MaxKeys--
-	}
-
-	if len(resp.CommonPrefixes)+len(resp.Contents) > int(page.MaxKeys) {
-		response.IsTruncated = true
-		if len(response.Contents) > 0 {
-			response.NextMarker = response.Contents[len(response.Contents)-1].Key
-		} else {
-			response.NextMarker = response.CommonPrefixes[len(response.CommonPrefixes)-1].Prefix
-		}
-	}
-	return resp, nil
+	return response, nil
 }
 
 // CreateBucket creates the bucket if it does not already exist. The name
@@ -288,7 +251,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	obj, _, err := s.b.Object(context.Background(), "/"+objectName, api.ObjectsWithBucket(bucketName))
+	obj, _, _, err := s.b.Object(context.Background(), "/"+objectName, api.ObjectsWithBucket(bucketName))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	}

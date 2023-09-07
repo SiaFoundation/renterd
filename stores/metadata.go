@@ -923,61 +923,97 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return objects, nil
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) ([]api.ObjectMetadata, error) {
+func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit, maxKeys int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
+	// convenience variables
+	usingMarker := marker != ""
+	usingOffsetLimit := offset > 0 || limit > -1
+
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
 
+	// sanity check we are passing sane paging parameters
+	if usingMarker && usingOffsetLimit {
+		return nil, false, errors.New("fetching entries using a marker uses the maxKeys for limiting the number of entries returned, offset and limit are thus not allowed and must be set to their defaults which are 0 and -1 respectively")
+	}
+	if !usingMarker && maxKeys > -1 {
+		return nil, false, fmt.Errorf("fetching entries using maxKeys (%d) requires passing a marker", maxKeys)
+	}
+
+	// ensure limits are out of play
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
+	if maxKeys <= -1 {
+		maxKeys = math.MaxInt
+	}
 
-	query := s.db.Raw(fmt.Sprintf(`
-SELECT
-	SUM(size) AS size,
-	CASE slashindex
-	WHEN 0 THEN %s
-	ELSE %s
-	END AS name,
-	MIN(health) as health
-FROM (
-	SELECT size, health, trimmed, INSTR(trimmed, "/") AS slashindex
+	// figure out the HAVING CLAUSE and its parameters
+	havingClause := "1 = 1"
+	var havingParams []interface{}
+	if usingMarker {
+		havingClause = "name > ?"
+		havingParams = append(havingParams, marker)
+
+		offset = 0      // disable offset
+		limit = maxKeys // limit by max keys
+	}
+
+	// fetch one more to see if there are more entries
+	if limit != math.MaxInt {
+		limit += 1
+	}
+
+	query := fmt.Sprintf(`
+	SELECT
+		CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
+		SUM(size) AS size,
+		MIN(health) as health
 	FROM (
-		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed
+		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
 		FROM objects
 		INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
 		LEFT JOIN slices ON objects.id = slices.db_object_id 
 		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
 		WHERE SUBSTR(object_id, 1, ?) = ? AND ?
 		GROUP BY object_id
-	) AS i
-) AS m
-GROUP BY name
-HAVING SUBSTR(name, 1, ?) = ? AND name != ?
-ORDER BY name ASC
-LIMIT ? OFFSET ?`,
+	) AS m
+	GROUP BY name
+	HAVING SUBSTR(name, 1, ?) = ? AND name != ? AND %s
+	ORDER BY name ASC
+	LIMIT ?
+	OFFSET ?`,
 		sqlConcat(s.db, "?", "trimmed"),
-		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")),
-		path,
-		path,
-		utf8.RuneCountInString(path)+1,
-		bucket,
-		utf8.RuneCountInString(path),
-		path,
-		sqlWhereBucket("objects", bucket),
-		utf8.RuneCountInString(path+prefix),
-		path+prefix,
-		path,
-		limit,
-		offset)
+		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)"),
+		havingClause)
 
-	var metadata []api.ObjectMetadata
-	err := query.Scan(&metadata).Error
-	if err != nil {
-		return nil, err
+	parameters := append(append([]interface{}{
+		path, // sqlConcat(s.db, "?", "trimmed"),
+		path, // sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")
+
+		utf8.RuneCountInString(path) + 1, // SUBSTR(object_id, ?)
+		utf8.RuneCountInString(path) + 1, // INSTR(SUBSTR(object_id, ?), "/")
+		bucket,                           // b.name = ?
+
+		utf8.RuneCountInString(path),      // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
+		path,                              // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
+		sqlWhereBucket("objects", bucket), // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
+
+		utf8.RuneCountInString(path + prefix), // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
+		path + prefix,                         // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
+		path,                                  // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
+	}, havingParams...), limit, offset)
+
+	if err = s.db.
+		Raw(query, parameters...).
+		Scan(&metadata).
+		Error; err == nil && len(metadata) == limit {
+		metadata = metadata[:len(metadata)-1] // remove last element
+		hasMore = true
 	}
-	return metadata, nil
+
+	return
 }
 
 func (s *SQLStore) Object(ctx context.Context, bucket, path string) (api.Object, error) {
