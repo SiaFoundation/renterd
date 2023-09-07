@@ -20,7 +20,7 @@ type gofakes3Logger struct {
 }
 
 type Opts struct {
-	AuthKeyPairs []string
+	AuthKeyPairs map[string]string
 }
 
 type bus interface {
@@ -57,10 +57,6 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 
 func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
 	namedLogger := logger.Named("s3")
-	keys, err := parsev4AuthKeys(opts.AuthKeyPairs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse auth key pairs: %w", err)
-	}
 	backend := &s3{
 		b:      b,
 		w:      w,
@@ -73,13 +69,13 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 		}),
 		gofakes3.WithRequestID(rand.Uint64()),
 		gofakes3.WithoutVersioning(),
-		gofakes3.WithV4Auth(keys),
+		gofakes3.WithV4Auth(opts.AuthKeyPairs),
 	)
 	return faker.Server(), nil
 }
 
-// parsev4AuthKeys parses a list of accessKey-secretKey pairs and returns a map
-func parsev4AuthKeys(keyPairs []string) (map[string]string, error) {
+// Parsev4AuthKeys parses a list of accessKey-secretKey pairs and returns a map
+func Parsev4AuthKeys(keyPairs []string) (map[string]string, error) {
 	pairs := make(map[string]string)
 	for _, pair := range keyPairs {
 		keys := strings.Split(pair, ",")

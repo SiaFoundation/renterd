@@ -155,7 +155,7 @@ func TestS3Authentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	s3Handler, err := s3.New(cluster.Bus, cluster.Worker, zap.NewNop().Sugar(), s3.Opts{
-		AuthKeyPairs: []string{"someid,somekey"},
+		AuthKeyPairs: map[string]string{"someid": "somekey"},
 	})
 	if err != nil {
 		t.Fatal(err)

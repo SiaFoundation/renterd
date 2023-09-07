@@ -107,7 +107,7 @@ var (
 		S3: config.S3{
 			Enabled:     false,
 			DisableAuth: false,
-			KeypairsV4:  []string{},
+			KeypairsV4:  nil,
 		},
 	}
 	seed types.PrivateKey
@@ -359,7 +359,11 @@ func main() {
 	var keyPairsV4 string
 	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
 	if keyPairsV4 != "" {
-		cfg.S3.KeypairsV4 = strings.Split(keyPairsV4, ";")
+		var err error
+		cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
+		if err != nil {
+			log.Fatalf("failed to parse keypairs: %v", err)
+		}
 	}
 
 	mustLoadAPIPassword()

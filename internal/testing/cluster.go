@@ -313,7 +313,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 
 	// Create S3 API.
 	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{
-		AuthKeyPairs: []string{"foo,bar"},
+		AuthKeyPairs: map[string]string{"foo": "bar"},
 	})
 	if err != nil {
 		return nil, err
