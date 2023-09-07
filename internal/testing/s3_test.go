@@ -166,11 +166,13 @@ func TestS3List(t *testing.T) {
 	}
 
 	objects := []string{
-		"sample.jpg",
-		"photos/2006/January/sample.jpg",
-		"photos2/2006/February/sample3.jpg",
-		"photos/2006/February/sample2.jpg",
-		"photos2/2006/February/sample4.jpg",
+		"/foo/bar",
+		"/foo/bat",
+		"/foo/baz/quux",
+		"/foo/baz/quuz",
+		"/gab/guub",
+		"/fileś/śpecial",
+		"/FOO/bar",
 	}
 	for _, object := range objects {
 		data := frand.Bytes(10)
@@ -180,37 +182,60 @@ func TestS3List(t *testing.T) {
 		}
 	}
 
+	flatten := func(res <-chan minio.ObjectInfo) []string {
+		var objs []string
+		for obj := range res {
+			if obj.Err != nil {
+				t.Fatal(err)
+			}
+			objs = append(objs, obj.Key)
+		}
+		return objs
+	}
+
+	// {"/", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+	// 	{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
+	// 	{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+	// 	{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
+	// 	{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+
+	// 	{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
+	// 	{"/", "F", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}}},
+	// 	{"/foo/", "fo", []api.ObjectMetadata{}},
+	// 	{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
+	// 	{"/gab/", "/guub", []api.ObjectMetadata{}},
 	tests := []struct {
 		prefix string
-		result []string
+		want   []string
 	}{
 		{
 			prefix: "",
-			result: []string{
-				"sample.jpg",
-				"photos/",
-				"photos2/",
-			},
+			want:   []string{"/FOO/", "/fileś/", "/foo/", "/gab/"},
 		},
 		{
-			prefix: "photos/2006/Feb",
-			result: []string{
-				"photos/2006/February/", // @reviewer: not sure if this is correct
-			},
+			prefix: "/foo/",
+			want:   []string{"/foo/bar", "/foo/bat", "/foo/baz/"},
+		},
+		{
+			prefix: "/F",
+			want:   []string{"/FOO/"},
 		},
 	}
 	for i, test := range tests {
-		var response []string
-		for objInfo := range s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{
-			Prefix: test.prefix,
-		}) {
-			if objInfo.Err != nil {
-				t.Fatal(err)
-			}
-			response = append(response, objInfo.Key)
+		got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix}))
+		if !cmp.Equal(test.want, got) {
+			t.Errorf("test %d: unexpected response: %v", i, cmp.Diff(test.want, got))
 		}
-		if !cmp.Equal(test.result, response) {
-			t.Errorf("test %d: unexpected response: %v", i, cmp.Diff(test.result, response))
+
+		for offset := 0; offset < len(test.want); offset++ {
+			got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix, StartAfter: test.want[offset]}))
+			var want []string
+			if offset+1 < len(test.want) {
+				want = test.want[offset+1:]
+			}
+			if !cmp.Equal(want, got) {
+				t.Errorf("test %d: unexpected response: got %+v want %+v", i, got, want)
+			}
 		}
 	}
 }

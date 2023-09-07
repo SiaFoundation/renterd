@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"runtime"
 	"sort"
 	"strings"
@@ -962,14 +963,21 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
+
 	var prefix string
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
+	} else if unescaped, err := url.PathUnescape(prefix); err == nil {
+		prefix = unescaped
 	}
+
 	var marker string
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
+	} else if unescaped, err := url.PathUnescape(marker); err == nil {
+		marker = unescaped
 	}
+
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return

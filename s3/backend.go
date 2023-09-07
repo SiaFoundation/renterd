@@ -80,17 +80,13 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 	opts := []api.ObjectsOption{api.ObjectsWithBucket(name)}
 
 	// Handle prefix.
-	path := "" // root of bucket
+	var path string // root of bucket
 	if prefix.HasPrefix {
-		idx := strings.LastIndex(prefix.Prefix, "/")
-		if idx == -1 {
-			// path remains the same and the prefix becomes the prefix
-			opts = append(opts, api.ObjectsWithPrefix("/"+prefix.Prefix))
-		} else {
-			// part of the prefix becomes the path
+		if idx := strings.LastIndex(prefix.Prefix, "/"); idx != -1 {
 			path = prefix.Prefix[:idx+1]
-			opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix[idx+1:]))
+			prefix.Prefix = prefix.Prefix[idx+1:]
 		}
+		opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix))
 	}
 
 	// Handle pagination.
@@ -117,8 +113,8 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 
 	// Loop over the entries and add them to the response.
 	for _, object := range objects {
-		objectKey := object.Name[1:] // trim leading slash
-
+		// objectKey := object.Name[1:] // trim leading slash
+		objectKey := object.Name
 		if strings.HasSuffix(objectKey, "/") {
 			response.AddPrefix(gofakes3.URLEncode(objectKey))
 			continue

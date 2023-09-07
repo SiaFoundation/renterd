@@ -941,6 +941,11 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		return nil, false, fmt.Errorf("fetching entries using maxKeys (%d) requires passing a marker", maxKeys)
 	}
 
+	// ensure marker is '/' prefixed
+	if usingMarker && !strings.HasPrefix(marker, "/") {
+		marker = fmt.Sprintf("/%s", marker)
+	}
+
 	// ensure limits are out of play
 	if limit <= -1 {
 		limit = math.MaxInt

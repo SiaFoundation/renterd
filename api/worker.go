@@ -281,6 +281,6 @@ func ObjectsWithMaxKeys(maxKeys int64) ObjectsOption {
 
 func ObjectsWithMarker(marker string) ObjectsOption {
 	return func(v url.Values) {
-		v.Set("marker", marker)
+		v.Set("marker", url.PathEscape(marker))
 	}
 }

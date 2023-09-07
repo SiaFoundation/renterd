@@ -1480,7 +1480,6 @@ func TestObjectEntries(t *testing.T) {
 				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
 			}
 		}
-		break
 	}
 }
 
