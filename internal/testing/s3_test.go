@@ -12,6 +12,7 @@ import (
 	"github.com/Mikubill/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/s3"
 	"go.uber.org/zap"
@@ -175,6 +176,19 @@ func TestS3Authentication(t *testing.T) {
 
 	// List buckets. Shouldn't work.
 	if _, err := s3Client.ListBuckets(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported algorithm") {
+		t.Fatal(err)
+	}
+
+	// Create client with credentials and try again..
+	s3Client, err = minio.New(s3Listener.Addr().String(), &minio.Options{
+		Creds: credentials.NewStaticV4("someid", "somekey", ""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List buckets. Should work.
+	if _, err := s3Client.ListBuckets(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
