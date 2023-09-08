@@ -83,17 +83,28 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 			}
 			continue
 		}
-		// Open the file.
-		file, err := os.OpenFile(filepath.Join(partialSlabDir, buffer.Filename), os.O_RDWR, 0600)
-		if err != nil {
-			sqlStore.logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.DBSlab.Key, err)
-			continue
-		}
-		// Create the slab buffer.
+		// Get the encryption key.
 		var ec object.EncryptionKey
 		if err := ec.UnmarshalText(buffer.DBSlab.Key); err != nil {
 			return nil, err
 		}
+		// Open the file.
+		file, err := os.OpenFile(filepath.Join(partialSlabDir, buffer.Filename), os.O_RDWR, 0600)
+		if err != nil {
+			_ = sqlStore.alerts.RegisterAlert(context.Background(), alerts.Alert{
+				ID:       types.HashBytes([]byte(buffer.Filename)),
+				Severity: alerts.SeverityCritical,
+				Message:  "failed to read buffer file on startup",
+				Data: map[string]interface{}{
+					"filename": buffer.Filename,
+					"slabKey":  ec,
+				},
+				Timestamp: time.Now(),
+			})
+			sqlStore.logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.DBSlab.Key, err)
+			continue
+		}
+		// Create the slab buffer.
 		sb := &SlabBuffer{
 			dbID:     buffer.ID,
 			filename: buffer.Filename,
