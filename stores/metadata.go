@@ -99,6 +99,8 @@ type (
 		Model
 		DBObjectID uint `gorm:"index"`
 
+		PartNumber uint64 `gorm:"index"`
+
 		// Slice related fields.
 		DBSlabID uint `gorm:"index"`
 		Offset   uint32
