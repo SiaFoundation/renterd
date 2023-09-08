@@ -3386,7 +3386,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if err := os.CopyObject(ctx, "src", "src", "/foo", "/bar"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(ctx, "src", "/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(ctx, "src", "/", "", "", 0, -1, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3397,7 +3397,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(ctx, "dst", "/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(ctx, "dst", "/", "", "", 0, -1, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
