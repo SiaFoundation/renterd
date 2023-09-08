@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -83,6 +84,8 @@ var (
 		MinShards:   2,
 		TotalShards: 3,
 	}
+
+	testS3Credentials = credentials.NewStaticV4("foo", "bar", "")
 )
 
 // TestCluster is a helper type that allows for easily creating a number of
@@ -270,7 +273,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
 	s3Client, err := minio.New(s3Addr, &minio.Options{
-		//Creds:  credentials.NewStaticV4(keyid, keysec, ""), // TODO: authentication
+		Creds:  testS3Credentials,
 		Secure: false,
 	})
 	if err != nil {
@@ -310,7 +313,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 
 	// Create S3 API.
 	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{
-		// TODO: authentication
+		AuthKeyPairs: map[string]string{"foo": "bar"},
 	})
 	if err != nil {
 		return nil, err

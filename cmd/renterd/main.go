@@ -104,6 +104,11 @@ var (
 			ScannerNumThreads:              100,
 			MigratorParallelSlabsPerWorker: 1,
 		},
+		S3: config.S3{
+			Enabled:     false,
+			DisableAuth: false,
+			KeypairsV4:  nil,
+		},
 	}
 	seed types.PrivateKey
 )
@@ -301,6 +306,7 @@ func main() {
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "the timeout applied to the node shutdown")
 
 	// s3
+	flag.BoolVar(&cfg.S3.DisableAuth, "s3.disableAuth", cfg.S3.DisableAuth, "disables authentication for the S3 API - can be overwritten using the RENTERD_S3_DISABLE_AUTH environment variable")
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "enable/disable the S3 API (only works if worker.enabled is also 'true') - can be overwritten using the RENTERD_S3_ENABLED environment variable (WARNING: S3 is currently not protected by any form of authentication by default)")
 
 	flag.Parse()
@@ -348,6 +354,17 @@ func main() {
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
 
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
+	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
+
+	var keyPairsV4 string
+	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
+	if keyPairsV4 != "" {
+		var err error
+		cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
+		if err != nil {
+			log.Fatalf("failed to parse keypairs: %v", err)
+		}
+	}
 
 	mustLoadAPIPassword()
 	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
@@ -491,8 +508,11 @@ func main() {
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
+				if len(cfg.S3.KeypairsV4) == 0 && !cfg.S3.DisableAuth {
+					log.Fatal("no S3 keypairs provided and S3 authentication is not disabled - please provide at least one keypair e.g. 'accessKeyID1,secretAccessKey1;accessKeyID2,secretAccessKey2")
+				}
 				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
-					AuthKeyPairs: nil, // not yet in use
+					AuthKeyPairs: cfg.S3.KeypairsV4,
 				})
 				if err != nil {
 					log.Fatal("failed to create s3 client", err)
