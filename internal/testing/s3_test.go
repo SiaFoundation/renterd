@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Mikubill/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/s3"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -28,9 +33,9 @@ func TestS3(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-	s3 := cluster.S3
 
 	// delete default bucket before testing.
+	s3 := cluster.S3
 	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +157,64 @@ func TestS3(t *testing.T) {
 	}
 	err = s3.RemoveBucket(context.Background(), "bucket3")
 	if err == nil || !strings.Contains(err.Error(), "The specified bucket does not exist") {
+		t.Fatal(err)
+	}
+}
+
+func TestS3Authentication(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Create a new S3 server that connects to the cluster.
+	s3Listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s3Handler, err := s3.New(cluster.Bus, cluster.Worker, zap.NewNop().Sugar(), s3.Opts{
+		AuthKeyPairs: map[string]string{"someid": "somekey"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s3Server := http.Server{
+		Handler: s3Handler,
+	}
+	go s3Server.Serve(s3Listener)
+
+	// Create client.
+	s3Client, err := minio.New(s3Listener.Addr().String(), &minio.Options{
+		Creds: nil, // no authentication
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List buckets. Shouldn't work.
+	if _, err := s3Client.ListBuckets(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported algorithm") {
+		t.Fatal(err)
+	}
+
+	// Create client with credentials and try again..
+	s3Client, err = minio.New(s3Listener.Addr().String(), &minio.Options{
+		Creds: credentials.NewStaticV4("someid", "somekey", ""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List buckets. Should work.
+	if _, err := s3Client.ListBuckets(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
