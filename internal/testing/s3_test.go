@@ -234,26 +234,26 @@ func TestS3List(t *testing.T) {
 		marker string
 		want   []string
 	}{
-		// {
-		// 	prefix: "",
-		// 	marker: "",
-		// 	want:   []string{"ab", "b", "d", "a/", "c/"},
-		// },
-		// {
-		// 	prefix: "a",
-		// 	marker: "",
-		// 	want:   []string{"ab", "a/"},
-		// },
-		// {
-		// 	prefix: "",
-		// 	marker: "b",
-		// 	want:   []string{"d", "c/"},
-		// },
-		// {
-		// 	prefix: "e",
-		// 	marker: "",
-		// 	want:   nil,
-		// },
+		{
+			prefix: "",
+			marker: "",
+			want:   []string{"ab", "b", "d", "a/", "c/"},
+		},
+		{
+			prefix: "a",
+			marker: "",
+			want:   []string{"ab", "a/"},
+		},
+		{
+			prefix: "",
+			marker: "b",
+			want:   []string{"d", "c/"},
+		},
+		{
+			prefix: "e",
+			marker: "",
+			want:   nil,
+		},
 		{
 			prefix: "a",
 			marker: "a/",
