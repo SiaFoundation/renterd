@@ -251,7 +251,7 @@ type ObjectsOption func(url.Values)
 
 func ObjectsWithPrefix(prefix string) ObjectsOption {
 	return func(v url.Values) {
-		v.Set("prefix", url.QueryEscape(prefix))
+		v.Set("prefix", prefix)
 	}
 }
 
@@ -273,7 +273,7 @@ func ObjectsWithBucket(bucket string) ObjectsOption {
 	}
 }
 
-func ObjectsWithMaxKeys(maxKeys int64) ObjectsOption {
+func ObjectsWithMaxKeys(maxKeys int) ObjectsOption {
 	return func(v url.Values) {
 		v.Set("maxKeys", fmt.Sprint(maxKeys))
 	}
@@ -281,6 +281,6 @@ func ObjectsWithMaxKeys(maxKeys int64) ObjectsOption {
 
 func ObjectsWithMarker(marker string) ObjectsOption {
 	return func(v url.Values) {
-		v.Set("marker", url.PathEscape(marker))
+		v.Set("marker", marker)
 	}
 }

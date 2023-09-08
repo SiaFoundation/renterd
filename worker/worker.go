@@ -984,6 +984,18 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 	jc.Custom(nil, []api.ObjectMetadata{})
 
+	bucket := api.DefaultBucketName
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+	var prefix string
+	if jc.DecodeForm("prefix", &prefix) != nil {
+		return
+	}
+	var marker string
+	if jc.DecodeForm("marker", &marker) != nil {
+		return
+	}
 	var off int
 	if jc.DecodeForm("offset", &off) != nil {
 		return
@@ -992,17 +1004,22 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	var prefix string
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
+	maxKeys := -1
+	if jc.DecodeForm("maxKeys", &maxKeys) != nil {
 		return
 	}
 
+	opts := []api.ObjectsOption{
+		api.ObjectsWithBucket(bucket),
+		api.ObjectsWithPrefix(prefix),
+		api.ObjectsWithMarker(marker),
+		api.ObjectsWithOffset(off),
+		api.ObjectsWithLimit(limit),
+		api.ObjectsWithMaxKeys(maxKeys),
+	}
+
 	path := jc.PathParam("path")
-	obj, entries, _, err := w.bus.Object(ctx, path, api.ObjectsWithPrefix(prefix), api.ObjectsWithOffset(off), api.ObjectsWithLimit(limit), api.ObjectsWithBucket(bucket))
+	obj, entries, _, err := w.bus.Object(ctx, path, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return

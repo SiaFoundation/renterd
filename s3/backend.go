@@ -102,7 +102,7 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	}
 	if page.HasMarker {
 		opts = append(opts, api.ObjectsWithMarker(page.Marker))
-		opts = append(opts, api.ObjectsWithMaxKeys(page.MaxKeys))
+		opts = append(opts, api.ObjectsWithMaxKeys(int(page.MaxKeys)))
 	}
 
 	// Fetch all objects of bucket with the given prefix.
