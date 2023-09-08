@@ -3,6 +3,7 @@ package testing
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -14,7 +15,11 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestS3(t *testing.T) {
+var (
+	errBucketNotExists = errors.New("specified bucket does not exist")
+)
+
+func TestS3Basic(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -30,7 +35,7 @@ func TestS3(t *testing.T) {
 	}()
 	s3 := cluster.S3
 
-	// delete default bucket before testing.
+	// delete default bucket
 	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
 	}
@@ -40,67 +45,81 @@ func TestS3(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create bucket.
-	err = s3.MakeBucket(context.Background(), "bucket1", minio.MakeBucketOptions{})
+	// create bucket
+	bucket := "bucket"
+	err = s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// List bucket.
+	// list buckets
 	buckets, err := s3.ListBuckets(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(buckets) != 1 {
-		t.Fatal("expected 1 bucket")
-	}
-	if buckets[0].Name != "bucket1" {
-		t.Fatal("expected bucket1", buckets[0].Name)
+	} else if len(buckets) != 1 {
+		t.Fatalf("unexpected number of buckets, %d != 1", len(buckets))
+	} else if buckets[0].Name != bucket {
+		t.Fatalf("unexpected bucket name, %s != %s", buckets[0].Name, bucket)
 	} else if buckets[0].CreationDate.IsZero() {
 		t.Fatal("expected non-zero creation date")
 	}
 
-	// Exists bucket.
-	exists, err := s3.BucketExists(context.Background(), "bucket1")
+	// exist buckets
+	exists, err := s3.BucketExists(context.Background(), bucket)
 	if err != nil {
 		t.Fatal(err)
 	} else if !exists {
-		t.Fatal("expected bucket1 to exist")
+		t.Fatal("expected bucket to exist")
 	}
-	exists, err = s3.BucketExists(context.Background(), "bucket2")
+	exists, err = s3.BucketExists(context.Background(), bucket+"nonexistent")
 	if err != nil {
 		t.Fatal(err)
 	} else if exists {
-		t.Fatal("expected bucket2 to not exist")
+		t.Fatal("expected bucket to not exist")
 	}
 
-	// Create bucket 2.
-	err = s3.MakeBucket(context.Background(), "bucket2", minio.MakeBucketOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// PutObject into bucket.
+	// add object to the bucket
 	data := frand.Bytes(10)
-	_, err = s3.PutObject(context.Background(), "bucket1", "object1", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	_, err = s3.PutObject(context.Background(), bucket, "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Copy object into other bucket.
+	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	if err == nil || !strings.Contains(err.Error(), errBucketNotExists.Error()) {
+		t.Fatal(err)
+	}
+
+	// get object
+	obj, err := s3.GetObject(context.Background(), bucket, "object", minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if b, err := io.ReadAll(obj); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(b, data) {
+		t.Fatal("data mismatch")
+	}
+
+	// add another bucket
+	err = s3.MakeBucket(context.Background(), bucket+"2", minio.MakeBucketOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// copy our object into the new bucket.
 	_, err = s3.CopyObject(context.Background(), minio.CopyDestOptions{
-		Bucket: "bucket2",
-		Object: "object1",
+		Bucket: bucket + "2",
+		Object: "object",
 	}, minio.CopySrcOptions{
-		Bucket: "bucket1",
-		Object: "object1",
+		Bucket: bucket,
+		Object: "object",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Get object.
-	obj, err := s3.GetObject(context.Background(), "bucket1", "object1", minio.GetObjectOptions{})
+	// get copied object
+	obj, err = s3.GetObject(context.Background(), bucket+"2", "object", minio.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	} else if b, err := io.ReadAll(obj); err != nil {
@@ -109,50 +128,42 @@ func TestS3(t *testing.T) {
 		t.Fatal("data mismatch")
 	}
 
-	// Get copied object.
-	obj, err = s3.GetObject(context.Background(), "bucket2", "object1", minio.GetObjectOptions{})
-	if err != nil {
-		t.Fatal(err)
-	} else if b, err := io.ReadAll(obj); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(b, data) {
-		t.Fatal("data mismatch")
-	}
-
-	// Try to delete full bucket.
-	err = s3.RemoveBucket(context.Background(), "bucket1")
+	// assert deleting the bucket fails because it's not empty
+	err = s3.RemoveBucket(context.Background(), bucket)
 	if err == nil || !strings.Contains(err.Error(), gofakes3.ErrBucketNotEmpty.Error()) {
 		t.Fatal(err)
 	}
 
-	// Remove object.
-	err = s3.RemoveObject(context.Background(), "bucket1", "object1", minio.RemoveObjectOptions{})
+	// assert deleting the bucket fails because it doesn't exist
+	err = s3.RemoveBucket(context.Background(), bucket+"nonexistent")
+	if err == nil || !strings.Contains(err.Error(), errBucketNotExists.Error()) {
+		t.Fatal(err)
+	}
+
+	// remove the object
+	err = s3.RemoveObject(context.Background(), bucket, "object", minio.RemoveObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Try to get object that doesn't exist anymore.
-	obj, err = s3.GetObject(context.Background(), "bucket1", "object1", minio.GetObjectOptions{})
+	// try to get object
+	obj, err = s3.GetObject(context.Background(), bucket, "object", minio.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	} else if _, err := io.ReadAll(obj); err == nil || !strings.Contains(err.Error(), "The specified key does not exist") {
 		t.Fatal(err)
 	}
 
-	// Delete bucket.
-	err = s3.RemoveBucket(context.Background(), "bucket1")
+	// delete bucket
+	err = s3.RemoveBucket(context.Background(), bucket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	exists, err = s3.BucketExists(context.Background(), "bucket1")
+	exists, err = s3.BucketExists(context.Background(), bucket)
 	if err != nil {
 		t.Fatal(err)
 	} else if exists {
-		t.Fatal("expected bucket1 to exist")
-	}
-	err = s3.RemoveBucket(context.Background(), "bucket3")
-	if err == nil || !strings.Contains(err.Error(), "The specified bucket does not exist") {
-		t.Fatal(err)
+		t.Fatal("expected bucket to not exist")
 	}
 }
 
@@ -172,7 +183,7 @@ func TestS3List(t *testing.T) {
 	}()
 	s3 := cluster.S3
 
-	// Enable upload packing to speed up test.
+	// enable upload packing to speed up test
 	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
 		Enabled: true,
 	})
@@ -185,20 +196,19 @@ func TestS3List(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create bucket.
+	// create bucket
 	err = s3.MakeBucket(context.Background(), "bucket", minio.MakeBucketOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	objects := []string{
-		"/foo/bar",
-		"/foo/bat",
-		"/foo/baz/quux",
-		"/foo/baz/quuz",
-		"/gab/guub",
-		"/fileś/śpecial",
-		"/FOO/bar",
+		"a/a/a",
+		"a/b",
+		"b",
+		"c/a",
+		"d",
+		"ab",
 	}
 	for _, object := range objects {
 		data := frand.Bytes(10)
@@ -221,36 +231,39 @@ func TestS3List(t *testing.T) {
 
 	tests := []struct {
 		prefix string
+		marker string
 		want   []string
 	}{
 		{
 			prefix: "",
-			want:   []string{"/FOO/", "/fileś/", "/foo/", "/gab/"},
+			marker: "",
+			want:   []string{"ab", "b", "d", "a/", "c/"},
 		},
 		{
-			prefix: "/foo/",
-			want:   []string{"/foo/bar", "/foo/bat", "/foo/baz/"},
+			prefix: "a",
+			marker: "",
+			want:   []string{"ab", "a/"},
 		},
 		{
-			prefix: "/F",
-			want:   []string{"/FOO/"},
+			prefix: "",
+			marker: "b",
+			want:   []string{"d", "c/"},
+		},
+		{
+			prefix: "e",
+			marker: "",
+			want:   nil,
+		},
+		{
+			prefix: "a",
+			marker: "a/",
+			want:   []string{"ab"},
 		},
 	}
 	for i, test := range tests {
-		got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix}))
+		got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix, StartAfter: test.marker}))
 		if !cmp.Equal(test.want, got) {
-			t.Errorf("test %d: unexpected response: %v", i, cmp.Diff(test.want, got))
-		}
-
-		for offset := 0; offset < len(test.want); offset++ {
-			got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix, StartAfter: test.want[offset]}))
-			var want []string
-			if offset+1 < len(test.want) {
-				want = test.want[offset+1:]
-			}
-			if !cmp.Equal(want, got) {
-				t.Errorf("test %d: unexpected response: got %+v want %+v", i, got, want)
-			}
+			t.Errorf("test %d: unexpected response, want %v got %v", i, test.want, got)
 		}
 	}
 }
