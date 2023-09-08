@@ -222,6 +222,14 @@ type ObjectsResponse struct {
 	Object  *Object          `json:"object,omitempty"`
 }
 
+type ObjectsCopyRequest struct {
+	SourceBucket string `json:"sourceBucket"`
+	SourcePath   string `json:"sourcePath"`
+
+	DestinationBucket string `json:"destinationBucket"`
+	DestinationPath   string `json:"destinationPath"`
+}
+
 // ObjectsRenameRequest is the request type for the /objects/rename endpoint.
 type ObjectsRenameRequest struct {
 	Bucket string `json:"bucket"`

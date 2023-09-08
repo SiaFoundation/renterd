@@ -74,19 +74,43 @@ func TestS3(t *testing.T) {
 		t.Fatal("expected bucket2 to not exist")
 	}
 
-	// PutOBject into bucket.
+	// Create bucket 2.
+	err = s3.MakeBucket(context.Background(), "bucket2", minio.MakeBucketOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// PutObject into bucket.
 	data := frand.Bytes(10)
 	_, err = s3.PutObject(context.Background(), "bucket1", "object1", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s3.PutObject(context.Background(), "bucket2", "object2", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
-	if err == nil || !strings.Contains(err.Error(), "The specified bucket does not exist") {
+
+	// Copy object into other bucket.
+	_, err = s3.CopyObject(context.Background(), minio.CopyDestOptions{
+		Bucket: "bucket2",
+		Object: "object1",
+	}, minio.CopySrcOptions{
+		Bucket: "bucket1",
+		Object: "object1",
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Get object.
 	obj, err := s3.GetObject(context.Background(), "bucket1", "object1", minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if b, err := io.ReadAll(obj); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(b, data) {
+		t.Fatal("data mismatch")
+	}
+
+	// Get copied object.
+	obj, err = s3.GetObject(context.Background(), "bucket2", "object1", minio.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	} else if b, err := io.ReadAll(obj); err != nil {
@@ -107,9 +131,11 @@ func TestS3(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Try to get object.
-	_, err = s3.GetObject(context.Background(), "bucket1", "object1", minio.GetObjectOptions{})
+	// Try to get object that doesn't exist anymore.
+	obj, err = s3.GetObject(context.Background(), "bucket1", "object1", minio.GetObjectOptions{})
 	if err != nil {
+		t.Fatal(err)
+	} else if _, err := io.ReadAll(obj); err == nil || !strings.Contains(err.Error(), "The specified key does not exist") {
 		t.Fatal(err)
 	}
 
@@ -124,7 +150,7 @@ func TestS3(t *testing.T) {
 	} else if exists {
 		t.Fatal("expected bucket1 to exist")
 	}
-	err = s3.RemoveBucket(context.Background(), "bucket2")
+	err = s3.RemoveBucket(context.Background(), "bucket3")
 	if err == nil || !strings.Contains(err.Error(), "The specified bucket does not exist") {
 		t.Fatal(err)
 	}

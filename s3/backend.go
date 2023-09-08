@@ -328,7 +328,13 @@ func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDe
 }
 
 // TODO: use metadata when we have support for it
-// TODO: impelement once we have ability to copy objects in bus
 func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
-	return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "copying objects is not supported")
+	err := s.b.CopyObject(context.Background(), srcBucket, dstBucket, "/"+srcKey, "/"+dstKey)
+	if err != nil {
+		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return gofakes3.CopyObjectResult{
+		ETag:         "",                                             // TODO: don't have that
+		LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
+	}, nil
 }
