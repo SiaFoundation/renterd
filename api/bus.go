@@ -484,6 +484,55 @@ type GougingSettings struct {
 	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
 }
 
+// Types related to multipart uploads.
+type (
+	MultipartCreateRequest struct {
+		Bucket string `json:"bucket"`
+		Path   string `json:"path"`
+	}
+	MultipartCreateResponse struct {
+		UploadID string `json:"uploadID"`
+	}
+	MultipartAbortRequest struct {
+	}
+	MultipartAbortResponse struct {
+	}
+	MultipartCompleteRequest struct {
+	}
+	MultipartCompleteResponse struct {
+	}
+	MultipartAddPartRequest struct {
+		Bucket        string                                   `json:"bucket"`
+		Etag          string                                   `json:"etag"`
+		Path          string                                   `json:"path"`
+		ContractSet   string                                   `json:"contractSet"`
+		UploadID      string                                   `json:"uploadID"`
+		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
+		PartNumber    int                                      `json:"partNumber"`
+		Slices        []object.SlabSlice                       `json:"slices"`
+		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	}
+	MultipartListUploadsRequest struct {
+		Bucket         string
+		Prefix         string
+		KeyMarker      string
+		UploadIDMarker string
+		Limit          int
+	}
+	MultipartListUploadsResponse struct {
+		Uploads []MultipartListUploadItem `json:"uploads"`
+	}
+	MultipartListUploadItem struct {
+		Path      string    `json:"objectName"`
+		UploadID  string    `json:"uploadID"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+	MultipartListPartsRequest struct {
+	}
+	MultipartListPartsResponse struct {
+	}
+)
+
 type WalletResponse struct {
 	ScanHeight  uint64         `json:"scanHeight"`
 	Address     types.Address  `json:"address"`
@@ -556,4 +605,8 @@ func (rs RedundancySettings) Validate() error {
 
 type AddPartialSlabResponse struct {
 	Slabs []object.PartialSlab `json:"slabs"`
+}
+
+func FormatEtag(etag []byte) string {
+	return fmt.Sprintf("\"%x\"", etag)
 }

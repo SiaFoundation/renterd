@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Mikubill/gofakes3"
+	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -35,12 +35,16 @@ type bus interface {
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, err error)
 	SearchObjects(ctx context.Context, bucket, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
 
+	CreateMultipartUpload(ctx context.Context, bucket, path string) (api.MultipartCreateResponse, error)
+	ListMultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
+
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
 type worker interface {
 	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error)
 	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.GetObjectResponse, error)
+	UploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error)
 }
 
 func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {

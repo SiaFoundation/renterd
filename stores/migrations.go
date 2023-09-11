@@ -17,6 +17,7 @@ var (
 		&dbContract{},
 		&dbContractSet{},
 		&dbObject{},
+		&dbMultipartUpload{},
 		&dbBucket{},
 		&dbBufferedSlab{},
 		&dbSlab{},

@@ -1021,6 +1021,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		obj.Slabs[i].Model = Model{}
 	}
 
+	one := uint(1)
 	expectedObj := dbObject{
 		DBBucketID: 1,
 		ObjectID:   objID,
@@ -1028,13 +1029,13 @@ func TestSQLMetadataStore(t *testing.T) {
 		Size:       obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
-				DBObjectID: 1,
+				DBObjectID: &one,
 				DBSlabID:   1,
 				Offset:     10,
 				Length:     100,
 			},
 			{
-				DBObjectID: 1,
+				DBObjectID: &one,
 				DBSlabID:   2,
 				Offset:     20,
 				Length:     200,

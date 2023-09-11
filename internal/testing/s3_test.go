@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mikubill/gofakes3"
+	"github.com/SiaFoundation/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -302,4 +302,78 @@ func TestS3List(t *testing.T) {
 			t.Errorf("test %d: unexpected response: %v", i, cmp.Diff(test.result, response))
 		}
 	}
+}
+
+func TestS3MultipartUploads(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	s3 := cluster.S3
+
+	// delete default bucket before testing.
+	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bucket.
+	err = s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a core client for lower-level operations.
+	url := s3.EndpointURL()
+	core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
+		Creds: testS3Credentials,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a new multipart upload.
+	uploadID, err := core.NewMultipartUpload(context.Background(), "multipart", "foo", minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if uploadID == "" {
+		t.Fatal("expected non-empty upload ID")
+	}
+
+	// List uploads
+	lmu, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(lmu.Uploads) != 1 {
+		t.Fatal("expected 1 upload")
+	} else if upload := lmu.Uploads[0]; upload.UploadID != uploadID || upload.Key != "foo" {
+		t.Fatal("unexpected upload:", upload.UploadID, upload.Key)
+	}
+
+	// Add a part.
+	part, err := core.PutObjectPart(context.Background(), "multipart", "foo", uploadID, 1, bytes.NewReader([]byte("hello")), 5, minio.PutObjectPartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if part.ETag == "" {
+		t.Fatal("expected non-empty ETag")
+	}
+
+	// TODO: list parts
+
+	// TODO: complete upload
+
+	// TODO: download object
 }

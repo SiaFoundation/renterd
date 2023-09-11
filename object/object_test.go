@@ -12,7 +12,7 @@ func TestEncryptionOverflow(t *testing.T) {
 	// Create a random key.
 	key := GenerateEncryptionKey()
 	data := frand.Bytes(3 * 64)
-	sr := key.Encrypt(bytes.NewReader(data))
+	sr := key.Encrypt(bytes.NewReader(data), 0)
 
 	// Check that the streamreader is initialized correctly.
 	rs := sr.S.(*rekeyStream)

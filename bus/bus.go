@@ -120,6 +120,10 @@ type (
 		RenameObject(ctx context.Context, bucket, from, to string) error
 		RenameObjects(ctx context.Context, bucket, from, to string) error
 
+		AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+		CreateMultipartUpload(ctx context.Context, bucket, path string) (api.MultipartCreateResponse, error)
+		ListMultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
+
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
@@ -1789,6 +1793,65 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	return b, nil
 }
 
+func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
+	var req api.MultipartCreateRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path)
+	if jc.Check("failed to create multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
+	var req api.MultipartAbortRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	panic("not implemented")
+}
+
+func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
+	var req api.MultipartCompleteRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	panic("not implemented")
+}
+
+func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
+	var req api.MultipartAddPartRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.Etag, req.UsedContracts)
+	if jc.Check("failed to upload part", err) != nil {
+		return
+	}
+}
+
+func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
+	var req api.MultipartListUploadsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.ListMultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.KeyMarker, req.UploadIDMarker, req.Limit)
+	if jc.Check("failed to list multipart uploads", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
+	var req api.MultipartListPartsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	panic("not implemented")
+}
+
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
@@ -1906,6 +1969,13 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+
+		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
+		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
+		"POST   /multipart/complete":    b.multipartHandlerCompletePOST,
+		"PUT    /multipart/part":        b.multipartHandlerUploadPartPUT,
+		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
+		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
