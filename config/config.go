@@ -78,7 +78,9 @@ type (
 	}
 
 	S3 struct {
-		Enabled bool `yaml:"enabled"`
+		DisableAuth bool              `yaml:"disableAuth"`
+		Enabled     bool              `yaml:"enabled"`
+		KeypairsV4  map[string]string `yaml:"keypairsV4"`
 	}
 
 	// Worker contains the configuration for a worker.
