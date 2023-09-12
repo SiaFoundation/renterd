@@ -105,6 +105,7 @@ var (
 			MigratorParallelSlabsPerWorker: 1,
 		},
 		S3: config.S3{
+			Address:     build.DefaultS3Address,
 			Enabled:     false,
 			DisableAuth: false,
 			KeypairsV4:  nil,
@@ -306,6 +307,7 @@ func main() {
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "the timeout applied to the node shutdown")
 
 	// s3
+	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "address to serve S3 API on - can be overwritten using the RENTERD_S3_ADDRESS environment variable")
 	flag.BoolVar(&cfg.S3.DisableAuth, "s3.disableAuth", cfg.S3.DisableAuth, "disables authentication for the S3 API - can be overwritten using the RENTERD_S3_DISABLE_AUTH environment variable")
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "enable/disable the S3 API (only works if worker.enabled is also 'true') - can be overwritten using the RENTERD_S3_ENABLED environment variable (WARNING: S3 is currently not protected by any form of authentication by default)")
 
@@ -353,6 +355,7 @@ func main() {
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
 	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
 
+	parseEnvVar("RENTERD_S3_ADDRESS", &cfg.S3.Address)
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
 	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
 
@@ -490,6 +493,8 @@ func main() {
 	}
 	bc := bus.NewClient(busAddr, busPassword)
 
+	var s3Srv *http.Server
+	var s3Listener net.Listener
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
@@ -517,7 +522,18 @@ func main() {
 				if err != nil {
 					log.Fatal("failed to create s3 client", err)
 				}
-				mux.sub["/api/s3"] = treeMux{h: s3Handler}
+				s3Srv = &http.Server{
+					Addr:    cfg.S3.Address,
+					Handler: s3Handler,
+				}
+				s3Listener, err = net.Listen("tcp", cfg.S3.Address)
+				if err != nil {
+					logger.Fatal("failed to create listener: " + err.Error())
+				}
+				shutdownFns = append(shutdownFns, shutdownFn{
+					name: "S3",
+					fn:   s3Srv.Shutdown,
+				})
 			}
 		}
 	} else {
@@ -552,6 +568,11 @@ func main() {
 	// Start server.
 	go srv.Serve(l)
 	logger.Info("api: Listening on " + l.Addr().String())
+
+	if s3Srv != nil {
+		go s3Srv.Serve(s3Listener)
+		logger.Info("s3: Listening on " + s3Listener.Addr().String())
+	}
 
 	syncerAddress, err := bc.SyncerAddress(context.Background())
 	if err != nil {
