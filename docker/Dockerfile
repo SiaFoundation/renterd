@@ -37,7 +37,7 @@ LABEL maintainer="The Sia Foundation <info@sia.tech>" \
 ENV PUID=0
 ENV PGID=0
 
-# Renterd env args..
+# Renterd env args
 ENV RENTERD_API_PASSWORD= 
 ENV RENTERD_SEED=
 ENV RENTERD_CONFIG_FILE=/data/renterd.yml
@@ -46,9 +46,6 @@ ENV RENTERD_CONFIG_FILE=/data/renterd.yml
 COPY --from=builder /renterd/renterd /usr/bin/renterd
 VOLUME [ "/data" ]
 
-EXPOSE 9980/tcp
-EXPOSE 9981/tcp
-
 USER ${PUID}:${PGID}
 
-ENTRYPOINT [ "renterd", "-dir", "./data", "-http", ":9980" ]
+ENTRYPOINT [ "renterd", "-dir", "./data"]
