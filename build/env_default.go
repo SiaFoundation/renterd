@@ -12,7 +12,7 @@ import (
 const (
 	network = "mainnet"
 
-	DefaultAPIAddress     = ":9980"
+	DefaultAPIAddress     = "localhost:9980"
 	DefaultGatewayAddress = ":9981"
 )
 
