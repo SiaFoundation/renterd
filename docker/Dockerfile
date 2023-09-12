@@ -37,6 +37,10 @@ LABEL maintainer="The Sia Foundation <info@sia.tech>" \
 ENV PUID=0
 ENV PGID=0
 
+# Entrypoint env args
+ARG BUILD_TAGS
+ENV BUILD_TAGS=$BUILD_TAGS
+
 # Renterd env args
 ENV RENTERD_API_PASSWORD= 
 ENV RENTERD_SEED=
@@ -48,4 +52,7 @@ VOLUME [ "/data" ]
 
 USER ${PUID}:${PGID}
 
-ENTRYPOINT [ "renterd", "-dir", "./data"]
+# Copy the script and set it as the entrypoint.
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh", "-dir", "./data"]
