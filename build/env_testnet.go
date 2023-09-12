@@ -12,7 +12,7 @@ import (
 const (
 	network = "zen"
 
-	DefaultAPIAddress     = "localhost:9880"
+	DefaultAPIAddress     = ":9880"
 	DefaultGatewayAddress = ":9881"
 )
 
