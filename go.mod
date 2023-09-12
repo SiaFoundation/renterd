@@ -3,12 +3,11 @@ module go.sia.tech/renterd
 go 1.20
 
 require (
-	github.com/Mikubill/gofakes3 v0.0.3-0.20230622102024-284c0f988700
+	github.com/SiaFoundation/gofakes3 v0.0.0-20230912082616-ae483b03686f
 	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.19.0
 	github.com/klauspost/reedsolomon v1.11.8
-	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/minio/minio-go/v7 v7.0.63
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
@@ -42,7 +41,6 @@ require (
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
-	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.7.1 // indirect
@@ -65,7 +63,6 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.17 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
-	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
