@@ -85,7 +85,8 @@ var (
 		TotalShards: 3,
 	}
 
-	testS3Credentials = credentials.NewStaticV4("foo", "bar", "")
+	testS3Credentials = credentials.NewStaticV4("myaccesskeyidentifier", "mysecret", "")
+	testS3AuthPairs   = map[string]string{"myaccesskeyidentifier": "mysecret"}
 )
 
 // TestCluster is a helper type that allows for easily creating a number of
@@ -313,7 +314,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 
 	// Create S3 API.
 	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{
-		AuthKeyPairs: map[string]string{"foo": "bar"},
+		AuthKeyPairs: testS3AuthPairs,
 	})
 	if err != nil {
 		return nil, err

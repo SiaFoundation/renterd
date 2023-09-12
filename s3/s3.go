@@ -67,7 +67,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 		w:      w,
 		logger: namedLogger,
 	}
-	faker := gofakes3.New(backend,
+	faker, err := gofakes3.New(backend,
 		gofakes3.WithHostBucket(false),
 		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,
@@ -76,7 +76,10 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 		gofakes3.WithoutVersioning(),
 		gofakes3.WithV4Auth(opts.AuthKeyPairs),
 	)
-	return faker.Server(), nil
+	if err != nil {
+		return nil, fmt.Errorf("failed to create s3 server: %w", err)
+	}
+	return faker.Server(), err
 }
 
 // Parsev4AuthKeys parses a list of accessKey-secretKey pairs and returns a map

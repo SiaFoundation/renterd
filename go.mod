@@ -3,7 +3,7 @@ module go.sia.tech/renterd
 go 1.20
 
 require (
-	github.com/SiaFoundation/gofakes3 v0.0.0-20230911090236-968673d3fd9b
+	github.com/SiaFoundation/gofakes3 v0.0.0-20230912082616-ae483b03686f
 	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.19.0
@@ -30,11 +30,11 @@ require (
 	gorm.io/driver/mysql v1.5.1
 	gorm.io/driver/sqlite v1.5.3
 	gorm.io/gorm v1.25.4
+	lukechampine.com/blake3 v1.2.1
 	lukechampine.com/frand v1.4.2
 )
 
 require (
-	github.com/Mikubill/gofakes3 v0.0.3-0.20230622102024-284c0f988700 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/aws/aws-sdk-go v1.44.334 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
@@ -100,6 +100,5 @@ require (
 	google.golang.org/grpc v1.57.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	lukechampine.com/blake3 v1.2.1 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect
 )

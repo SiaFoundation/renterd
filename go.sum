@@ -1,10 +1,9 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/Mikubill/gofakes3 v0.0.3-0.20230622102024-284c0f988700 h1:r3fp2/Ro+0RtpjNY0/wsbN7vRmCW//dXTOZDQTct25Q=
 github.com/Mikubill/gofakes3 v0.0.3-0.20230622102024-284c0f988700/go.mod h1:OSXqXEGUe9CmPiwLMMnVrbXonMf4BeLBkBdLufxxiyY=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
-github.com/SiaFoundation/gofakes3 v0.0.0-20230911090236-968673d3fd9b h1:0UfDJus0ScHuWk683+CgquHtMDRa7htVduNTwSQgV5E=
-github.com/SiaFoundation/gofakes3 v0.0.0-20230911090236-968673d3fd9b/go.mod h1:+Csw7MlmrhhBB3xCIp+R9jgQEHEHYMWYFaySNcpWBkM=
+github.com/SiaFoundation/gofakes3 v0.0.0-20230912082616-ae483b03686f h1:fC8/C81w7etGUTmNaILRqNDnJpUxqaxjhsZ/KcuOsmw=
+github.com/SiaFoundation/gofakes3 v0.0.0-20230912082616-ae483b03686f/go.mod h1:+Csw7MlmrhhBB3xCIp+R9jgQEHEHYMWYFaySNcpWBkM=
 github.com/VividCortex/ewma v1.1.1/go.mod h1:2Tkkvm3sRDVXaiyucHiACn4cqf7DpdyLvmxzcbUokwA=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d/go.mod h1:asat636LX7Bqt5lYEZ27JNDcqxfjdBQuJ/MM4CN/Lzo=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=

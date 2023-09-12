@@ -12,7 +12,6 @@ import (
 	"github.com/SiaFoundation/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/s3"
 	"go.uber.org/zap"
@@ -182,7 +181,7 @@ func TestS3Authentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	s3Handler, err := s3.New(cluster.Bus, cluster.Worker, zap.NewNop().Sugar(), s3.Opts{
-		AuthKeyPairs: map[string]string{"someid": "somekey"},
+		AuthKeyPairs: testS3AuthPairs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +206,7 @@ func TestS3Authentication(t *testing.T) {
 
 	// Create client with credentials and try again..
 	s3Client, err = minio.New(s3Listener.Addr().String(), &minio.Options{
-		Creds: credentials.NewStaticV4("someid", "somekey", ""),
+		Creds: testS3Credentials,
 	})
 	if err != nil {
 		t.Fatal(err)

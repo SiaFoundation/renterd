@@ -73,9 +73,11 @@ func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
 func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
 	if prefix == nil {
 		prefix = &gofakes3.Prefix{}
-	} else if prefix.HasDelimiter && prefix.Delimiter != "/" {
+	}
+	prefix.HasDelimiter = prefix.Delimiter != ""
+	if prefix.HasDelimiter && prefix.Delimiter != "/" {
 		// NOTE: this is a limitation of the current implementation of the bus.
-		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "delimiter must be '/'")
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "delimiter must be '/' but was "+prefix.Delimiter)
 	}
 
 	// Workaround for empty prefix
