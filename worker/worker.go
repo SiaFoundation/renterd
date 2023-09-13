@@ -1141,8 +1141,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// set etag in header response.
 	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
 
-	// handle partial slabs
-	if jc.Check("failed to finish upload", w.finishUpload(jc, bucket, obj, partialSlabData, contracts, up)) != nil {
+	// finish upload
+	if jc.Check("failed to finish upload", w.finishUpload(jc, bucket, obj, true, partialSlabData, contracts, up)) != nil {
 		return
 	}
 }
@@ -1213,8 +1213,12 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	var opts []UploadOption
 
 	// make sure only one of the following is set
-	var disablePreshardingEncryption bool // enabled by default
+	var disablePreshardingEncryption bool
 	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
+		return
+	}
+	if !disablePreshardingEncryption {
+		jc.Error(errors.New("presharding encryption is not yet supported for multipart uploads"), http.StatusNotImplemented)
 		return
 	}
 	if !disablePreshardingEncryption && jc.Request.FormValue("offset") == "" {
@@ -1249,8 +1253,8 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// set etag in header response.
 	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
 
-	// handle partial slabs
-	if jc.Check("failed to finish upload", w.finishUpload(jc, bucket, obj, partialSlabData, contracts, up)) != nil {
+	// finish upload
+	if jc.Check("failed to finish upload", w.finishUpload(jc, bucket, obj, false, partialSlabData, contracts, up)) != nil {
 		return
 	}
 }

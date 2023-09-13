@@ -75,6 +75,10 @@ var (
 	// database.
 	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
 
+	// ErrPartNotFound is returned if the specified part of a multipart upload
+	// wasn't found.
+	ErrPartNotFound = errors.New("multipart upload part not found")
+
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
@@ -498,13 +502,17 @@ type (
 	MultipartAbortResponse struct {
 	}
 	MultipartCompleteRequest struct {
-		Parts []MultipartCompletedPart
+		Bucket   string `json:"bucket"`
+		Path     string `json:"path"`
+		UploadID string `json:"uploadID"`
+		Parts    []MultipartCompletedPart
 	}
 	MultipartCompletedPart struct {
 		PartNumber int    `json:"partNumber"`
 		ETag       string `json:"etag"`
 	}
 	MultipartCompleteResponse struct {
+		ETag string `json:"etag"`
 	}
 	MultipartAddPartRequest struct {
 		Bucket        string                                   `json:"bucket"`
@@ -626,6 +634,6 @@ type AddPartialSlabResponse struct {
 	Slabs []object.PartialSlab `json:"slabs"`
 }
 
-func FormatEtag(etag []byte) string {
-	return fmt.Sprintf("\"%x\"", etag)
+func FormatEtag(etag string) string {
+	return fmt.Sprintf("\"%s\"", etag)
 }

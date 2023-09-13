@@ -969,6 +969,16 @@ func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet
 	return
 }
 
+func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
+	err = c.c.WithContext(ctx).POST("/multipart/complete", api.MultipartCompleteRequest{
+		Bucket:   bucket,
+		Path:     path,
+		UploadID: uploadID,
+		Parts:    parts,
+	}, &resp)
+	return
+}
+
 func (c *Client) ListMultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/listuploads", api.MultipartListUploadsRequest{
 		Bucket:         bucket,

@@ -416,7 +416,8 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 			errors.Is(err, api.ErrBucketExists) ||
 			errors.Is(err, api.ErrBucketNotFound) ||
 			errors.Is(err, api.ErrBucketNotEmpty) ||
-			errors.Is(err, api.ErrContractNotFound) {
+			errors.Is(err, api.ErrContractNotFound) ||
+			errors.Is(err, api.ErrPartNotFound) {
 			return true
 		}
 		return false

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +20,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
-	"lukechampine.com/blake3"
 	"lukechampine.com/frand"
 )
 
@@ -284,29 +284,30 @@ func (mgr *uploadManager) Stop() {
 
 type etagger struct {
 	r io.Reader
-	h *blake3.Hasher
+	h *types.Hasher
 }
 
 func newEtagger(r io.Reader) *etagger {
 	return &etagger{
 		r: r,
-		h: blake3.New(32, nil),
+		h: types.NewHasher(),
 	}
 }
 
 func (e *etagger) Read(p []byte) (int, error) {
 	n, err := e.r.Read(p)
-	if _, wErr := e.h.Write(p[:n]); wErr != nil {
+	if _, wErr := e.h.E.Write(p[:n]); wErr != nil {
 		return 0, wErr
 	}
 	return n, err
 }
 
-func (e *etagger) Etag() []byte {
-	return e.h.Sum(nil)
+func (e *etagger) Etag() string {
+	sum := e.h.Sum()
+	return hex.EncodeToString(sum[:])
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, partialSlab, etag []byte, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, partialSlab []byte, etag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -340,7 +341,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
 	if err != nil {
-		return object.Object{}, nil, nil, err
+		return object.Object{}, nil, "", err
 	}
 	defer finishFn()
 
@@ -362,9 +363,9 @@ loop:
 	for {
 		select {
 		case <-mgr.stopChan:
-			return object.Object{}, nil, nil, errors.New("manager was stopped")
+			return object.Object{}, nil, "", errors.New("manager was stopped")
 		case <-ctx.Done():
-			return object.Object{}, nil, nil, errors.New("upload timed out")
+			return object.Object{}, nil, "", errors.New("upload timed out")
 		case nextSlabChan <- struct{}{}:
 			// read next slab's data
 			data := make([]byte, size)
@@ -382,7 +383,7 @@ loop:
 				}
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
-				return object.Object{}, nil, nil, err
+				return object.Object{}, nil, "", err
 			}
 			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
@@ -398,7 +399,7 @@ loop:
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
-				return object.Object{}, nil, nil, res.err
+				return object.Object{}, nil, "", res.err
 			}
 
 			// collect the response and potentially break out of the loop

@@ -472,5 +472,16 @@ func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) e
 }
 
 func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (versionID gofakes3.VersionID, etag string, err error) {
-	panic("not implemented")
+	var parts []api.MultipartCompletedPart
+	for _, part := range input.Parts {
+		parts = append(parts, api.MultipartCompletedPart{
+			ETag:       part.ETag,
+			PartNumber: part.PartNumber,
+		})
+	}
+	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, object, string(id), parts)
+	if err != nil {
+		return "", "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return "", resp.ETag, nil
 }

@@ -19,6 +19,7 @@ type (
 	dbMultipartUpload struct {
 		Model
 
+		Key      []byte
 		UploadID string            `gorm:"uniqueIndex"`
 		ObjectID string            `gorm:"index"`
 		Parts    []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
@@ -58,6 +59,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		uploadIDEntropy := frand.Entropy256()
 		uploadID = hex.EncodeToString(uploadIDEntropy[:])
 		if err := s.db.Create(&dbMultipartUpload{
+			Key:      []byte(object.NoOpKey.String()), // TODO: set actual key
 			UploadID: uploadID,
 			ObjectID: path,
 		}).Error; err != nil {
@@ -190,9 +192,7 @@ func (s *SQLStore) AbortMultipartUpload(bucket, object string, uploadID string) 
 	panic("not implemented")
 }
 
-var errPartNotFound = errors.New("part not found")
-
-func (s *SQLStore) CompleteMultipartUpload(bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error) {
+func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error) {
 	// Sanity check input parts.
 	if !sort.SliceIsSorted(parts, func(i, j int) bool {
 		return parts[i].PartNumber < parts[j].PartNumber
@@ -204,6 +204,7 @@ func (s *SQLStore) CompleteMultipartUpload(bucket, path string, uploadID string,
 			return api.MultipartCompleteResponse{}, fmt.Errorf("duplicate part number %v", parts[i].PartNumber)
 		}
 	}
+	var etag string
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		// Find multipart upload.
 		var mu dbMultipartUpload
@@ -222,10 +223,10 @@ func (s *SQLStore) CompleteMultipartUpload(bucket, path string, uploadID string,
 			for {
 				if j >= len(mu.Parts) {
 					// ran out of parts in the database
-					return errPartNotFound
+					return api.ErrPartNotFound
 				} else if mu.Parts[j].PartNumber > part.PartNumber {
 					// missing part
-					return errPartNotFound
+					return api.ErrPartNotFound
 				} else if mu.Parts[j].PartNumber == part.PartNumber && mu.Parts[j].Etag == part.ETag {
 					// found a match
 					j++
@@ -241,6 +242,7 @@ func (s *SQLStore) CompleteMultipartUpload(bucket, path string, uploadID string,
 
 		// Fetch all the slices in the right order.
 		var slices []dbSlice
+		h := types.NewHasher()
 		for _, part := range dbParts {
 			var partSlices []dbSlice
 			err = tx.Model(&dbSlice{}).
@@ -252,7 +254,14 @@ func (s *SQLStore) CompleteMultipartUpload(bucket, path string, uploadID string,
 				return fmt.Errorf("failed to fetch slices: %w", err)
 			}
 			slices = append(slices, partSlices...)
+			if _, err = h.E.Write([]byte(part.Etag)); err != nil {
+				return fmt.Errorf("failed to hash etag: %w", err)
+			}
 		}
+
+		// Compute etag.
+		sum := h.Sum()
+		etag = hex.EncodeToString(sum[:])
 
 		// Sort their primary keys to make sure retrieving them later will
 		// respect the part order.
@@ -292,7 +301,9 @@ func (s *SQLStore) CompleteMultipartUpload(bucket, path string, uploadID string,
 		}
 		return nil
 	})
-	return api.MultipartCompleteResponse{}, err
+	return api.MultipartCompleteResponse{
+		ETag: etag,
+	}, err
 }
 
 type sortedSlices []dbSlice

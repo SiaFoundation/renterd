@@ -372,7 +372,7 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// Add 3 parts out of order to make sure the object is reconstructed
 	// correctly.
-	putPart := func(partNum int, data []byte) {
+	putPart := func(partNum int, data []byte) string {
 		t.Helper()
 		part, err := core.PutObjectPart(context.Background(), "multipart", "foo", uploadID, partNum, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
 		if err != nil {
@@ -380,10 +380,11 @@ func TestS3MultipartUploads(t *testing.T) {
 		} else if part.ETag == "" {
 			t.Fatal("expected non-empty ETag")
 		}
+		return part.ETag
 	}
-	putPart(2, []byte("world"))
-	putPart(1, []byte("hello"))
-	putPart(3, []byte("!"))
+	etag2 := putPart(2, []byte("world"))
+	etag1 := putPart(1, []byte("hello"))
+	etag3 := putPart(3, []byte("!"))
 
 	// List parts
 	lop, err := core.ListObjectParts(context.Background(), "multipart", "foo", uploadID, 0, 0)
@@ -399,7 +400,26 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal("unexpected part:", part3)
 	}
 
-	// TODO: complete upload
+	// Complete upload
+	ui, err := core.CompleteMultipartUpload(context.Background(), "multipart", "foo", uploadID, []minio.CompletePart{
+		{
+			PartNumber: 1,
+			ETag:       etag1,
+		},
+		{
+			PartNumber: 2,
+			ETag:       etag2,
+		},
+		{
+			PartNumber: 3,
+			ETag:       etag3,
+		},
+	}, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if ui.Bucket != "multipart" || ui.Key != "foo" || ui.ETag == "" {
+		t.Fatal("unexpected response:", ui)
+	}
 
 	// TODO: download object
 }
