@@ -421,5 +421,13 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal("unexpected response:", ui)
 	}
 
-	// TODO: download object
+	// Download object
+	downloadedObj, err := s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if data, err := io.ReadAll(downloadedObj); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, []byte("helloworld!")) {
+		t.Fatal("unexpected data:", string(data))
+	}
 }

@@ -388,7 +388,7 @@ func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[st
 }
 
 func (s *s3) CreateMultipartUpload(bucket, object string, meta map[string]string) (gofakes3.UploadID, error) {
-	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, object)
+	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+object)
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -420,7 +420,7 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 	var uploads []gofakes3.ListMultipartUploadItem
 	for _, upload := range resp.Uploads {
 		uploads = append(uploads, gofakes3.ListMultipartUploadItem{
-			Key:       upload.Path,
+			Key:       upload.Path[1:],
 			UploadID:  gofakes3.UploadID(upload.UploadID),
 			Initiated: gofakes3.NewContentTime(upload.CreatedAt),
 		})
@@ -441,7 +441,7 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 }
 
 func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker int, limit int64) (*gofakes3.ListMultipartUploadPartsResult, error) {
-	resp, err := s.b.ListMultipartUploadParts(context.Background(), bucket, object, string(uploadID), marker, limit)
+	resp, err := s.b.ListMultipartUploadParts(context.Background(), bucket, "/"+object, string(uploadID), marker, limit)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -479,7 +479,7 @@ func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID
 			PartNumber: part.PartNumber,
 		})
 	}
-	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, object, string(id), parts)
+	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, "/"+object, string(id), parts)
 	if err != nil {
 		return "", "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

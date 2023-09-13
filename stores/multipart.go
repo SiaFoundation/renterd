@@ -19,10 +19,12 @@ type (
 	dbMultipartUpload struct {
 		Model
 
-		Key      []byte
-		UploadID string            `gorm:"uniqueIndex"`
-		ObjectID string            `gorm:"index"`
-		Parts    []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
+		Key        []byte
+		UploadID   string `gorm:"uniqueIndex"`
+		ObjectID   string `gorm:"index"`
+		DBBucket   dbBucket
+		DBBucketID uint              `gorm:"index;NOT NULL"`
+		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
 	}
 
 	dbMultipartPart struct {
@@ -59,9 +61,10 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		uploadIDEntropy := frand.Entropy256()
 		uploadID = hex.EncodeToString(uploadIDEntropy[:])
 		if err := s.db.Create(&dbMultipartUpload{
-			Key:      []byte(object.NoOpKey.String()), // TODO: set actual key
-			UploadID: uploadID,
-			ObjectID: path,
+			DBBucketID: bucketID,
+			Key:        []byte(object.NoOpKey.String()), // TODO: set actual key
+			UploadID:   uploadID,
+			ObjectID:   path,
 		}).Error; err != nil {
 			return fmt.Errorf("failed to create multipart upload: %w", err)
 		}
@@ -161,7 +164,9 @@ func (s *SQLStore) ListMultipartUploadParts(ctx context.Context, bucket, object 
 	err := s.retryTransaction(func(tx *gorm.DB) error {
 		var dbParts []dbMultipartPart
 		err := tx.
-			Where("part_number > ?", marker).
+			Joins("INNER JOIN multipart_uploads mus ON mus.id = multipart_parts.db_multipart_upload_id").
+			Joins("INNER JOIN buckets b ON b.name = ? AND b.id = mus.db_bucket_id", bucket).
+			Where("mus.object_id = ? AND mus.upload_id = ? AND part_number > ?", object, uploadID, marker).
 			Order("part_number ASC").
 			Limit(int(limit)).
 			Find(&dbParts).
@@ -208,13 +213,27 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		// Find multipart upload.
 		var mu dbMultipartUpload
-		err = tx.Where("upload_id", uploadID).
+		err = tx.Where("upload_id = ?", uploadID).
 			Preload("Parts").
+			Joins("DBBucket").
 			Take(&mu).
 			Error
 		if err != nil {
 			return fmt.Errorf("failed to fetch multipart upload: %w", err)
 		}
+		// Check object id.
+		if mu.ObjectID != path {
+			return fmt.Errorf("object id mismatch: %v != %v: %w", mu.ObjectID, path, api.ErrObjectNotFound)
+		}
+
+		// Check bucket name.
+		if mu.DBBucket.Name != bucket {
+			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
+		}
+		// Sort the parts.
+		sort.Slice(mu.Parts, func(i, j int) bool {
+			return mu.Parts[i].PartNumber < mu.Parts[j].PartNumber
+		})
 		// Find relevant parts.
 		var dbParts []dbMultipartPart
 		var size uint64
@@ -229,9 +248,9 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 					return api.ErrPartNotFound
 				} else if mu.Parts[j].PartNumber == part.PartNumber && mu.Parts[j].Etag == part.ETag {
 					// found a match
-					j++
 					dbParts = append(dbParts, mu.Parts[j])
 					size += mu.Parts[j].Size
+					j++
 					break
 				} else {
 					// try next
@@ -246,8 +265,8 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		for _, part := range dbParts {
 			var partSlices []dbSlice
 			err = tx.Model(&dbSlice{}).
-				Joins("INNER JOIN multipart_uploads mus ON mus.id = slices.db_multipart_upload_id AND mus.id", mu.ID).
-				Joins("INNER JOIN multipart_parts mp ON mus.id = mp.db_multipart_upload_id AND mp.id = ?", part.ID).
+				Joins("INNER JOIN multipart_parts mp ON mp.id = slices.db_multipart_part_id AND mp.id = ?", part.ID).
+				Joins("INNER JOIN multipart_uploads mus ON mus.id = mp.db_multipart_upload_id").
 				Find(&partSlices).
 				Error
 			if err != nil {
@@ -276,9 +295,10 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 
 		// Create the object.
 		obj := dbObject{
-			ObjectID: path,
-			Key:      key,
-			Size:     int64(size),
+			DBBucketID: mu.DBBucketID,
+			ObjectID:   path,
+			Key:        key,
+			Size:       int64(size),
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
