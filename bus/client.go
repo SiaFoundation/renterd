@@ -980,6 +980,17 @@ func (c *Client) ListMultipartUploads(ctx context.Context, bucket, prefix, keyMa
 	return
 }
 
+func (c *Client) ListMultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, err error) {
+	err = c.c.WithContext(ctx).POST("/multipart/listparts", api.MultipartListPartsRequest{
+		Bucket:           bucket,
+		Path:             object,
+		UploadID:         uploadID,
+		PartNumberMarker: marker,
+		Limit:            limit,
+	}, &resp)
+	return
+}
+
 // NewClient returns a client that communicates with a renterd store server
 // listening on the specified address.
 func NewClient(addr, password string) *Client {

@@ -396,7 +396,7 @@ func (s *s3) CreateMultipartUpload(bucket, object string, meta map[string]string
 }
 
 func (s *s3) UploadPart(bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (etag string, err error) {
-	etag, err = s.w.UploadPart(context.Background(), input, object, string(id), partNumber, api.UploadWithDisabledPreshardingEncryption())
+	etag, err = s.w.UploadMultipartUploadPart(context.Background(), input, object, string(id), partNumber, api.UploadWithDisabledPreshardingEncryption())
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -441,7 +441,30 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 }
 
 func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker int, limit int64) (*gofakes3.ListMultipartUploadPartsResult, error) {
-	panic("not implemented")
+	resp, err := s.b.ListMultipartUploadParts(context.Background(), bucket, object, string(uploadID), marker, limit)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	var parts []gofakes3.ListMultipartUploadPartItem
+	for _, part := range resp.Parts {
+		parts = append(parts, gofakes3.ListMultipartUploadPartItem{
+			PartNumber:   part.PartNumber,
+			LastModified: gofakes3.NewContentTime(part.LastModified),
+			ETag:         part.ETag,
+			Size:         part.Size,
+		})
+	}
+
+	return &gofakes3.ListMultipartUploadPartsResult{
+		Bucket:               bucket,
+		Key:                  object,
+		UploadID:             uploadID,
+		PartNumberMarker:     marker,
+		NextPartNumberMarker: resp.NextMarker,
+		MaxParts:             limit,
+		IsTruncated:          resp.IsTruncated,
+		Parts:                parts,
+	}, nil
 }
 
 func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) error {

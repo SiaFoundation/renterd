@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -123,6 +124,7 @@ type (
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 		CreateMultipartUpload(ctx context.Context, bucket, path string) (api.MultipartCreateResponse, error)
 		ListMultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
+		ListMultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
@@ -1826,6 +1828,21 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
+	if req.Bucket == "" {
+		req.Bucket = api.DefaultBucketName
+	} else if req.ContractSet == "" {
+		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	} else if req.Etag == "" {
+		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
+		return
+	} else if req.PartNumber <= 0 || req.PartNumber > gofakes3.MaxUploadPartNumber {
+		jc.Error(fmt.Errorf("part_number must be between 1 and %d", gofakes3.MaxUploadPartNumber), http.StatusBadRequest)
+		return
+	} else if req.UploadID == "" {
+		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
+		return
+	}
 	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.Etag, req.UsedContracts)
 	if jc.Check("failed to upload part", err) != nil {
 		return
@@ -1849,7 +1866,11 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	panic("not implemented")
+	resp, err := b.ms.ListMultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
+	if jc.Check("failed to list multipart upload parts", err) != nil {
+		return
+	}
+	jc.Encode(resp)
 }
 
 // Handler returns an HTTP handler that serves the bus API.

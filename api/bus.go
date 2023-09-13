@@ -498,6 +498,11 @@ type (
 	MultipartAbortResponse struct {
 	}
 	MultipartCompleteRequest struct {
+		Parts []MultipartCompletedPart
+	}
+	MultipartCompletedPart struct {
+		PartNumber int    `json:"partNumber"`
+		ETag       string `json:"etag"`
 	}
 	MultipartCompleteResponse struct {
 	}
@@ -513,23 +518,37 @@ type (
 		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 	}
 	MultipartListUploadsRequest struct {
-		Bucket         string
-		Prefix         string
-		KeyMarker      string
-		UploadIDMarker string
-		Limit          int
+		Bucket         string `json:"bucket"`
+		Prefix         string `json:"prefix"`
+		KeyMarker      string `json:"keyMarker"`
+		UploadIDMarker string `json:"uploadIDMarker"`
+		Limit          int    `json:"limit"`
 	}
 	MultipartListUploadsResponse struct {
 		Uploads []MultipartListUploadItem `json:"uploads"`
 	}
 	MultipartListUploadItem struct {
-		Path      string    `json:"objectName"`
+		Path      string    `json:"path"`
 		UploadID  string    `json:"uploadID"`
 		CreatedAt time.Time `json:"createdAt"`
 	}
 	MultipartListPartsRequest struct {
+		Bucket           string `json:"bucket"`
+		Path             string `json:"path"`
+		UploadID         string `json:"uploadID"`
+		PartNumberMarker int    `json:"partNumberMarker"`
+		Limit            int64  `json:"limit"`
 	}
 	MultipartListPartsResponse struct {
+		IsTruncated bool                    `json:"isTruncated"`
+		NextMarker  int                     `json:"nextMarker"`
+		Parts       []MultipartListPartItem `json:"parts"`
+	}
+	MultipartListPartItem struct {
+		PartNumber   int       `json:"partNumber"`
+		LastModified time.Time `json:"lastModified"`
+		ETag         string    `json:"etag"`
+		Size         int64     `json:"size"`
 	}
 )
 

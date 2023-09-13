@@ -324,6 +324,14 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Enable upload packing to speed up test.
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// add hosts
 	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
 		t.Fatal(err)
@@ -362,15 +370,34 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal("unexpected upload:", upload.UploadID, upload.Key)
 	}
 
-	// Add a part.
-	part, err := core.PutObjectPart(context.Background(), "multipart", "foo", uploadID, 1, bytes.NewReader([]byte("hello")), 5, minio.PutObjectPartOptions{})
+	// Add 3 parts out of order to make sure the object is reconstructed
+	// correctly.
+	putPart := func(partNum int, data []byte) {
+		t.Helper()
+		part, err := core.PutObjectPart(context.Background(), "multipart", "foo", uploadID, partNum, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+		if err != nil {
+			t.Fatal(err)
+		} else if part.ETag == "" {
+			t.Fatal("expected non-empty ETag")
+		}
+	}
+	putPart(2, []byte("world"))
+	putPart(1, []byte("hello"))
+	putPart(3, []byte("!"))
+
+	// List parts
+	lop, err := core.ListObjectParts(context.Background(), "multipart", "foo", uploadID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
-	} else if part.ETag == "" {
-		t.Fatal("expected non-empty ETag")
+	} else if lop.Bucket != "multipart" || lop.Key != "foo" || lop.UploadID != uploadID || len(lop.ObjectParts) != 3 {
+		t.Fatal("unexpected response:", lop)
+	} else if part1 := lop.ObjectParts[0]; part1.PartNumber != 1 || part1.Size != 5 || part1.ETag == "" {
+		t.Fatal("unexpected part:", part1)
+	} else if part2 := lop.ObjectParts[1]; part2.PartNumber != 2 || part2.Size != 5 || part2.ETag == "" {
+		t.Fatal("unexpected part:", part2)
+	} else if part3 := lop.ObjectParts[2]; part3.PartNumber != 3 || part3.Size != 1 || part3.ETag == "" {
+		t.Fatal("unexpected part:", part3)
 	}
-
-	// TODO: list parts
 
 	// TODO: complete upload
 

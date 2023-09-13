@@ -213,8 +213,8 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
-// UploadPart uploads part of the data for a multipart upload.
-func (c *Client) UploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error) {
+// UploadMultipartUploadPart uploads part of the data for a multipart upload.
+func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error) {
 	path = strings.TrimPrefix(path, "/")
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
@@ -363,44 +363,6 @@ func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err
 	values.Set("batch", fmt.Sprint(batch))
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
-}
-
-func (c *Client) UploadMultipartPart(ctx context.Context, bucket, path, uploadID string, partNumber int,
-	data io.Reader, size int64) (err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	values.Set("uploadID", uploadID)
-	values.Set("partNumber", fmt.Sprint(partNumber))
-
-	u, err := url.Parse(fmt.Sprintf("%v/multipart/create/%s", c.c.BaseURL, path))
-	if err != nil {
-		panic(err)
-	}
-	u.RawQuery = values.Encode()
-	req, err := http.NewRequestWithContext(ctx, "POST", u.String(), data)
-	if err != nil {
-		panic(err)
-	}
-
-	// Set headers.
-	req.Header.Set("Content-Length", fmt.Sprint(size))
-	req.Header.Set("Content-Type", "octet/stream")
-	if c.c.Password != "" {
-		req.SetBasicAuth("", c.c.Password)
-	}
-
-	// Send request.
-	r, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer io.Copy(io.Discard, r.Body)
-	defer r.Body.Close()
-	if !(200 <= r.StatusCode && r.StatusCode < 300) {
-		err, _ := io.ReadAll(r.Body)
-		return errors.New(string(err))
-	}
-	return nil
 }
 
 // Contracts returns all contracts from the worker. These contracts decorate a
