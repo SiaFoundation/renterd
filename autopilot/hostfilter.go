@@ -307,7 +307,7 @@ func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceT
 // our expectation using the host settings.
 func isBelowCollateralThreshold(expectedCollateral, actualCollateral types.Currency) bool {
 	if expectedCollateral.IsZero() {
-		return true // protect against division-by-zero
+		return false // protect against division-by-zero
 	}
 	collateral := big.NewRat(0, 1).SetFrac(actualCollateral.Big(), expectedCollateral.Big())
 	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
