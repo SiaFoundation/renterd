@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -111,6 +112,7 @@ type (
 	contractInfo struct {
 		contract    api.Contract
 		settings    rhpv2.HostSettings
+		priceTable  rhpv3.HostPriceTable
 		usable      bool
 		recoverable bool
 	}
@@ -728,7 +730,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// decide whether the contract is still good
-		ci := contractInfo{contract: contract, settings: host.Settings}
+		ci := contractInfo{contract: contract, priceTable: host.PriceTable.HostPriceTable, settings: host.Settings}
 		renterFunds, err := c.renewFundingEstimate(ctx, ci, state.fee, false)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
@@ -1359,7 +1361,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	}
 
 	// calculate the host collateral
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, settings)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.settings, ci.priceTable)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
 	// renew the contract
@@ -1435,7 +1437,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	}
 
 	// calculate the new collateral
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, settings)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.settings, ci.priceTable)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, contract.EndHeight())
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
@@ -1518,7 +1520,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 
 	// calculate the host collateral
 	endHeight := endHeight(state.cfg, state.period)
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.Settings)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.Settings, scan.PriceTable)
 	hostCollateral := rhpv2.ContractFormationCollateral(state.cfg.Contracts.Period, expectedStorage, scan.Settings)
 
 	// form contract
@@ -1612,16 +1614,16 @@ func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 
 // renterFundsToExpectedStorage returns how much storage a renter is expected to
 // be able to afford given the provided 'renterFunds'.
-func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, host rhpv2.HostSettings) uint64 {
-	costPerByte := host.UploadBandwidthPrice.Add(host.StoragePrice.Mul64(duration)).Add(host.DownloadBandwidthPrice)
-	// If storage is free, we can afford 'unlimited' data.
-	if costPerByte.IsZero() {
-		return math.MaxUint64
+func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable) uint64 {
+	costPerSector := sectorUploadCost(pt, duration)
+	// Handle free storage.
+	if costPerSector.IsZero() {
+		costPerSector = types.NewCurrency64(1)
 	}
 	// Catch overflow.
-	expectedStorage := renterFunds.Div(costPerByte)
+	expectedStorage := renterFunds.Div(costPerSector).Mul64(rhpv2.SectorSize)
 	if expectedStorage.Cmp(types.NewCurrency64(math.MaxUint64)) > 0 {
-		return math.MaxUint64
+		expectedStorage = types.NewCurrency64(math.MaxUint64)
 	}
 	return expectedStorage.Big().Uint64()
 }

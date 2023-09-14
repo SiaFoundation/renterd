@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -222,7 +223,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 // - refresh -> should be refreshed
 // - renew -> should be renewed
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
-	c, s := ci.contract, ci.settings
+	c, s, pt := ci.contract, ci.settings, ci.priceTable
 
 	usable = true
 	if bh > c.EndHeight() {
@@ -238,7 +239,7 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		refresh = false
 		renew = false
 	} else {
-		if isOutOfCollateral(c, s, renterFunds, bh) {
+		if isOutOfCollateral(c, s, pt, renterFunds, bh) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = false
 			recoverable = true
@@ -287,8 +288,14 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract)
 // isOutOfCollateral returns 'true' if the remaining/unallocated collateral in
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
-func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, renterFunds types.Currency, blockHeight uint64) bool {
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, c.EndHeight()-blockHeight, s)
+func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, renterFunds types.Currency, blockHeight uint64) bool {
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, c.EndHeight()-blockHeight, s, pt)
+	// Cap the expected storage at the remaining storage of the host. If the
+	// host doesn't have any storage left, there is no point in adding
+	// collateral.
+	if expectedStorage > s.RemainingStorage {
+		expectedStorage = s.RemainingStorage
+	}
 	expectedCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, s, blockHeight, c.EndHeight())
 	return isBelowCollateralThreshold(expectedCollateral, c.RemainingCollateral(s))
 }

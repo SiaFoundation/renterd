@@ -396,9 +396,10 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	// TODO: record metric
 
 	jc.Encode(api.RHPScanResponse{
-		Ping:      api.ParamDuration(elapsed),
-		ScanError: errStr,
-		Settings:  settings,
+		Ping:       api.ParamDuration(elapsed),
+		PriceTable: priceTable,
+		ScanError:  errStr,
+		Settings:   settings,
 	})
 }
 

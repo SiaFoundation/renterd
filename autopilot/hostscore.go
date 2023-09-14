@@ -6,6 +6,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -292,9 +293,14 @@ func bytesToSectors(bytes uint64) uint64 {
 	return numSectors
 }
 
-func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
-	asc := h.PriceTable.BaseCost().Add(h.PriceTable.AppendSectorCost(cfg.Contracts.Period))
+func sectorUploadCost(pt rhpv3.HostPriceTable, duration uint64) types.Currency {
+	asc := pt.BaseCost().Add(pt.AppendSectorCost(duration))
 	uploadSectorCostRHPv3, _ := asc.Total()
+	return uploadSectorCostRHPv3
+}
+
+func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+	uploadSectorCostRHPv3 := sectorUploadCost(h.PriceTable.HostPriceTable, cfg.Contracts.Period)
 	numSectors := bytesToSectors(bytes)
 	return uploadSectorCostRHPv3.Mul64(numSectors)
 }
