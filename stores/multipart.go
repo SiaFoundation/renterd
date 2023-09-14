@@ -20,8 +20,8 @@ type (
 		Model
 
 		Key        []byte
-		UploadID   string `gorm:"uniqueIndex"`
-		ObjectID   string `gorm:"index"`
+		UploadID   string `gorm:"uniqueIndex;NOT NULL;size:32"`
+		ObjectID   string `gorm:"index;NOT NULL"`
 		DBBucket   dbBucket
 		DBBucketID uint              `gorm:"index;NOT NULL"`
 		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
