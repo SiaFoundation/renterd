@@ -498,6 +498,9 @@ type (
 		UploadID string `json:"uploadID"`
 	}
 	MultipartAbortRequest struct {
+		Bucket   string `json:"bucket"`
+		Path     string `json:"path"`
+		UploadID string `json:"uploadID"`
 	}
 	MultipartAbortResponse struct {
 	}

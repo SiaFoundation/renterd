@@ -193,7 +193,7 @@ func (s *SQLStore) ListMultipartUploadParts(ctx context.Context, bucket, object 
 	return resp, err
 }
 
-func (s *SQLStore) AbortMultipartUpload(bucket, object string, uploadID string) (api.MultipartAbortResponse, error) {
+func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, object string, uploadID string) (api.MultipartAbortResponse, error) {
 	panic("not implemented")
 }
 

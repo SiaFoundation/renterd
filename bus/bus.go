@@ -121,6 +121,7 @@ type (
 		RenameObject(ctx context.Context, bucket, from, to string) error
 		RenameObjects(ctx context.Context, bucket, from, to string) error
 
+		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (resp api.MultipartAbortResponse, err error)
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 		CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucket, path string) (api.MultipartCreateResponse, error)
@@ -1813,7 +1814,11 @@ func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	panic("not implemented")
+	resp, err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
+	if jc.Check("failed to abort multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
 }
 
 func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
