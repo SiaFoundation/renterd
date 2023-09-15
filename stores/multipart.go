@@ -20,7 +20,7 @@ type (
 		Model
 
 		Key        []byte
-		UploadID   string `gorm:"uniqueIndex;NOT NULL;size:32"`
+		UploadID   string `gorm:"uniqueIndex;NOT NULL;size:64"`
 		ObjectID   string `gorm:"index;NOT NULL"`
 		DBBucket   dbBucket
 		DBBucketID uint              `gorm:"index;NOT NULL"`
