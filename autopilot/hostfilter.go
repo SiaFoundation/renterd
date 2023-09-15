@@ -317,7 +317,11 @@ func isBelowCollateralThreshold(newCollateral, actualCollateral types.Currency) 
 		// refresh wouldn't result in any new unallocated collateral.
 		// 2. the host has no more remaining storage so a refresh would only
 		// lead to unallocated collateral that we can't use.
-		// In both cases we don't want to refresh the contract.
+		// In both cases we don't gain anything from refreshing the contract.
+		// NOTE: This causes us to not immediately consider contracts as bad
+		// even though we can't upload to them anymore. This is fine since the
+		// collateral score or remaining storage score should filter these
+		// contracts out eventually.
 		return false
 	}
 	collateral := big.NewRat(0, 1).SetFrac(actualCollateral.Big(), newCollateral.Big())
