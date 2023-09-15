@@ -267,6 +267,10 @@ func initSchema(tx *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
 	}
 
 	// Add default bucket.
