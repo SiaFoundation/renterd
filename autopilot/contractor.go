@@ -1090,7 +1090,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 
 	// estimate the cost of the current data stored
 	dataStored := ci.contract.FileSize()
-	storageCost := types.NewCurrency64(dataStored).Mul64(state.cfg.Contracts.Period).Mul(ci.settings.StoragePrice)
+	storageCost := sectorStorageCost(ci.priceTable, state.cfg.Contracts.Period).Mul64(bytesToSectors(dataStored))
 
 	// fetch the spending of the contract we want to renew.
 	prevSpending, err := c.contractSpending(ctx, ci.contract, state.period)
@@ -1107,9 +1107,10 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	//
 	// TODO: estimate is not ideal because price can change, better would be to
 	// look at the amount of data stored in the contract from the previous cycle
-	prevUploadDataEstimate := prevSpending.Uploads
-	if !ci.settings.UploadBandwidthPrice.IsZero() {
-		prevUploadDataEstimate = prevUploadDataEstimate.Div(ci.settings.UploadBandwidthPrice)
+	prevUploadDataEstimate := types.NewCurrency64(dataStored) // default to assuming all data was uploaded
+	sectorUploadCost := sectorUploadCost(ci.priceTable, state.cfg.Contracts.Period)
+	if !sectorUploadCost.IsZero() {
+		prevUploadDataEstimate = prevSpending.Uploads.Div(sectorUploadCost).Mul64(rhpv2.SectorSize)
 	}
 	if prevUploadDataEstimate.Cmp(types.NewCurrency64(dataStored)) > 0 {
 		prevUploadDataEstimate = types.NewCurrency64(dataStored)
@@ -1119,7 +1120,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	// - upload cost: previous uploads + prev storage
 	// - download cost: assumed to be the same
 	// - fund acount cost: assumed to be the same
-	newUploadsCost := prevSpending.Uploads.Add(prevUploadDataEstimate.Mul64(state.cfg.Contracts.Period).Mul(ci.settings.StoragePrice))
+	newUploadsCost := prevSpending.Uploads.Add(sectorUploadCost.Mul(prevUploadDataEstimate.Div64(rhpv2.SectorSize)))
 	newDownloadsCost := prevSpending.Downloads
 	newFundAccountCost := prevSpending.FundAccount
 
@@ -1361,7 +1362,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	}
 
 	// calculate the host collateral
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.settings, ci.priceTable)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.priceTable)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
 	// renew the contract
@@ -1437,7 +1438,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	}
 
 	// calculate the new collateral
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.settings, ci.priceTable)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
 	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, contract.EndHeight())
 
 	// do not refresh if the contract's updated collateral will fall below the threshold anyway
@@ -1520,7 +1521,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 
 	// calculate the host collateral
 	endHeight := endHeight(state.cfg, state.period)
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.Settings, scan.PriceTable)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
 	hostCollateral := rhpv2.ContractFormationCollateral(state.cfg.Contracts.Period, expectedStorage, scan.Settings)
 
 	// form contract
@@ -1614,7 +1615,7 @@ func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 
 // renterFundsToExpectedStorage returns how much storage a renter is expected to
 // be able to afford given the provided 'renterFunds'.
-func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable) uint64 {
+func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, pt rhpv3.HostPriceTable) uint64 {
 	costPerSector := sectorUploadCost(pt, duration)
 	// Handle free storage.
 	if costPerSector.IsZero() {
