@@ -32,7 +32,7 @@ type bus interface {
 	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error)
-	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (o api.Object, entries []api.ObjectMetadata, hasMore bool, err error)
+	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
 	SearchObjects(ctx context.Context, bucket, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
 
 	UploadParams(ctx context.Context) (api.UploadParams, error)

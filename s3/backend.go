@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -107,20 +108,20 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	}
 
 	// Fetch all objects of bucket with the given prefix.
-	_, objects, hasMore, err := s.b.Object(context.Background(), path, opts...)
+	res, err := s.b.Object(context.Background(), path, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
 	// Create the list response
 	response := gofakes3.NewObjectList()
-	if hasMore {
+	if res.HasMore {
 		response.IsTruncated = true
-		response.NextMarker = objects[len(objects)-1].Name
+		response.NextMarker = res.Entries[len(res.Entries)-1].Name
 	}
 
 	// Loop over the entries and add them to the response.
-	for _, object := range objects {
+	for _, object := range res.Entries {
 		key := strings.TrimPrefix(object.Name, "/")
 		if strings.HasSuffix(key, "/") {
 			response.AddPrefix(gofakes3.URLEncode(key))
@@ -254,7 +255,10 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	obj, _, _, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName))
+	if strings.HasSuffix(objectName, "/") {
+		return nil, errors.New("object name must not end with '/'")
+	}
+	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	}
@@ -266,7 +270,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 	return &gofakes3.Object{
 		Name:     gofakes3.URLEncode(objectName),
 		Metadata: metadata,
-		Size:     obj.Size,
+		Size:     res.Object.Size,
 		Contents: io.NopCloser(bytes.NewReader(nil)),
 	}, nil
 }

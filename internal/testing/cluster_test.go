@@ -376,24 +376,26 @@ func TestObjectEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		_, got, _, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
+		res, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
-		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+
+		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
+			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			_, got, hasMore, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
+			res, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != 1 || got[0] != test.want[offset] {
-				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+
+			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
+				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
 			}
 			moreRemaining := len(test.want)-offset-1 > 0
-			if hasMore != moreRemaining {
-				t.Errorf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
+			if res.HasMore != moreRemaining {
+				t.Errorf("invalid value for hasMore (%t) at offset (%d) test (%+v)", res.HasMore, offset, test)
 			}
 
 			// make sure we stay within bounds
@@ -401,22 +403,22 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			_, got, hasMore, err = b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithMarker(test.want[offset].Name), api.ObjectsWithLimit(1))
+			res, err = b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithMarker(test.want[offset].Name), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != 1 || got[0] != test.want[offset+1] {
-				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
+			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
+				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
 			}
 
 			moreRemaining = len(test.want)-offset-2 > 0
-			if hasMore != moreRemaining {
-				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
+			if res.HasMore != moreRemaining {
+				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", res.HasMore, test.want[offset].Name, test)
 			}
 		}
 
 		// use the worker client
-		got, err = w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, test.prefix, 0, -1)
+		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, test.prefix, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -736,20 +738,20 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "file" prefix
-	_, entries, _, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
+	res, err := cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
+	if len(res.Entries) != 2 {
 		t.Fatal("expected two entry to be returned", len(entries))
 	}
 
 	// fetch entries with "fileś" prefix
-	_, entries, _, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
+	res, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
+	if len(res.Entries) != 0 {
 		t.Fatal("expected no entries to be returned", len(entries))
 	}
 
@@ -948,12 +950,12 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			_, entries, _, err := cluster.Bus.Object(context.Background(), "")
+			res, err := cluster.Bus.Object(context.Background(), "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			var found bool
-			for _, entry := range entries {
+			for _, entry := range res.Entries {
 				if entry.Name == fmt.Sprintf("/%s", name) {
 					found = true
 					break
@@ -1862,12 +1864,12 @@ func TestUploadPacking(t *testing.T) {
 			t.Fatal(err)
 		}
 		download(name, data, 0, int64(len(data)))
-		obj, _, _, err := b.Object(context.Background(), name)
+		res, err := b.Object(context.Background(), name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if obj.Size != int64(len(data)) {
-			t.Fatal("unexpected size after upload", obj.Size, len(data))
+		if res.Object.Size != int64(len(data)) {
+			t.Fatal("unexpected size after upload", res.Object.Size, len(data))
 		}
 		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1)
 		if err != nil {
@@ -1952,11 +1954,11 @@ func TestUploadPacking(t *testing.T) {
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.
-	file1, _, _, err := b.Object(context.Background(), "file1")
+	res, err := b.Object(context.Background(), "file1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, file1.Slabs[0].Key)
+	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].Key)
 	if err != nil {
 		t.Fatal(err)
 	}

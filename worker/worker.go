@@ -160,7 +160,7 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.Object, []api.ObjectMetadata, bool, error)
+	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
 	AddObject(ctx context.Context, bucket string, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
@@ -1014,7 +1014,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	path := jc.PathParam("path")
-	obj, entries, _, err := w.bus.Object(ctx, path, opts...)
+	res, err := w.bus.Object(ctx, path, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1024,10 +1024,10 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat)) // TODO: update this when object has a ModTime
 
 	if path == "" || strings.HasSuffix(path, "/") {
-		jc.Encode(entries)
+		jc.Encode(res.Entries)
 		return
 	}
-	if len(obj.Slabs) == 0 && len(obj.PartialSlabs) == 0 {
+	if len(res.Object.Slabs) == 0 && len(res.Object.PartialSlabs) == 0 {
 		return
 	}
 
@@ -1045,19 +1045,19 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// Read call. We can improve on this to some degree by buffering, but
 	// without knowing the exact ranges being requested, this will always be
 	// suboptimal. Thus, sadly, we have to roll our own range support.
-	ranges, err := http_range.ParseRange(jc.Request.Header.Get("Range"), obj.Size)
+	ranges, err := http_range.ParseRange(jc.Request.Header.Get("Range"), res.Object.Size)
 	if err != nil {
 		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
 	var offset int64
-	length := obj.Size
+	length := res.Object.Size
 	status := http.StatusOK
 	if len(ranges) > 0 {
 		status = http.StatusPartialContent
-		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(obj.Size))
+		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(res.Object.Size))
 		offset, length = ranges[0].Start, ranges[0].Length
-		if offset < 0 || length < 0 || offset+length > obj.Size {
+		if offset < 0 || length < 0 || offset+length > res.Object.Size {
 			jc.Error(fmt.Errorf("invalid range: %v %v", offset, length), http.StatusRequestedRangeNotSatisfiable)
 			return
 		}
@@ -1079,7 +1079,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// download the object
-	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, obj.Object, uint64(offset), uint64(length), contracts)) != nil {
+	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, res.Object.Object, uint64(offset), uint64(length), contracts)) != nil {
 		return
 	}
 }
