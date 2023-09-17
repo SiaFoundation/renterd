@@ -401,7 +401,7 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			_, got, hasMore, err = b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithMarker(test.want[offset].Name), api.ObjectsWithMaxKeys(1))
+			_, got, hasMore, err = b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithMarker(test.want[offset].Name), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
 			}

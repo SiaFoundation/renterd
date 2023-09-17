@@ -1004,10 +1004,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	maxKeys := -1
-	if jc.DecodeForm("maxKeys", &maxKeys) != nil {
-		return
-	}
 
 	opts := []api.ObjectsOption{
 		api.ObjectsWithBucket(bucket),
@@ -1015,7 +1011,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		api.ObjectsWithMarker(marker),
 		api.ObjectsWithOffset(off),
 		api.ObjectsWithLimit(limit),
-		api.ObjectsWithMaxKeys(maxKeys),
 	}
 
 	path := jc.PathParam("path")

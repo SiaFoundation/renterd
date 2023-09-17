@@ -110,7 +110,7 @@ type (
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 
 		Object(ctx context.Context, bucket, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit, maxKeys int) ([]api.ObjectMetadata, bool, error)
+		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
@@ -982,13 +982,9 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	maxKeys := -1
-	if jc.DecodeForm("maxKeys", &maxKeys) != nil {
-		return
-	}
 
 	// look for object entries
-	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, marker, offset, limit, maxKeys)
+	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, marker, offset, limit)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}

@@ -923,10 +923,10 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return objects, nil
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit, maxKeys int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
+func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
 	// convenience variables
 	usingMarker := marker != ""
-	usingOffsetLimit := offset > 0 || limit > -1
+	usingOffset := offset > 0
 
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -934,11 +934,8 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 	}
 
 	// sanity check we are passing sane paging parameters
-	if usingMarker && usingOffsetLimit {
-		return nil, false, errors.New("fetching entries using a marker uses the maxKeys for limiting the number of entries returned, offset and limit are thus not allowed and must be set to their defaults which are 0 and -1 respectively")
-	}
-	if !usingMarker && maxKeys > -1 {
-		return nil, false, fmt.Errorf("fetching entries using maxKeys (%d) requires passing a marker", maxKeys)
+	if usingMarker && usingOffset {
+		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
 	}
 
 	// ensure marker is '/' prefixed
@@ -950,9 +947,6 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
-	if maxKeys <= -1 {
-		maxKeys = math.MaxInt
-	}
 
 	// figure out the HAVING CLAUSE and its parameters
 	havingClause := "1 = 1"
@@ -961,8 +955,7 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		havingClause = "name > ?"
 		havingParams = append(havingParams, marker)
 
-		offset = 0      // disable offset
-		limit = maxKeys // limit by max keys
+		offset = 0 // disable offset
 	}
 
 	// fetch one more to see if there are more entries

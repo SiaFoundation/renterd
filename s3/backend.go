@@ -17,6 +17,7 @@ import (
 	"lukechampine.com/frand"
 )
 
+// maxKeysDefault is the default maxKeys value used in the AWS SDK
 const maxKeysDefault = 1000
 
 type s3 struct {
@@ -102,7 +103,7 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	}
 	if page.HasMarker {
 		opts = append(opts, api.ObjectsWithMarker(page.Marker))
-		opts = append(opts, api.ObjectsWithMaxKeys(int(page.MaxKeys)))
+		opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
 	}
 
 	// Fetch all objects of bucket with the given prefix.
