@@ -1070,24 +1070,31 @@ func pruneSlabs(tx *gorm.DB) error {
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {
-	fcids := make([]fileContractID, 0, len(usedContracts))
-	hostForFCID := make(map[types.FileContractID]types.PublicKey, len(usedContracts))
-	for hk, fcid := range usedContracts {
+	// build fcids
+	var fcids []fileContractID
+	for _, fcid := range usedContracts {
 		fcids = append(fcids, fileContractID(fcid))
-		hostForFCID[fcid] = hk
 	}
+
+	// fetch all contracts
 	var contracts []dbContract
-	err := tx.Model(&dbContract{}).
-		Where("fcid IN (?)", fcids).
-		Find(&contracts).Error
-	if err != nil {
+	if err := tx.Model(&dbContract{}).
+		Where("fcid IN (?) OR renewed_from IN (?)", fcids).
+		Preload("Host").
+		Find(&contracts).Error; err != nil {
 		return nil, err
 	}
-	fetchedContracts := make(map[types.PublicKey]dbContract, len(contracts))
+
+	// build a host to contract map
+	h2c := make(map[types.PublicKey]dbContract, len(contracts))
 	for _, c := range contracts {
-		fetchedContracts[hostForFCID[types.FileContractID(c.FCID)]] = c
+		_, exists := usedContracts[types.PublicKey(c.Host.PublicKey)]
+		if exists {
+			h2c[types.PublicKey(c.Host.PublicKey)] = c
+		}
 	}
-	return fetchedContracts, nil
+
+	return h2c, nil
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string) error {
