@@ -72,9 +72,10 @@ type RHPPriceTableRequest struct {
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
-	Ping      ParamDuration      `json:"ping"`
-	ScanError string             `json:"scanError,omitempty"`
-	Settings  rhpv2.HostSettings `json:"settings,omitempty"`
+	Ping       ParamDuration        `json:"ping"`
+	ScanError  string               `json:"scanError,omitempty"`
+	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 }
 
 // RHPFormRequest is the request type for the /rhp/form endpoint.
@@ -259,7 +260,7 @@ type ObjectsOption func(url.Values)
 
 func ObjectsWithPrefix(prefix string) ObjectsOption {
 	return func(v url.Values) {
-		v.Set("prefix", url.QueryEscape(prefix))
+		v.Set("prefix", prefix)
 	}
 }
 
@@ -278,5 +279,11 @@ func ObjectsWithLimit(limit int) ObjectsOption {
 func ObjectsWithBucket(bucket string) ObjectsOption {
 	return func(v url.Values) {
 		v.Set("bucket", bucket)
+	}
+}
+
+func ObjectsWithMarker(marker string) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("marker", marker)
 	}
 }

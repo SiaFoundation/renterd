@@ -14,6 +14,7 @@ const (
 
 	DefaultAPIAddress     = "localhost:9880"
 	DefaultGatewayAddress = ":9881"
+	DefaultS3Address      = "localhost:7070"
 )
 
 var (

@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"math"
 	"mime"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +17,9 @@ import (
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+// maxKeysDefault is the default maxKeys value used in the AWS SDK
+const maxKeysDefault = 1000
 
 var (
 	_ gofakes3.Backend          = (*s3)(nil)
@@ -70,7 +72,14 @@ func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
 //
 // TODO: This implementation is not ideal because it fetches all objects. We
 // will eventually want to support this type of pagination in the bus.
-func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
+func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
+	exists, err := s.BucketExists(bucketName)
+	if err != nil {
+		return nil, err
+	} else if !exists {
+		return nil, gofakes3.BucketNotFound(bucketName)
+	}
+
 	if prefix == nil {
 		prefix = &gofakes3.Prefix{}
 	}
@@ -84,101 +93,59 @@ func (s *s3) ListBucket(name string, prefix *gofakes3.Prefix, page gofakes3.List
 	prefix.HasPrefix = prefix.Prefix != ""
 
 	// Specify bucket.
-	opts := []api.ObjectsOption{api.ObjectsWithBucket(name)}
+	opts := []api.ObjectsOption{api.ObjectsWithBucket(bucketName)}
 
 	// Handle prefix.
-	path := "" // root of bucket
+	var path string // root of bucket
 	if prefix.HasPrefix {
-		idx := strings.LastIndex(prefix.Prefix, "/")
-		if idx == -1 {
-			// path remains the same and the prefix becomes the prefix
-			opts = append(opts, api.ObjectsWithPrefix("/"+prefix.Prefix))
-		} else {
-			// part of the prefix becomes the path
+		if idx := strings.LastIndex(prefix.Prefix, "/"); idx != -1 {
 			path = prefix.Prefix[:idx+1]
-			opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix[idx+1:]))
+			prefix.Prefix = prefix.Prefix[idx+1:]
 		}
+		opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix))
+	}
+
+	// Handle pagination.
+	if page.MaxKeys == 0 {
+		page.MaxKeys = maxKeysDefault
+	}
+	if page.HasMarker {
+		opts = append(opts, api.ObjectsWithMarker(page.Marker))
+		opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
 	}
 
 	// Fetch all objects of bucket with the given prefix.
-	_, objects, err := s.b.Object(context.Background(), path, opts...)
+	res, err := s.b.Object(context.Background(), path, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
-	// Match objects against prefix. If the object is a common prefix (folder),
-	// add it as a prefix to the response and otherwise as an object.
-	resp := gofakes3.NewObjectList()
-	for _, object := range objects {
-		objectKey := object.Name[1:] // trim leading slash
+	// Create the list response
+	response := gofakes3.NewObjectList()
+	if res.HasMore {
+		response.IsTruncated = true
+		response.NextMarker = res.Entries[len(res.Entries)-1].Name
+	}
 
-		if strings.HasSuffix(objectKey, "/") {
-			resp.AddPrefix(gofakes3.URLEncode(objectKey))
+	// Loop over the entries and add them to the response.
+	for _, object := range res.Entries {
+		key := strings.TrimPrefix(object.Name, "/")
+		if strings.HasSuffix(key, "/") {
+			response.AddPrefix(gofakes3.URLEncode(key))
 			continue
 		}
 
 		item := &gofakes3.Content{
-			Key:          gofakes3.URLEncode(objectKey),
+			Key:          gofakes3.URLEncode(key),
 			LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
 			ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
 			Size:         object.Size,
 			StorageClass: gofakes3.StorageStandard,
 		}
-		resp.Add(item)
+		response.Add(item)
 	}
 
-	// Sort by alphabet.
-	sort.Slice(resp.CommonPrefixes, func(i, j int) bool {
-		return resp.CommonPrefixes[i].Prefix < resp.CommonPrefixes[j].Prefix
-	})
-
-	// Apply pagination.
-	if page.MaxKeys == 0 {
-		page.MaxKeys = math.MaxInt64 // no limit specified
-	}
-	if page.HasMarker {
-		// If there is a marker, remove all objects up until and including the
-		// marker.
-		for i, obj := range resp.Contents {
-			if obj.Key == page.Marker {
-				resp.Contents = resp.Contents[i+1:]
-				break
-			}
-		}
-		for i, obj := range resp.CommonPrefixes {
-			if obj.Prefix == page.Marker {
-				resp.CommonPrefixes = resp.CommonPrefixes[i+1:]
-				break
-			}
-		}
-	}
-
-	response := gofakes3.NewObjectList()
-	for _, obj := range resp.CommonPrefixes {
-		if page.MaxKeys <= 0 {
-			break
-		}
-		response.AddPrefix(obj.Prefix)
-		page.MaxKeys--
-	}
-
-	for _, obj := range resp.Contents {
-		if page.MaxKeys <= 0 {
-			break
-		}
-		response.Add(obj)
-		page.MaxKeys--
-	}
-
-	if len(resp.CommonPrefixes)+len(resp.Contents) > int(page.MaxKeys) {
-		response.IsTruncated = true
-		if len(response.Contents) > 0 {
-			response.NextMarker = response.Contents[len(response.Contents)-1].Key
-		} else {
-			response.NextMarker = response.CommonPrefixes[len(response.CommonPrefixes)-1].Prefix
-		}
-	}
-	return resp, nil
+	return response, nil
 }
 
 // CreateBucket creates the bucket if it does not already exist. The name
@@ -295,7 +262,10 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	obj, _, err := s.b.Object(context.Background(), "/"+objectName, api.ObjectsWithBucket(bucketName))
+	if strings.HasSuffix(objectName, "/") {
+		return nil, errors.New("object name must not end with '/'")
+	}
+	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	}
@@ -307,7 +277,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 	return &gofakes3.Object{
 		Name:     gofakes3.URLEncode(objectName),
 		Metadata: metadata,
-		Size:     obj.Size,
+		Size:     res.Object.Size,
 		Contents: io.NopCloser(bytes.NewReader(nil)),
 	}, nil
 }
@@ -328,7 +298,14 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(context.Background(), bucketName, "/"+objectName, false)
+	exists, err := s.BucketExists(bucketName)
+	if err != nil {
+		return gofakes3.ObjectDeleteResult{}, err
+	} else if !exists {
+		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
+	}
+
+	err = s.b.DeleteObject(context.Background(), bucketName, objectName, false)
 	if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

@@ -78,6 +78,7 @@ type (
 	}
 
 	S3 struct {
+		Address     string            `yaml:"address"`
 		DisableAuth bool              `yaml:"disableAuth"`
 		Enabled     bool              `yaml:"enabled"`
 		KeypairsV4  map[string]string `yaml:"keypairsV4"`
