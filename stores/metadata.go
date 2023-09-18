@@ -615,6 +615,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		// Overwrite the old contract with the new one.
 		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
 		newContract.Model = oldContract.Model
+		newContract.CreatedAt = time.Now()
 		err = tx.Save(&newContract).Error
 		if err != nil {
 			return err
@@ -1179,7 +1180,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet s
 			// Verify that all hosts have a contract.
 			_, exists := usedContracts[shard.Host]
 			if !exists {
-				return fmt.Errorf("missing contract for host %v", shard.Host)
+				return fmt.Errorf("missing contract for host %v: %w", shard.Host, api.ErrContractNotFound)
 			}
 		}
 	}
@@ -1676,7 +1677,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			return err
 		}
 		for _, slab := range slabs {
-			fileName, err = markPackedSlabUploaded(tx, slab, contracts)
+			fileName, err = s.markPackedSlabUploaded(tx, slab, contracts)
 			if err != nil {
 				return err
 			}
@@ -1692,7 +1693,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	return nil
 }
 
-func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
+func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
@@ -1724,16 +1725,18 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	// add the shards to the slab
 	var shards []dbSector
 	for i := range slab.Shards {
-		contract, exists := contracts[slab.Shards[i].Host]
-		if !exists {
-			return "", fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
-		}
-		shards = append(shards, dbSector{
+		sector := dbSector{
 			DBSlabID:   sla.ID,
 			LatestHost: publicKey(slab.Shards[i].Host),
 			Root:       slab.Shards[i].Root[:],
-			Contracts:  []dbContract{contract},
-		})
+		}
+		contract, exists := contracts[slab.Shards[i].Host]
+		if !exists {
+			s.logger.Warnw("missing contract for host", "host", slab.Shards[i].Host)
+		} else {
+			sector.Contracts = []dbContract{contract}
+		}
+		shards = append(shards, sector)
 	}
 	return fileName, tx.Create(shards).Error
 }
