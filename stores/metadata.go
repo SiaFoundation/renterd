@@ -1079,7 +1079,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	// fetch all contracts
 	var contracts []dbContract
 	if err := tx.Model(&dbContract{}).
-		Where("fcid IN (?) OR renewed_from IN (?)", fcids).
+		Where("fcid IN (?) OR renewed_from IN (?)", fcids, fcids).
 		Preload("Host").
 		Find(&contracts).Error; err != nil {
 		return nil, err
