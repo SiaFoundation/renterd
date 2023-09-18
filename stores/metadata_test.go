@@ -3449,4 +3449,11 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	var count int64
+	if err := db.db.Model(&dbContractSector{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	} else if count != 1 {
+		t.Fatal("expected 1 sector", count)
+	}
 }

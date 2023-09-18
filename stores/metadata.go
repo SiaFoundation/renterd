@@ -1071,13 +1071,12 @@ func pruneSlabs(tx *gorm.DB) error {
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {
 	fcids := make([]fileContractID, 0, len(usedContracts))
-	hostForFCID := make(map[types.FileContractID]types.PublicKey, len(usedContracts))
-	for hk, fcid := range usedContracts {
+	for _, fcid := range usedContracts {
 		fcids = append(fcids, fileContractID(fcid))
-		hostForFCID[fcid] = hk
 	}
 	var contracts []dbContract
 	err := tx.Model(&dbContract{}).
+		Joins("Host").
 		Where("fcid IN (?) OR renewed_from IN (?)", fcids, fcids).
 		Find(&contracts).Error
 	if err != nil {
@@ -1085,7 +1084,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	}
 	fetchedContracts := make(map[types.PublicKey]dbContract, len(contracts))
 	for _, c := range contracts {
-		fetchedContracts[hostForFCID[types.FileContractID(c.FCID)]] = c
+		fetchedContracts[types.PublicKey(c.Host.PublicKey)] = c
 	}
 	return fetchedContracts, nil
 }
@@ -1676,7 +1675,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			return err
 		}
 		for _, slab := range slabs {
-			fileName, err = s.markPackedSlabUploaded(tx, slab, contracts, usedContracts)
+			fileName, err = s.markPackedSlabUploaded(tx, slab, contracts)
 			if err != nil {
 				return err
 			}
@@ -1692,7 +1691,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	return nil
 }
 
-func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract, usedContracts map[types.PublicKey]types.FileContractID) (string, error) {
+func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
