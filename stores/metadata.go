@@ -1078,7 +1078,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.Fil
 	}
 	var contracts []dbContract
 	err := tx.Model(&dbContract{}).
-		Where("fcid IN (?)", fcids).
+		Where("fcid IN (?) OR renewed_from IN (?)", fcids, fcids).
 		Find(&contracts).Error
 	if err != nil {
 		return nil, err
@@ -1731,18 +1731,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 		}
 		contract, exists := contracts[slab.Shards[i].Host]
 		if !exists {
-			// Check if contract renewed.
-			var renewedTo dbContract
-			err = tx.Where("renewed_from", fileContractID(usedContracts[slab.Shards[i].Host])).
-				Take(&renewedTo).
-				Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				s.logger.Warnw("missing contract for host", "host", slab.Shards[i].Host)
-			} else if err != nil {
-				s.logger.Error("failed to fetch contract that the used contract renewed to", err)
-			} else {
-				sector.Contracts = []dbContract{renewedTo}
-			}
+			s.logger.Warnw("missing contract for host", "host", slab.Shards[i].Host)
 		} else {
 			// Add contract to sector.
 			sector.Contracts = []dbContract{contract}
