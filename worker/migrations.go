@@ -100,5 +100,19 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	for i, si := range shardIndices {
 		s.Shards[si] = uploaded[i]
 	}
+
+	// loop all shards and extend the used contracs map so it reflects all used
+	// contracts, not just the used contracts for the migrated shards
+	for _, sector := range s.Shards {
+		_, exists := used[sector.Host]
+		if !exists {
+			if fcid, exists := h2c[sector.Host]; !exists {
+				return nil, fmt.Errorf("couldn't find contract for host %v", sector.Host)
+			} else {
+				used[sector.Host] = fcid
+			}
+		}
+	}
+
 	return used, nil
 }

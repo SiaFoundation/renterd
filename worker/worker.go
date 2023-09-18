@@ -908,25 +908,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// build host to contract map
-	h2c := make(map[types.PublicKey]types.FileContractID)
-	for _, contract := range ulContracts {
-		h2c[contract.HostKey] = contract.ID
-	}
-
-	for _, ss := range slab.Shards {
-		if _, exists := used[ss.Host]; exists {
-			continue
-		}
-
-		fcid, exists := h2c[ss.Host]
-		if !exists {
-			jc.Error(fmt.Errorf("couldn't find contract for host %v", ss.Host), http.StatusInternalServerError)
-			continue
-		}
-		used[ss.Host] = fcid
-	}
-
+	// update the slab
 	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
 		return
 	}
