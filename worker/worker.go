@@ -909,7 +909,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// update the slab
-	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
+	if used != nil && jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
 		return
 	}
 }
