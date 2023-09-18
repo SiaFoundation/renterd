@@ -223,6 +223,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00014_buckets(tx, logger)
 			},
 		},
+		{
+			ID: "00015_multipartUploads",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00015_multipartUploads(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -770,5 +776,37 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 		}
 	}
 	logger.Info("migration 00014_buckets complete")
+	return nil
+}
+
+func performMigration00015_multipartUploads(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00015_multipartUploads")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Create new tables.
+	if err := txn.Migrator().AutoMigrate(&dbMultipartUpload{}, &dbMultipartPart{}); err != nil {
+		return err
+	}
+
+	// Add column to slices table.
+	if err := txn.Migrator().AutoMigrate(&dbSlice{}); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00015_multipartUploads complete")
 	return nil
 }
