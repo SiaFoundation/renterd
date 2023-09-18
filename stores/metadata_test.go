@@ -3375,3 +3375,78 @@ func TestCopyObject(t *testing.T) {
 		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
 	}
 }
+
+func TestMarkSlabUploadedAfterRenew(t *testing.T) {
+	dir := t.TempDir()
+	db, _, _, err := newTestSQLStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create host.
+	hks, err := db.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk := hks[0]
+
+	// create contracts
+	fcids, _, err := db.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid := fcids[0]
+	usedContracts := map[types.PublicKey]types.FileContractID{
+		hk: fcid,
+	}
+
+	// create a full buffered slab.
+	completeSize := bufferedSlabSize(1)
+	_, err = db.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch it for upload.
+	packedSlabs, err := db.PackedSlabsForUpload(context.Background(), time.Hour, 1, 1, testContractSet, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packedSlabs) != 1 {
+		t.Fatal("expected 1 slab to be returned", len(packedSlabs))
+	}
+
+	// renew the contract.
+	fcidRenewed := types.FileContractID{2, 2, 2, 2, 2}
+	uc := generateMultisigUC(1, 2, "salt")
+	rev := rhpv2.ContractRevision{
+		Revision: types.FileContractRevision{
+			ParentID:         fcidRenewed,
+			UnlockConditions: uc,
+			FileContract: types.FileContract{
+				MissedProofOutputs: []types.SiacoinOutput{},
+				ValidProofOutputs:  []types.SiacoinOutput{},
+			},
+		},
+	}
+	_, err = db.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), 100, fcid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// mark it as uploaded.
+	err = db.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
+		{
+			BufferID: packedSlabs[0].BufferID,
+			Shards: []object.Sector{
+				{
+					Host: hk,
+					Root: types.Hash256{1},
+				},
+			},
+		},
+	}, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
