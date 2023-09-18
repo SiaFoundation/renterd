@@ -1330,7 +1330,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	entries, err := db.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1)
+	entries, _, err := db.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1394,6 +1394,7 @@ func TestObjectEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	objects := []struct {
 		path string
 		size int64
@@ -1406,6 +1407,10 @@ func TestObjectEntries(t *testing.T) {
 		{"/fileś/śpecial", 6}, // utf8
 		{"/FOO/bar", 7},
 	}
+
+	// shuffle to ensure order does not influence the outcome of the test
+	frand.Shuffle(len(objects), func(i, j int) { objects[i], objects[j] = objects[j], objects[i] })
+
 	ctx := context.Background()
 	for _, o := range objects {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
@@ -1434,7 +1439,7 @@ func TestObjectEntries(t *testing.T) {
 		{"/gab/", "/guub", []api.ObjectMetadata{}},
 	}
 	for _, test := range tests {
-		got, err := os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, 0, -1)
+		got, _, err := os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, "", 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1442,12 +1447,35 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, offset, 1)
+			got, hasMore, err := os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, "", offset, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+			}
+
+			moreRemaining := len(test.want)-offset-1 > 0
+			if hasMore != moreRemaining {
+				t.Errorf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
+			}
+
+			// make sure we stay within bounds
+			if offset+1 >= len(test.want) {
+				continue
+			}
+
+			got, hasMore, err = os.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.want[offset].Name, 0, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0] != test.want[offset+1] {
+				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
+			}
+
+			moreRemaining = len(test.want)-offset-2 > 0
+			if hasMore != moreRemaining {
+				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
 			}
 		}
 	}
@@ -3211,13 +3239,13 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// List the objects in the buckets.
-	if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
+	if entries, _, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3243,13 +3271,13 @@ func TestBucketObjects(t *testing.T) {
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
 	if err := os.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3260,13 +3288,13 @@ func TestBucketObjects(t *testing.T) {
 	// Rename foo/bar in bucket 2 using the batch rename.
 	if err := os.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3279,28 +3307,28 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if err := os.RemoveObject(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if entries, err := os.ObjectEntries(context.Background(), b2, "/", "", 0, -1); err != nil {
+	if entries, _, err := os.ObjectEntries(context.Background(), b2, "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if err := os.RemoveObjects(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(context.Background(), b2, "/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b2, "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, err := os.ObjectEntries(context.Background(), b1, "/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(context.Background(), b1, "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3356,7 +3384,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if err := os.CopyObject(ctx, "src", "src", "/foo", "/bar"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(ctx, "src", "/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(ctx, "src", "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3367,7 +3395,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar"); err != nil {
 		t.Fatal(err)
-	} else if entries, err := os.ObjectEntries(ctx, "dst", "/", "", 0, -1); err != nil {
+	} else if entries, _, err := os.ObjectEntries(ctx, "dst", "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))

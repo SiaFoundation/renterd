@@ -252,7 +252,7 @@ type ObjectsOption func(url.Values)
 
 func ObjectsWithPrefix(prefix string) ObjectsOption {
 	return func(v url.Values) {
-		v.Set("prefix", url.QueryEscape(prefix))
+		v.Set("prefix", prefix)
 	}
 }
 
@@ -271,5 +271,11 @@ func ObjectsWithLimit(limit int) ObjectsOption {
 func ObjectsWithBucket(bucket string) ObjectsOption {
 	return func(v url.Values) {
 		v.Set("bucket", bucket)
+	}
+}
+
+func ObjectsWithMarker(marker string) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("marker", marker)
 	}
 }

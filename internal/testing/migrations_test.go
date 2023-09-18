@@ -32,12 +32,15 @@ func TestMigrations(t *testing.T) {
 	// create a helper to fetch used hosts
 	usedHosts := func(path string) map[types.PublicKey]struct{} {
 		// fetch used hosts
-		obj, _, err := cluster.Bus.Object(context.Background(), path)
+		res, err := cluster.Bus.Object(context.Background(), path)
 		if err != nil {
 			t.Fatal(err)
+		} else if res.Object == nil {
+			t.Fatal("object not found")
 		}
+
 		used := make(map[types.PublicKey]struct{})
-		for _, slab := range obj.Slabs {
+		for _, slab := range res.Object.Slabs {
 			for _, sector := range slab.Shards {
 				used[sector.Host] = struct{}{}
 			}

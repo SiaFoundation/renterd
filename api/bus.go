@@ -217,6 +217,7 @@ type ObjectAddRequest struct {
 
 // ObjectsResponse is the response type for the /objects endpoint.
 type ObjectsResponse struct {
+	HasMore bool             `json:"hasMore"`
 	Entries []ObjectMetadata `json:"entries,omitempty"`
 	Object  *Object          `json:"object,omitempty"`
 }
