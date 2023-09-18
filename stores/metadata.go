@@ -592,7 +592,6 @@ func (s *SQLStore) Contracts(ctx context.Context) ([]api.ContractMetadata, error
 // to each other through the RenewedFrom and RenewedTo fields respectively.
 func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
-
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, fileContractID(renewedFrom))
@@ -1677,7 +1676,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			return err
 		}
 		for _, slab := range slabs {
-			fileName, err = s.markPackedSlabUploaded(tx, slab, contracts)
+			fileName, err = s.markPackedSlabUploaded(tx, slab, contracts, usedContracts)
 			if err != nil {
 				return err
 			}
@@ -1693,7 +1692,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	return nil
 }
 
-func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
+func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract, usedContracts map[types.PublicKey]types.FileContractID) (string, error) {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
@@ -1732,8 +1731,20 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 		}
 		contract, exists := contracts[slab.Shards[i].Host]
 		if !exists {
-			s.logger.Warnw("missing contract for host", "host", slab.Shards[i].Host)
+			// Check if contract renewed.
+			var renewedTo dbContract
+			err = tx.Where("renewed_from", fileContractID(usedContracts[slab.Shards[i].Host])).
+				Take(&renewedTo).
+				Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				s.logger.Warnw("missing contract for host", "host", slab.Shards[i].Host)
+			} else if err != nil {
+				s.logger.Error("failed to fetch contract that the used contract renewed to", err)
+			} else {
+				sector.Contracts = []dbContract{renewedTo}
+			}
 		} else {
+			// Add contract to sector.
 			sector.Contracts = []dbContract{contract}
 		}
 		shards = append(shards, sector)
