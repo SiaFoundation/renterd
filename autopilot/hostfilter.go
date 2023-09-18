@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -222,7 +223,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 // - refresh -> should be refreshed
 // - renew -> should be renewed
 func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
-	c, s := ci.contract, ci.settings
+	c, s, pt := ci.contract, ci.settings, ci.priceTable
 
 	usable = true
 	if bh > c.EndHeight() {
@@ -238,7 +239,7 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 		refresh = false
 		renew = false
 	} else {
-		if isOutOfCollateral(c, s, renterFunds, bh) {
+		if isOutOfCollateral(c, s, pt, renterFunds, cfg.Contracts.Period, bh) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = false
 			recoverable = true
@@ -287,22 +288,43 @@ func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract)
 // isOutOfCollateral returns 'true' if the remaining/unallocated collateral in
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
-func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, renterFunds types.Currency, blockHeight uint64) bool {
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, c.EndHeight()-blockHeight, s)
-	expectedCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, s, blockHeight, c.EndHeight())
-	return isBelowCollateralThreshold(expectedCollateral, c.RemainingCollateral(s))
+func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, renterFunds types.Currency, period, blockHeight uint64) bool {
+	// Compute the expected storage for the contract given the funds we are
+	// willing to put into it.
+	// Note: we use the full period here even though we are checking whether to
+	// do a refresh. Otherwise, the 'expectedStorage' would would become
+	// ridiculously large the closer the contract is to its end height.
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, period, pt)
+	// Cap the expected storage at the remaining storage of the host. If the
+	// host doesn't have any storage left, there is no point in adding
+	// collateral.
+	if expectedStorage > s.RemainingStorage {
+		expectedStorage = s.RemainingStorage
+	}
+	newCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, s, blockHeight, c.EndHeight())
+	return isBelowCollateralThreshold(newCollateral, c.RemainingCollateral(s))
 }
 
 // isBelowCollateralThreshold returns true if the actualCollateral is below a
-// certain percentage of expectedCollateral. The expectedCollateral is the
-// amount of new collateral we intend to put into a contract when refreshing it
-// and the actualCollateral is the amount we can actually put in after adjusting
-// our expectation using the host settings.
-func isBelowCollateralThreshold(expectedCollateral, actualCollateral types.Currency) bool {
-	if expectedCollateral.IsZero() {
-		return true // protect against division-by-zero
+// certain percentage of newCollateral. The newCollateral is the amount of
+// unallocated collateral in a contract after refreshing it and the
+// actualCollateral is the current amount of unallocated collateral in the
+// contract.
+func isBelowCollateralThreshold(newCollateral, actualCollateral types.Currency) bool {
+	if newCollateral.IsZero() {
+		// Protect against division-by-zero. This can happen for 2 reasons.
+		// 1. the collateral is already at the host's max collateral so a
+		// refresh wouldn't result in any new unallocated collateral.
+		// 2. the host has no more remaining storage so a refresh would only
+		// lead to unallocated collateral that we can't use.
+		// In both cases we don't gain anything from refreshing the contract.
+		// NOTE: This causes us to not immediately consider contracts as bad
+		// even though we can't upload to them anymore. This is fine since the
+		// collateral score or remaining storage score should filter these
+		// contracts out eventually.
+		return false
 	}
-	collateral := big.NewRat(0, 1).SetFrac(actualCollateral.Big(), expectedCollateral.Big())
+	collateral := big.NewRat(0, 1).SetFrac(actualCollateral.Big(), newCollateral.Big())
 	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
 	return collateral.Cmp(threshold) < 0
 }
