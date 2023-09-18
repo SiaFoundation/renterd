@@ -101,7 +101,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 		s.Shards[si] = uploaded[i]
 	}
 
-	// loop all shards and extend the used contracs map so it reflects all used
+	// loop all shards and extend the used contracts map so it reflects all used
 	// contracts, not just the used contracts for the migrated shards
 	for _, sector := range s.Shards {
 		_, exists := used[sector.Host]
