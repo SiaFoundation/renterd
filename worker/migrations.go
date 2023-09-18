@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) error {
+func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (map[types.PublicKey]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -48,7 +48,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 
 	// if all shards are on good hosts, we're done
 	if len(shardIndices) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// subtract the number of shards that are on hosts with contracts and might
@@ -63,16 +63,16 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 
 	// perform some sanity checks
 	if len(ulContracts) < int(s.MinShards) {
-		return fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
+		return nil, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
-		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
+		return nil, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
 	}
 
 	// download the slab
 	shards, err := d.DownloadSlab(ctx, *s, dlContracts)
 	if err != nil {
-		return fmt.Errorf("failed to download slab for migration: %w", err)
+		return nil, fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	s.Encrypt(shards)
 
@@ -91,14 +91,28 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	}
 
 	// migrate the shards
-	uploaded, err := u.Migrate(ctx, shards, allowed, bh)
+	uploaded, used, err := u.Migrate(ctx, shards, allowed, bh)
 	if err != nil {
-		return fmt.Errorf("failed to upload slab for migration: %w", err)
+		return nil, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
 	for i, si := range shardIndices {
 		s.Shards[si] = uploaded[i]
 	}
-	return nil
+
+	// loop all shards and extend the used contracts map so it reflects all used
+	// contracts, not just the used contracts for the migrated shards
+	for _, sector := range s.Shards {
+		_, exists := used[sector.Host]
+		if !exists {
+			if fcid, exists := h2c[sector.Host]; !exists {
+				return nil, fmt.Errorf("couldn't find contract for host %v", sector.Host)
+			} else {
+				used[sector.Host] = fcid
+			}
+		}
+	}
+
+	return used, nil
 }

@@ -902,26 +902,19 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	err = migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	// migrate the slab
+	used, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
 		return
 	}
 
-	usedContracts := make(map[types.PublicKey]types.FileContractID)
-	for _, ss := range slab.Shards {
-		if _, exists := usedContracts[ss.Host]; exists {
-			continue
-		}
-
-		for _, c := range ulContracts {
-			if c.HostKey == ss.Host {
-				usedContracts[ss.Host] = c.ID
-				break
-			}
-		}
+	// no migration took place, return early
+	if used == nil {
+		return
 	}
 
-	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, usedContracts)) != nil {
+	// update the slab
+	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
 		return
 	}
 }
@@ -1144,21 +1137,9 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	obj, partialSlabData, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
+	obj, used, partialSlabData, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
-	}
-
-	// build used contracts map
-	h2c := make(map[types.PublicKey]types.FileContractID)
-	for _, c := range contracts {
-		h2c[c.HostKey] = c.ID
-	}
-	used := make(map[types.PublicKey]types.FileContractID)
-	for _, s := range obj.Slabs {
-		for _, ss := range s.Shards {
-			used[ss.Host] = h2c[ss.Host]
-		}
 	}
 
 	if len(partialSlabData) > 0 {
@@ -1188,19 +1169,9 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	for _, ps := range packedSlabs {
 		// upload packed slab.
 		shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-		sectors, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
+		sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
 		if jc.Check("couldn't upload packed slab", err) != nil {
 			return
-		}
-
-		// build used contracts map
-		h2c := make(map[types.PublicKey]types.FileContractID)
-		for _, c := range contracts {
-			h2c[c.HostKey] = c.ID
-		}
-		used := make(map[types.PublicKey]types.FileContractID)
-		for _, s := range sectors {
-			used[s.Host] = h2c[s.Host]
 		}
 
 		// mark packed slab as uploaded.
