@@ -234,16 +234,44 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 	}
 }
 
-func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64) ([]object.Sector, error) {
+func (mgr *uploadManager) Migrate(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64) ([]object.Sector, map[types.PublicKey]types.FileContractID, error) {
 	// initiate the upload
 	upload, finishFn, err := mgr.newUpload(ctx, len(shards), contracts, bh)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer finishFn()
 
 	// upload the shards
-	return upload.uploadShards(ctx, shards, nil)
+	sectors, err := upload.uploadShards(ctx, shards, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// build host to contract map
+	h2c := make(map[types.PublicKey]types.FileContractID)
+	for _, contract := range contracts {
+		h2c[contract.HostKey] = contract.ID
+	}
+
+	// ask the manager for the renewals
+	c2r := mgr.renewalsMap()
+
+	// build used contracts list
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
+	for _, sector := range sectors {
+		fcid, exists := h2c[sector.Host]
+		if !exists {
+			return nil, nil, fmt.Errorf("couldn't find contract for host %v", sector.Host)
+		}
+		if renewed, exists := c2r[fcid]; exists {
+			usedContracts[sector.Host] = renewed
+		} else {
+			usedContracts[sector.Host] = fcid
+		}
+	}
+
+	return sectors, usedContracts, nil
 }
 
 func (mgr *uploadManager) Stats() uploadManagerStats {
@@ -307,7 +335,7 @@ func (e *etagger) Etag() string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, partialSlab []byte, etag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, etag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -341,7 +369,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
 	if err != nil {
-		return object.Object{}, nil, "", err
+		return object.Object{}, nil, nil, "", err
 	}
 	defer finishFn()
 
@@ -363,9 +391,9 @@ loop:
 	for {
 		select {
 		case <-mgr.stopChan:
-			return object.Object{}, nil, "", errors.New("manager was stopped")
+			return object.Object{}, nil, nil, "", errors.New("manager was stopped")
 		case <-ctx.Done():
-			return object.Object{}, nil, "", errors.New("upload timed out")
+			return object.Object{}, nil, nil, "", errors.New("upload timed out")
 		case nextSlabChan <- struct{}{}:
 			// read next slab's data
 			data := make([]byte, size)
@@ -383,7 +411,7 @@ loop:
 				}
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
-				return object.Object{}, nil, "", err
+				return object.Object{}, nil, nil, "", err
 			}
 			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
@@ -399,7 +427,7 @@ loop:
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
-				return object.Object{}, nil, "", res.err
+				return object.Object{}, nil, nil, "", res.err
 			}
 
 			// collect the response and potentially break out of the loop
@@ -419,7 +447,32 @@ loop:
 	for _, resp := range responses {
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
-	return o, partialSlab, tagger.Etag(), nil
+
+	// build host to contract map
+	h2c := make(map[types.PublicKey]types.FileContractID)
+	for _, contract := range contracts {
+		h2c[contract.HostKey] = contract.ID
+	}
+
+	// ask the manager for the renewals
+	c2r := mgr.renewalsMap()
+
+	// build used contracts list
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
+	for _, slab := range o.Slabs {
+		for _, sector := range slab.Shards {
+			fcid, exists := h2c[sector.Host]
+			if !exists {
+				return object.Object{}, nil, nil, "", fmt.Errorf("couldn't find contract for host %v", sector.Host)
+			}
+			if renewed, exists := c2r[fcid]; exists {
+				usedContracts[sector.Host] = renewed
+			} else {
+				usedContracts[sector.Host] = fcid
+			}
+		}
+	}
+	return o, usedContracts, partialSlab, tagger.Etag(), nil
 }
 
 func (mgr *uploadManager) launch(req *sectorUploadReq) error {
@@ -572,6 +625,20 @@ func (mgr *uploadManager) renewUploader(u *uploader) {
 	u.mu.Unlock()
 
 	u.SignalWork()
+}
+
+func (mgr *uploadManager) renewalsMap() map[types.FileContractID]types.FileContractID {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	renewals := make(map[types.FileContractID]types.FileContractID)
+	for _, u := range mgr.uploaders {
+		fcid, renewedFrom, _ := u.contractInfo()
+		if renewedFrom != (types.FileContractID{}) {
+			renewals[renewedFrom] = fcid
+		}
+	}
+	return renewals
 }
 
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
