@@ -572,7 +572,7 @@ func (s *SQLStore) Contracts(ctx context.Context) ([]api.ContractMetadata, error
 	var dbContracts []dbContract
 	err := s.db.
 		Model(&dbContract{}).
-		Preload("Host").
+		Joins("Host").
 		Find(&dbContracts).
 		Error
 	if err != nil {
@@ -887,7 +887,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 
 	err = s.db.
 		Where(&dbContract{ContractCommon: ContractCommon{RenewedFrom: fileContractID(renewedFrom)}}).
-		Preload("Host").
+		Joins("Host").
 		Take(&contract).
 		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1778,7 +1778,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
 	err = tx.
 		Where(&dbContract{ContractCommon: ContractCommon{FCID: id}}).
-		Preload("Host").
+		Joins("Host").
 		Take(&contract).
 		Error
 
@@ -1799,7 +1799,7 @@ func contracts(tx *gorm.DB, ids []types.FileContractID) (dbContracts []dbContrac
 	err = tx.
 		Model(&dbContract{}).
 		Where("fcid IN (?)", fcids).
-		Preload("Host").
+		Joins("Host").
 		Find(&dbContracts).
 		Error
 	return
@@ -1809,7 +1809,7 @@ func contracts(tx *gorm.DB, ids []types.FileContractID) (dbContracts []dbContrac
 func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err error) {
 	err = tx.
 		Where(&dbContract{HostID: host.ID}).
-		Preload("Host").
+		Joins("Host").
 		Find(&contracts).
 		Error
 	return
