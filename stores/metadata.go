@@ -592,7 +592,6 @@ func (s *SQLStore) Contracts(ctx context.Context) ([]api.ContractMetadata, error
 // to each other through the RenewedFrom and RenewedTo fields respectively.
 func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
-
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
 		oldContract, err := contract(tx, fileContractID(renewedFrom))
@@ -615,6 +614,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		// Overwrite the old contract with the new one.
 		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
 		newContract.Model = oldContract.Model
+		newContract.CreatedAt = time.Now()
 		err = tx.Save(&newContract).Error
 		if err != nil {
 			return err
@@ -1105,21 +1105,20 @@ func pruneSlabs(tx *gorm.DB) error {
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]types.FileContractID) (map[types.PublicKey]dbContract, error) {
 	fcids := make([]fileContractID, 0, len(usedContracts))
-	hostForFCID := make(map[types.FileContractID]types.PublicKey, len(usedContracts))
-	for hk, fcid := range usedContracts {
+	for _, fcid := range usedContracts {
 		fcids = append(fcids, fileContractID(fcid))
-		hostForFCID[fcid] = hk
 	}
 	var contracts []dbContract
 	err := tx.Model(&dbContract{}).
-		Where("fcid IN (?)", fcids).
+		Joins("Host").
+		Where("fcid IN (?) OR renewed_from IN (?)", fcids, fcids).
 		Find(&contracts).Error
 	if err != nil {
 		return nil, err
 	}
 	fetchedContracts := make(map[types.PublicKey]dbContract, len(contracts))
 	for _, c := range contracts {
-		fetchedContracts[hostForFCID[types.FileContractID(c.FCID)]] = c
+		fetchedContracts[types.PublicKey(c.Host.PublicKey)] = c
 	}
 	return fetchedContracts, nil
 }
@@ -1213,7 +1212,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet s
 			// Verify that all hosts have a contract.
 			_, exists := usedContracts[shard.Host]
 			if !exists {
-				return fmt.Errorf("missing contract for host %v", shard.Host)
+				return fmt.Errorf("missing contract for host %v: %w", shard.Host, api.ErrContractNotFound)
 			}
 		}
 	}
@@ -1710,7 +1709,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			return err
 		}
 		for _, slab := range slabs {
-			fileName, err = markPackedSlabUploaded(tx, slab, contracts)
+			fileName, err = s.markPackedSlabUploaded(tx, slab, contracts)
 			if err != nil {
 				return err
 			}
@@ -1726,7 +1725,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	return nil
 }
 
-func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
+func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts map[types.PublicKey]dbContract) (string, error) {
 	// find the slab
 	var sla dbSlab
 	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
@@ -1758,16 +1757,19 @@ func markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab, contracts 
 	// add the shards to the slab
 	var shards []dbSector
 	for i := range slab.Shards {
-		contract, exists := contracts[slab.Shards[i].Host]
-		if !exists {
-			return "", fmt.Errorf("missing contract for host %v", slab.Shards[i].Host)
-		}
-		shards = append(shards, dbSector{
+		sector := dbSector{
 			DBSlabID:   sla.ID,
 			LatestHost: publicKey(slab.Shards[i].Host),
 			Root:       slab.Shards[i].Root[:],
-			Contracts:  []dbContract{contract},
-		})
+		}
+		contract, exists := contracts[slab.Shards[i].Host]
+		if !exists {
+			s.logger.Warnw("missing contract for host", "host", slab.Shards[i].Host)
+		} else {
+			// Add contract to sector.
+			sector.Contracts = []dbContract{contract}
+		}
+		shards = append(shards, sector)
 	}
 	return fileName, tx.Create(shards).Error
 }
