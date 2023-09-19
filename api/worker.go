@@ -246,7 +246,6 @@ type DownloadObjectOption func(http.Header)
 
 func DownloadWithRange(offset, length int64) DownloadObjectOption {
 	return func(h http.Header) {
-		fmt.Println("rangeWith", offset, length)
 		if length == -1 {
 			h.Set("Range", fmt.Sprintf("bytes=%v-", offset))
 		} else {
