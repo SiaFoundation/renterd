@@ -246,7 +246,12 @@ type DownloadObjectOption func(http.Header)
 
 func DownloadWithRange(offset, length int64) DownloadObjectOption {
 	return func(h http.Header) {
-		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
+		fmt.Println("rangeWith", offset, length)
+		if length == -1 {
+			h.Set("Range", fmt.Sprintf("bytes=%v-", offset))
+		} else {
+			h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
+		}
 	}
 }
 
@@ -279,6 +284,12 @@ func ObjectsWithLimit(limit int) ObjectsOption {
 func ObjectsWithBucket(bucket string) ObjectsOption {
 	return func(v url.Values) {
 		v.Set("bucket", bucket)
+	}
+}
+
+func ObjectsWithIgnoreDelim(ignore bool) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("ignoreDelim", fmt.Sprint(ignore))
 	}
 }
 

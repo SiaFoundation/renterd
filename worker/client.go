@@ -8,10 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gotd/contrib/http_range"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -306,6 +306,34 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	return err
 }
 
+func parseContentRange(contentRange string) (start, end int64, err error) {
+	parts := strings.Split(contentRange, " ")
+	if len(parts) != 2 || parts[0] != "bytes" {
+		err = errors.New("missing 'bytes' prefix in range header")
+		return
+	}
+	parts = strings.Split(parts[1], "/")
+	if len(parts) != 2 {
+		err = fmt.Errorf("invalid Content-Range header: %s", contentRange)
+		return
+	}
+	rangeStr := parts[0]
+	rangeParts := strings.Split(rangeStr, "-")
+	if len(rangeParts) != 2 {
+		err = errors.New("invalid Content-Range header")
+		return
+	}
+	start, err = strconv.ParseInt(rangeParts[0], 10, 64)
+	if err != nil {
+		return
+	}
+	end, err = strconv.ParseInt(rangeParts[1], 10, 64)
+	if err != nil {
+		return
+	}
+	return
+}
+
 func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (_ api.GetObjectResponse, err error) {
 	if strings.HasSuffix(path, "/") {
 		return api.GetObjectResponse{}, errors.New("the given path is a directory, use ObjectEntries instead")
@@ -331,14 +359,15 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 		return api.GetObjectResponse{}, err
 	}
 	var r *api.DownloadRange
-	ranges, err := http_range.ParseRange(header.Get("Content-Range"), size)
-	if err != nil {
-		return api.GetObjectResponse{}, err
-	}
-	if len(ranges) > 0 {
+	if cr := header.Get("Content-Range"); cr != "" {
+		start, length, err := parseContentRange(cr)
+		if err != nil {
+			fmt.Println("rapzapzap", header.Get("Content-Range"))
+			return api.GetObjectResponse{}, err
+		}
 		r = &api.DownloadRange{
-			Start:  ranges[0].Start,
-			Length: ranges[0].Length,
+			Start:  start,
+			Length: length,
 		}
 	}
 	// Parse Last-Modified

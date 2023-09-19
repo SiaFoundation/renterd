@@ -3,7 +3,7 @@ module go.sia.tech/renterd
 go 1.20
 
 require (
-	github.com/SiaFoundation/gofakes3 v0.0.0-20230918145812-698366c1fd56
+	github.com/SiaFoundation/gofakes3 v0.0.0-20230919075754-db4f3d79eb50
 	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.19.0

@@ -945,8 +945,12 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) objectsHandlerGET(jc jape.Context) {
+	var ignoreDelim bool
+	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+		return
+	}
 	path := jc.PathParam("path")
-	if strings.HasSuffix(path, "/") {
+	if strings.HasSuffix(path, "/") && !ignoreDelim {
 		b.objectEntriesHandlerGET(jc, path)
 		return
 	}

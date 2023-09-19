@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -262,10 +261,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	if strings.HasSuffix(objectName, "/") {
-		return nil, errors.New("object name must not end with '/'")
-	}
-	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName))
+	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName), api.ObjectsWithIgnoreDelim(true))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	}

@@ -264,6 +264,19 @@ func TestS3List(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// manually create the 'a/' object as a directory. It should also be
+	// possible to call StatObject on it without errors.
+	_, err = s3.PutObject(context.Background(), "bucket", "a/", bytes.NewReader(nil), 0, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, err := s3.StatObject(context.Background(), "bucket", "a/", minio.StatObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if so.Key != "a/" {
+		t.Fatal("unexpected key:", so.Key)
+	}
+
 	objects := []string{
 		"a/a/a",
 		"a/b",
