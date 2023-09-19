@@ -13,6 +13,7 @@ import (
 
 	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -360,8 +361,8 @@ func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[st
 	}, nil
 }
 
-func (s *s3) CreateMultipartUpload(bucket, object string, meta map[string]string) (gofakes3.UploadID, error) {
-	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+object)
+func (s *s3) CreateMultipartUpload(bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
+	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+key, object.NoOpKey)
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -386,7 +387,7 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 	} else if marker != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "marker not supported")
 	}
-	resp, err := s.b.ListMultipartUploads(context.Background(), bucket, "", "", "", int(limit))
+	resp, err := s.b.MultipartUploads(context.Background(), bucket, "", "", "", int(limit))
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -414,7 +415,7 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 }
 
 func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker int, limit int64) (*gofakes3.ListMultipartUploadPartsResult, error) {
-	resp, err := s.b.ListMultipartUploadParts(context.Background(), bucket, "/"+object, string(uploadID), marker, limit)
+	resp, err := s.b.MultipartUploadParts(context.Background(), bucket, "/"+object, string(uploadID), marker, limit)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -441,7 +442,11 @@ func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker
 }
 
 func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) error {
-	return gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "abort multipart upload not supported")
+	err := s.b.AbortMultipartUpload(context.Background(), bucket, "/"+object, string(id))
+	if err != nil {
+		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return nil
 }
 
 func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (versionID gofakes3.VersionID, etag string, err error) {

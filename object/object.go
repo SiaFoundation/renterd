@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -49,9 +50,12 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 
 // Encrypt returns a cipher.StreamReader that encrypts r with k starting at the
 // given offset.
-func (k EncryptionKey) Encrypt(r io.Reader, offset uint64) cipher.StreamReader {
+func (k EncryptionKey) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
+	if offset%64 != 0 {
+		return cipher.StreamReader{}, errors.New("offset must be a multiple of 64")
+	}
 	if k.IsNoopKey() {
-		return cipher.StreamReader{S: &noOpStream{}, R: r}
+		return cipher.StreamReader{S: &noOpStream{}, R: r}, nil
 	}
 	nonce64 := offset / (64 * math.MaxUint32)
 	offset %= 64 * math.MaxUint32
@@ -61,7 +65,7 @@ func (k EncryptionKey) Encrypt(r io.Reader, offset uint64) cipher.StreamReader {
 	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce)
 	c.SetCounter(uint32(offset / 64))
 	rs := &rekeyStream{key: k.entropy[:], c: c}
-	return cipher.StreamReader{S: rs, R: r}
+	return cipher.StreamReader{S: rs, R: r}, nil
 }
 
 // Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
@@ -119,7 +123,7 @@ func (o Object) TotalSize() int64 {
 
 // Encrypt wraps the given reader with a reader that encrypts the stream using
 // the object's key.
-func (o Object) Encrypt(r io.Reader, offset uint64) cipher.StreamReader {
+func (o Object) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
 	return o.Key.Encrypt(r, offset)
 }
 

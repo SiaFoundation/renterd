@@ -310,31 +310,6 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-type etagger struct {
-	r io.Reader
-	h *types.Hasher
-}
-
-func newEtagger(r io.Reader) *etagger {
-	return &etagger{
-		r: r,
-		h: types.NewHasher(),
-	}
-}
-
-func (e *etagger) Read(p []byte) (int, error) {
-	n, err := e.r.Read(p)
-	if _, wErr := e.h.E.Write(p[:n]); wErr != nil {
-		return 0, wErr
-	}
-	return n, err
-}
-
-func (e *etagger) Etag() string {
-	sum := e.h.Sum()
-	return hex.EncodeToString(sum[:])
-}
-
 func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, etag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
@@ -357,14 +332,17 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	}
 
 	// wrap the reader to create an etag
-	tagger := newEtagger(r)
+	tagger := newHashReader(r)
 	r = tagger
 
 	// create the object
 	o := object.NewObject(uc.ec)
 
 	// create the cipher reader
-	cr := o.Encrypt(r, uc.encryptionOffset)
+	cr, err := o.Encrypt(r, uc.encryptionOffset)
+	if err != nil {
+		return object.Object{}, nil, nil, "", err
+	}
 
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
@@ -1435,4 +1413,29 @@ func (a *dataPoints) tryDecay() {
 
 func (sID slabID) String() string {
 	return fmt.Sprintf("%x", sID[:])
+}
+
+type hashReader struct {
+	r io.Reader
+	h *types.Hasher
+}
+
+func newHashReader(r io.Reader) *hashReader {
+	return &hashReader{
+		r: r,
+		h: types.NewHasher(),
+	}
+}
+
+func (e *hashReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if _, wErr := e.h.E.Write(p[:n]); wErr != nil {
+		return 0, wErr
+	}
+	return n, err
+}
+
+func (e *hashReader) Etag() string {
+	sum := e.h.Sum()
+	return hex.EncodeToString(sum[:])
 }
