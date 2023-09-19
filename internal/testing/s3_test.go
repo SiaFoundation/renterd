@@ -104,6 +104,14 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal("data mismatch")
 	}
 
+	// stat object
+	info, err := s3.StatObject(context.Background(), bucket, "object", minio.StatObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if info.Size != int64(len(data)) {
+		t.Fatal("size mismatch")
+	}
+
 	// add another bucket
 	err = s3.MakeBucket(context.Background(), bucket+"2", minio.MakeBucketOptions{})
 	if err != nil {
@@ -334,20 +342,25 @@ func TestS3List(t *testing.T) {
 		{
 			prefix: "",
 			marker: "",
-			want:   []string{"ab", "b", "d", "a/", "c/"},
+			want:   []string{"a/", "ab", "b", "c/", "d"},
 		},
 		{
 			prefix: "a",
 			marker: "",
-			want:   []string{"ab", "a/"},
+			want:   []string{"a/", "ab"},
+		},
+		{
+			prefix: "a/a",
+			marker: "",
+			want:   []string{"a/a/"},
 		},
 		{
 			prefix: "",
 			marker: "b",
-			want:   []string{"d", "c/"},
+			want:   []string{"c/", "d"},
 		},
 		{
-			prefix: "e",
+			prefix: "z",
 			marker: "",
 			want:   nil,
 		},
