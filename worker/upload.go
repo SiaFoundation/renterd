@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,25 @@ var (
 	errNoCandidateUploader = errors.New("no candidate uploader found")
 	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
 )
+
+type uploadConfig struct {
+	ec               object.EncryptionKey
+	encryptionOffset uint64
+}
+
+type UploadOption func(*uploadConfig)
+
+func WithCustomKey(ec object.EncryptionKey) UploadOption {
+	return func(cfg *uploadConfig) {
+		cfg.ec = ec
+	}
+}
+
+func WithCustomEncryptionOffset(offset uint64) UploadOption {
+	return func(cfg *uploadConfig) {
+		cfg.encryptionOffset = offset
+	}
+}
 
 type (
 	slabID [8]byte
@@ -290,7 +310,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, etag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -302,16 +322,32 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 		span.End()
 	}()
 
+	//  apply options
+	uc := uploadConfig{
+		ec:               object.GenerateEncryptionKey(), // random key
+		encryptionOffset: 0,                              // from the beginning
+	}
+	for _, opt := range opts {
+		opt(&uc)
+	}
+
+	// wrap the reader to create an etag
+	tagger := newHashReader(r)
+	r = tagger
+
 	// create the object
-	o := object.NewObject()
+	o := object.NewObject(uc.ec)
 
 	// create the cipher reader
-	cr := o.Encrypt(r)
+	cr, err := o.Encrypt(r, uc.encryptionOffset)
+	if err != nil {
+		return object.Object{}, nil, nil, "", err
+	}
 
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
 	if err != nil {
-		return object.Object{}, nil, nil, err
+		return object.Object{}, nil, nil, "", err
 	}
 	defer finishFn()
 
@@ -333,9 +369,9 @@ loop:
 	for {
 		select {
 		case <-mgr.stopChan:
-			return object.Object{}, nil, nil, errors.New("manager was stopped")
+			return object.Object{}, nil, nil, "", errors.New("manager was stopped")
 		case <-ctx.Done():
-			return object.Object{}, nil, nil, errors.New("upload timed out")
+			return object.Object{}, nil, nil, "", errors.New("upload timed out")
 		case nextSlabChan <- struct{}{}:
 			// read next slab's data
 			data := make([]byte, size)
@@ -353,7 +389,7 @@ loop:
 				}
 				continue
 			} else if err != nil && err != io.ErrUnexpectedEOF {
-				return object.Object{}, nil, nil, err
+				return object.Object{}, nil, nil, "", err
 			}
 			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
@@ -369,7 +405,7 @@ loop:
 			slabIndex++
 		case res := <-respChan:
 			if res.err != nil {
-				return object.Object{}, nil, nil, res.err
+				return object.Object{}, nil, nil, "", res.err
 			}
 
 			// collect the response and potentially break out of the loop
@@ -405,7 +441,7 @@ loop:
 		for _, sector := range slab.Shards {
 			fcid, exists := h2c[sector.Host]
 			if !exists {
-				return object.Object{}, nil, nil, fmt.Errorf("couldn't find contract for host %v", sector.Host)
+				return object.Object{}, nil, nil, "", fmt.Errorf("couldn't find contract for host %v", sector.Host)
 			}
 			if renewed, exists := c2r[fcid]; exists {
 				usedContracts[sector.Host] = renewed
@@ -414,7 +450,7 @@ loop:
 			}
 		}
 	}
-	return o, usedContracts, partialSlab, nil
+	return o, usedContracts, partialSlab, tagger.Etag(), nil
 }
 
 func (mgr *uploadManager) launch(req *sectorUploadReq) error {
@@ -1377,4 +1413,29 @@ func (a *dataPoints) tryDecay() {
 
 func (sID slabID) String() string {
 	return fmt.Sprintf("%x", sID[:])
+}
+
+type hashReader struct {
+	r io.Reader
+	h *types.Hasher
+}
+
+func newHashReader(r io.Reader) *hashReader {
+	return &hashReader{
+		r: r,
+		h: types.NewHasher(),
+	}
+}
+
+func (e *hashReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if _, wErr := e.h.E.Write(p[:n]); wErr != nil {
+		return 0, wErr
+	}
+	return n, err
+}
+
+func (e *hashReader) Etag() string {
+	sum := e.h.Sum()
+	return hex.EncodeToString(sum[:])
 }

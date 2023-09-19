@@ -221,6 +221,14 @@ func UploadWithBucket(bucket string) UploadOption {
 	}
 }
 
+// UploadWithDisablePreshardingEncryption disables presharding encryption for
+// the upload
+func UploadWithDisabledPreshardingEncryption() UploadOption {
+	return func(v url.Values) {
+		v.Set("disablepreshardingencryption", "true")
+	}
+}
+
 type DownloadRange struct {
 	Start  int64
 	Length int64

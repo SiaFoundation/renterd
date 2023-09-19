@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -13,9 +14,17 @@ import (
 	"lukechampine.com/frand"
 )
 
+var NoOpKey = EncryptionKey{
+	entropy: new([32]byte),
+}
+
 // A EncryptionKey can encrypt and decrypt messages.
 type EncryptionKey struct {
 	entropy *[32]byte `json:"-"`
+}
+
+func (k EncryptionKey) IsNoopKey() bool {
+	return bytes.Equal(k.entropy[:], NoOpKey.entropy[:])
 }
 
 // String implements fmt.Stringer.
@@ -39,16 +48,32 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 	return nil
 }
 
-// Encrypt returns a cipher.StreamReader that encrypts r with k.
-func (k EncryptionKey) Encrypt(r io.Reader) cipher.StreamReader {
-	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], make([]byte, 24))
+// Encrypt returns a cipher.StreamReader that encrypts r with k starting at the
+// given offset.
+func (k EncryptionKey) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
+	if offset%64 != 0 {
+		return cipher.StreamReader{}, errors.New("offset must be a multiple of 64")
+	}
+	if k.IsNoopKey() {
+		return cipher.StreamReader{S: &noOpStream{}, R: r}, nil
+	}
+	nonce64 := offset / (64 * math.MaxUint32)
+	offset %= 64 * math.MaxUint32
+
+	nonce := make([]byte, 24)
+	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
+	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce)
+	c.SetCounter(uint32(offset / 64))
 	rs := &rekeyStream{key: k.entropy[:], c: c}
-	return cipher.StreamReader{S: rs, R: r}
+	return cipher.StreamReader{S: rs, R: r}, nil
 }
 
 // Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
 // specified offset.
 func (k EncryptionKey) Decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
+	if k.IsNoopKey() {
+		return cipher.StreamWriter{S: &noOpStream{}, W: w}
+	}
 	nonce64 := offset / (64 * math.MaxUint32)
 	offset %= 64 * math.MaxUint32
 
@@ -78,9 +103,9 @@ type Object struct {
 }
 
 // NewObject returns a new Object with a random key.
-func NewObject() Object {
+func NewObject(ec EncryptionKey) Object {
 	return Object{
-		Key: GenerateEncryptionKey(),
+		Key: ec,
 	}
 }
 
@@ -98,8 +123,8 @@ func (o Object) TotalSize() int64 {
 
 // Encrypt wraps the given reader with a reader that encrypts the stream using
 // the object's key.
-func (o Object) Encrypt(r io.Reader) cipher.StreamReader {
-	return o.Key.Encrypt(r)
+func (o Object) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
+	return o.Key.Encrypt(r, offset)
 }
 
 // SplitSlabs splits a set of slabs into slices comprising objects with the
@@ -162,4 +187,10 @@ func (rs *rekeyStream) XORKeyStream(dst, src []byte) {
 	binary.LittleEndian.PutUint64(nonce[16:], rs.nonce)
 	rs.c, _ = chacha20.NewUnauthenticatedCipher(rs.key, nonce)
 	rs.c.XORKeyStream(dst[rem:], src[rem:])
+}
+
+type noOpStream struct{}
+
+func (noOpStream) XORKeyStream(dst, src []byte) {
+	copy(dst, src)
 }

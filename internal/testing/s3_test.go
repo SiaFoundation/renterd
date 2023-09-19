@@ -329,3 +329,155 @@ func TestS3List(t *testing.T) {
 		}
 	}
 }
+
+func TestS3MultipartUploads(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	s3 := cluster.S3
+
+	// delete default bucket before testing.
+	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enable upload packing to speed up test.
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bucket.
+	err = s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a core client for lower-level operations.
+	url := s3.EndpointURL()
+	core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
+		Creds: testS3Credentials,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a new multipart upload.
+	uploadID, err := core.NewMultipartUpload(context.Background(), "multipart", "foo", minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if uploadID == "" {
+		t.Fatal("expected non-empty upload ID")
+	}
+
+	// List uploads
+	lmu, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(lmu.Uploads) != 1 {
+		t.Fatal("expected 1 upload")
+	} else if upload := lmu.Uploads[0]; upload.UploadID != uploadID || upload.Key != "foo" {
+		t.Fatal("unexpected upload:", upload.UploadID, upload.Key)
+	}
+
+	// Add 3 parts out of order to make sure the object is reconstructed
+	// correctly.
+	putPart := func(partNum int, data []byte) string {
+		t.Helper()
+		part, err := core.PutObjectPart(context.Background(), "multipart", "foo", uploadID, partNum, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+		if err != nil {
+			t.Fatal(err)
+		} else if part.ETag == "" {
+			t.Fatal("expected non-empty ETag")
+		}
+		return part.ETag
+	}
+	etag2 := putPart(2, []byte("world"))
+	etag1 := putPart(1, []byte("hello"))
+	etag3 := putPart(3, []byte("!"))
+
+	// List parts
+	lop, err := core.ListObjectParts(context.Background(), "multipart", "foo", uploadID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if lop.Bucket != "multipart" || lop.Key != "foo" || lop.UploadID != uploadID || len(lop.ObjectParts) != 3 {
+		t.Fatal("unexpected response:", lop)
+	} else if part1 := lop.ObjectParts[0]; part1.PartNumber != 1 || part1.Size != 5 || part1.ETag == "" {
+		t.Fatal("unexpected part:", part1)
+	} else if part2 := lop.ObjectParts[1]; part2.PartNumber != 2 || part2.Size != 5 || part2.ETag == "" {
+		t.Fatal("unexpected part:", part2)
+	} else if part3 := lop.ObjectParts[2]; part3.PartNumber != 3 || part3.Size != 1 || part3.ETag == "" {
+		t.Fatal("unexpected part:", part3)
+	}
+
+	// Complete upload
+	ui, err := core.CompleteMultipartUpload(context.Background(), "multipart", "foo", uploadID, []minio.CompletePart{
+		{
+			PartNumber: 1,
+			ETag:       etag1,
+		},
+		{
+			PartNumber: 2,
+			ETag:       etag2,
+		},
+		{
+			PartNumber: 3,
+			ETag:       etag3,
+		},
+	}, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if ui.Bucket != "multipart" || ui.Key != "foo" || ui.ETag == "" {
+		t.Fatal("unexpected response:", ui)
+	}
+
+	// Download object
+	downloadedObj, err := s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if data, err := io.ReadAll(downloadedObj); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, []byte("helloworld!")) {
+		t.Fatal("unexpected data:", string(data))
+	}
+
+	// Start a second multipart upload.
+	uploadID, err = core.NewMultipartUpload(context.Background(), "multipart", "bar", minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a part.
+	putPart(1, []byte("bar"))
+
+	// Abort upload
+	err = core.AbortMultipartUpload(context.Background(), "multipart", "bar", uploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List it.
+	res, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Uploads) != 0 {
+		t.Fatal("expected 0 uploads")
+	}
+}

@@ -35,12 +35,19 @@ type bus interface {
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
 	SearchObjects(ctx context.Context, bucket, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
 
+	AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
+	CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
+	CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error)
+	MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
+	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
+
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
 type worker interface {
 	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error)
 	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.GetObjectResponse, error)
+	UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error)
 }
 
 func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {

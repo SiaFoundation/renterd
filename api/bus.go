@@ -75,6 +75,10 @@ var (
 	// database.
 	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
 
+	// ErrPartNotFound is returned if the specified part of a multipart upload
+	// wasn't found.
+	ErrPartNotFound = errors.New("multipart upload part not found")
+
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
@@ -485,6 +489,80 @@ type GougingSettings struct {
 	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
 }
 
+// Types related to multipart uploads.
+type (
+	MultipartCreateRequest struct {
+		Bucket string               `json:"bucket"`
+		Key    object.EncryptionKey `json:"key"`
+		Path   string               `json:"path"`
+	}
+	MultipartCreateResponse struct {
+		UploadID string `json:"uploadID"`
+	}
+	MultipartAbortRequest struct {
+		Bucket   string `json:"bucket"`
+		Path     string `json:"path"`
+		UploadID string `json:"uploadID"`
+	}
+	MultipartCompleteRequest struct {
+		Bucket   string `json:"bucket"`
+		Path     string `json:"path"`
+		UploadID string `json:"uploadID"`
+		Parts    []MultipartCompletedPart
+	}
+	MultipartCompletedPart struct {
+		PartNumber int    `json:"partNumber"`
+		ETag       string `json:"eTag"`
+	}
+	MultipartCompleteResponse struct {
+		ETag string `json:"eTag"`
+	}
+	MultipartAddPartRequest struct {
+		Bucket        string                                   `json:"bucket"`
+		Etag          string                                   `json:"eTag"`
+		Path          string                                   `json:"path"`
+		ContractSet   string                                   `json:"contractSet"`
+		UploadID      string                                   `json:"uploadID"`
+		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
+		PartNumber    int                                      `json:"partNumber"`
+		Slices        []object.SlabSlice                       `json:"slices"`
+		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	}
+	MultipartListUploadsRequest struct {
+		Bucket         string `json:"bucket"`
+		Prefix         string `json:"prefix"`
+		KeyMarker      string `json:"keyMarker"`
+		UploadIDMarker string `json:"uploadIDMarker"`
+		Limit          int    `json:"limit"`
+	}
+	MultipartListUploadsResponse struct {
+		Uploads []MultipartListUploadItem `json:"uploads"`
+	}
+	MultipartListUploadItem struct {
+		Path      string    `json:"path"`
+		UploadID  string    `json:"uploadID"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+	MultipartListPartsRequest struct {
+		Bucket           string `json:"bucket"`
+		Path             string `json:"path"`
+		UploadID         string `json:"uploadID"`
+		PartNumberMarker int    `json:"partNumberMarker"`
+		Limit            int64  `json:"limit"`
+	}
+	MultipartListPartsResponse struct {
+		IsTruncated bool                    `json:"isTruncated"`
+		NextMarker  int                     `json:"nextMarker"`
+		Parts       []MultipartListPartItem `json:"parts"`
+	}
+	MultipartListPartItem struct {
+		PartNumber   int       `json:"partNumber"`
+		LastModified time.Time `json:"lastModified"`
+		ETag         string    `json:"eTag"`
+		Size         int64     `json:"size"`
+	}
+)
+
 type WalletResponse struct {
 	ScanHeight  uint64         `json:"scanHeight"`
 	Address     types.Address  `json:"address"`
@@ -557,4 +635,8 @@ func (rs RedundancySettings) Validate() error {
 
 type AddPartialSlabResponse struct {
 	Slabs []object.PartialSlab `json:"slabs"`
+}
+
+func FormatEtag(etag string) string {
+	return fmt.Sprintf("\"%s\"", etag)
 }
