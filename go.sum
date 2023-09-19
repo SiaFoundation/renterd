@@ -1,8 +1,8 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
-github.com/SiaFoundation/gofakes3 v0.0.0-20230918145812-698366c1fd56 h1:Wx1Xp4d5jb2lYgHfPRPeA4PhY9/hwXO3H7557AZB6j8=
-github.com/SiaFoundation/gofakes3 v0.0.0-20230918145812-698366c1fd56/go.mod h1:pm3DyXGoeF7/gka6OYDqAW4E5hkcnXm/GfUagzztlxk=
+github.com/SiaFoundation/gofakes3 v0.0.0-20230919115219-af470842bcfa h1:CMKw/7lpPrLLZaT+sFQysXEE7Zgj8Iqz+dUuaYrh0wg=
+github.com/SiaFoundation/gofakes3 v0.0.0-20230919115219-af470842bcfa/go.mod h1:pm3DyXGoeF7/gka6OYDqAW4E5hkcnXm/GfUagzztlxk=
 github.com/VividCortex/ewma v1.1.1/go.mod h1:2Tkkvm3sRDVXaiyucHiACn4cqf7DpdyLvmxzcbUokwA=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d/go.mod h1:asat636LX7Bqt5lYEZ27JNDcqxfjdBQuJ/MM4CN/Lzo=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=

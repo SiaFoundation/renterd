@@ -941,9 +941,10 @@ func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode strin
 	return
 }
 
-func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string) (resp api.MultipartCreateResponse, err error) {
+func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (resp api.MultipartCreateResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/create", api.MultipartCreateRequest{
 		Bucket: bucket,
+		Key:    ec,
 		Path:   path,
 	}, &resp)
 	return
@@ -964,12 +965,12 @@ func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet
 	return
 }
 
-func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (resp api.MultipartAbortResponse, err error) {
+func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/abort", api.MultipartAbortRequest{
 		Bucket:   bucket,
 		Path:     path,
 		UploadID: uploadID,
-	}, &resp)
+	}, nil)
 	return
 }
 
@@ -983,7 +984,7 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path strin
 	return
 }
 
-func (c *Client) ListMultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
+func (c *Client) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/listuploads", api.MultipartListUploadsRequest{
 		Bucket:         bucket,
 		Prefix:         prefix,
@@ -994,7 +995,7 @@ func (c *Client) ListMultipartUploads(ctx context.Context, bucket, prefix, keyMa
 	return
 }
 
-func (c *Client) ListMultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, err error) {
+func (c *Client) MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/listparts", api.MultipartListPartsRequest{
 		Bucket:           bucket,
 		Path:             object,

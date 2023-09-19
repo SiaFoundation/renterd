@@ -1132,7 +1132,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// update uploader contracts
+	// fetch contract set contracts
 	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
@@ -1199,6 +1199,19 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// cancel the upload if no contract set is specified
+	if up.ContractSet == "" {
+		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
+		return
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
+		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
+		return
+	}
+
 	// decode the contract set from the query string
 	var contractset string
 	if jc.DecodeForm("contractset", &contractset) != nil {
@@ -1222,21 +1235,9 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// decode the part number
 	var partNumber int
 	if jc.DecodeForm("partnumber", &partNumber) != nil {
-		return
-	}
-
-	// cancel the upload if no contract set is specified
-	if up.ContractSet == "" {
-		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
-		return
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
-		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1280,7 +1281,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// update uploader contracts
+	// fetch contract set contracts
 	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return

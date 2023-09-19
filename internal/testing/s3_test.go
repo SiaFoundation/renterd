@@ -457,4 +457,27 @@ func TestS3MultipartUploads(t *testing.T) {
 	} else if !bytes.Equal(data, []byte("helloworld!")) {
 		t.Fatal("unexpected data:", string(data))
 	}
+
+	// Start a second multipart upload.
+	uploadID, err = core.NewMultipartUpload(context.Background(), "multipart", "bar", minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a part.
+	putPart(1, []byte("bar"))
+
+	// Abort upload
+	err = core.AbortMultipartUpload(context.Background(), "multipart", "bar", uploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List it.
+	res, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Uploads) != 0 {
+		t.Fatal("expected 0 uploads")
+	}
 }

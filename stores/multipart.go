@@ -45,9 +45,14 @@ func (dbMultipartPart) TableName() string {
 	return "multipart_parts"
 }
 
-func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string) (api.MultipartCreateResponse, error) {
+func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error) {
+	// Marshal key
+	key, err := ec.MarshalText()
+	if err != nil {
+		return api.MultipartCreateResponse{}, err
+	}
 	var uploadID string
-	err := s.retryTransaction(func(tx *gorm.DB) error {
+	err = s.retryTransaction(func(tx *gorm.DB) error {
 		// Get bucket id.
 		var bucketID uint
 		err := tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
@@ -62,7 +67,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		uploadID = hex.EncodeToString(uploadIDEntropy[:])
 		if err := s.db.Create(&dbMultipartUpload{
 			DBBucketID: bucketID,
-			Key:        []byte(object.NoOpKey.String()), // TODO: set actual key
+			Key:        key,
 			UploadID:   uploadID,
 			ObjectID:   path,
 		}).Error; err != nil {
@@ -76,7 +81,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 }
 
 func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
-	err = s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
 		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
@@ -128,12 +133,11 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 		}
 		return nil
 	})
-	return err
 }
 
 // TODO: f/u with support for 'prefix', 'keyMarker' and 'uploadIDMarker'
-func (s *SQLStore) ListMultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error) {
-	err := s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
+	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var dbUploads []dbMultipartUpload
 		err := tx.Limit(int(maxUploads)).
 			Find(&dbUploads).
@@ -150,10 +154,10 @@ func (s *SQLStore) ListMultipartUploads(ctx context.Context, bucket, prefix, key
 		}
 		return nil
 	})
-	return resp, err
+	return
 }
 
-func (s *SQLStore) ListMultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error) {
+func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error) {
 	limitUsed := limit > 0
 	if !limitUsed {
 		limit = math.MaxInt64
@@ -164,6 +168,7 @@ func (s *SQLStore) ListMultipartUploadParts(ctx context.Context, bucket, object 
 	err := s.retryTransaction(func(tx *gorm.DB) error {
 		var dbParts []dbMultipartPart
 		err := tx.
+			Model(&dbMultipartPart{}).
 			Joins("INNER JOIN multipart_uploads mus ON mus.id = multipart_parts.db_multipart_upload_id").
 			Joins("INNER JOIN buckets b ON b.name = ? AND b.id = mus.db_bucket_id", bucket).
 			Where("mus.object_id = ? AND mus.upload_id = ? AND part_number > ?", object, uploadID, marker).
@@ -193,8 +198,31 @@ func (s *SQLStore) ListMultipartUploadParts(ctx context.Context, bucket, object 
 	return resp, err
 }
 
-func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, object string, uploadID string) (api.MultipartAbortResponse, error) {
-	panic("not implemented")
+func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		// Find multipart upload.
+		var mu dbMultipartUpload
+		err := tx.Where("upload_id = ?", uploadID).
+			Preload("Parts").
+			Joins("DBBucket").
+			Take(&mu).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch multipart upload: %w", err)
+		}
+		if mu.ObjectID != path {
+			// Check object id.
+			return fmt.Errorf("object id mismatch: %v != %v: %w", mu.ObjectID, path, api.ErrObjectNotFound)
+		} else if mu.DBBucket.Name != bucket {
+			// Check bucket name.
+			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
+		}
+		err = tx.Delete(&mu).Error
+		if err != nil {
+			return fmt.Errorf("failed to delete multipart upload: %w", err)
+		}
+		return pruneSlabs(tx)
+	})
 }
 
 func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error) {
@@ -286,18 +314,11 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		// respect the part order.
 		sort.Sort(sortedSlices(slices))
 
-		// Marshal key.
-		// TODO: set actual key
-		key, err := object.NoOpKey.MarshalText()
-		if err != nil {
-			return fmt.Errorf("failed to marshal key: %w", err)
-		}
-
 		// Create the object.
 		obj := dbObject{
 			DBBucketID: mu.DBBucketID,
 			ObjectID:   path,
-			Key:        key,
+			Key:        mu.Key,
 			Size:       int64(size),
 		}
 		if err := tx.Create(&obj).Error; err != nil {
@@ -321,9 +342,12 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		}
 		return nil
 	})
+	if err != nil {
+		return api.MultipartCompleteResponse{}, err
+	}
 	return api.MultipartCompleteResponse{
 		ETag: etag,
-	}, err
+	}, nil
 }
 
 type sortedSlices []dbSlice

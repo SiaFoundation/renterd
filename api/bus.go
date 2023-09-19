@@ -492,8 +492,9 @@ type GougingSettings struct {
 // Types related to multipart uploads.
 type (
 	MultipartCreateRequest struct {
-		Bucket string `json:"bucket"`
-		Path   string `json:"path"`
+		Bucket string               `json:"bucket"`
+		Key    object.EncryptionKey `json:"key"`
+		Path   string               `json:"path"`
 	}
 	MultipartCreateResponse struct {
 		UploadID string `json:"uploadID"`
@@ -503,8 +504,6 @@ type (
 		Path     string `json:"path"`
 		UploadID string `json:"uploadID"`
 	}
-	MultipartAbortResponse struct {
-	}
 	MultipartCompleteRequest struct {
 		Bucket   string `json:"bucket"`
 		Path     string `json:"path"`
@@ -513,14 +512,14 @@ type (
 	}
 	MultipartCompletedPart struct {
 		PartNumber int    `json:"partNumber"`
-		ETag       string `json:"etag"`
+		ETag       string `json:"eTag"`
 	}
 	MultipartCompleteResponse struct {
-		ETag string `json:"etag"`
+		ETag string `json:"eTag"`
 	}
 	MultipartAddPartRequest struct {
 		Bucket        string                                   `json:"bucket"`
-		Etag          string                                   `json:"etag"`
+		Etag          string                                   `json:"eTag"`
 		Path          string                                   `json:"path"`
 		ContractSet   string                                   `json:"contractSet"`
 		UploadID      string                                   `json:"uploadID"`
@@ -559,7 +558,7 @@ type (
 	MultipartListPartItem struct {
 		PartNumber   int       `json:"partNumber"`
 		LastModified time.Time `json:"lastModified"`
-		ETag         string    `json:"etag"`
+		ETag         string    `json:"eTag"`
 		Size         int64     `json:"size"`
 	}
 )
