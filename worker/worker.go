@@ -1132,11 +1132,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// built options
+	opts := []UploadOption{WithUploadParams(up)}
+
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the object
-	etag, err := w.upload(ctx, jc.Request.Body, rs, bucket, jc.PathParam("path"), up.ContractSet, up.CurrentHeight, up.UploadPacking)
+	etag, err := w.upload(ctx, jc.Request.Body, bucket, jc.PathParam("path"), opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -1209,8 +1212,6 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	var opts []UploadOption
-
 	// make sure only one of the following is set
 	var disablePreshardingEncryption bool
 	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
@@ -1228,6 +1229,9 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	}
+
+	// built options
+	opts := []UploadOption{WithUploadParams(up)}
 	if disablePreshardingEncryption {
 		opts = append(opts, WithCustomKey(object.NoOpKey))
 	} else {
@@ -1238,7 +1242,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the multipart
-	etag, err := w.uploadMultiPart(ctx, jc.Request.Body, rs, bucket, jc.PathParam("path"), up.ContractSet, uploadID, partNumber, up.CurrentHeight, up.UploadPacking, opts...)
+	etag, err := w.uploadMultiPart(ctx, jc.Request.Body, bucket, jc.PathParam("path"), uploadID, partNumber, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
