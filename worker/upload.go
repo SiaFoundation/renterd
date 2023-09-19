@@ -167,6 +167,128 @@ func (w *worker) initUploadManager(maxOverdrive uint64, overdriveTimeout time.Du
 	w.uploadManager = newUploadManager(w.bus, w, w, maxOverdrive, overdriveTimeout, logger)
 }
 
+func (w *worker) upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, bucket, path, contractSet string, bh uint64, pack bool) (err error) {
+	// fetch contracts
+	contracts, err := w.bus.ContractSetContracts(ctx, contractSet)
+	if err != nil {
+		return fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// perform the upload
+	obj, used, partialSlabData, err := w.uploadManager.Upload(ctx, r, rs, contracts, bh, pack)
+	if err != nil {
+		return fmt.Errorf("couldn't upload object: %w", err)
+	}
+
+	// add parital slabs
+	if len(partialSlabData) > 0 {
+		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet)
+		if err != nil {
+			return err
+		}
+		obj.PartialSlabs = partialSlabs
+	}
+
+	// persist the object
+	err = w.bus.AddObject(ctx, bucket, path, contractSet, obj, used)
+	if err != nil {
+		return fmt.Errorf("couldn't add object: %w", err)
+	}
+
+	// if packing was enabled try uploading packed slabs in a separate goroutine
+	if pack {
+		go w.tryUploadPackedSlabs(rs, contractSet)
+	}
+	return nil
+}
+
+func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet string) {
+	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
+
+	w.uploadsMu.Lock()
+	if w.uploadingPackedSlabs[key] {
+		w.uploadsMu.Unlock()
+		return
+	}
+	w.uploadingPackedSlabs[key] = true
+	w.uploadsMu.Unlock()
+
+	// make sure we mark uploading packed slabs as false when we're done
+	defer func() {
+		w.uploadsMu.Lock()
+		w.uploadingPackedSlabs[key] = false
+		w.uploadsMu.Unlock()
+	}()
+
+	// keep uploading packed slabs until we're done
+	packedSlabsFound := true
+	for packedSlabsFound {
+		packedSlabsFound = func() bool {
+			// create a context with sane timeout
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			// fetch contracts
+			contracts, err := w.bus.ContractSetContracts(ctx, contractSet)
+			if err != nil {
+				w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
+				return false
+			}
+
+			// fetch consensus state
+			cs, err := w.bus.ConsensusState(ctx)
+			if err != nil {
+				w.logger.Errorf("couldn't fetch consensus state from bus: %v", err)
+				return false
+			}
+
+			// if partial uploads are enabled, check whether we have a full slab now
+			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, 5*time.Minute, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, -1)
+			if err != nil {
+				w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
+				return false
+			}
+
+			// if there's no packed slabs, we're done
+			if len(packedSlabs) == 0 {
+				return false
+			}
+
+			// upload packed slabs
+			for _, ps := range packedSlabs {
+				if err := func() error {
+					// create a context with sane timeout
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+					defer cancel()
+
+					// upload packed slab
+					shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
+					sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, cs.BlockHeight)
+					if err != nil {
+						w.logger.Errorf("couldn't upload packed slab, err: %v", err)
+						return err
+					}
+
+					// mark packed slab as uploaded
+					if err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{
+						{
+							BufferID: ps.BufferID,
+							Shards:   sectors,
+						},
+					}, used); err != nil {
+						w.logger.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
+						return err
+					}
+					return nil
+				}(); err != nil {
+					return false
+				}
+			}
+			return true
+		}()
+	}
+}
+
 func newDataPoints(halfLife time.Duration) *dataPoints {
 	return &dataPoints{
 		size:        20,
@@ -290,7 +412,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, pack bool) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -355,7 +477,7 @@ loop:
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, nil, nil, err
 			}
-			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
+			if pack && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
 				// uploading.
 				partialSlab = data[:length]
