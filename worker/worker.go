@@ -1139,13 +1139,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the object
-	etag, err := w.upload(ctx, jc.Request.Body, bucket, jc.PathParam("path"), opts...)
+	_, err = w.upload(ctx, jc.Request.Body, bucket, jc.PathParam("path"), opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
-
-	// set etag in header response.
-	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
 }
 
 func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
