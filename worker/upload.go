@@ -28,6 +28,10 @@ const (
 	statsDecayHalfTime        = 10 * time.Minute
 	statsDecayThreshold       = 5 * time.Minute
 	statsRecomputeMinInterval = 3 * time.Second
+
+	defaultPackedSlabsLockDuration  = 5 * time.Minute
+	defaultPackedSlabsUploadTimeout = 10 * time.Minute
+	defaultPackedSlabsLimit         = 2
 )
 
 var (
@@ -321,7 +325,7 @@ func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet str
 			}
 
 			// if partial uploads are enabled, check whether we have a full slab now
-			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, 5*time.Minute, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, -1)
+			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, defaultPackedSlabsLimit)
 			if err != nil {
 				w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
 				return false
@@ -336,7 +340,7 @@ func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet str
 			for _, ps := range packedSlabs {
 				if err := func() error {
 					// create a context with sane timeout
-					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+					ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
 					defer cancel()
 
 					// upload packed slab
