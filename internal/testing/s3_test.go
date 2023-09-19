@@ -158,6 +158,28 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// add a few objects to the bucket.
+	_, err = s3.PutObject(context.Background(), bucket, "dir/", bytes.NewReader(frand.Bytes(10)), 10, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s3.PutObject(context.Background(), bucket, "dir/file", bytes.NewReader(frand.Bytes(10)), 10, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// delete them using the multi delete endpoint.
+	objectsCh := make(chan minio.ObjectInfo, 3)
+	objectsCh <- minio.ObjectInfo{Key: "dir/file"}
+	objectsCh <- minio.ObjectInfo{Key: "dir/"}
+	close(objectsCh)
+	results := s3.RemoveObjects(context.Background(), bucket, objectsCh, minio.RemoveObjectsOptions{})
+	for res := range results {
+		if res.Err != nil {
+			t.Fatal(res.Err)
+		}
+	}
+
 	// delete bucket
 	err = s3.RemoveBucket(context.Background(), bucket)
 	if err != nil {
