@@ -279,7 +279,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 
 	// if packing was enabled try uploading packed slabs in a separate goroutine
 	if cfg.pack {
-		go w.tryUploadPackedSlabs(cfg.rs, cfg.contractSet)
+		w.tryUploadPackedSlabs(cfg.rs, cfg.contractSet)
 	}
 	return etag, nil
 }
@@ -317,10 +317,10 @@ func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet str
 				return false
 			}
 
-			// fetch consensus state
-			cs, err := w.bus.ConsensusState(ctx)
+			// fetch upload params
+			up, err := w.bus.UploadParams(ctx)
 			if err != nil {
-				w.logger.Errorf("couldn't fetch consensus state from bus: %v", err)
+				w.logger.Errorf("couldn't fetch upload params from bus: %v", err)
 				return false
 			}
 
@@ -343,9 +343,12 @@ func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet str
 					ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
 					defer cancel()
 
+					// attach gouging checker to the context
+					ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
 					// upload packed slab
 					shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-					sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, cs.BlockHeight)
+					sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
 					if err != nil {
 						w.logger.Errorf("couldn't upload packed slab, err: %v", err)
 						return err

@@ -1932,24 +1932,31 @@ func TestUploadPacking(t *testing.T) {
 	uploadDownload("file5", data5)
 	download("file4", data4, 0, int64(len(data4)))
 
-	// check the object stats
-	os, err := b.ObjectsStats()
+	// check the object stats, we use a retry loop since packed slabs are upload
+	// in a separate goroutine so stats might lag a bit
+	err = Retry(60, time.Second, func() error {
+		os, err := b.ObjectsStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if os.NumObjects != 5 {
+			return fmt.Errorf("expected 5 objects, got %v", os.NumObjects)
+		}
+		totalObjectSize := uint64(3 * slabSize)
+		totalRedundantSize := totalObjectSize * uint64(rs.TotalShards) / uint64(rs.MinShards)
+		if os.TotalObjectsSize != totalObjectSize {
+			return fmt.Errorf("expected totalObjectSize of %v, got %v", totalObjectSize, os.TotalObjectsSize)
+		}
+		if os.TotalSectorsSize != uint64(totalRedundantSize) {
+			return fmt.Errorf("expected totalSectorSize of %v, got %v", totalRedundantSize, os.TotalSectorsSize)
+		}
+		if os.TotalUploadedSize != uint64(totalRedundantSize) {
+			return fmt.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if os.NumObjects != 5 {
-		t.Fatal("expected 5 objects, got", os.NumObjects)
-	}
-	totalObjectSize := uint64(3 * slabSize)
-	totalRedundantSize := totalObjectSize * uint64(rs.TotalShards) / uint64(rs.MinShards)
-	if os.TotalObjectsSize != totalObjectSize {
-		t.Fatalf("expected totalObjectSize of %v, got %v", totalObjectSize, os.TotalObjectsSize)
-	}
-	if os.TotalSectorsSize != uint64(totalRedundantSize) {
-		t.Errorf("expected totalSectorSize of %v, got %v", totalRedundantSize, os.TotalSectorsSize)
-	}
-	if os.TotalUploadedSize != uint64(totalRedundantSize) {
-		t.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
 	}
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
