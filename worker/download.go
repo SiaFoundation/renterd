@@ -279,6 +279,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				if next.PartialSlab {
 					responseChan <- &slabDownloadResponse{index: slabIndex}
 					slabIndex++
+					atomic.AddUint64(&concurrentSlabs, 1)
 					continue // handle partial slab separately
 				}
 

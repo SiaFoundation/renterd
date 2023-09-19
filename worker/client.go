@@ -213,6 +213,40 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	return
 }
 
+// UploadMultipartUploadPart uploads part of the data for a multipart upload.
+func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error) {
+	path = strings.TrimPrefix(path, "/")
+	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
+
+	values := make(url.Values)
+	values.Set("uploadid", uploadID)
+	values.Set("partnumber", fmt.Sprint(partNumber))
+	for _, opt := range opts {
+		opt(values)
+	}
+	u, err := url.Parse(fmt.Sprintf("%v/multipart/%v", c.c.BaseURL, path))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), r)
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		err, _ := io.ReadAll(resp.Body)
+		return "", errors.New(string(err))
+	}
+	return resp.Header.Get("ETag"), nil
+}
+
 func (c *Client) object(ctx context.Context, bucket, path, prefix string, offset, limit int, opts ...api.DownloadObjectOption) (_ io.ReadCloser, _ http.Header, err error) {
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))

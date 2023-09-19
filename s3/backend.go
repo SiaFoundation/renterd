@@ -14,12 +14,18 @@ import (
 
 	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 // maxKeysDefault is the default maxKeys value used in the AWS SDK
 const maxKeysDefault = 1000
+
+var (
+	_ gofakes3.Backend          = (*s3)(nil)
+	_ gofakes3.MultipartBackend = (*s3)(nil)
+)
 
 type s3 struct {
 	b      bus
@@ -357,4 +363,107 @@ func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[st
 		ETag:         "",                                             // TODO: don't have that
 		LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
 	}, nil
+}
+
+func (s *s3) CreateMultipartUpload(bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
+	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+key, object.NoOpKey)
+	if err != nil {
+		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return gofakes3.UploadID(resp.UploadID), nil
+}
+
+func (s *s3) UploadPart(bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (etag string, err error) {
+	etag, err = s.w.UploadMultipartUploadPart(context.Background(), input, object, string(id), partNumber, api.UploadWithDisabledPreshardingEncryption())
+	if err != nil {
+		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return etag, nil
+}
+
+func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
+	prefix.HasPrefix = prefix.Prefix != ""
+	prefix.HasDelimiter = prefix.Delimiter != ""
+	if prefix.HasDelimiter && prefix.Delimiter != "/" {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "delimiter must be '/'")
+	} else if prefix.HasPrefix {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "prefix not supported")
+	} else if marker != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "marker not supported")
+	}
+	resp, err := s.b.MultipartUploads(context.Background(), bucket, "", "", "", int(limit))
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	var uploads []gofakes3.ListMultipartUploadItem
+	for _, upload := range resp.Uploads {
+		uploads = append(uploads, gofakes3.ListMultipartUploadItem{
+			Key:       upload.Path[1:],
+			UploadID:  gofakes3.UploadID(upload.UploadID),
+			Initiated: gofakes3.NewContentTime(upload.CreatedAt),
+		})
+	}
+	return &gofakes3.ListMultipartUploadsResult{
+		Bucket:             bucket,
+		KeyMarker:          "",
+		UploadIDMarker:     "",
+		NextKeyMarker:      "",
+		NextUploadIDMarker: "",
+		MaxUploads:         limit,
+		Delimiter:          prefix.Delimiter,
+		Prefix:             prefix.Prefix,
+		CommonPrefixes:     []gofakes3.CommonPrefix{},
+		IsTruncated:        false,
+		Uploads:            uploads,
+	}, nil
+}
+
+func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker int, limit int64) (*gofakes3.ListMultipartUploadPartsResult, error) {
+	resp, err := s.b.MultipartUploadParts(context.Background(), bucket, "/"+object, string(uploadID), marker, limit)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	var parts []gofakes3.ListMultipartUploadPartItem
+	for _, part := range resp.Parts {
+		parts = append(parts, gofakes3.ListMultipartUploadPartItem{
+			PartNumber:   part.PartNumber,
+			LastModified: gofakes3.NewContentTime(part.LastModified),
+			ETag:         part.ETag,
+			Size:         part.Size,
+		})
+	}
+
+	return &gofakes3.ListMultipartUploadPartsResult{
+		Bucket:               bucket,
+		Key:                  object,
+		UploadID:             uploadID,
+		PartNumberMarker:     marker,
+		NextPartNumberMarker: resp.NextMarker,
+		MaxParts:             limit,
+		IsTruncated:          resp.IsTruncated,
+		Parts:                parts,
+	}, nil
+}
+
+func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) error {
+	err := s.b.AbortMultipartUpload(context.Background(), bucket, "/"+object, string(id))
+	if err != nil {
+		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return nil
+}
+
+func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (versionID gofakes3.VersionID, etag string, err error) {
+	var parts []api.MultipartCompletedPart
+	for _, part := range input.Parts {
+		parts = append(parts, api.MultipartCompletedPart{
+			ETag:       part.ETag,
+			PartNumber: part.PartNumber,
+		})
+	}
+	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, "/"+object, string(id), parts)
+	if err != nil {
+		return "", "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return "", resp.ETag, nil
 }

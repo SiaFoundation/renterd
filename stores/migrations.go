@@ -17,6 +17,7 @@ var (
 		&dbContract{},
 		&dbContractSet{},
 		&dbObject{},
+		&dbMultipartUpload{},
 		&dbBucket{},
 		&dbBufferedSlab{},
 		&dbSlab{},
@@ -222,6 +223,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00014_buckets(tx, logger)
 			},
 		},
+		{
+			ID: "00015_multipartUploads",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00015_multipartUploads(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -265,6 +272,10 @@ func initSchema(tx *gorm.DB) error {
 		err = tx.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
+		}
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
 	}
 
@@ -765,5 +776,37 @@ func performMigration00014_buckets(txn *gorm.DB, logger *zap.SugaredLogger) erro
 		}
 	}
 	logger.Info("migration 00014_buckets complete")
+	return nil
+}
+
+func performMigration00015_multipartUploads(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00015_multipartUploads")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Create new tables.
+	if err := txn.Migrator().AutoMigrate(&dbMultipartUpload{}, &dbMultipartPart{}); err != nil {
+		return err
+	}
+
+	// Add column to slices table.
+	if err := txn.Migrator().AutoMigrate(&dbSlice{}); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00015_multipartUploads complete")
 	return nil
 }

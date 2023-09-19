@@ -164,6 +164,8 @@ type Bus interface {
 	AddObject(ctx context.Context, bucket string, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
+	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
@@ -1134,10 +1136,115 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the object
-	err = w.upload(ctx, jc.Request.Body, rs, bucket, jc.PathParam("path"), up.ContractSet, up.CurrentHeight, up.UploadPacking)
+	etag, err := w.upload(ctx, jc.Request.Body, rs, bucket, jc.PathParam("path"), up.ContractSet, up.CurrentHeight, up.UploadPacking)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
+
+	// set etag in header response.
+	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
+}
+
+func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
+	jc.Custom((*[]byte)(nil), nil)
+	ctx := jc.Request.Context()
+
+	// fetch the upload parameters
+	up, err := w.bus.UploadParams(ctx)
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+
+	// cancel the upload if no contract set is specified
+	if up.ContractSet == "" {
+		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
+		return
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
+		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
+		return
+	}
+
+	// decode the contract set from the query string
+	var contractset string
+	if jc.DecodeForm("contractset", &contractset) != nil {
+		return
+	} else if contractset != "" {
+		up.ContractSet = contractset
+	}
+
+	// decode the bucket from the query string
+	bucket := api.DefaultBucketName
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+
+	// decode the upload id
+	var uploadID string
+	if jc.DecodeForm("uploadid", &uploadID) != nil {
+		return
+	} else if uploadID == "" {
+		jc.Error(errors.New("upload id not specified"), http.StatusBadRequest)
+		return
+	}
+
+	// decode the part number
+	var partNumber int
+	if jc.DecodeForm("partnumber", &partNumber) != nil {
+		return
+	}
+
+	// allow overriding the redundancy settings
+	rs := up.RedundancySettings
+	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+		return
+	}
+	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
+		return
+	}
+	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
+		return
+	}
+
+	var opts []UploadOption
+
+	// make sure only one of the following is set
+	var disablePreshardingEncryption bool
+	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
+		return
+	}
+	if !disablePreshardingEncryption {
+		jc.Error(errors.New("presharding encryption is not yet supported for multipart uploads"), http.StatusNotImplemented)
+		return
+	}
+	if !disablePreshardingEncryption && jc.Request.FormValue("offset") == "" {
+		jc.Error(errors.New("if presharding encryption isn't disabled, the offset needs to be set"), http.StatusBadRequest)
+		return
+	}
+	var offset uint64
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	}
+	if disablePreshardingEncryption {
+		opts = append(opts, WithCustomKey(object.NoOpKey))
+	} else {
+		opts = append(opts, WithCustomEncryptionOffset(offset))
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// upload the multipart
+	etag, err := w.uploadMultiPart(ctx, jc.Request.Body, rs, bucket, jc.PathParam("path"), up.ContractSet, uploadID, partNumber, up.CurrentHeight, up.UploadPacking, opts...)
+	if jc.Check("couldn't upload object", err) != nil {
+		return
+	}
+
+	// set etag in header response.
+	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
 }
 
 func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
@@ -1292,6 +1399,8 @@ func (w *worker) Handler() http.Handler {
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
+
+		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
 	}))

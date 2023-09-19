@@ -97,7 +97,8 @@ type (
 
 	dbSlice struct {
 		Model
-		DBObjectID uint `gorm:"index"`
+		DBObjectID        *uint `gorm:"index"`
+		DBMultipartPartID *uint `gorm:"index"`
 
 		// Slice related fields.
 		DBSlabID uint `gorm:"index"`
@@ -1177,8 +1178,8 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to fetch src slices: %w", err)
 		}
 		for i := range srcSlices {
-			srcSlices[i].Model = Model{} // clear model
-			srcSlices[i].DBObjectID = 0  // clear object id
+			srcSlices[i].Model = Model{}  // clear model
+			srcSlices[i].DBObjectID = nil // clear object id
 		}
 
 		var bucket dbBucket
@@ -1262,92 +1263,9 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet s
 			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
 
-		for i, ss := range o.Slabs {
-			// Create Slab if it doesn't exist yet.
-			slabKey, err := ss.Key.MarshalText()
-			if err != nil {
-				return fmt.Errorf("failed to marshal slab key: %w", err)
-			}
-			slab := &dbSlab{
-				Key:         slabKey,
-				MinShards:   ss.MinShards,
-				TotalShards: uint8(len(ss.Shards)),
-			}
-			err = tx.Where(dbSlab{Key: slabKey}).
-				Assign(dbSlab{
-					DBContractSetID: cs.ID,
-				}).
-				FirstOrCreate(&slab).Error
-			if err != nil {
-				return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(o.Slabs), err)
-			}
-
-			// Create Slice.
-			slice := dbSlice{
-				DBSlabID:   slab.ID,
-				DBObjectID: obj.ID,
-				Offset:     ss.Offset,
-				Length:     ss.Length,
-			}
-			err = tx.Create(&slice).Error
-			if err != nil {
-				return fmt.Errorf("failed to create slice %v/%v: %w", i+1, len(o.Slabs), err)
-			}
-
-			for j, shard := range ss.Shards {
-				// Create sector if it doesn't exist yet.
-				var sector dbSector
-				err := tx.
-					Where(dbSector{Root: shard.Root[:]}).
-					Assign(dbSector{
-						DBSlabID:   slab.ID,
-						LatestHost: publicKey(shard.Host),
-					}).
-					FirstOrCreate(&sector).
-					Error
-				if err != nil {
-					return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
-				}
-
-				// Add contract and host to join tables.
-				contract, contractFound := contracts[shard.Host]
-				if contractFound {
-					err = tx.Model(&sector).Association("Contracts").Append(&contract)
-					if err != nil {
-						return fmt.Errorf("failed to append to Contracts association: %w", err)
-					}
-				}
-			}
-		}
-
-		// Handle partial slabs. We create a slice for each partial slab.
-		partialSlabs := o.PartialSlabs
-		if len(partialSlabs) == 0 {
-			return nil
-		}
-
-		for _, partialSlab := range partialSlabs {
-			key, err := partialSlab.Key.MarshalText()
-			if err != nil {
-				return err
-			}
-			var buffer dbBufferedSlab
-			err = tx.Joins("DBSlab").
-				Take(&buffer, "DBSlab.key = ?", key).
-				Error
-			if err != nil {
-				return fmt.Errorf("failed to fetch buffered slab: %w", err)
-			}
-
-			err = tx.Create(&dbSlice{
-				DBObjectID: obj.ID,
-				DBSlabID:   buffer.DBSlab.ID,
-				Offset:     partialSlab.Offset,
-				Length:     partialSlab.Length,
-			}).Error
-			if err != nil {
-				return fmt.Errorf("failed to create slice for partial slab: %w", err)
-			}
+		// Create all slices. This also creates any missing slabs or sectors.
+		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs, o.PartialSlabs); err != nil {
+			return fmt.Errorf("failed to create slices: %w", err)
 		}
 		return nil
 	})
@@ -1591,6 +1509,104 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		}
 	}
 	return slabs, nil
+}
+
+func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.PublicKey]dbContract, slices []object.SlabSlice, partialSlabs []object.PartialSlab) error {
+	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
+		return fmt.Errorf("either objID or multiPartID must be set")
+	}
+
+	var dbSlices []dbSlice
+	for i, ss := range slices {
+		// Create Slab if it doesn't exist yet.
+		slabKey, err := ss.Key.MarshalText()
+		if err != nil {
+			return fmt.Errorf("failed to marshal slab key: %w", err)
+		}
+		slab := &dbSlab{
+			Key:         slabKey,
+			MinShards:   ss.MinShards,
+			TotalShards: uint8(len(ss.Shards)),
+		}
+		err = tx.Where(dbSlab{Key: slabKey}).
+			Assign(dbSlab{
+				DBContractSetID: contractSetID,
+			}).
+			FirstOrCreate(&slab).Error
+		if err != nil {
+			return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(slices), err)
+		}
+
+		// Create Slice.
+		slice := dbSlice{
+			DBSlabID:          slab.ID,
+			DBObjectID:        objID,
+			DBMultipartPartID: multiPartID,
+			Offset:            ss.Offset,
+			Length:            ss.Length,
+		}
+		err = tx.Create(&slice).Error
+		if err != nil {
+			return fmt.Errorf("failed to create slice %v/%v: %w", i+1, len(slices), err)
+		}
+		dbSlices = append(dbSlices, slice)
+
+		for j, shard := range ss.Shards {
+			// Create sector if it doesn't exist yet.
+			var sector dbSector
+			err := tx.
+				Where(dbSector{Root: shard.Root[:]}).
+				Assign(dbSector{
+					DBSlabID:   slab.ID,
+					LatestHost: publicKey(shard.Host),
+				}).
+				FirstOrCreate(&sector).
+				Error
+			if err != nil {
+				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
+			}
+
+			// Add contract and host to join tables.
+			contract, contractFound := contracts[shard.Host]
+			if contractFound {
+				err = tx.Model(&sector).Association("Contracts").Append(&contract)
+				if err != nil {
+					return fmt.Errorf("failed to append to Contracts association: %w", err)
+				}
+			}
+		}
+	}
+
+	// Handle partial slabs. We create a slice for each partial slab.
+	if len(partialSlabs) == 0 {
+		return nil
+	}
+
+	for _, partialSlab := range partialSlabs {
+		key, err := partialSlab.Key.MarshalText()
+		if err != nil {
+			return err
+		}
+		var buffer dbBufferedSlab
+		err = tx.Joins("DBSlab").
+			Take(&buffer, "DBSlab.key = ?", key).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch buffered slab: %w", err)
+		}
+
+		err = tx.Create(&dbSlice{
+			DBObjectID:        objID,
+			DBMultipartPartID: multiPartID,
+			DBSlabID:          buffer.DBSlab.ID,
+			Offset:            partialSlab.Offset,
+			Length:            partialSlab.Length,
+		}).Error
+		if err != nil {
+			return fmt.Errorf("failed to create slice for partial slab: %w", err)
+		}
+	}
+	return nil
 }
 
 // object retrieves a raw object from the store.

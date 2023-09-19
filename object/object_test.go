@@ -2,17 +2,54 @@ package object
 
 import (
 	"bytes"
+	"io"
 	"math"
 	"testing"
 
 	"lukechampine.com/frand"
 )
 
+func TestEncryptionOffset(t *testing.T) {
+	key := GenerateEncryptionKey()
+
+	encrypt := func(offset uint64, plainText []byte) []byte {
+		t.Helper()
+		sr, err := key.Encrypt(bytes.NewReader(plainText), offset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ct, err := io.ReadAll(sr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ct
+	}
+	decrypt := func(offset uint64, cipherText []byte) []byte {
+		pt := bytes.NewBuffer(nil)
+		_, err := key.Decrypt(pt, offset).Write(cipherText)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pt.Bytes()
+	}
+
+	data := frand.Bytes(640)
+	offset := uint64(64)
+	if !bytes.Equal(data, decrypt(offset, encrypt(offset, data))) {
+		t.Fatal("mismatch")
+	} else if bytes.Equal(data, decrypt(offset, encrypt(128, data))) {
+		t.Fatal("expected mismatch")
+	}
+}
+
 func TestEncryptionOverflow(t *testing.T) {
 	// Create a random key.
 	key := GenerateEncryptionKey()
 	data := frand.Bytes(3 * 64)
-	sr := key.Encrypt(bytes.NewReader(data))
+	sr, err := key.Encrypt(bytes.NewReader(data), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Check that the streamreader is initialized correctly.
 	rs := sr.S.(*rekeyStream)

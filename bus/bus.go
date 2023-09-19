@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -119,6 +120,13 @@ type (
 		RemoveObjects(ctx context.Context, bucket, prefix string) error
 		RenameObject(ctx context.Context, bucket, from, to string) error
 		RenameObjects(ctx context.Context, bucket, from, to string) error
+
+		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
+		AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+		CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
+		CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error)
+		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
+		MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
@@ -1796,6 +1804,91 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	return b, nil
 }
 
+func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
+	var req api.MultipartCreateRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.Key)
+	if jc.Check("failed to create multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
+	var req api.MultipartAbortRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
+	if jc.Check("failed to abort multipart upload", err) != nil {
+		return
+	}
+}
+
+func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
+	var req api.MultipartCompleteRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts)
+	if jc.Check("failed to complete multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
+	var req api.MultipartAddPartRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if req.Bucket == "" {
+		req.Bucket = api.DefaultBucketName
+	} else if req.ContractSet == "" {
+		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	} else if req.Etag == "" {
+		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
+		return
+	} else if req.PartNumber <= 0 || req.PartNumber > gofakes3.MaxUploadPartNumber {
+		jc.Error(fmt.Errorf("part_number must be between 1 and %d", gofakes3.MaxUploadPartNumber), http.StatusBadRequest)
+		return
+	} else if req.UploadID == "" {
+		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
+		return
+	}
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.Etag, req.UsedContracts)
+	if jc.Check("failed to upload part", err) != nil {
+		return
+	}
+}
+
+func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
+	var req api.MultipartListUploadsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.KeyMarker, req.UploadIDMarker, req.Limit)
+	if jc.Check("failed to list multipart uploads", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
+	var req api.MultipartListPartsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
+	if jc.Check("failed to list multipart upload parts", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
@@ -1913,6 +2006,13 @@ func (b *bus) Handler() http.Handler {
 		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+
+		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
+		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
+		"POST   /multipart/complete":    b.multipartHandlerCompletePOST,
+		"PUT    /multipart/part":        b.multipartHandlerUploadPartPUT,
+		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
+		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
