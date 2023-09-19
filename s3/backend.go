@@ -445,7 +445,7 @@ func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker
 }
 
 func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) error {
-	panic("not implemented")
+	return gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "abort multipart upload not supported")
 }
 
 func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (versionID gofakes3.VersionID, etag string, err error) {
