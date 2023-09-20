@@ -1133,7 +1133,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// built options
-	opts := []UploadOption{WithUploadParams(up)}
+	opts := []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+	}
 
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
@@ -1228,7 +1233,12 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// built options
-	opts := []UploadOption{WithUploadParams(up)}
+	opts := []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+	}
 	if disablePreshardingEncryption {
 		opts = append(opts, WithCustomKey(object.NoOpKey))
 	} else {
