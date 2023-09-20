@@ -2133,23 +2133,32 @@ func TestSlabBufferStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// check the object stats
-	os, err := b.ObjectsStats()
+	// check the object stats, we use a retry loop since packed slabs are upload
+	// in a separate goroutine so stats might lag a bit
+	err = Retry(60, time.Second, func() error {
+		os, err := b.ObjectsStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if os.NumObjects != 1 {
+			return fmt.Errorf("expected 1 object, got %d", os.NumObjects)
+		}
+		if os.TotalObjectsSize != uint64(len(data1)) {
+			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1), os.TotalObjectsSize)
+		}
+		if os.TotalSectorsSize != 0 {
+			return fmt.Errorf("expected totalSectorSize of 0, got %d", os.TotalSectorsSize)
+		}
+		if os.TotalUploadedSize != 0 {
+			return fmt.Errorf("expected totalUploadedSize of 0, got %d", os.TotalUploadedSize)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if os.NumObjects != 1 {
-		t.Fatal("expected 1 object, got", os.NumObjects)
-	}
-	if os.TotalObjectsSize != uint64(len(data1)) {
-		t.Fatalf("expected totalObjectSize of %v, got %v", len(data1), os.TotalObjectsSize)
-	}
-	if os.TotalSectorsSize != 0 {
-		t.Fatal("expected totalSectorSize of 0, got", os.TotalSectorsSize)
-	}
-	if os.TotalUploadedSize != 0 {
-		t.Fatal("expected totalUploadedSize of 0, got", os.TotalUploadedSize)
-	}
+
+	// check the slab buffers
 	buffers, err := b.SlabBuffers()
 	if err != nil {
 		t.Fatal(err)
@@ -2181,22 +2190,32 @@ func TestSlabBufferStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	os, err = b.ObjectsStats()
+	// check the object stats again, we use a retry loop since packed slabs are upload
+	// in a separate goroutine so stats might lag a bit
+	err = Retry(60, time.Second, func() error {
+		os, err := b.ObjectsStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if os.NumObjects != 2 {
+			return fmt.Errorf("expected 1 object, got %d", os.NumObjects)
+		}
+		if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
+			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1)+len(data2), os.TotalObjectsSize)
+		}
+		if os.TotalSectorsSize != 3*rhpv2.SectorSize {
+			return fmt.Errorf("expected totalSectorSize of %d, got %d", 3*rhpv2.SectorSize, os.TotalSectorsSize)
+		}
+		if os.TotalUploadedSize != 3*rhpv2.SectorSize {
+			return fmt.Errorf("expected totalUploadedSize of %d, got %d", 3*rhpv2.SectorSize, os.TotalUploadedSize)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if os.NumObjects != 2 {
-		t.Fatal("expected 1 object, got", os.NumObjects)
-	}
-	if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
-		t.Fatalf("expected totalObjectSize of %v, got %v", len(data1)+len(data2), os.TotalObjectsSize)
-	}
-	if os.TotalSectorsSize != 3*rhpv2.SectorSize {
-		t.Fatalf("expected totalSectorSize of %v, got %v", 3*rhpv2.SectorSize, os.TotalSectorsSize)
-	}
-	if os.TotalUploadedSize != 3*rhpv2.SectorSize {
-		t.Fatalf("expected totalUploadedSize of %v, got %v", 3*rhpv2.SectorSize, os.TotalUploadedSize)
-	}
+
+	// check the slab buffers
 	buffers, err = b.SlabBuffers()
 	if err != nil {
 		t.Fatal(err)
