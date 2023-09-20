@@ -1932,16 +1932,23 @@ func TestUploadPacking(t *testing.T) {
 	uploadDownload("file5", data5)
 	download("file4", data4, 0, int64(len(data4)))
 
-	// check the object stats, we use a retry loop since packed slabs are upload
-	// in a separate goroutine so stats might lag a bit
+	// assert number of objects
+	os, err := b.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.NumObjects != 5 {
+		t.Fatalf("expected 5 objects, got %v", os.NumObjects)
+	}
+
+	// check the object size stats, we use a retry loop since packed slabs are
+	// uploaded in a separate goroutine, so the object stats might lag a bit
 	err = Retry(60, time.Second, func() error {
 		os, err := b.ObjectsStats()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if os.NumObjects != 5 {
-			return fmt.Errorf("expected 5 objects, got %v", os.NumObjects)
-		}
+
 		totalObjectSize := uint64(3 * slabSize)
 		totalRedundantSize := totalObjectSize * uint64(rs.TotalShards) / uint64(rs.MinShards)
 		if os.TotalObjectsSize != totalObjectSize {
@@ -2133,15 +2140,21 @@ func TestSlabBufferStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// check the object stats, we use a retry loop since packed slabs are upload
-	// in a separate goroutine so stats might lag a bit
+	// assert number of objects
+	os, err := b.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.NumObjects != 1 {
+		t.Fatalf("expected 1 object, got %d", os.NumObjects)
+	}
+
+	// check the object size stats, we use a retry loop since packed slabs are
+	// uploaded in a separate goroutine, so the object stats might lag a bit
 	err = Retry(60, time.Second, func() error {
 		os, err := b.ObjectsStats()
 		if err != nil {
 			t.Fatal(err)
-		}
-		if os.NumObjects != 1 {
-			return fmt.Errorf("expected 1 object, got %d", os.NumObjects)
 		}
 		if os.TotalObjectsSize != uint64(len(data1)) {
 			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1), os.TotalObjectsSize)
@@ -2190,15 +2203,21 @@ func TestSlabBufferStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// check the object stats again, we use a retry loop since packed slabs are upload
-	// in a separate goroutine so stats might lag a bit
+	// assert number of objects
+	os, err = b.ObjectsStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.NumObjects != 2 {
+		t.Fatalf("expected 1 object, got %d", os.NumObjects)
+	}
+
+	// check the object size stats, we use a retry loop since packed slabs are
+	// uploaded in a separate goroutine, so the object stats might lag a bit
 	err = Retry(60, time.Second, func() error {
 		os, err := b.ObjectsStats()
 		if err != nil {
 			t.Fatal(err)
-		}
-		if os.NumObjects != 2 {
-			return fmt.Errorf("expected 1 object, got %d", os.NumObjects)
 		}
 		if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
 			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1)+len(data2), os.TotalObjectsSize)
