@@ -575,3 +575,73 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal("expected 0 uploads")
 	}
 }
+
+func TestS3SpecialChars(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	s3 := cluster.S3
+
+	// enable upload packing to speed up test
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// manually create the 'a/' object as a directory. It should also be
+	// possible to call StatObject on it without errors.
+	objectKey := "foo/höst (1).log"
+	_, err = s3.PutObject(context.Background(), api.DefaultBucketName, objectKey, bytes.NewReader([]byte("bar")), 0, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, err := s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if so.Key != objectKey {
+		t.Fatal("unexpected key:", so.Key)
+	}
+	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
+		if res.Err != nil {
+			t.Fatal(err)
+		}
+		if res.Key != objectKey {
+			t.Fatal("unexpected key:", res.Key)
+		}
+	}
+
+	// delete it and verify its gone.
+	err = s3.RemoveObject(context.Background(), api.DefaultBucketName, objectKey, minio.RemoveObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, err = s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		t.Fatal("shouldn't exist", err)
+	}
+	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
+		if res.Err != nil {
+			t.Fatal(err)
+		}
+		if res.Key == objectKey {
+			t.Fatal("unexpected key:", res.Key)
+		}
+	}
+}

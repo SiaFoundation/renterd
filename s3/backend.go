@@ -141,20 +141,18 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	}
 
 	// Loop over the entries and add them to the response.
-	for i, object := range objects {
+	for _, object := range objects {
 		key := strings.TrimPrefix(object.Name, "/")
 		var match gofakes3.PrefixMatch
 		if !prefix.Match(key, &match) {
 			continue
 		} else if match.CommonPrefix {
-			fmt.Println(i, "commonPrefix", key)
-			response.AddPrefix(gofakes3.URLEncode(key))
+			response.AddPrefix(key)
 			continue
 		}
-		fmt.Println(i, "object", key)
 
 		item := &gofakes3.Content{
-			Key:          gofakes3.URLEncode(key),
+			Key:          key,
 			LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
 			ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
 			Size:         object.Size,
