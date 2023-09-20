@@ -181,8 +181,8 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 		}
 		// Check if there are more parts beyond 'limit'.
 		if limitUsed && len(dbParts) == int(limit) {
-			resp.IsTruncated = true
-			resp.NextMarker = dbParts[len(dbParts)-1].PartNumber
+			resp.HasMore = true
+			resp.NextMarker = dbParts[len(dbParts)-2].PartNumber
 			dbParts = dbParts[:len(dbParts)-1]
 		}
 		for _, part := range dbParts {

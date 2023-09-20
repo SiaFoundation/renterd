@@ -3486,3 +3486,66 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 		t.Fatal("expected 1 sector", count)
 	}
 }
+
+func TestListBucket(t *testing.T) {
+	os, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := []struct {
+		path string
+		size int64
+	}{
+		{"/foo/bar", 1},
+		{"/foo/bat", 2},
+		{"/foo/baz/quux", 3},
+		{"/foo/baz/quuz", 4},
+		{"/gab/guub", 5},
+		{"/FOO/bar", 6}, // test case sensitivity
+	}
+	ctx := context.Background()
+	for _, o := range objects {
+		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj.Slabs = obj.Slabs[:1]
+		obj.Slabs[0].Length = uint32(o.size)
+		if err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, obj, ucs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		prefix string
+		marker string
+		want   []api.ObjectMetadata
+	}{
+		{"/", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"o/baz/quu", "", []api.ObjectMetadata{}},
+		{"/foo", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+	}
+	for _, test := range tests {
+		resp, err := os.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := resp.Objects
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.prefix, got, test.want)
+		}
+		if len(resp.Objects) > 0 {
+			marker := ""
+			for offset := 0; offset < len(test.want); offset++ {
+				resp, err := os.ListObjects(ctx, api.DefaultBucketName, test.prefix, marker, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := resp.Objects
+				if len(got) != 1 {
+					t.Errorf("expected 1 object, got %v", len(got))
+				} else if got[0].Name != test.want[offset].Name {
+					t.Errorf("expected %v, got %v", test.want[offset].Name, got[0].Name)
+				}
+				marker = resp.NextMarker
+			}
+		}
+	}
+}

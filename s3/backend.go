@@ -92,52 +92,66 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	// Workaround for empty prefix
 	prefix.HasPrefix = prefix.Prefix != ""
 
-	// Specify bucket.
-	opts := []api.ObjectsOption{api.ObjectsWithBucket(bucketName)}
+	// Adjust MaxKeys
+	if page.MaxKeys == 0 {
+		page.MaxKeys = maxKeysDefault
+	}
 
-	// Handle prefix.
-	var path string // root of bucket
-	if prefix.HasPrefix {
+	var objects []api.ObjectMetadata
+	response := gofakes3.NewObjectList()
+	if prefix.HasDelimiter {
+		// Handle request with delimiter.
+		opts := []api.ObjectsOption{api.ObjectsWithBucket(bucketName)}
+		if page.HasMarker {
+			opts = append(opts, api.ObjectsWithMarker(page.Marker))
+			opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
+		}
+		var path string // root of bucket
 		adjustedPrefix := prefix.Prefix
 		if idx := strings.LastIndex(adjustedPrefix, "/"); idx != -1 {
 			path = adjustedPrefix[:idx+1]
 			adjustedPrefix = adjustedPrefix[idx+1:]
 		}
-		opts = append(opts, api.ObjectsWithPrefix(adjustedPrefix))
+		if adjustedPrefix != "" {
+			opts = append(opts, api.ObjectsWithPrefix(adjustedPrefix))
+		}
+		var res api.ObjectsResponse
+		res, err = s.b.Object(context.Background(), path, opts...)
+		if err != nil {
+			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+		}
+		objects = res.Entries
+		response.IsTruncated = res.HasMore
+		if response.IsTruncated {
+			response.NextMarker = objects[len(objects)-1].Name
+		}
+	} else {
+		// Handle request without delimiter.
+		var res api.ObjectsListResponse
+		res, err = s.b.ListObjects(context.Background(), bucketName, "/"+prefix.Prefix, page.Marker, int(page.MaxKeys))
+		if err != nil {
+			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+		}
+		objects = res.Objects
+		response.IsTruncated = res.HasMore
+		response.NextMarker = res.NextMarker
 	}
-
-	// Handle pagination.
-	if page.MaxKeys == 0 {
-		page.MaxKeys = maxKeysDefault
-	}
-	if page.HasMarker {
-		opts = append(opts, api.ObjectsWithMarker(page.Marker))
-		opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
-	}
-
-	// Fetch all objects of bucket with the given prefix.
-	res, err := s.b.Object(context.Background(), path, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
-	// Create the list response
-	response := gofakes3.NewObjectList()
-	if res.HasMore {
-		response.IsTruncated = true
-		response.NextMarker = res.Entries[len(res.Entries)-1].Name
-	}
-
 	// Loop over the entries and add them to the response.
-	for _, object := range res.Entries {
+	for i, object := range objects {
 		key := strings.TrimPrefix(object.Name, "/")
 		var match gofakes3.PrefixMatch
 		if !prefix.Match(key, &match) {
 			continue
 		} else if match.CommonPrefix {
+			fmt.Println(i, "commonPrefix", key)
 			response.AddPrefix(gofakes3.URLEncode(key))
 			continue
 		}
+		fmt.Println(i, "object", key)
 
 		item := &gofakes3.Content{
 			Key:          gofakes3.URLEncode(key),
@@ -269,6 +283,8 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName), api.ObjectsWithIgnoreDelim(true))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
+	} else if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
@@ -319,6 +335,7 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
+	fmt.Println("put", key)
 	err := s.w.UploadObject(context.Background(), input, key, api.UploadWithBucket(bucketName))
 	if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -435,7 +452,7 @@ func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker
 		PartNumberMarker:     marker,
 		NextPartNumberMarker: resp.NextMarker,
 		MaxParts:             limit,
-		IsTruncated:          resp.IsTruncated,
+		IsTruncated:          resp.HasMore,
 		Parts:                parts,
 	}, nil
 }

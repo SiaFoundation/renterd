@@ -314,6 +314,8 @@ func TestS3List(t *testing.T) {
 		"c/a",
 		"d",
 		"ab",
+		"y/",
+		"y/y/y/y",
 	}
 	for _, object := range objects {
 		data := frand.Bytes(10)
@@ -323,55 +325,99 @@ func TestS3List(t *testing.T) {
 		}
 	}
 
-	flatten := func(res <-chan minio.ObjectInfo) []string {
+	flatten := func(res minio.ListBucketResult) []string {
 		var objs []string
-		for obj := range res {
-			if obj.Err != nil {
-				t.Fatal(err)
-			}
+		for _, obj := range res.Contents {
 			objs = append(objs, obj.Key)
+		}
+		for _, cp := range res.CommonPrefixes {
+			objs = append(objs, cp.Prefix)
 		}
 		return objs
 	}
 
+	// Create a core client for lower-level operations.
+	url := s3.EndpointURL()
+	core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
+		Creds: testS3Credentials,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
-		prefix string
-		marker string
-		want   []string
+		delimiter string
+		prefix    string
+		marker    string
+		want      []string
 	}{
 		{
-			prefix: "",
-			marker: "",
-			want:   []string{"a/", "ab", "b", "c/", "d"},
+			delimiter: "/",
+			prefix:    "",
+			marker:    "",
+			want:      []string{"a/", "ab", "b", "c/", "d", "y/"},
 		},
 		{
-			prefix: "a",
-			marker: "",
-			want:   []string{"a/", "ab"},
+			delimiter: "/",
+			prefix:    "a",
+			marker:    "",
+			want:      []string{"a/", "ab"},
 		},
 		{
-			prefix: "a/a",
-			marker: "",
-			want:   []string{"a/a/"},
+			delimiter: "/",
+			prefix:    "a/a",
+			marker:    "",
+			want:      []string{"a/a/"},
 		},
 		{
-			prefix: "",
-			marker: "b",
-			want:   []string{"c/", "d"},
+			delimiter: "/",
+			prefix:    "",
+			marker:    "b",
+			want:      []string{"c/", "d", "y/"},
 		},
 		{
-			prefix: "z",
-			marker: "",
-			want:   nil,
+			delimiter: "/",
+			prefix:    "z",
+			marker:    "",
+			want:      nil,
 		},
 		{
-			prefix: "a",
-			marker: "a/",
-			want:   []string{"ab"},
+			delimiter: "/",
+			prefix:    "a",
+			marker:    "a/",
+			want:      []string{"ab"},
+		},
+		{
+			delimiter: "/",
+			prefix:    "y/",
+			marker:    "",
+			want:      []string{"y/y/"},
+		},
+		{
+			delimiter: "",
+			prefix:    "y/",
+			marker:    "",
+			want:      []string{"y/", "y/y/y/y"},
+		},
+		{
+			delimiter: "",
+			prefix:    "y/y",
+			marker:    "",
+			want:      []string{"y/y/y/y"},
+		},
+		{
+			delimiter: "",
+			prefix:    "y/y/",
+			marker:    "",
+			want:      []string{"y/y/y/y"},
 		},
 	}
 	for i, test := range tests {
-		got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix, StartAfter: test.marker}))
+		result, err := core.ListObjects("bucket", test.prefix, test.marker, test.delimiter, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := flatten(result)
 		if !cmp.Equal(test.want, got) {
 			t.Errorf("test %d: unexpected response, want %v got %v", i, test.want, got)
 		}
