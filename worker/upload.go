@@ -74,7 +74,7 @@ func WithCustomEncryptionOffset(offset uint64) UploadOption {
 func WithUploadParams(up api.UploadParams) UploadOption {
 	return func(cfg *uploadConfig) {
 		cfg.rs = up.RedundancySettings
-		cfg.bh = up.ConsensusState.BlockHeight
+		cfg.bh = up.CurrentHeight
 		cfg.contractSet = up.ContractSet
 		cfg.pack = up.UploadPacking
 	}
