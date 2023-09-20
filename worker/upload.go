@@ -230,21 +230,21 @@ func (w *worker) initUploadManager(maxOverdrive uint64, overdriveTimeout time.Du
 }
 
 func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, opts ...UploadOption) (string, error) {
-	//  build upload config
-	cfg := defaultParameters()
+	//  build upload parameters
+	up := defaultParameters()
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(&up)
 	}
 
 	// perform the upload
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, cfg)
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
 
 	// add parital slabs
 	if len(partialSlabData) > 0 {
-		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(cfg.rs.MinShards), uint8(cfg.rs.TotalShards), cfg.contractSet)
+		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return "", err
 		}
@@ -252,14 +252,14 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, cfg.contractSet, obj, used)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
 
 	// if packing was enabled try uploading packed slabs in a separate goroutine
-	if cfg.packing {
-		go w.tryUploadPackedSlabs(cfg.rs, cfg.contractSet)
+	if up.packing {
+		go w.tryUploadPackedSlabs(up.rs, up.contractSet)
 	}
 	return etag, nil
 }
