@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -52,7 +51,7 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 // given offset.
 func (k EncryptionKey) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
 	if offset%64 != 0 {
-		return cipher.StreamReader{}, errors.New("offset must be a multiple of 64")
+		return cipher.StreamReader{}, fmt.Errorf("offset must be a multiple of 64, got %v", offset)
 	}
 	if k.IsNoopKey() {
 		return cipher.StreamReader{S: &noOpStream{}, R: r}, nil

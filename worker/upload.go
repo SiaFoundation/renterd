@@ -17,6 +17,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
@@ -27,6 +28,10 @@ const (
 	statsDecayHalfTime        = 10 * time.Minute
 	statsDecayThreshold       = 5 * time.Minute
 	statsRecomputeMinInterval = 3 * time.Second
+
+	defaultPackedSlabsLockDuration  = 5 * time.Minute
+	defaultPackedSlabsUploadTimeout = 10 * time.Minute
+	defaultPackedSlabsLimit         = 1
 )
 
 var (
@@ -34,22 +39,59 @@ var (
 	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
 )
 
-type uploadConfig struct {
+type uploadParameters struct {
 	ec               object.EncryptionKey
 	encryptionOffset uint64
+
+	rs          api.RedundancySettings
+	bh          uint64
+	contractSet string
+	packing     bool
 }
 
-type UploadOption func(*uploadConfig)
+func defaultParameters() uploadParameters {
+	return uploadParameters{
+		ec:               object.GenerateEncryptionKey(), // random key
+		encryptionOffset: 0,                              // from the beginning
+		rs:               build.DefaultRedundancySettings,
+	}
+}
+
+type UploadOption func(*uploadParameters)
 
 func WithCustomKey(ec object.EncryptionKey) UploadOption {
-	return func(cfg *uploadConfig) {
-		cfg.ec = ec
+	return func(up *uploadParameters) {
+		up.ec = ec
 	}
 }
 
 func WithCustomEncryptionOffset(offset uint64) UploadOption {
-	return func(cfg *uploadConfig) {
-		cfg.encryptionOffset = offset
+	return func(up *uploadParameters) {
+		up.encryptionOffset = offset
+	}
+}
+
+func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
+	return func(up *uploadParameters) {
+		up.rs = rs
+	}
+}
+
+func WithBlockHeight(bh uint64) UploadOption {
+	return func(up *uploadParameters) {
+		up.bh = bh
+	}
+}
+
+func WithContractSet(contractSet string) UploadOption {
+	return func(up *uploadParameters) {
+		up.contractSet = contractSet
+	}
+}
+
+func WithPacking(packing bool) UploadOption {
+	return func(up *uploadParameters) {
+		up.packing = packing
 	}
 }
 
@@ -187,6 +229,158 @@ func (w *worker) initUploadManager(maxOverdrive uint64, overdriveTimeout time.Du
 	w.uploadManager = newUploadManager(w.bus, w, w, maxOverdrive, overdriveTimeout, logger)
 }
 
+func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, opts ...UploadOption) (string, error) {
+	//  build upload parameters
+	up := defaultParameters()
+	for _, opt := range opts {
+		opt(&up)
+	}
+
+	// perform the upload
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
+	if err != nil {
+		return "", fmt.Errorf("couldn't upload object: %w", err)
+	}
+
+	// add parital slabs
+	if len(partialSlabData) > 0 {
+		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		if err != nil {
+			return "", err
+		}
+		obj.PartialSlabs = partialSlabs
+	}
+
+	// persist the object
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, used)
+	if err != nil {
+		return "", fmt.Errorf("couldn't add object: %w", err)
+	}
+
+	// if packing was enabled try uploading packed slabs in a separate goroutine
+	if up.packing {
+		go w.tryUploadPackedSlabs(up.rs, up.contractSet)
+	}
+	return etag, nil
+}
+
+func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts ...UploadOption) (string, error) {
+	//  build upload parameters
+	up := defaultParameters()
+	for _, opt := range opts {
+		opt(&up)
+	}
+
+	// upload the part
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
+	if err != nil {
+		return "", fmt.Errorf("couldn't upload object: %w", err)
+	}
+
+	// add parital slabs
+	if len(partialSlabData) > 0 {
+		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		if err != nil {
+			return "", err
+		}
+		obj.PartialSlabs = partialSlabs
+	}
+
+	// persist the part
+	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)
+	if err != nil {
+		return "", fmt.Errorf("couldn't add multi part: %w", err)
+	}
+
+	// if packing was enabled try uploading packed slabs in a separate goroutine
+	if up.packing {
+		go w.tryUploadPackedSlabs(up.rs, up.contractSet)
+	}
+	return etag, nil
+}
+
+func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet string) {
+	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
+
+	w.uploadsMu.Lock()
+	if w.uploadingPackedSlabs[key] {
+		w.uploadsMu.Unlock()
+		return
+	}
+	w.uploadingPackedSlabs[key] = true
+	w.uploadsMu.Unlock()
+
+	// make sure we mark uploading packed slabs as false when we're done
+	defer func() {
+		w.uploadsMu.Lock()
+		w.uploadingPackedSlabs[key] = false
+		w.uploadsMu.Unlock()
+	}()
+
+	// keep uploading packed slabs until we're done
+	for {
+		// fetch packed slabs
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, defaultPackedSlabsLimit)
+		if err != nil {
+			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
+			cancel()
+			return
+		}
+		cancel()
+
+		// if there's no packed slabs, we're done
+		if len(packedSlabs) == 0 {
+			return
+		}
+
+		// upload packed slabs
+		for _, ps := range packedSlabs {
+			if err := w.uploadPackedSlab(ps, rs, contractSet); err != nil {
+				w.logger.Errorf("failed to upload packed slab, err: %v", err)
+				return
+			}
+		}
+	}
+}
+
+func (w *worker) uploadPackedSlab(ps api.PackedSlab, rs api.RedundancySettings, contractSet string) error {
+	// create a context with sane timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
+	defer cancel()
+
+	// fetch contracts
+	contracts, err := w.bus.ContractSetContracts(ctx, contractSet)
+	if err != nil {
+		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+	}
+
+	// fetch upload params
+	up, err := w.bus.UploadParams(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't fetch upload params from bus: %v", err)
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// upload packed slab
+	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
+	sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
+	if err != nil {
+		return fmt.Errorf("couldn't upload packed slab, err: %v", err)
+	}
+
+	// mark packed slab as uploaded
+	slab := api.UploadedPackedSlab{BufferID: ps.BufferID, Shards: sectors}
+	err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{slab}, used)
+	if err != nil {
+		return fmt.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
+	}
+
+	return nil
+}
+
 func newDataPoints(halfLife time.Duration) *dataPoints {
 	return &dataPoints{
 		size:        20,
@@ -310,7 +504,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.RedundancySettings, contracts []api.ContractMetadata, bh uint64, uploadPacking bool, opts ...UploadOption) (_ object.Object, used map[types.PublicKey]types.FileContractID, partialSlab []byte, etag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadParameters) (_ object.Object, partialSlab []byte, used map[types.PublicKey]types.FileContractID, etag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -322,30 +516,26 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 		span.End()
 	}()
 
-	//  apply options
-	uc := uploadConfig{
-		ec:               object.GenerateEncryptionKey(), // random key
-		encryptionOffset: 0,                              // from the beginning
-	}
-	for _, opt := range opts {
-		opt(&uc)
-	}
-
 	// wrap the reader to create an etag
-	tagger := newHashReader(r)
-	r = tagger
+	hr := newHashReader(r)
 
 	// create the object
-	o := object.NewObject(uc.ec)
+	o := object.NewObject(up.ec)
 
 	// create the cipher reader
-	cr, err := o.Encrypt(r, uc.encryptionOffset)
+	cr, err := o.Encrypt(hr, up.encryptionOffset)
 	if err != nil {
 		return object.Object{}, nil, nil, "", err
 	}
 
+	// fetch contracts
+	contracts, err := mgr.b.ContractSetContracts(ctx, up.contractSet)
+	if err != nil {
+		return object.Object{}, nil, nil, "", fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
 	// create the upload
-	u, finishFn, err := mgr.newUpload(ctx, rs.TotalShards, contracts, bh)
+	u, finishFn, err := mgr.newUpload(ctx, up.rs.TotalShards, contracts, up.bh)
 	if err != nil {
 		return object.Object{}, nil, nil, "", err
 	}
@@ -364,7 +554,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, rs api.Redund
 	numSlabs := -1
 
 	// prepare slab size
-	size := int64(rs.MinShards) * rhpv2.SectorSize
+	size := int64(up.rs.MinShards) * rhpv2.SectorSize
 loop:
 	for {
 		select {
@@ -391,7 +581,7 @@ loop:
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, nil, nil, "", err
 			}
-			if uploadPacking && errors.Is(err, io.ErrUnexpectedEOF) {
+			if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
 				// uploading.
 				partialSlab = data[:length]
@@ -400,7 +590,7 @@ loop:
 				// Otherwise we upload it.
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
 					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, nextSlabChan)
-				}(rs, data, length, slabIndex)
+				}(up.rs, data, length, slabIndex)
 			}
 			slabIndex++
 		case res := <-respChan:
@@ -450,7 +640,7 @@ loop:
 			}
 		}
 	}
-	return o, usedContracts, partialSlab, tagger.Etag(), nil
+	return o, partialSlab, usedContracts, hr.Hash(), nil
 }
 
 func (mgr *uploadManager) launch(req *sectorUploadReq) error {
@@ -1435,7 +1625,7 @@ func (e *hashReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (e *hashReader) Etag() string {
+func (e *hashReader) Hash() string {
 	sum := e.h.Sum()
 	return hex.EncodeToString(sum[:])
 }

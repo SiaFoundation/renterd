@@ -33,7 +33,7 @@ type bus interface {
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error)
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
-	SearchObjects(ctx context.Context, bucket, key string, offset, limit int) (entries []api.ObjectMetadata, err error)
+	ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (resp api.ObjectsListResponse, err error)
 
 	AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
 	CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)

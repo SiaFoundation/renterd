@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -93,51 +92,64 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	// Workaround for empty prefix
 	prefix.HasPrefix = prefix.Prefix != ""
 
-	// Specify bucket.
-	opts := []api.ObjectsOption{api.ObjectsWithBucket(bucketName)}
-
-	// Handle prefix.
-	var path string // root of bucket
-	if prefix.HasPrefix {
-		if idx := strings.LastIndex(prefix.Prefix, "/"); idx != -1 {
-			path = prefix.Prefix[:idx+1]
-			prefix.Prefix = prefix.Prefix[idx+1:]
-		}
-		opts = append(opts, api.ObjectsWithPrefix(prefix.Prefix))
-	}
-
-	// Handle pagination.
+	// Adjust MaxKeys
 	if page.MaxKeys == 0 {
 		page.MaxKeys = maxKeysDefault
 	}
-	if page.HasMarker {
-		opts = append(opts, api.ObjectsWithMarker(page.Marker))
-		opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
-	}
 
-	// Fetch all objects of bucket with the given prefix.
-	res, err := s.b.Object(context.Background(), path, opts...)
+	var objects []api.ObjectMetadata
+	response := gofakes3.NewObjectList()
+	if prefix.HasDelimiter {
+		// Handle request with delimiter.
+		opts := []api.ObjectsOption{api.ObjectsWithBucket(bucketName)}
+		if page.HasMarker {
+			opts = append(opts, api.ObjectsWithMarker(page.Marker))
+			opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
+		}
+		var path string // root of bucket
+		adjustedPrefix := prefix.Prefix
+		if idx := strings.LastIndex(adjustedPrefix, prefix.Delimiter); idx != -1 {
+			path = adjustedPrefix[:idx+1]
+			adjustedPrefix = adjustedPrefix[idx+1:]
+		}
+		if adjustedPrefix != "" {
+			opts = append(opts, api.ObjectsWithPrefix(adjustedPrefix))
+		}
+		var res api.ObjectsResponse
+		res, err = s.b.Object(context.Background(), path, opts...)
+		if err != nil {
+			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+		}
+		objects = res.Entries
+		response.IsTruncated = res.HasMore
+		if response.IsTruncated {
+			response.NextMarker = objects[len(objects)-1].Name
+		}
+	} else {
+		// Handle request without delimiter.
+		var res api.ObjectsListResponse
+		res, err = s.b.ListObjects(context.Background(), bucketName, "/"+prefix.Prefix, page.Marker, int(page.MaxKeys))
+		if err != nil {
+			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+		}
+		objects = res.Objects
+		response.IsTruncated = res.HasMore
+		response.NextMarker = res.NextMarker
+	}
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
-	// Create the list response
-	response := gofakes3.NewObjectList()
-	if res.HasMore {
-		response.IsTruncated = true
-		response.NextMarker = res.Entries[len(res.Entries)-1].Name
-	}
-
 	// Loop over the entries and add them to the response.
-	for _, object := range res.Entries {
+	for _, object := range objects {
 		key := strings.TrimPrefix(object.Name, "/")
-		if strings.HasSuffix(key, "/") {
-			response.AddPrefix(gofakes3.URLEncode(key))
+		if prefix.HasDelimiter && strings.HasSuffix(key, prefix.Delimiter) {
+			response.AddPrefix(key)
 			continue
 		}
 
 		item := &gofakes3.Content{
-			Key:          gofakes3.URLEncode(key),
+			Key:          key,
 			LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
 			ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
 			Size:         object.Size,
@@ -263,12 +275,11 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	if strings.HasSuffix(objectName, "/") {
-		return nil, errors.New("object name must not end with '/'")
-	}
-	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName))
+	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName), api.ObjectsWithIgnoreDelim(true))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
+	} else if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
@@ -299,15 +310,10 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	exists, err := s.BucketExists(bucketName)
-	if err != nil {
-		return gofakes3.ObjectDeleteResult{}, err
-	} else if !exists {
+	err := s.b.DeleteObject(context.Background(), bucketName, objectName, false)
+	if err != nil && !strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
-	}
-
-	err = s.b.DeleteObject(context.Background(), bucketName, objectName, false)
-	if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.ObjectDeleteResult{
@@ -336,7 +342,7 @@ func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.
 func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
-		err := s.b.DeleteObject(context.Background(), objectName, bucketName, false)
+		err := s.b.DeleteObject(context.Background(), bucketName, objectName, false)
 		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     objectName,
@@ -440,7 +446,7 @@ func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker
 		PartNumberMarker:     marker,
 		NextPartNumberMarker: resp.NextMarker,
 		MaxParts:             limit,
-		IsTruncated:          resp.IsTruncated,
+		IsTruncated:          resp.HasMore,
 		Parts:                parts,
 	}, nil
 }

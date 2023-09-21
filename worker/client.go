@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gotd/contrib/http_range"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -331,15 +330,12 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 		return api.GetObjectResponse{}, err
 	}
 	var r *api.DownloadRange
-	ranges, err := http_range.ParseRange(header.Get("Content-Range"), size)
-	if err != nil {
-		return api.GetObjectResponse{}, err
-	}
-	if len(ranges) > 0 {
-		r = &api.DownloadRange{
-			Start:  ranges[0].Start,
-			Length: ranges[0].Length,
+	if cr := header.Get("Content-Range"); cr != "" {
+		dr, err := api.ParseDownloadRange(cr)
+		if err != nil {
+			return api.GetObjectResponse{}, err
 		}
+		r = &dr
 	}
 	// Parse Last-Modified
 	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
