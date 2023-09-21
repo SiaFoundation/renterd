@@ -111,7 +111,7 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	// copy our object into the new bucket.
-	_, err = s3.CopyObject(context.Background(), minio.CopyDestOptions{
+	res, err := s3.CopyObject(context.Background(), minio.CopyDestOptions{
 		Bucket: bucket + "2",
 		Object: "object",
 	}, minio.CopySrcOptions{
@@ -120,6 +120,9 @@ func TestS3Basic(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.LastModified.IsZero() {
+		t.Fatal("expected LastModified to be non-zero")
 	}
 
 	// get copied object
@@ -285,6 +288,10 @@ func TestS3List(t *testing.T) {
 		for obj := range res {
 			if obj.Err != nil {
 				t.Fatal(err)
+			}
+
+			if !strings.HasSuffix(obj.Key, "/") && obj.LastModified.IsZero() {
+				t.Fatal("expected non-zero LastModified", obj.Key)
 			}
 			objs = append(objs, obj.Key)
 		}

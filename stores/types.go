@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -15,6 +17,7 @@ import (
 var zeroCurrency = currency(types.ZeroCurrency)
 
 type (
+	datetime       time.Time
 	currency       types.Currency
 	fileContractID types.FileContractID
 	hash256        types.Hash256
@@ -177,7 +180,54 @@ func (hs *balance) Scan(value interface{}) error {
 	return nil
 }
 
+var SQLiteTimestampFormats = []string{
+	"2006-01-02 15:04:05.999999999-07:00",
+	"2006-01-02T15:04:05.999999999-07:00",
+	"2006-01-02 15:04:05.999999999",
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04",
+	"2006-01-02T15:04",
+	"2006-01-02",
+}
+
 // Value returns a balance value, implements driver.Valuer interface.
 func (hs balance) Value() (driver.Value, error) {
 	return (*big.Int)(&hs).String(), nil
+}
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (datetime) GormDataType() string {
+	return "string"
+}
+
+// Scan scan value into balance, implements sql.Scanner interface.
+func (dt *datetime) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal time.Time value: %v %t", value, value)
+	}
+
+	var t time.Time
+	s = strings.TrimSuffix(s, "Z")
+	for _, format := range SQLiteTimestampFormats {
+		if timeVal, err := time.ParseInLocation(format, s, time.UTC); err == nil {
+			t = timeVal
+			break
+		}
+	}
+
+	*dt = datetime(t)
+	return nil
+}
+
+// Value returns a datetime value, implements driver.Valuer interface.
+func (dt datetime) Value() (driver.Value, error) {
+	return (time.Time)(dt).Format(SQLiteTimestampFormats[0]), nil
 }

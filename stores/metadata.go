@@ -287,7 +287,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
-func (raw rawObject) convert(tx *gorm.DB) (api.Object, error) {
+func (raw rawObject) convert() (api.Object, error) {
 	if len(raw) == 0 {
 		return api.Object{}, errors.New("no slabs found")
 	}
@@ -966,13 +966,20 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		limit += 1
 	}
 
+	var rows []struct {
+		Health  float64
+		ModTime datetime
+		Name    string
+		Size    int64
+	}
 	query := fmt.Sprintf(`
 	SELECT
+		MAX(created_at) AS ModTime,
 		CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
 		SUM(size) AS size,
 		MIN(health) as health
 	FROM (
-		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
+		SELECT MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
 		FROM objects
 		INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
 		LEFT JOIN slices ON objects.id = slices.db_object_id 
@@ -1008,10 +1015,24 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 
 	if err = s.db.
 		Raw(query, parameters...).
-		Scan(&metadata).
-		Error; err == nil && len(metadata) == limit {
-		metadata = metadata[:len(metadata)-1] // remove last element
+		Scan(&rows).
+		Error; err != nil {
+		return
+	}
+
+	// trim last element if we have more
+	if len(rows) == limit {
 		hasMore = true
+		rows = rows[:len(rows)-1]
+	}
+
+	for _, row := range rows {
+		metadata = append(metadata, api.ObjectMetadata{
+			Health:  row.Health,
+			ModTime: time.Time(row.ModTime),
+			Name:    row.Name,
+			Size:    row.Size,
+		})
 	}
 
 	return
@@ -1024,8 +1045,11 @@ func (s *SQLStore) Object(ctx context.Context, bucket, path string) (api.Object,
 		if err != nil {
 			return err
 		}
-		obj, err = o.convert(tx)
-		return err
+		obj, err = o.convert()
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 	return obj, err
 }
@@ -1161,8 +1185,8 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (om api.ObjectMetadata, err error) {
+	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
 		err := tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
 			Joins("DBBucket").
@@ -1179,9 +1203,18 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		if err != nil {
 			return fmt.Errorf("failed to fetch src slices: %w", err)
 		}
+		var slabIds []uint
 		for i := range srcSlices {
 			srcSlices[i].Model = Model{}  // clear model
 			srcSlices[i].DBObjectID = nil // clear object id
+			slabIds = append(slabIds, srcSlices[i].DBSlabID)
+		}
+
+		var srcSlabs []dbSlab
+		if err := tx.Where("id IN (?)", slabIds).
+			Find(&srcSlabs).
+			Error; err != nil {
+			return fmt.Errorf("failed to fetch src slabs: %w", err)
 		}
 
 		var bucket dbBucket
@@ -1198,11 +1231,30 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		dstObj.ObjectID = dstPath     // set dst path
 		dstObj.DBBucketID = bucket.ID // set dst bucket id
 		dstObj.Slabs = srcSlices      // set slices
-		if err := tx.Create(&dstObj).Error; err != nil {
+		tx = tx.Create(&dstObj)
+		if err := tx.Error; err != nil {
 			return fmt.Errorf("failed to create copy of object: %w", err)
+		}
+
+		minHealth := math.MaxFloat64
+		for _, dbSlab := range srcSlabs {
+			if dbSlab.Health < minHealth {
+				minHealth = dbSlab.Health
+			}
+		}
+		if minHealth == math.MaxFloat64 {
+			minHealth = 1
+		}
+
+		om = api.ObjectMetadata{
+			Name:    dstObj.ObjectID,
+			Size:    dstObj.Size,
+			ModTime: dstObj.CreatedAt,
+			Health:  minHealth,
 		}
 		return nil
 	})
+	return
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
