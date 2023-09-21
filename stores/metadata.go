@@ -175,6 +175,14 @@ type (
 		SectorRoot []byte
 		SectorHost publicKey
 	}
+
+	// rawObjectMetadata is used for hydrating object metadata.
+	rawObjectMetadata struct {
+		Health  float64
+		ModTime datetime
+		Name    string
+		Size    int64
+	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -285,6 +293,15 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	}
 
 	return
+}
+
+func (raw rawObjectMetadata) convert() api.ObjectMetadata {
+	return api.ObjectMetadata{
+		Health:  raw.Health,
+		ModTime: time.Time(raw.ModTime),
+		Name:    raw.Name,
+		Size:    raw.Size,
+	}
 }
 
 func (raw rawObject) convert() (api.Object, error) {
@@ -967,12 +984,7 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		limit += 1
 	}
 
-	var rows []struct {
-		Health  float64
-		ModTime datetime
-		Name    string
-		Size    int64
-	}
+	var rows []rawObjectMetadata
 	query := fmt.Sprintf(`
 	SELECT
 		MAX(created_at) AS ModTime,
@@ -1027,15 +1039,10 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		rows = rows[:len(rows)-1]
 	}
 
+	// convert rows into metadata
 	for _, row := range rows {
-		metadata = append(metadata, api.ObjectMetadata{
-			Health:  row.Health,
-			ModTime: time.Time(row.ModTime),
-			Name:    row.Name,
-			Size:    row.Size,
-		})
+		metadata = append(metadata, row.convert())
 	}
-
 	return
 }
 
@@ -2062,12 +2069,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		markerExpr = gorm.Expr("o.object_id > ?", marker)
 	}
 
-	var rows []struct {
-		Health  float64
-		ModTime datetime
-		Name    string
-		Size    int64
-	}
+	var rows []rawObjectMetadata
 	err := s.db.
 		Select("o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, MAX(o.created_at) as ModTime").
 		Model(&dbObject{}).
@@ -2084,23 +2086,17 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		return api.ObjectsListResponse{}, err
 	}
 
-	var objects []api.ObjectMetadata
-	for _, row := range rows {
-		objects = append(objects, api.ObjectMetadata{
-			Name:    row.Name,
-			Size:    row.Size,
-			Health:  row.Health,
-			ModTime: time.Time(row.ModTime),
-		})
+	var hasMore bool
+	var nextMarker string
+	if len(rows) == limit {
+		hasMore = true
+		rows = rows[:len(rows)-1]
+		nextMarker = rows[len(rows)-1].Name
 	}
 
-	hasMore := len(objects) == limit
-	nextMarker := ""
-	if hasMore {
-		nextMarker = objects[len(objects)-2].Name
-	}
-	if len(objects) == limit {
-		objects = objects[:len(objects)-1]
+	var objects []api.ObjectMetadata
+	for _, row := range rows {
+		objects = append(objects, row.convert())
 	}
 
 	return api.ObjectsListResponse{
