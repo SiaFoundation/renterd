@@ -3487,7 +3487,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 }
 
-func TestListBucket(t *testing.T) {
+func TestListObjects(t *testing.T) {
 	os, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

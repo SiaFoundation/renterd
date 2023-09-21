@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -306,34 +305,6 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	return err
 }
 
-func parseContentRange(contentRange string) (start, end int64, err error) {
-	parts := strings.Split(contentRange, " ")
-	if len(parts) != 2 || parts[0] != "bytes" {
-		err = errors.New("missing 'bytes' prefix in range header")
-		return
-	}
-	parts = strings.Split(parts[1], "/")
-	if len(parts) != 2 {
-		err = fmt.Errorf("invalid Content-Range header: %s", contentRange)
-		return
-	}
-	rangeStr := parts[0]
-	rangeParts := strings.Split(rangeStr, "-")
-	if len(rangeParts) != 2 {
-		err = errors.New("invalid Content-Range header")
-		return
-	}
-	start, err = strconv.ParseInt(rangeParts[0], 10, 64)
-	if err != nil {
-		return
-	}
-	end, err = strconv.ParseInt(rangeParts[1], 10, 64)
-	if err != nil {
-		return
-	}
-	return
-}
-
 func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (_ api.GetObjectResponse, err error) {
 	if strings.HasSuffix(path, "/") {
 		return api.GetObjectResponse{}, errors.New("the given path is a directory, use ObjectEntries instead")
@@ -360,15 +331,11 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 	}
 	var r *api.DownloadRange
 	if cr := header.Get("Content-Range"); cr != "" {
-		start, length, err := parseContentRange(cr)
+		dr, err := api.ParseDownloadRange(cr)
 		if err != nil {
-			fmt.Println("rapzapzap", header.Get("Content-Range"))
 			return api.GetObjectResponse{}, err
 		}
-		r = &api.DownloadRange{
-			Start:  start,
-			Length: length,
-		}
+		r = &dr
 	}
 	// Parse Last-Modified
 	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))

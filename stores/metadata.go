@@ -1984,8 +1984,9 @@ func sqlWhereBucket(objTable string, bucket string) clause.Expr {
 	return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", objTable), bucket)
 }
 
-// TODO: we can use ObjectEntries for now but it would be interesting to have
-// 'delim' support in ListObjects.
+// TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
+// a delimiter for now (see backend.go) but it would be interesting to have
+// arbitrary 'delim' support in ListObjects.
 func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (api.ObjectsListResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
@@ -2013,6 +2014,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Where("? AND ? AND ?", sqlWhereBucket("o", bucket), prefixExpr, markerExpr).
 		Group("o.object_id").
+		Order("o.object_id").
 		Limit(int(limit)).
 		Scan(&objects).Error
 	if err != nil {
