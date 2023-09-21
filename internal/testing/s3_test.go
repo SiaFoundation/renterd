@@ -355,13 +355,13 @@ func TestS3List(t *testing.T) {
 			delimiter: "/",
 			prefix:    "",
 			marker:    "",
-			want:      []string{"a/", "ab", "b", "c/", "d", "y/"},
+			want:      []string{"ab", "b", "d", "a/", "c/", "y/"},
 		},
 		{
 			delimiter: "/",
 			prefix:    "a",
 			marker:    "",
-			want:      []string{"a/", "ab"},
+			want:      []string{"ab", "a/"},
 		},
 		{
 			delimiter: "/",
@@ -373,7 +373,7 @@ func TestS3List(t *testing.T) {
 			delimiter: "/",
 			prefix:    "",
 			marker:    "b",
-			want:      []string{"c/", "d", "y/"},
+			want:      []string{"d", "c/", "y/"},
 		},
 		{
 			delimiter: "/",

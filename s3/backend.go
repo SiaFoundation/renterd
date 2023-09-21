@@ -108,7 +108,7 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 		}
 		var path string // root of bucket
 		adjustedPrefix := prefix.Prefix
-		if idx := strings.LastIndex(adjustedPrefix, "/"); idx != -1 {
+		if idx := strings.LastIndex(adjustedPrefix, prefix.Delimiter); idx != -1 {
 			path = adjustedPrefix[:idx+1]
 			adjustedPrefix = adjustedPrefix[idx+1:]
 		}
@@ -143,10 +143,7 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	// Loop over the entries and add them to the response.
 	for _, object := range objects {
 		key := strings.TrimPrefix(object.Name, "/")
-		var match gofakes3.PrefixMatch
-		if !prefix.Match(key, &match) {
-			continue
-		} else if match.CommonPrefix {
+		if prefix.HasDelimiter && strings.HasSuffix(key, prefix.Delimiter) {
 			response.AddPrefix(key)
 			continue
 		}
