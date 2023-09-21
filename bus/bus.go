@@ -325,8 +325,8 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	var before, since time.Time
 	offset := 0
 	limit := -1
-	if jc.DecodeForm("before", (*api.ParamTime)(&before)) != nil ||
-		jc.DecodeForm("since", (*api.ParamTime)(&since)) != nil ||
+	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
+		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil ||
 		jc.DecodeForm("offset", &offset) != nil ||
 		jc.DecodeForm("limit", &limit) != nil {
 		return
@@ -585,7 +585,7 @@ func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
 	offset := 0
 	limit := -1
 	maxLastScan := time.Now()
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.ParamTime)(&maxLastScan)) != nil {
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
 		return
 	}
 	hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)

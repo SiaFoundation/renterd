@@ -595,10 +595,10 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.AutopilotStateResponse{
 		Configured:         err == nil,
 		Migrating:          migrating,
-		MigratingLastStart: api.ParamTime(mLastStart),
+		MigratingLastStart: api.TimeRFC3339(mLastStart),
 		Scanning:           scanning,
-		ScanningLastStart:  api.ParamTime(sLastStart),
-		UptimeMS:           api.ParamDuration(ap.Uptime()),
+		ScanningLastStart:  api.TimeRFC3339(sLastStart),
+		UptimeMS:           api.DurationMS(ap.Uptime()),
 
 		StartTime: ap.StartTime(),
 		BuildState: api.BuildState{

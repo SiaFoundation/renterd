@@ -150,13 +150,13 @@ type ContractRootsResponse struct {
 // ContractAcquireRequest is the request type for the /contract/acquire
 // endpoint.
 type ContractAcquireRequest struct {
-	Duration ParamDuration `json:"duration"`
-	Priority int           `json:"priority"`
+	Duration DurationMS `json:"duration"`
+	Priority int        `json:"priority"`
 }
 
 type ContractKeepaliveRequest struct {
-	Duration ParamDuration `json:"duration"`
-	LockID   uint64        `json:"lockID"`
+	Duration DurationMS `json:"duration"`
+	LockID   uint64     `json:"lockID"`
 }
 
 // ContractAcquireRequest is the request type for the /contract/:id/release
@@ -194,8 +194,8 @@ type HostsPriceTablesRequest struct {
 
 // HostsRemoveRequest is the request type for the /hosts/remove endpoint.
 type HostsRemoveRequest struct {
-	MaxDowntimeHours      ParamDurationHour `json:"maxDowntimeHours"`
-	MinRecentScanFailures uint64            `json:"minRecentScanFailures"`
+	MaxDowntimeHours      DurationH `json:"maxDowntimeHours"`
+	MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 }
 
 // Object wraps an object.Object with its metadata.
@@ -416,11 +416,11 @@ type AccountsAddBalanceRequest struct {
 }
 
 type PackedSlabsRequestGET struct {
-	LockingDuration ParamDuration `json:"lockingDuration"`
-	MinShards       uint8         `json:"minShards"`
-	TotalShards     uint8         `json:"totalShards"`
-	ContractSet     string        `json:"contractSet"`
-	Limit           int           `json:"limit"`
+	LockingDuration DurationMS `json:"lockingDuration"`
+	MinShards       uint8      `json:"minShards"`
+	TotalShards     uint8      `json:"totalShards"`
+	ContractSet     string     `json:"contractSet"`
+	Limit           int        `json:"limit"`
 }
 
 type PackedSlabsRequestPOST struct {
