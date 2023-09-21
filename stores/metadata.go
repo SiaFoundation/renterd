@@ -2062,9 +2062,14 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		markerExpr = gorm.Expr("o.object_id > ?", marker)
 	}
 
-	var objects []api.ObjectMetadata
+	var rows []struct {
+		Health  float64
+		ModTime datetime
+		Name    string
+		Size    int64
+	}
 	err := s.db.
-		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
+		Select("o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, MAX(o.created_at) as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -2074,9 +2079,19 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		Group("o.object_id").
 		Order("o.object_id").
 		Limit(int(limit)).
-		Scan(&objects).Error
+		Scan(&rows).Error
 	if err != nil {
 		return api.ObjectsListResponse{}, err
+	}
+
+	var objects []api.ObjectMetadata
+	for _, row := range rows {
+		objects = append(objects, api.ObjectMetadata{
+			Name:    row.Name,
+			Size:    row.Size,
+			Health:  row.Health,
+			ModTime: time.Time(row.ModTime),
+		})
 	}
 
 	hasMore := len(objects) == limit
