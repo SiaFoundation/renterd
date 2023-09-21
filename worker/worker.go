@@ -263,6 +263,9 @@ type worker struct {
 
 	busFlushInterval time.Duration
 
+	uploadsMu            sync.Mutex
+	uploadingPackedSlabs map[string]bool
+
 	interactionsMu                sync.Mutex
 	interactionsScans             []hostdb.HostScan
 	interactionsPriceTableUpdates []hostdb.PriceTableUpdate
@@ -1129,63 +1132,21 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// built options
+	opts := []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+	}
+
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch contract set contracts
-	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
-	}
-
 	// upload the object
-	obj, used, partialSlabData, _, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking)
+	_, err = w.upload(ctx, jc.Request.Body, bucket, jc.PathParam("path"), opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
-	}
-
-	if len(partialSlabData) > 0 {
-		partialSlabs, err := w.bus.AddPartialSlab(jc.Request.Context(), partialSlabData, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet)
-		if jc.Check("couldn't add partial slabs to bus", err) != nil {
-			return
-		}
-		obj.PartialSlabs = partialSlabs
-	}
-
-	// persist the object
-	if jc.Check("couldn't add object", w.bus.AddObject(ctx, bucket, jc.PathParam("path"), up.ContractSet, obj, used)) != nil {
-		return
-	}
-
-	// if partial uploads are not enabled we are done.
-	if !up.UploadPacking {
-		return
-	}
-
-	// if partial uploads are enabled, check whether we have a full slab now
-	packedSlabs, err := w.bus.PackedSlabsForUpload(jc.Request.Context(), 5*time.Minute, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet, 2)
-	if jc.Check("couldn't fetch packed slabs from bus", err) != nil {
-		return
-	}
-
-	for _, ps := range packedSlabs {
-		// upload packed slab.
-		shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-		sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
-		if jc.Check("couldn't upload packed slab", err) != nil {
-			return
-		}
-
-		// mark packed slab as uploaded.
-		err = w.bus.MarkPackedSlabsUploaded(jc.Request.Context(), []api.UploadedPackedSlab{
-			{
-				BufferID: ps.BufferID,
-				Shards:   sectors,
-			},
-		}, used)
-		if jc.Check("couldn't mark packed slabs uploaded", err) != nil {
-			return
-		}
 	}
 }
 
@@ -1253,8 +1214,6 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	var opts []UploadOption
-
 	// make sure only one of the following is set
 	var disablePreshardingEncryption bool
 	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
@@ -1272,6 +1231,14 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	}
+
+	// built options
+	opts := []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+	}
 	if disablePreshardingEncryption {
 		opts = append(opts, WithCustomKey(object.NoOpKey))
 	} else {
@@ -1281,64 +1248,14 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch contract set contracts
-	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
-	}
-
-	// upload the part
-	obj, used, partialSlabData, etag, err := w.uploadManager.Upload(ctx, jc.Request.Body, rs, contracts, up.CurrentHeight, up.UploadPacking, opts...)
+	// upload the multipart
+	etag, err := w.uploadMultiPart(ctx, jc.Request.Body, bucket, jc.PathParam("path"), uploadID, partNumber, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
-		return
-	}
-
-	if len(partialSlabData) > 0 {
-		partialSlabs, err := w.bus.AddPartialSlab(jc.Request.Context(), partialSlabData, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet)
-		if jc.Check("couldn't add partial slabs to bus", err) != nil {
-			return
-		}
-		obj.PartialSlabs = partialSlabs
-	}
-
-	// persist the part
-	if jc.Check("couldn't add part", w.bus.AddMultipartPart(ctx, bucket, jc.PathParam("path"), up.ContractSet, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)) != nil {
 		return
 	}
 
 	// set etag in header response.
 	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
-
-	// if partial uploads are not enabled we are done.
-	if !up.UploadPacking {
-		return
-	}
-
-	// if partial uploads are enabled, check whether we have a full slab now
-	packedSlabs, err := w.bus.PackedSlabsForUpload(jc.Request.Context(), 5*time.Minute, uint8(rs.MinShards), uint8(rs.TotalShards), up.ContractSet, 2)
-	if jc.Check("couldn't fetch packed slabs from bus", err) != nil {
-		return
-	}
-
-	for _, ps := range packedSlabs {
-		// upload packed slab.
-		shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-		sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
-		if jc.Check("couldn't upload packed slab", err) != nil {
-			return
-		}
-
-		// mark packed slab as uploaded.
-		err = w.bus.MarkPackedSlabsUploaded(jc.Request.Context(), []api.UploadedPackedSlab{
-			{
-				BufferID: ps.BufferID,
-				Shards:   sectors,
-			},
-		}, used)
-		if jc.Check("couldn't mark packed slabs uploaded", err) != nil {
-			return
-		}
-	}
 }
 
 func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
@@ -1456,6 +1373,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
 		startTime:               time.Now(),
+		uploadingPackedSlabs:    make(map[string]bool),
 	}
 	w.initTransportPool()
 	w.initAccounts(b)
