@@ -1423,6 +1423,17 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
+	// assert mod time & clear it afterwards so we can compare
+	assertModTime := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+				t.Fatal("mod time should be set")
+			}
+			entries[i].ModTime = time.Time{}
+		}
+	}
+
 	tests := []struct {
 		path   string
 		prefix string
@@ -1447,12 +1458,7 @@ func TestObjectEntries(t *testing.T) {
 		}
 
 		// assert mod time & clear it afterwards so we can compare
-		for i := range got {
-			if !strings.HasSuffix(got[i].Name, "/") && got[i].ModTime.IsZero() {
-				t.Fatal("mod time should be set")
-			}
-			got[i].ModTime = time.Time{}
-		}
+		assertModTime(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
@@ -1464,12 +1470,7 @@ func TestObjectEntries(t *testing.T) {
 			}
 
 			// assert mod time & clear it afterwards so we can compare
-			for i := range got {
-				if !strings.HasSuffix(got[i].Name, "/") && got[i].ModTime.IsZero() {
-					t.Fatal("mod time should be set")
-				}
-				got[i].ModTime = time.Time{}
-			}
+			assertModTime(got)
 
 			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
@@ -1491,12 +1492,7 @@ func TestObjectEntries(t *testing.T) {
 			}
 
 			// assert mod time & clear it afterwards so we can compare
-			for i := range got {
-				if !strings.HasSuffix(got[i].Name, "/") && got[i].ModTime.IsZero() {
-					t.Fatal("mod time should be set")
-				}
-				got[i].ModTime = time.Time{}
-			}
+			assertModTime(got)
 
 			if len(got) != 1 || got[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
@@ -3535,6 +3531,17 @@ func TestListObjects(t *testing.T) {
 		{"/gab/guub", 5},
 		{"/FOO/bar", 6}, // test case sensitivity
 	}
+
+	// assert mod time & clear it afterwards so we can compare
+	assertModTime := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+				t.Fatal("mod time should be set")
+			}
+			entries[i].ModTime = time.Time{}
+		}
+	}
+
 	ctx := context.Background()
 	for _, o := range objects {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
@@ -3561,12 +3568,7 @@ func TestListObjects(t *testing.T) {
 		}
 
 		// assert mod time & clear it afterwards so we can compare
-		for i := range res.Objects {
-			if !strings.HasSuffix(res.Objects[i].Name, "/") && res.Objects[i].ModTime.IsZero() {
-				t.Fatal("mod time should be set")
-			}
-			res.Objects[i].ModTime = time.Time{}
-		}
+		assertModTime(res.Objects)
 
 		got := res.Objects
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
@@ -3581,12 +3583,7 @@ func TestListObjects(t *testing.T) {
 				}
 
 				// assert mod time & clear it afterwards so we can compare
-				for i := range res.Objects {
-					if !strings.HasSuffix(res.Objects[i].Name, "/") && res.Objects[i].ModTime.IsZero() {
-						t.Fatal("mod time should be set")
-					}
-					res.Objects[i].ModTime = time.Time{}
-				}
+				assertModTime(res.Objects)
 
 				got := res.Objects
 				if len(got) != 1 {
