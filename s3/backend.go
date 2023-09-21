@@ -273,7 +273,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
 		"Content-Type":  mime.TypeByExtension(objectName),
-		"Last-Modified": time.Now().UTC().Format(http.TimeFormat), // TODO: update this when object has metadata
+		"Last-Modified": res.Object.LastModified(),
 	}
 	return &gofakes3.Object{
 		Name:     gofakes3.URLEncode(objectName),

@@ -154,9 +154,10 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectKey  []byte
-		ObjectName string
-		ObjectSize int64
+		ObjectKey     []byte
+		ObjectName    string
+		ObjectSize    int64
+		ObjectModTime time.Time
 
 		// slice
 		SliceOffset uint32
@@ -367,9 +368,10 @@ func (raw rawObject) convert(tx *gorm.DB) (api.Object, error) {
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
-			Name:   raw[0].ObjectName,
-			Size:   raw[0].ObjectSize,
-			Health: minHealth,
+			Health:  minHealth,
+			ModTime: raw[0].ObjectModTime,
+			Name:    raw[0].ObjectName,
+			Size:    raw[0].ObjectSize,
 		},
 		Object: object.Object{
 			Key:          key,
@@ -1226,8 +1228,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet s
 			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
 		}
 
-		// Try to delete. We want to get rid of the object and its
-		// slices if it exists.
+		// Try to delete. We want to get rid of the object and its slices if it
+		// exists.
+		//
+		// NOTE: please note that the object's created_at is currently used as
+		// its ModTime, if we ever stop recreating the object but update it
+		// instead we need to take this into account
 		_, err := deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
@@ -1617,7 +1623,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.created_at as ObjectModTime, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
