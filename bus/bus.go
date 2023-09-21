@@ -110,6 +110,7 @@ type (
 		DeleteBucket(_ context.Context, bucket string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 
+		ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucket, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
@@ -945,8 +946,12 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) objectsHandlerGET(jc jape.Context) {
+	var ignoreDelim bool
+	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+		return
+	}
 	path := jc.PathParam("path")
-	if strings.HasSuffix(path, "/") {
+	if strings.HasSuffix(path, "/") && !ignoreDelim {
 		b.objectEntriesHandlerGET(jc, path)
 		return
 	}
@@ -1018,6 +1023,20 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't copy object", b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath)) != nil {
 		return
 	}
+}
+
+func (b *bus) objectsListHandlerPOST(jc jape.Context) {
+	var req api.ObjectsListRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req.Bucket == "" {
+		req.Bucket = api.DefaultBucketName
+	}
+	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.Marker, req.Limit)
+	if jc.Check("couldn't list objects", err) != nil {
+		return
+	}
+	jc.Encode(resp)
 }
 
 func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
@@ -1976,6 +1995,7 @@ func (b *bus) Handler() http.Handler {
 		"DELETE /objects/*path":  b.objectsHandlerDELETE,
 		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
 		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+		"POST   /objects/list":   b.objectsListHandlerPOST,
 
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
 		"GET    /params/gouging": b.paramsHandlerGougingGET,

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -246,7 +247,11 @@ type DownloadObjectOption func(http.Header)
 
 func DownloadWithRange(offset, length int64) DownloadObjectOption {
 	return func(h http.Header) {
-		h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
+		if length == -1 {
+			h.Set("Range", fmt.Sprintf("bytes=%v-", offset))
+		} else {
+			h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
+		}
 	}
 }
 
@@ -282,8 +287,42 @@ func ObjectsWithBucket(bucket string) ObjectsOption {
 	}
 }
 
+func ObjectsWithIgnoreDelim(ignore bool) ObjectsOption {
+	return func(v url.Values) {
+		v.Set("ignoreDelim", fmt.Sprint(ignore))
+	}
+}
+
 func ObjectsWithMarker(marker string) ObjectsOption {
 	return func(v url.Values) {
 		v.Set("marker", marker)
 	}
+}
+
+func ParseDownloadRange(contentRange string) (DownloadRange, error) {
+	parts := strings.Split(contentRange, " ")
+	if len(parts) != 2 || parts[0] != "bytes" {
+		return DownloadRange{}, errors.New("missing 'bytes' prefix in range header")
+	}
+	parts = strings.Split(parts[1], "/")
+	if len(parts) != 2 {
+		return DownloadRange{}, fmt.Errorf("invalid Content-Range header: %s", contentRange)
+	}
+	rangeStr := parts[0]
+	rangeParts := strings.Split(rangeStr, "-")
+	if len(rangeParts) != 2 {
+		return DownloadRange{}, errors.New("invalid Content-Range header")
+	}
+	start, err := strconv.ParseInt(rangeParts[0], 10, 64)
+	if err != nil {
+		return DownloadRange{}, err
+	}
+	end, err := strconv.ParseInt(rangeParts[1], 10, 64)
+	if err != nil {
+		return DownloadRange{}, err
+	}
+	return DownloadRange{
+		Start:  start,
+		Length: end - start + 1,
+	}, nil
 }

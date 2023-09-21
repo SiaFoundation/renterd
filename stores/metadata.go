@@ -900,6 +900,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 }
 
 func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
+	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
@@ -1981,4 +1982,57 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 
 func sqlWhereBucket(objTable string, bucket string) clause.Expr {
 	return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", objTable), bucket)
+}
+
+// TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
+// a delimiter for now (see backend.go) but it would be interesting to have
+// arbitrary 'delim' support in ListObjects.
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (api.ObjectsListResponse, error) {
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else {
+		limit++
+	}
+
+	prefixExpr := gorm.Expr("TRUE")
+	if prefix != "" {
+		prefixExpr = gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+	}
+	markerExpr := gorm.Expr("TRUE")
+	if marker != "" {
+		markerExpr = gorm.Expr("o.object_id > ?", marker)
+	}
+
+	var objects []api.ObjectMetadata
+	err := s.db.
+		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
+		Model(&dbObject{}).
+		Table("objects o").
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Where("? AND ? AND ?", sqlWhereBucket("o", bucket), prefixExpr, markerExpr).
+		Group("o.object_id").
+		Order("o.object_id").
+		Limit(int(limit)).
+		Scan(&objects).Error
+	if err != nil {
+		return api.ObjectsListResponse{}, err
+	}
+
+	hasMore := len(objects) == limit
+	nextMarker := ""
+	if hasMore {
+		nextMarker = objects[len(objects)-2].Name
+	}
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
+	}, nil
 }
