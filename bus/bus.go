@@ -116,14 +116,14 @@ type (
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
-		UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateObject(ctx context.Context, bucket, path string, o object.Object, om object.ObjectMetadata) error
 		RemoveObject(ctx context.Context, bucket, path string) error
 		RemoveObjects(ctx context.Context, bucket, prefix string) error
 		RenameObject(ctx context.Context, bucket, from, to string) error
 		RenameObjects(ctx context.Context, bucket, from, to string) error
 
 		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+		AddMultipartPart(ctx context.Context, bucket, path, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, om object.ObjectMetadata) (err error)
 		CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error)
 		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
@@ -1012,7 +1012,7 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.Object, aor.ObjectMetadata))
 }
 
 func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1868,7 +1868,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	} else if req.ContractSet == "" {
 		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
 		return
-	} else if req.Etag == "" {
+	} else if req.ObjectMetadata.ETag == "" {
 		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
 		return
 	} else if req.PartNumber <= 0 || req.PartNumber > gofakes3.MaxUploadPartNumber {
@@ -1878,7 +1878,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.Etag, req.UsedContracts)
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.ObjectMetadata)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}

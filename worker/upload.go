@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/montanaflynn/stats"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -236,8 +238,14 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		opt(&up)
 	}
 
+	// extract the mimetype
+	mimeType, mr, err := newMimeReader(r)
+	if err != nil {
+		return "", err
+	}
+
 	// perform the upload
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, mr, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -251,8 +259,16 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		obj.PartialSlabs = partialSlabs
 	}
 
+	// construct object metadata
+	om := object.ObjectMetadata{
+		ContractSet:   up.contractSet,
+		ETag:          etag,
+		MimeType:      mimeType,
+		UsedContracts: used,
+	}
+
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, used)
+	err = w.bus.AddObject(ctx, bucket, path, obj, om)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
@@ -271,8 +287,14 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		opt(&up)
 	}
 
+	// extract the mimetype
+	mimeType, mr, err := newMimeReader(r)
+	if err != nil {
+		return "", err
+	}
+
 	// upload the part
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, mr, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -286,8 +308,16 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		obj.PartialSlabs = partialSlabs
 	}
 
+	// construct object metadata
+	om := object.ObjectMetadata{
+		ContractSet:   up.contractSet,
+		ETag:          etag,
+		MimeType:      mimeType,
+		UsedContracts: used,
+	}
+
 	// persist the part
-	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)
+	err = w.bus.AddMultipartPart(ctx, bucket, path, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, om)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add multi part: %w", err)
 	}
@@ -516,11 +546,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 		span.End()
 	}()
 
-	// wrap the reader to create an etag
-	hr := newHashReader(r)
-
 	// create the object
 	o := object.NewObject(up.ec)
+
+	// create the hash reader
+	hr := newHashReader(r)
 
 	// create the cipher reader
 	cr, err := o.Encrypt(hr, up.encryptionOffset)
@@ -1603,6 +1633,13 @@ func (a *dataPoints) tryDecay() {
 
 func (sID slabID) String() string {
 	return fmt.Sprintf("%x", sID[:])
+}
+
+func newMimeReader(r io.Reader) (mimeType string, recycled io.Reader, err error) {
+	buf := bytes.NewBuffer(nil)
+	mtype, err := mimetype.DetectReader(io.TeeReader(r, buf))
+	recycled = io.MultiReader(buf, r)
+	return mtype.String(), recycled, err
 }
 
 type hashReader struct {

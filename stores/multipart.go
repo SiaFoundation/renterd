@@ -80,15 +80,15 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, om object.ObjectMetadata) (err error) {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
+		if err := tx.Take(&cs, "name = ?", om.ContractSet).Error; err != nil {
+			return fmt.Errorf("contract set %v not found: %w", om.ContractSet, err)
 		}
 		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, usedContracts)
+		contracts, err := fetchUsedContracts(tx, om.UsedContracts)
 		if err != nil {
 			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
@@ -117,7 +117,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 		}
 		// Create a new part.
 		part := dbMultipartPart{
-			Etag:                etag,
+			Etag:                om.ETag,
 			PartNumber:          partNumber,
 			DBMultipartUploadID: mu.ID,
 			Size:                size,

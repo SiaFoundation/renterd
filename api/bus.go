@@ -213,10 +213,10 @@ type ObjectMetadata struct {
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.
 type ObjectAddRequest struct {
-	Bucket        string                                   `json:"bucket"`
-	ContractSet   string                                   `json:"contractSet"`
-	Object        object.Object                            `json:"object"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	Bucket string        `json:"bucket"`
+	Object object.Object `json:"object"`
+
+	object.ObjectMetadata
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.
@@ -531,15 +531,14 @@ type (
 		ETag string `json:"eTag"`
 	}
 	MultipartAddPartRequest struct {
-		Bucket        string                                   `json:"bucket"`
-		Etag          string                                   `json:"eTag"`
-		Path          string                                   `json:"path"`
-		ContractSet   string                                   `json:"contractSet"`
-		UploadID      string                                   `json:"uploadID"`
-		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
-		PartNumber    int                                      `json:"partNumber"`
-		Slices        []object.SlabSlice                       `json:"slices"`
-		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		Bucket       string               `json:"bucket"`
+		Path         string               `json:"path"`
+		UploadID     string               `json:"uploadID"`
+		PartialSlabs []object.PartialSlab `json:"partialSlabs"`
+		PartNumber   int                  `json:"partNumber"`
+		Slices       []object.SlabSlice   `json:"slices"`
+
+		object.ObjectMetadata
 	}
 	MultipartListUploadsRequest struct {
 		Bucket         string `json:"bucket"`

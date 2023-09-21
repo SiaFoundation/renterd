@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/SiaFoundation/gofakes3"
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -29,7 +28,7 @@ type bus interface {
 	DeleteBucket(ctx context.Context, name string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error)
+	AddObject(ctx context.Context, bucket, path string, o object.Object, om object.ObjectMetadata) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error)
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
