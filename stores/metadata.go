@@ -1054,10 +1054,7 @@ func (s *SQLStore) Object(ctx context.Context, bucket, path string) (api.Object,
 			return err
 		}
 		obj, err = o.convert()
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	return obj, err
 }

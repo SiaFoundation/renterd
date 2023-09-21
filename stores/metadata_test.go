@@ -3383,7 +3383,7 @@ func TestCopyObject(t *testing.T) {
 	}
 
 	// Copy it within the same bucket.
-	if _, err := os.CopyObject(ctx, "src", "src", "/foo", "/bar"); err != nil {
+	if om, err := os.CopyObject(ctx, "src", "src", "/foo", "/bar"); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := os.ObjectEntries(ctx, "src", "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3391,10 +3391,12 @@ func TestCopyObject(t *testing.T) {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/bar" || entries[1].Name != "/foo" {
 		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	} else if om.ModTime.IsZero() {
+		t.Fatal("expected mod time to be set")
 	}
 
 	// Copy it cross buckets.
-	if _, err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar"); err != nil {
+	if om, err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar"); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := os.ObjectEntries(ctx, "dst", "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3402,6 +3404,8 @@ func TestCopyObject(t *testing.T) {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Name != "/bar" {
 		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	} else if om.ModTime.IsZero() {
+		t.Fatal("expected mod time to be set")
 	}
 }
 
