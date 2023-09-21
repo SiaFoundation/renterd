@@ -31,7 +31,7 @@ const (
 
 	defaultPackedSlabsLockDuration  = 5 * time.Minute
 	defaultPackedSlabsUploadTimeout = 10 * time.Minute
-	defaultPackedSlabsLimit         = 2
+	defaultPackedSlabsLimit         = 1
 )
 
 var (
@@ -318,75 +318,69 @@ func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet str
 	}()
 
 	// keep uploading packed slabs until we're done
-	packedSlabsFound := true
-	for packedSlabsFound {
-		packedSlabsFound = func() bool {
-			// create a context with sane timeout
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
+	for {
+		// fetch packed slabs
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, defaultPackedSlabsLimit)
+		if err != nil {
+			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
+			cancel()
+			return
+		}
+		cancel()
 
-			// fetch contracts
-			contracts, err := w.bus.ContractSetContracts(ctx, contractSet)
-			if err != nil {
-				w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
-				return false
+		// if there's no packed slabs, we're done
+		if len(packedSlabs) == 0 {
+			return
+		}
+
+		// upload packed slabs
+		for _, ps := range packedSlabs {
+			if err := w.uploadPackedSlab(ps, rs, contractSet); err != nil {
+				w.logger.Errorf("failed to upload packed slab, err: %v", err)
+				return
 			}
-
-			// fetch upload params
-			up, err := w.bus.UploadParams(ctx)
-			if err != nil {
-				w.logger.Errorf("couldn't fetch upload params from bus: %v", err)
-				return false
-			}
-
-			// if partial uploads are enabled, check whether we have a full slab now
-			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, defaultPackedSlabsLimit)
-			if err != nil {
-				w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
-				return false
-			}
-
-			// if there's no packed slabs, we're done
-			if len(packedSlabs) == 0 {
-				return false
-			}
-
-			// upload packed slabs
-			for _, ps := range packedSlabs {
-				if err := func() error {
-					// create a context with sane timeout
-					ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
-					defer cancel()
-
-					// attach gouging checker to the context
-					ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-					// upload packed slab
-					shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-					sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
-					if err != nil {
-						w.logger.Errorf("couldn't upload packed slab, err: %v", err)
-						return err
-					}
-
-					// mark packed slab as uploaded
-					if err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{
-						{
-							BufferID: ps.BufferID,
-							Shards:   sectors,
-						},
-					}, used); err != nil {
-						w.logger.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
-						return err
-					}
-					return nil
-				}(); err != nil {
-					return false
-				}
-			}
-			return true
-		}()
+		}
 	}
+}
+
+func (w *worker) uploadPackedSlab(ps api.PackedSlab, rs api.RedundancySettings, contractSet string) error {
+	// create a context with sane timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
+	defer cancel()
+
+	// fetch contracts
+	contracts, err := w.bus.ContractSetContracts(ctx, contractSet)
+	if err != nil {
+		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+	}
+
+	// fetch upload params
+	up, err := w.bus.UploadParams(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't fetch upload params from bus: %v", err)
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// upload packed slab
+	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
+	sectors, used, err := w.uploadManager.Migrate(ctx, shards, contracts, up.CurrentHeight)
+	if err != nil {
+		return fmt.Errorf("couldn't upload packed slab, err: %v", err)
+	}
+
+	// mark packed slab as uploaded
+	if err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{
+		{
+			BufferID: ps.BufferID,
+			Shards:   sectors,
+		},
+	}, used); err != nil {
+		return fmt.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
+	}
+	return nil
 }
 
 func newDataPoints(halfLife time.Duration) *dataPoints {
