@@ -381,6 +381,14 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err, test.path)
 		}
 
+		// assert mod time & clear it afterwards so we can compare
+		for i := range res.Entries {
+			if !strings.HasSuffix(res.Entries[i].Name, "/") && res.Entries[i].ModTime.IsZero() {
+				t.Fatal("mod time should be set")
+			}
+			res.Entries[i].ModTime = time.Time{}
+		}
+
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
 		}
@@ -388,6 +396,14 @@ func TestObjectEntries(t *testing.T) {
 			res, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
 			if err != nil {
 				t.Fatal(err)
+			}
+
+			// assert mod time & clear it afterwards so we can compare
+			for i := range res.Entries {
+				if !strings.HasSuffix(res.Entries[i].Name, "/") && res.Entries[i].ModTime.IsZero() {
+					t.Fatal("mod time should be set")
+				}
+				res.Entries[i].ModTime = time.Time{}
 			}
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
@@ -407,6 +423,15 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mod time & clear it afterwards so we can compare
+			for i := range res.Entries {
+				if !strings.HasSuffix(res.Entries[i].Name, "/") && res.Entries[i].ModTime.IsZero() {
+					t.Fatal("mod time should be set")
+				}
+				res.Entries[i].ModTime = time.Time{}
+			}
+
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
 			}
@@ -422,6 +447,15 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		// assert mod time & clear it afterwards so we can compare
+		for i := range got {
+			if !strings.HasSuffix(got[i].Name, "/") && got[i].ModTime.IsZero() {
+				t.Fatal("mod time should be set")
+			}
+			got[i].ModTime = time.Time{}
+		}
+
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}

@@ -252,7 +252,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
 		"Content-Type":  res.ContentType,
-		"Last-Modified": res.ModTime.Format(http.TimeFormat),
+		"Last-Modified": res.ModTime.UTC().Format(http.TimeFormat),
 	}
 
 	return &gofakes3.Object{

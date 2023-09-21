@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -3527,28 +3528,46 @@ func TestListObjects(t *testing.T) {
 		{"/foo", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
 	}
 	for _, test := range tests {
-		resp, err := os.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", -1)
+		res, err := os.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := resp.Objects
+
+		// assert mod time & clear it afterwards so we can compare
+		for i := range res.Objects {
+			if !strings.HasSuffix(res.Objects[i].Name, "/") && res.Objects[i].ModTime.IsZero() {
+				t.Fatal("mod time should be set")
+			}
+			res.Objects[i].ModTime = time.Time{}
+		}
+
+		got := res.Objects
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.prefix, got, test.want)
 		}
-		if len(resp.Objects) > 0 {
+		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				resp, err := os.ListObjects(ctx, api.DefaultBucketName, test.prefix, marker, 1)
+				res, err := os.ListObjects(ctx, api.DefaultBucketName, test.prefix, marker, 1)
 				if err != nil {
 					t.Fatal(err)
 				}
-				got := resp.Objects
+
+				// assert mod time & clear it afterwards so we can compare
+				for i := range res.Objects {
+					if !strings.HasSuffix(res.Objects[i].Name, "/") && res.Objects[i].ModTime.IsZero() {
+						t.Fatal("mod time should be set")
+					}
+					res.Objects[i].ModTime = time.Time{}
+				}
+
+				got := res.Objects
 				if len(got) != 1 {
 					t.Errorf("expected 1 object, got %v", len(got))
 				} else if got[0].Name != test.want[offset].Name {
 					t.Errorf("expected %v, got %v", test.want[offset].Name, got[0].Name)
 				}
-				marker = resp.NextMarker
+				marker = res.NextMarker
 			}
 		}
 	}

@@ -298,7 +298,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 	return api.ObjectMetadata{
 		Health:  raw.Health,
-		ModTime: time.Time(raw.ModTime),
+		ModTime: time.Time(raw.ModTime).UTC(),
 		Name:    raw.Name,
 		Size:    raw.Size,
 	}
@@ -386,7 +386,7 @@ func (raw rawObject) convert() (api.Object, error) {
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
 			Health:  minHealth,
-			ModTime: raw[0].ObjectModTime,
+			ModTime: raw[0].ObjectModTime.UTC(),
 			Name:    raw[0].ObjectName,
 			Size:    raw[0].ObjectSize,
 		},
@@ -1254,7 +1254,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		om = api.ObjectMetadata{
 			Name:    dstObj.ObjectID,
 			Size:    dstObj.Size,
-			ModTime: dstObj.CreatedAt,
+			ModTime: dstObj.CreatedAt.UTC(),
 			Health:  minHealth,
 		}
 		return nil
