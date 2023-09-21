@@ -372,14 +372,12 @@ func (w *worker) uploadPackedSlab(ps api.PackedSlab, rs api.RedundancySettings, 
 	}
 
 	// mark packed slab as uploaded
-	if err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{
-		{
-			BufferID: ps.BufferID,
-			Shards:   sectors,
-		},
-	}, used); err != nil {
+	slab := api.UploadedPackedSlab{BufferID: ps.BufferID, Shards: sectors}
+	err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{slab}, used)
+	if err != nil {
 		return fmt.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
 	}
+
 	return nil
 }
 
