@@ -104,6 +104,14 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal("data mismatch")
 	}
 
+	// stat object
+	info, err := s3.StatObject(context.Background(), bucket, "object", minio.StatObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if info.Size != int64(len(data)) {
+		t.Fatal("size mismatch")
+	}
+
 	// add another bucket
 	err = s3.MakeBucket(context.Background(), bucket+"2", minio.MakeBucketOptions{})
 	if err != nil {
@@ -159,6 +167,28 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal(err)
 	} else if _, err := io.ReadAll(obj); err == nil || !strings.Contains(err.Error(), "The specified key does not exist") {
 		t.Fatal(err)
+	}
+
+	// add a few objects to the bucket.
+	_, err = s3.PutObject(context.Background(), bucket, "dir/", bytes.NewReader(frand.Bytes(10)), 10, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s3.PutObject(context.Background(), bucket, "dir/file", bytes.NewReader(frand.Bytes(10)), 10, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// delete them using the multi delete endpoint.
+	objectsCh := make(chan minio.ObjectInfo, 3)
+	objectsCh <- minio.ObjectInfo{Key: "dir/file"}
+	objectsCh <- minio.ObjectInfo{Key: "dir/"}
+	close(objectsCh)
+	results := s3.RemoveObjects(context.Background(), bucket, objectsCh, minio.RemoveObjectsOptions{})
+	for res := range results {
+		if res.Err != nil {
+			t.Fatal(res.Err)
+		}
 	}
 
 	// delete bucket
@@ -267,6 +297,19 @@ func TestS3List(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// manually create the 'a/' object as a directory. It should also be
+	// possible to call StatObject on it without errors.
+	_, err = s3.PutObject(context.Background(), "bucket", "a/", bytes.NewReader(nil), 0, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, err := s3.StatObject(context.Background(), "bucket", "a/", minio.StatObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if so.Key != "a/" {
+		t.Fatal("unexpected key:", so.Key)
+	}
+
 	objects := []string{
 		"a/a/a",
 		"a/b",
@@ -274,6 +317,8 @@ func TestS3List(t *testing.T) {
 		"c/a",
 		"d",
 		"ab",
+		"y/",
+		"y/y/y/y",
 	}
 	for _, object := range objects {
 		data := frand.Bytes(10)
@@ -283,54 +328,102 @@ func TestS3List(t *testing.T) {
 		}
 	}
 
-	flatten := func(res <-chan minio.ObjectInfo) []string {
+	flatten := func(res minio.ListBucketResult) []string {
 		var objs []string
-		for obj := range res {
-			if obj.Err != nil {
-				t.Fatal(err)
-			}
-
+		for _, obj := range res.Contents {
 			if !strings.HasSuffix(obj.Key, "/") && obj.LastModified.IsZero() {
 				t.Fatal("expected non-zero LastModified", obj.Key)
 			}
 			objs = append(objs, obj.Key)
 		}
+		for _, cp := range res.CommonPrefixes {
+			objs = append(objs, cp.Prefix)
+		}
 		return objs
 	}
 
+	// Create a core client for lower-level operations.
+	url := s3.EndpointURL()
+	core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
+		Creds: testS3Credentials,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
-		prefix string
-		marker string
-		want   []string
+		delimiter string
+		prefix    string
+		marker    string
+		want      []string
 	}{
 		{
-			prefix: "",
-			marker: "",
-			want:   []string{"ab", "b", "d", "a/", "c/"},
+			delimiter: "/",
+			prefix:    "",
+			marker:    "",
+			want:      []string{"ab", "b", "d", "a/", "c/", "y/"},
 		},
 		{
-			prefix: "a",
-			marker: "",
-			want:   []string{"ab", "a/"},
+			delimiter: "/",
+			prefix:    "a",
+			marker:    "",
+			want:      []string{"ab", "a/"},
 		},
 		{
-			prefix: "",
-			marker: "b",
-			want:   []string{"d", "c/"},
+			delimiter: "/",
+			prefix:    "a/a",
+			marker:    "",
+			want:      []string{"a/a/"},
 		},
 		{
-			prefix: "e",
-			marker: "",
-			want:   nil,
+			delimiter: "/",
+			prefix:    "",
+			marker:    "b",
+			want:      []string{"d", "c/", "y/"},
 		},
 		{
-			prefix: "a",
-			marker: "a/",
-			want:   []string{"ab"},
+			delimiter: "/",
+			prefix:    "z",
+			marker:    "",
+			want:      nil,
+		},
+		{
+			delimiter: "/",
+			prefix:    "a",
+			marker:    "a/",
+			want:      []string{"ab"},
+		},
+		{
+			delimiter: "/",
+			prefix:    "y/",
+			marker:    "",
+			want:      []string{"y/y/"},
+		},
+		{
+			delimiter: "",
+			prefix:    "y/",
+			marker:    "",
+			want:      []string{"y/", "y/y/y/y"},
+		},
+		{
+			delimiter: "",
+			prefix:    "y/y",
+			marker:    "",
+			want:      []string{"y/y/y/y"},
+		},
+		{
+			delimiter: "",
+			prefix:    "y/y/",
+			marker:    "",
+			want:      []string{"y/y/y/y"},
 		},
 	}
 	for i, test := range tests {
-		got := flatten(s3.ListObjects(context.Background(), "bucket", minio.ListObjectsOptions{Prefix: test.prefix, StartAfter: test.marker}))
+		result, err := core.ListObjects("bucket", test.prefix, test.marker, test.delimiter, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := flatten(result)
 		if !cmp.Equal(test.want, got) {
 			t.Errorf("test %d: unexpected response, want %v got %v", i, test.want, got)
 		}
@@ -486,5 +579,75 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	} else if len(res.Uploads) != 0 {
 		t.Fatal("expected 0 uploads")
+	}
+}
+
+func TestS3SpecialChars(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	s3 := cluster.S3
+
+	// enable upload packing to speed up test
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// manually create the 'a/' object as a directory. It should also be
+	// possible to call StatObject on it without errors.
+	objectKey := "foo/höst (1).log"
+	_, err = s3.PutObject(context.Background(), api.DefaultBucketName, objectKey, bytes.NewReader([]byte("bar")), 0, minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, err := s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if so.Key != objectKey {
+		t.Fatal("unexpected key:", so.Key)
+	}
+	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
+		if res.Err != nil {
+			t.Fatal(err)
+		}
+		if res.Key != objectKey {
+			t.Fatal("unexpected key:", res.Key)
+		}
+	}
+
+	// delete it and verify its gone.
+	err = s3.RemoveObject(context.Background(), api.DefaultBucketName, objectKey, minio.RemoveObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, err = s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		t.Fatal("shouldn't exist", err)
+	}
+	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
+		if res.Err != nil {
+			t.Fatal(err)
+		}
+		if res.Key == objectKey {
+			t.Fatal("unexpected key:", res.Key)
+		}
 	}
 }

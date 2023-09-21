@@ -431,6 +431,19 @@ type PackedSlabsRequestGET struct {
 	Limit           int           `json:"limit"`
 }
 
+type ObjectsListRequest struct {
+	Bucket string `json:"bucket"`
+	Limit  int    `json:"limit"`
+	Prefix string `json:"prefix"`
+	Marker string `json:"marker"`
+}
+
+type ObjectsListResponse struct {
+	HasMore    bool             `json:"hasMore"`
+	NextMarker string           `json:"nextMarker"`
+	Objects    []ObjectMetadata `json:"objects"`
+}
+
 type PackedSlabsRequestPOST struct {
 	Slabs         []UploadedPackedSlab                     `json:"slabs"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
@@ -559,9 +572,9 @@ type (
 		Limit            int64  `json:"limit"`
 	}
 	MultipartListPartsResponse struct {
-		IsTruncated bool                    `json:"isTruncated"`
-		NextMarker  int                     `json:"nextMarker"`
-		Parts       []MultipartListPartItem `json:"parts"`
+		HasMore    bool                    `json:"hasMore"`
+		NextMarker int                     `json:"nextMarker"`
+		Parts      []MultipartListPartItem `json:"parts"`
 	}
 	MultipartListPartItem struct {
 		PartNumber   int       `json:"partNumber"`

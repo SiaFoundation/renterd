@@ -627,6 +627,17 @@ func (c *Client) ObjectsBySlabKey(ctx context.Context, bucket string, key object
 	return
 }
 
+// ListOBjects lists objects in the given bucket.
+func (c *Client) ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+	err = c.c.WithContext(ctx).POST("/objects/list", api.ObjectsListRequest{
+		Bucket: bucket,
+		Limit:  limit,
+		Prefix: prefix,
+		Marker: marker,
+	}, &resp)
+	return
+}
+
 // SearchObjects returns all objects that contains a sub-string in their key.
 func (c *Client) SearchObjects(ctx context.Context, bucket, key string, offset, limit int) (entries []api.ObjectMetadata, err error) {
 	values := url.Values{}
