@@ -365,7 +365,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 	if rsr.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(jc.Request.Context(), rsr.Timeout)
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), time.Duration(rsr.Timeout))
 		defer cancel()
 	}
 
@@ -401,7 +401,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	// TODO: record metric
 
 	jc.Encode(api.RHPScanResponse{
-		Ping:       api.ParamDuration(elapsed),
+		Ping:       api.DurationMS(elapsed),
 		PriceTable: priceTable,
 		ScanError:  errStr,
 		Settings:   settings,
@@ -476,7 +476,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 	if rptr.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(jc.Request.Context(), rptr.Timeout)
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), time.Duration(rptr.Timeout))
 		defer cancel()
 	}
 
@@ -637,7 +637,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	ctx := jc.Request.Context()
 	if pcr.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(jc.Request.Context(), pcr.Timeout)
+		ctx, cancel = context.WithTimeout(jc.Request.Context(), time.Duration(pcr.Timeout))
 		defer cancel()
 	}
 
@@ -1296,7 +1296,7 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	}
 
 	var hosttimeout time.Duration
-	if jc.DecodeForm("hosttimeout", (*api.ParamDuration)(&hosttimeout)) != nil {
+	if jc.DecodeForm("hosttimeout", (*api.DurationMS)(&hosttimeout)) != nil {
 		return
 	}
 
