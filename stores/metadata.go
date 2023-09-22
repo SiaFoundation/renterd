@@ -1346,7 +1346,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 
 	// Update slab.
 	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
-		// Fetch contract set.
+		// fetch contract set
 		var cs dbContractSet
 		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
 			return err

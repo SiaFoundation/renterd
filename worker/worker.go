@@ -908,13 +908,8 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	used, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	used, numShardsMigrated, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if jc.Check("couldn't migrate slabs", err) != nil {
-		return
-	}
-
-	// no migration took place, return early
-	if used == nil {
 		return
 	}
 
@@ -922,6 +917,8 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
 		return
 	}
+
+	jc.Encode(api.MigrateSlabResponse{NumShardsMigrated: numShardsMigrated})
 }
 
 func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
