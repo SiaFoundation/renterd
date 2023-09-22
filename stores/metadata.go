@@ -158,6 +158,7 @@ type (
 		ObjectName    string
 		ObjectSize    int64
 		ObjectModTime time.Time
+		ObjectHealth  float64
 
 		// slice
 		SliceOffset uint32
@@ -1201,6 +1202,11 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to fetch src object: %w", err)
 		}
 
+		srcObjHealth, err := s.objectHealth(ctx, tx, srcObj.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch src object health: %w", err)
+		}
+
 		var srcSlices []dbSlice
 		err = tx.Where("db_object_id = ?", srcObj.ID).
 			Find(&srcSlices).
@@ -1208,18 +1214,9 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		if err != nil {
 			return fmt.Errorf("failed to fetch src slices: %w", err)
 		}
-		var slabIds []uint
 		for i := range srcSlices {
 			srcSlices[i].Model = Model{}  // clear model
 			srcSlices[i].DBObjectID = nil // clear object id
-			slabIds = append(slabIds, srcSlices[i].DBSlabID)
-		}
-
-		var srcSlabs []dbSlab
-		if err := tx.Where("id IN (?)", slabIds).
-			Find(&srcSlabs).
-			Error; err != nil {
-			return fmt.Errorf("failed to fetch src slabs: %w", err)
 		}
 
 		var bucket dbBucket
@@ -1236,26 +1233,15 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		dstObj.ObjectID = dstPath     // set dst path
 		dstObj.DBBucketID = bucket.ID // set dst bucket id
 		dstObj.Slabs = srcSlices      // set slices
-		tx = tx.Create(&dstObj)
-		if err := tx.Error; err != nil {
+		if err := tx.Create(&dstObj).Error; err != nil {
 			return fmt.Errorf("failed to create copy of object: %w", err)
-		}
-
-		minHealth := math.MaxFloat64
-		for _, dbSlab := range srcSlabs {
-			if dbSlab.Health < minHealth {
-				minHealth = dbSlab.Health
-			}
-		}
-		if minHealth == math.MaxFloat64 {
-			minHealth = 1
 		}
 
 		om = api.ObjectMetadata{
 			Name:    dstObj.ObjectID,
 			Size:    dstObj.Size,
 			ModTime: dstObj.CreatedAt.UTC(),
-			Health:  minHealth,
+			Health:  srcObjHealth,
 		}
 		return nil
 	})
@@ -1697,6 +1683,21 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	}
 
 	return rows, nil
+}
+
+func (s *SQLStore) objectHealth(ctx context.Context, tx *gorm.DB, objectID uint) (health float64, err error) {
+	if err = tx.
+		Select("MIN(sla.health)").
+		Model(&dbObject{}).
+		Table("objects o").
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Where("o.id = ?", objectID).
+		Scan(&health).
+		Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		err = api.ErrObjectNotFound
+	}
+	return
 }
 
 // contract retrieves a contract from the store.

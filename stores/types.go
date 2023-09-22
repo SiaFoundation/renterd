@@ -180,6 +180,8 @@ func (hs *balance) Scan(value interface{}) error {
 	return nil
 }
 
+// SQLiteTimestampFormats were taken from github.com/mattn/go-sqlite3 and are
+// used when parsing a string to a date
 var SQLiteTimestampFormats = []string{
 	"2006-01-02 15:04:05.999999999-07:00",
 	"2006-01-02T15:04:05.999999999-07:00",
@@ -217,13 +219,18 @@ func (dt *datetime) Scan(value interface{}) error {
 		return fmt.Errorf("failed to unmarshal time.Time value: %v %T", value, value)
 	}
 
+	var ok bool
 	var t time.Time
 	s = strings.TrimSuffix(s, "Z")
 	for _, format := range SQLiteTimestampFormats {
 		if timeVal, err := time.ParseInLocation(format, s, time.UTC); err == nil {
+			ok = true
 			t = timeVal
 			break
 		}
+	}
+	if !ok {
+		return fmt.Errorf("failed to parse datetime value: %v", s)
 	}
 
 	*dt = datetime(t)

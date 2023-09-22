@@ -301,9 +301,10 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// assert mod time & clear it afterwards so we can compare
+	start := time.Now()
 	assertModTime := func(entries []api.ObjectMetadata) {
 		for i := range entries {
-			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.After(start.UTC()) {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = time.Time{}

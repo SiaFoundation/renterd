@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SiaFoundation/gofakes3"
 	"github.com/google/go-cmp/cmp"
@@ -28,6 +29,7 @@ func TestS3Basic(t *testing.T) {
 		t.SkipNow()
 	}
 
+	start := time.Now()
 	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -131,6 +133,8 @@ func TestS3Basic(t *testing.T) {
 	}
 	if res.LastModified.IsZero() {
 		t.Fatal("expected LastModified to be non-zero")
+	} else if !res.LastModified.After(start.UTC()) {
+		t.Fatal("expected LastModified to be after the start of our test")
 	}
 
 	// get copied object
