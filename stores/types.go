@@ -210,8 +210,11 @@ func (dt *datetime) Scan(value interface{}) error {
 		s = value
 	case []byte:
 		s = string(value)
+	case time.Time:
+		*dt = datetime(value)
+		return nil
 	default:
-		return fmt.Errorf("failed to unmarshal time.Time value: %v %t", value, value)
+		return fmt.Errorf("failed to unmarshal time.Time value: %v %T", value, value)
 	}
 
 	var t time.Time
