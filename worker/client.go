@@ -161,11 +161,11 @@ func (c *Client) State() (state api.WorkerStateResponse, err error) {
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) error {
+func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) (res api.MigrateSlabResponse, err error) {
 	values := make(url.Values)
 	values.Set("contractset", set)
-
-	return c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, nil)
+	err = c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, &res)
+	return
 }
 
 // DownloadStats returns the upload stats.

@@ -44,6 +44,11 @@ type ContractsResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
+type MigrateSlabResponse struct {
+	NumShardsMigrated int `json:"numShardsMigrated"`
+}
+
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
