@@ -154,6 +154,7 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
+		ObjectID      uint
 		ObjectKey     []byte
 		ObjectName    string
 		ObjectSize    int64
@@ -1666,7 +1667,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.created_at as ObjectModTime, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.created_at as ObjectModTime, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).

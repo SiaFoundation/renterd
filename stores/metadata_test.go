@@ -1331,6 +1331,20 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal("wrong health", obj.Health)
 	}
 
+	// assert (raw) object and object health methods
+	raw, err := db.object(context.Background(), db.db, api.DefaultBucketName, "/foo")
+	if err != nil {
+		t.Fatal(err)
+	} else if len(raw) == 0 {
+		t.Fatal("object not found")
+	}
+	health, err := db.objectHealth(context.Background(), db.db, raw[0].ObjectID)
+	if err != nil {
+		t.Fatal(err)
+	} else if health != expectedHealth {
+		t.Fatal("wrong health", health)
+	}
+
 	// assert health is returned correctly by ObjectEntries
 	entries, _, err := db.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", "", 0, -1)
 	if err != nil {
