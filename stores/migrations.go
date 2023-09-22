@@ -229,6 +229,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00015_multipartUploads(tx, logger)
 			},
 		},
+		{
+			ID: "00016_mimetype",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00016_mimetype(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -808,5 +814,21 @@ func performMigration00015_multipartUploads(txn *gorm.DB, logger *zap.SugaredLog
 		}
 	}
 	logger.Info("migration 00015_multipartUploads complete")
+	return nil
+}
+
+func performMigration00016_mimetype(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00016_mimetype")
+	if !txn.Migrator().HasColumn(&dbObject{}, "MimeType") {
+		if err := txn.Migrator().AddColumn(&dbObject{}, "MimeType"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasColumn(&dbMultipartPart{}, "MimeType") {
+		if err := txn.Migrator().AddColumn(&dbMultipartPart{}, "MimeType"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00016_mimetype complete")
 	return nil
 }

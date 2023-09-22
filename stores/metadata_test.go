@@ -103,6 +103,7 @@ func TestObjectBasic(t *testing.T) {
 				hk1: fcid1,
 				hk2: fcid2,
 			},
+			MimeType: "application/octet-stream",
 		}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +115,9 @@ func TestObjectBasic(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Object, want) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
+	}
+	if got.ObjectMetadata.MimeType != "application/octet-stream" {
+		t.Fatal("unexpected mime type", got.ObjectMetadata.MimeType)
 	}
 
 	// delete a sector
@@ -1443,11 +1447,22 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, obj, object.ObjectMetadata{ContractSet: testContractSet, UsedContracts: ucs})
+		err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, obj, object.ObjectMetadata{ContractSet: testContractSet, UsedContracts: ucs, MimeType: "application/octet-stream"})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+
+	// assert mime type & clear it afterwards so we can compare
+	assertMimeType := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			if entries[i].MimeType != "application/octet-stream" {
+				t.Fatal("unexpected mime type", entries[i].MimeType)
+			}
+			entries[i].MimeType = ""
+		}
+	}
+
 	tests := []struct {
 		path   string
 		prefix string
@@ -1470,6 +1485,10 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		// assert mime type & clear it afterwards so we can compare
+		assertMimeType(got)
+
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
@@ -1478,6 +1497,10 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mime type & clear it afterwards so we can compare
+			assertMimeType(got)
+
 			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
 			}
@@ -1496,6 +1519,10 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mime type & clear it afterwards so we can compare
+			assertMimeType(got)
+
 			if len(got) != 1 || got[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
 			}

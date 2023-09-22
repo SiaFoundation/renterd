@@ -695,7 +695,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	cluster, err := newTestCluster("/Users/peterjan/testing", newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,6 +738,9 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatal("expected one entry to be returned", len(entries))
+	}
+	if entries[0].MimeType != "application/octet-stream" {
+		t.Fatal("wrong mime type", entries[0].MimeType)
 	}
 
 	// fetch entries with "file" prefix

@@ -29,11 +29,13 @@ type (
 
 	dbMultipartPart struct {
 		Model
-		Etag                string `gorm:"index"`
-		PartNumber          int    `gorm:"index"`
+		PartNumber          int `gorm:"index"`
 		Size                uint64
 		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
 		Slabs               []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+
+		Etag     string `gorm:"index"`
+		MimeType string `gorm:"index"`
 	}
 )
 
@@ -117,10 +119,12 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, uploadID 
 		}
 		// Create a new part.
 		part := dbMultipartPart{
-			Etag:                om.ETag,
 			PartNumber:          partNumber,
 			DBMultipartUploadID: mu.ID,
 			Size:                size,
+
+			Etag:     om.ETag,
+			MimeType: om.MimeType,
 		}
 		err = tx.Create(&part).Error
 		if err != nil {
@@ -320,6 +324,8 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			ObjectID:   path,
 			Key:        mu.Key,
 			Size:       int64(size),
+
+			MimeType: dbParts[0].MimeType, // use the mimeType of the first part
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)

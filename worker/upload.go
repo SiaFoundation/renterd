@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -238,14 +240,18 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		opt(&up)
 	}
 
-	// extract the mimetype
-	mimeType, mr, err := newMimeReader(r)
-	if err != nil {
-		return "", err
+	// try decide mimetype by extension, otherwise wrap our reader
+	mimeType := mime.TypeByExtension(filepath.Ext(path))
+	if mimeType == "" {
+		var err error
+		mimeType, r, err = newMimeReader(r)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	// perform the upload
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, mr, up)
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -287,14 +293,18 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		opt(&up)
 	}
 
-	// extract the mimetype
-	mimeType, mr, err := newMimeReader(r)
-	if err != nil {
-		return "", err
+	// try decide mimetype by extension, otherwise wrap our reader
+	mimeType := mime.TypeByExtension(filepath.Ext(path))
+	if mimeType == "" {
+		var err error
+		mimeType, r, err = newMimeReader(r)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	// upload the part
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, mr, up)
+	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}

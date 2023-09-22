@@ -206,9 +206,10 @@ type Object struct {
 
 // ObjectMetadata contains various metadata about an object.
 type ObjectMetadata struct {
-	Name   string  `json:"name"`
-	Size   int64   `json:"size"`
-	Health float64 `json:"health"`
+	Name     string  `json:"name"`
+	Size     int64   `json:"size"`
+	Health   float64 `json:"health"`
+	MimeType string  `json:"mimeType"`
 }
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.

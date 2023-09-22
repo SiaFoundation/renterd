@@ -87,6 +87,8 @@ type (
 		Key   []byte
 		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 		Size  int64
+
+		MimeType string `json:"index"`
 	}
 
 	dbBucket struct {
@@ -154,9 +156,10 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectKey  []byte
-		ObjectName string
-		ObjectSize int64
+		ObjectKey      []byte
+		ObjectName     string
+		ObjectSize     int64
+		ObjectMimeType string
 
 		// slice
 		SliceOffset uint32
@@ -173,6 +176,14 @@ type (
 		SectorID   uint
 		SectorRoot []byte
 		SectorHost publicKey
+	}
+
+	// rawObjectMetadata is used for hydrating object metadata.
+	rawObjectMetadata struct {
+		Health   float64
+		Name     string
+		Size     int64
+		MimeType string
 	}
 )
 
@@ -286,6 +297,15 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
+func (raw rawObjectMetadata) convert() api.ObjectMetadata {
+	return api.ObjectMetadata{
+		Health:   raw.Health,
+		Name:     raw.Name,
+		Size:     raw.Size,
+		MimeType: raw.MimeType,
+	}
+}
+
 func (raw rawObject) convert(tx *gorm.DB) (api.Object, error) {
 	if len(raw) == 0 {
 		return api.Object{}, errors.New("no slabs found")
@@ -367,9 +387,10 @@ func (raw rawObject) convert(tx *gorm.DB) (api.Object, error) {
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
-			Name:   raw[0].ObjectName,
-			Size:   raw[0].ObjectSize,
-			Health: minHealth,
+			Name:     raw[0].ObjectName,
+			Size:     raw[0].ObjectSize,
+			Health:   minHealth,
+			MimeType: raw[0].ObjectMimeType,
 		},
 		Object: object.Object{
 			Key:          key,
@@ -965,13 +986,15 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		limit += 1
 	}
 
+	var rows []rawObjectMetadata
 	query := fmt.Sprintf(`
 	SELECT
 		CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
 		SUM(size) AS size,
-		MIN(health) as health
+		MIN(health) as health,
+		MAX(mimeType) as MimeType
 	FROM (
-		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
+		SELECT MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
 		FROM objects
 		INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
 		LEFT JOIN slices ON objects.id = slices.db_object_id 
@@ -1007,12 +1030,20 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 
 	if err = s.db.
 		Raw(query, parameters...).
-		Scan(&metadata).
-		Error; err == nil && len(metadata) == limit {
-		metadata = metadata[:len(metadata)-1] // remove last element
+		Scan(&rows).
+		Error; err != nil {
+		return
+	}
+
+	if len(rows) == limit {
+		rows = rows[:len(rows)-1] // remove last element
 		hasMore = true
 	}
 
+	// convert to api.ObjectMetadata
+	for _, row := range rows {
+		metadata = append(metadata, row.convert())
+	}
 	return
 }
 
@@ -1252,6 +1283,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path string, o obje
 			ObjectID:   path,
 			Key:        objKey,
 			Size:       o.TotalSize(),
+			MimeType:   om.MimeType,
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1618,7 +1650,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -1672,38 +1704,32 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, contractSetID, limit)
 }
 
-func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
-	var objs []struct {
-		Name   string
-		Size   int64
-		Health float64
-	}
+func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
+	var rows []rawObjectMetadata
 	key, err := slabKey.MarshalText()
 	if err != nil {
 		return nil, err
 	}
+
 	err = s.db.Raw(`
-SELECT DISTINCT obj.object_id as Name, obj.size as Size, sla.health as Health
+SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
 INNER JOIN objects obj ON sli.db_object_id = obj.id
 INNER JOIN buckets b ON obj.db_bucket_id = b.id AND b.name = ?
 WHERE sla.key = ?
 	`, bucket, key).
-		Scan(&objs).
+		Scan(&rows).
 		Error
 	if err != nil {
 		return nil, err
 	}
-	metadata := make([]api.ObjectMetadata, len(objs))
-	for i, obj := range objs {
-		metadata[i] = api.ObjectMetadata{
-			Name:   obj.Name,
-			Size:   obj.Size,
-			Health: obj.Health,
-		}
+
+	// convert rows
+	for _, row := range rows {
+		metadata = append(metadata, row.convert())
 	}
-	return metadata, nil
+	return
 }
 
 // MarkPackedSlabsUploaded marks the given slabs as uploaded and deletes them
@@ -2004,9 +2030,9 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		markerExpr = gorm.Expr("o.object_id > ?", marker)
 	}
 
-	var objects []api.ObjectMetadata
+	var rows []rawObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
+		Select("o.object_id as name, MAX(o.size) as size, MAX(o.mime_type) as mimeType, MIN(sla.health) as health").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -2016,18 +2042,22 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		Group("o.object_id").
 		Order("o.object_id").
 		Limit(int(limit)).
-		Scan(&objects).Error
+		Scan(&rows).Error
 	if err != nil {
 		return api.ObjectsListResponse{}, err
 	}
 
-	hasMore := len(objects) == limit
-	nextMarker := ""
-	if hasMore {
-		nextMarker = objects[len(objects)-2].Name
+	var hasMore bool
+	var nextMarker string
+	if len(rows) == limit {
+		hasMore = true
+		rows = rows[:len(rows)-1]
+		nextMarker = rows[len(rows)-1].Name
 	}
-	if len(objects) == limit {
-		objects = objects[:len(objects)-1]
+
+	var objects []api.ObjectMetadata
+	for _, row := range rows {
+		objects = append(objects, row.convert())
 	}
 
 	return api.ObjectsListResponse{
