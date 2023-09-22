@@ -243,7 +243,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, pat
 		err, _ := io.ReadAll(resp.Body)
 		return "", errors.New(string(err))
 	}
-	return resp.Header.Get("ETag"), nil
+	return strings.Trim(resp.Header.Get("ETag"), "\""), nil
 }
 
 func (c *Client) object(ctx context.Context, bucket, path, prefix string, offset, limit int, opts ...api.DownloadObjectOption) (_ io.ReadCloser, _ http.Header, err error) {

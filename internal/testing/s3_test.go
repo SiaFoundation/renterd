@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SiaFoundation/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/s3"
 	"go.uber.org/zap"
@@ -274,6 +277,7 @@ func TestS3List(t *testing.T) {
 		}
 	}()
 	s3 := cluster.S3
+	core := cluster.S3Core
 
 	// enable upload packing to speed up test
 	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
@@ -334,15 +338,6 @@ func TestS3List(t *testing.T) {
 			objs = append(objs, cp.Prefix)
 		}
 		return objs
-	}
-
-	// Create a core client for lower-level operations.
-	url := s3.EndpointURL()
-	core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
-		Creds: testS3Credentials,
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	tests := []struct {
@@ -439,6 +434,7 @@ func TestS3MultipartUploads(t *testing.T) {
 		}
 	}()
 	s3 := cluster.S3
+	core := cluster.S3Core
 
 	// delete default bucket before testing.
 	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
@@ -460,15 +456,6 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// Create bucket.
 	err = s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a core client for lower-level operations.
-	url := s3.EndpointURL()
-	core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
-		Creds: testS3Credentials,
-	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,6 +560,99 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	} else if len(res.Uploads) != 0 {
 		t.Fatal("expected 0 uploads")
+	}
+}
+
+// TestS3MultipartPruneSlabs is a regression test for an edge case where a
+// packed slab is referenced by both a regular upload as well as a part of a
+// multipart upload. Deleting the regularly uploaded object by e.g. overwriting
+// it, the following call to 'pruneSlabs' would fail. That's because it didn't
+// account for references of multipart uploads when deleting slabs.
+func TestS3MultipartPruneSlabs(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	s3 := cluster.S3
+	core := cluster.S3Core
+	bucket := "multipart"
+
+	// delete default bucket before testing.
+	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+		t.Fatal(err)
+	}
+
+	// This test requires upload packing.
+	err = cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bucket.
+	err = s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a new multipart upload.
+	uploadID, err := core.NewMultipartUpload(context.Background(), bucket, "foo", minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if uploadID == "" {
+		t.Fatal("expected non-empty upload ID")
+	}
+
+	// Add 1 part to the upload.
+	data := frand.Bytes(5)
+	_, err = core.PutObjectPart(context.Background(), bucket, "foo", uploadID, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Upload 1 regular object. It will share the same packed slab, cause the
+	// packed slab to be complete and start a new one.
+	data = frand.Bytes(testRedundancySettings.MinShards*rhpv2.SectorSize - 1)
+	_, err = s3.PutObject(context.Background(), bucket, "bar", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Block until the buffer is uploaded.
+	err = Retry(100, 100*time.Millisecond, func() error {
+		buffers, err := cluster.Bus.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		} else if len(buffers) != 1 {
+			return fmt.Errorf("expected 1 slab buffer, got %d", len(buffers))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Upload another object that overwrites the first one, triggering a call to
+	// 'pruneSlabs'.
+	data = frand.Bytes(5)
+	_, err = s3.PutObject(context.Background(), bucket, "bar", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

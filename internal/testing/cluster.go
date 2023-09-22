@@ -98,6 +98,7 @@ type TestCluster struct {
 	Bus       *bus.Client
 	Worker    *worker.Client
 	S3        *minio.Client
+	S3Core    *minio.Core
 
 	workerShutdownFns    []func(context.Context) error
 	busShutdownFns       []func(context.Context) error
@@ -280,6 +281,13 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
+	url := s3Client.EndpointURL()
+	s3Core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
+		Creds: testS3Credentials,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Create miner.
 	busCfg.Miner = node.NewMiner(busClient)
@@ -352,6 +360,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		Bus:       busClient,
 		Worker:    workerClient,
 		S3:        s3Client,
+		S3Core:    s3Core,
 
 		workerShutdownFns:    workerShutdownFns,
 		busShutdownFns:       busShutdownFns,
