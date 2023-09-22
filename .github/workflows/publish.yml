@@ -228,6 +228,7 @@ jobs:
       - name: Setup
         shell: bash
         run: |
+          dotnet tool install --global AzureSignTool
           go generate ./...
       - name: Build amd64
         env:
@@ -239,6 +240,7 @@ jobs:
           mkdir -p release
           ZIP_OUTPUT=release/renterd_${{ matrix.network }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
+          azuresigntool sign -kvu "${{ secrets.AZURE_KEY_VAULT_URI }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc ${{ secrets.AZURE_CERT_NAME }} -tr http://timestamp.digicert.com -v bin/renterd.exe
           cp README.md LICENSE bin/
           7z a $ZIP_OUTPUT bin/*
       - uses: actions/upload-artifact@v3
