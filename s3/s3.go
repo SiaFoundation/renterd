@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SiaFoundation/gofakes3"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -28,15 +29,15 @@ type bus interface {
 	DeleteBucket(ctx context.Context, name string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, path string, o object.Object, om object.ObjectMetadata) (err error)
+	AddObject(ctx context.Context, bucket, path, contractSet, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error)
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
 	ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (resp api.ObjectsListResponse, err error)
 
 	AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
-	CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
-	CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error)
+	CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID, mimeType string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
+	CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, opts api.CreateMultipartOptions) (api.MultipartCreateResponse, error)
 	MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 

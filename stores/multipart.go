@@ -25,17 +25,17 @@ type (
 		DBBucket   dbBucket
 		DBBucketID uint              `gorm:"index;NOT NULL"`
 		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
+		MimeType   string            `gorm:"index"`
 	}
 
 	dbMultipartPart struct {
 		Model
-		PartNumber          int `gorm:"index"`
+		Etag                string `gorm:"index"`
+		PartNumber          int    `gorm:"index"`
 		Size                uint64
 		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
 		Slabs               []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 
-		Etag     string `gorm:"index"`
-		MimeType string `gorm:"index"`
 	}
 )
 
@@ -47,7 +47,7 @@ func (dbMultipartPart) TableName() string {
 	return "multipart_parts"
 }
 
-func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error) {
+func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error) {
 	// Marshal key
 	key, err := ec.MarshalText()
 	if err != nil {
@@ -72,6 +72,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 			Key:        key,
 			UploadID:   uploadID,
 			ObjectID:   path,
+			MimeType:   mimeType,
 		}).Error; err != nil {
 			return fmt.Errorf("failed to create multipart upload: %w", err)
 		}
@@ -82,15 +83,15 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, om object.ObjectMetadata) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, eTag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", om.ContractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", om.ContractSet, err)
+		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
+			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
 		}
 		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, om.UsedContracts)
+		contracts, err := fetchUsedContracts(tx, usedContracts)
 		if err != nil {
 			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
@@ -119,12 +120,10 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, uploadID 
 		}
 		// Create a new part.
 		part := dbMultipartPart{
+			Etag:                eTag,
 			PartNumber:          partNumber,
 			DBMultipartUploadID: mu.ID,
 			Size:                size,
-
-			Etag:     om.ETag,
-			MimeType: om.MimeType,
 		}
 		err = tx.Create(&part).Error
 		if err != nil {
@@ -324,8 +323,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			ObjectID:   path,
 			Key:        mu.Key,
 			Size:       int64(size),
-
-			MimeType: dbParts[0].MimeType, // use the mimeType of the first part
+			MimeType:   mu.MimeType,
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)

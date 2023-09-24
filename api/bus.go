@@ -214,10 +214,11 @@ type ObjectMetadata struct {
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.
 type ObjectAddRequest struct {
-	Bucket string        `json:"bucket"`
-	Object object.Object `json:"object"`
-
-	object.ObjectMetadata
+	Bucket        string                                   `json:"bucket"`
+	ContractSet   string                                   `json:"contractSet"`
+	Object        object.Object                            `json:"object"`
+	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	MimeType      string                                   `json:"mimeType"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.
@@ -505,10 +506,14 @@ type GougingSettings struct {
 
 // Types related to multipart uploads.
 type (
+	CreateMultipartOptions struct {
+		MimeType string `json:"mimeType"`
+	}
 	MultipartCreateRequest struct {
-		Bucket string               `json:"bucket"`
-		Key    object.EncryptionKey `json:"key"`
-		Path   string               `json:"path"`
+		Bucket   string               `json:"bucket"`
+		Key      object.EncryptionKey `json:"key"`
+		Path     string               `json:"path"`
+		MimeType string               `json:"mimeType"`
 	}
 	MultipartCreateResponse struct {
 		UploadID string `json:"uploadID"`
@@ -523,6 +528,7 @@ type (
 		Path     string `json:"path"`
 		UploadID string `json:"uploadID"`
 		Parts    []MultipartCompletedPart
+		MimeType string `json:"mimeType"`
 	}
 	MultipartCompletedPart struct {
 		PartNumber int    `json:"partNumber"`
@@ -532,14 +538,16 @@ type (
 		ETag string `json:"eTag"`
 	}
 	MultipartAddPartRequest struct {
-		Bucket       string               `json:"bucket"`
-		Path         string               `json:"path"`
-		UploadID     string               `json:"uploadID"`
-		PartialSlabs []object.PartialSlab `json:"partialSlabs"`
-		PartNumber   int                  `json:"partNumber"`
-		Slices       []object.SlabSlice   `json:"slices"`
-
-		object.ObjectMetadata
+		Bucket        string                                   `json:"bucket"`
+		ETag          string                                   `json:"eTag"`
+		ContractSet   string                                   `json:"contractSet"`
+		Object        object.Object                            `json:"object"`
+		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		Path          string                                   `json:"path"`
+		UploadID      string                                   `json:"uploadID"`
+		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
+		PartNumber    int                                      `json:"partNumber"`
+		Slices        []object.SlabSlice                       `json:"slices"`
 	}
 	MultipartListUploadsRequest struct {
 		Bucket         string `json:"bucket"`

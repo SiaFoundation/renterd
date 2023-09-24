@@ -662,12 +662,14 @@ func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOpt
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, bucket, path string, o object.Object, om object.ObjectMetadata) (err error) {
+func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
-		Bucket:         bucket,
-		Object:         o,
-		ObjectMetadata: om,
+		Bucket:        bucket,
+		ContractSet:   contractSet,
+		Object:        o,
+		UsedContracts: usedContracts,
+		MimeType:      mimeType,
 	})
 	return
 }
@@ -951,24 +953,25 @@ func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode strin
 	return
 }
 
-func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (resp api.MultipartCreateResponse, err error) {
+func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/create", api.MultipartCreateRequest{
-		Bucket: bucket,
-		Key:    ec,
-		Path:   path,
+		Bucket:   bucket,
+		Key:      ec,
+		Path:     path,
+		MimeType: opts.MimeType,
 	}, &resp)
 	return
 }
 
-func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, om object.ObjectMetadata) (err error) {
+func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, ETag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT("/multipart/part", api.MultipartAddPartRequest{
-		Bucket:         bucket,
-		Path:           path,
-		UploadID:       uploadID,
-		PartNumber:     partNumber,
-		Slices:         slices,
-		PartialSlabs:   partialSlab,
-		ObjectMetadata: om,
+		Bucket:       bucket,
+		ETag:         ETag,
+		Path:         path,
+		UploadID:     uploadID,
+		PartNumber:   partNumber,
+		Slices:       slices,
+		PartialSlabs: partialSlab,
 	})
 	return
 }
@@ -982,12 +985,13 @@ func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, 
 	return
 }
 
-func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
+func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID, mimeType string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/complete", api.MultipartCompleteRequest{
 		Bucket:   bucket,
 		Path:     path,
 		UploadID: uploadID,
 		Parts:    parts,
+		MimeType: mimeType,
 	}, &resp)
 	return
 }

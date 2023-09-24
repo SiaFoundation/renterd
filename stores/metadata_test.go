@@ -96,15 +96,10 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), want,
-		object.ObjectMetadata{
-			ContractSet: testContractSet,
-			UsedContracts: map[types.PublicKey]types.FileContractID{
-				hk1: fcid1,
-				hk2: fcid2,
-			},
-			MimeType: "application/octet-stream",
-		}); err != nil {
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testMimeType, want, map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -115,9 +110,6 @@ func TestObjectBasic(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Object, want) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
-	}
-	if got.ObjectMetadata.MimeType != "application/octet-stream" {
-		t.Fatal("unexpected mime type", got.ObjectMetadata.MimeType)
 	}
 
 	// delete a sector
@@ -143,10 +135,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), want2, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{},
-	}); err != nil {
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testMimeType, want2, make(map[types.PublicKey]types.FileContractID)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -444,10 +433,7 @@ func TestContractRoots(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]},
-	}); err != nil {
+	if err := cs.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -559,12 +545,9 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := cs.UpdateObject(context.Background(), api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet: testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{
-			hk:  fcid1,
-			hk2: fcid2,
-		},
+	if err := cs.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{
+		hk:  fcid1,
+		hk2: fcid2,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1002,18 +985,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, obj1, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedHosts,
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testMimeType, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, obj1, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedHosts,
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testMimeType, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1178,10 +1155,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, obj1, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedHosts,
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testMimeType, obj1, usedHosts); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = db.Object(ctx, api.DefaultBucketName, objID)
@@ -1316,15 +1290,12 @@ func TestObjectHealth(t *testing.T) {
 		},
 	}
 
-	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, "/foo", add, object.ObjectMetadata{
-		ContractSet: testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{
-			hks[0]: fcids[0],
-			hks[1]: fcids[1],
-			hks[2]: fcids[2],
-			hks[3]: fcids[3],
-			hks[4]: fcids[4],
-		},
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, "/foo", testContractSet, testMimeType, add, map[types.PublicKey]types.FileContractID{
+		hks[0]: fcids[0],
+		hks[1]: fcids[1],
+		hks[2]: fcids[2],
+		hks[3]: fcids[3],
+		hks[4]: fcids[4],
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1405,8 +1376,7 @@ func TestObjectHealth(t *testing.T) {
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: nil,
 	}
-
-	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, "/bar", add, object.ObjectMetadata{ContractSet: testContractSet}); err != nil {
+	if err := db.UpdateObject(context.Background(), api.DefaultBucketName, "/bar", testContractSet, testMimeType, add, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1447,22 +1417,11 @@ func TestObjectEntries(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, obj, object.ObjectMetadata{ContractSet: testContractSet, UsedContracts: ucs, MimeType: "application/octet-stream"})
+		err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testMimeType, obj, ucs)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	// assert mime type & clear it afterwards so we can compare
-	assertMimeType := func(entries []api.ObjectMetadata) {
-		for i := range entries {
-			if entries[i].MimeType != "application/octet-stream" {
-				t.Fatal("unexpected mime type", entries[i].MimeType)
-			}
-			entries[i].MimeType = ""
-		}
-	}
-
 	tests := []struct {
 		path   string
 		prefix string
@@ -1485,10 +1444,6 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		// assert mime type & clear it afterwards so we can compare
-		assertMimeType(got)
-
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
@@ -1497,10 +1452,6 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			// assert mime type & clear it afterwards so we can compare
-			assertMimeType(got)
-
 			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
 			}
@@ -1519,10 +1470,6 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			// assert mime type & clear it afterwards so we can compare
-			assertMimeType(got)
-
 			if len(got) != 1 || got[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
 			}
@@ -1557,7 +1504,7 @@ func TestSearchObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, obj, object.ObjectMetadata{ContractSet: testContractSet, UsedContracts: ucs}); err != nil {
+		if err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testMimeType, obj, ucs); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1752,17 +1699,13 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj,
-		object.ObjectMetadata{
-			ContractSet: testContractSet,
-			UsedContracts: map[types.PublicKey]types.FileContractID{
-				hk1: fcid1,
-				hk2: fcid2,
-				hk3: fcid3,
-				hk4: fcid4,
-				{5}: {5}, // deleted host and contract
-			},
-		}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+		hk3: fcid3,
+		hk4: fcid4,
+		{5}: {5}, // deleted host and contract
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1870,10 +1813,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{hk1: fcid1},
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1937,10 +1877,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{hk1: fcid1},
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2045,13 +1982,10 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet: testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{
-			hk1: fcid1,
-			hk2: fcid2,
-			hk3: fcid3,
-		},
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
+		hk3: fcid3,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2120,12 +2054,8 @@ func TestContractSectors(t *testing.T) {
 			},
 		},
 	}
-
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedContracts,
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2151,10 +2081,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedContracts,
-	}); err != nil {
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2219,12 +2146,9 @@ func TestPutSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", obj, object.ObjectMetadata{
-		ContractSet: testContractSet,
-		UsedContracts: map[types.PublicKey]types.FileContractID{
-			hk1: fcid1,
-			hk2: fcid2,
-		},
+	if err := db.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testMimeType, obj, map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk2: fcid2,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2487,10 +2411,7 @@ func TestRenameObjects(t *testing.T) {
 	ctx := context.Background()
 	for _, path := range objects {
 		obj, ucs := newTestObject(1)
-		if err := cs.UpdateObject(ctx, api.DefaultBucketName, path, obj, object.ObjectMetadata{
-			ContractSet:   testContractSet,
-			UsedContracts: ucs,
-		}); err != nil {
+		if err := cs.UpdateObject(ctx, api.DefaultBucketName, path, testContractSet, testMimeType, obj, ucs); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2596,10 +2517,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := cs.UpdateObject(context.Background(), api.DefaultBucketName, key, obj, object.ObjectMetadata{
-			ContractSet:   testContractSet,
-			UsedContracts: contracts,
-		})
+		err := cs.UpdateObject(context.Background(), api.DefaultBucketName, key, testContractSet, testMimeType, obj, contracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2780,10 +2698,7 @@ func TestPartialSlab(t *testing.T) {
 		}
 	}
 	obj := testObject(slabs)
-	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedContracts,
-	})
+	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key", testContractSet, testMimeType, obj, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2820,10 +2735,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj2 := testObject(slabs)
-	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key2", obj2, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedContracts,
-	})
+	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key2", testContractSet, testMimeType, obj2, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2870,10 +2782,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj3 := testObject(slabs)
-	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key3", obj3, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: usedContracts,
-	})
+	err = db.UpdateObject(context.Background(), api.DefaultBucketName, "key3", testContractSet, testMimeType, obj3, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3037,7 +2946,7 @@ func TestContractSizes(t *testing.T) {
 
 	// add an object to both contracts
 	for i := 0; i < 2; i++ {
-		if err := db.UpdateObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("obj_%d", i+1), object.Object{
+		if err := db.UpdateObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("obj_%d", i+1), testContractSet, testMimeType, object.Object{
 			Key: object.GenerateEncryptionKey(),
 			Slabs: []object.SlabSlice{
 				{
@@ -3053,11 +2962,8 @@ func TestContractSizes(t *testing.T) {
 					},
 				},
 			},
-		}, object.ObjectMetadata{
-			ContractSet: testContractSet,
-			UsedContracts: map[types.PublicKey]types.FileContractID{
-				hks[i]: fcids[i],
-			},
+		}, map[types.PublicKey]types.FileContractID{
+			hks[i]: fcids[i],
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -3215,10 +3121,7 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 	for _, name := range []string{"obj1", "obj2", "obj3"} {
 		obj.Slabs[0].Length++
-		err = db.UpdateObject(context.Background(), api.DefaultBucketName, name, obj, object.ObjectMetadata{
-			ContractSet:   testContractSet,
-			UsedContracts: usedContracts,
-		})
+		err = db.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testMimeType, obj, usedContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3294,10 +3197,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// Adding an object to a bucket that doesn't exist shouldn't work.
 	obj, ucs := newTestObject(1)
-	err = os.UpdateObject(context.Background(), "unknown-bucket", "foo", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: ucs,
-	})
+	err = os.UpdateObject(context.Background(), "unknown-bucket", "foo", testContractSet, testMimeType, obj, ucs)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
 	}
@@ -3328,10 +3228,7 @@ func TestBucketObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := os.UpdateObject(ctx, o.bucket, o.path, obj, object.ObjectMetadata{
-			ContractSet:   testContractSet,
-			UsedContracts: ucs,
-		})
+		err := os.UpdateObject(ctx, o.bucket, o.path, testContractSet, testMimeType, obj, ucs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3480,10 +3377,7 @@ func TestCopyObject(t *testing.T) {
 
 	// Create one object.
 	obj, ucs := newTestObject(1)
-	err = os.UpdateObject(ctx, "src", "/foo", obj, object.ObjectMetadata{
-		ContractSet:   testContractSet,
-		UsedContracts: ucs,
-	})
+	err = os.UpdateObject(ctx, "src", "/foo", testContractSet, testMimeType, obj, ucs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3614,11 +3508,7 @@ func TestListObjects(t *testing.T) {
 		obj, ucs := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-
-		if err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, obj, object.ObjectMetadata{
-			ContractSet:   testContractSet,
-			UsedContracts: ucs,
-		}); err != nil {
+		if err := os.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testMimeType, obj, ucs); err != nil {
 			t.Fatal(err)
 		}
 	}

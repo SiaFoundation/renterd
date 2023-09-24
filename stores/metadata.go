@@ -1235,7 +1235,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	})
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path string, o object.Object, om object.ObjectMetadata) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
 
@@ -1243,7 +1243,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path string, o obje
 	for _, ss := range o.Slabs {
 		for _, shard := range ss.Shards {
 			// Verify that all hosts have a contract.
-			_, exists := om.UsedContracts[shard.Host]
+			_, exists := usedContracts[shard.Host]
 			if !exists {
 				return fmt.Errorf("missing contract for host %v: %w", shard.Host, api.ErrContractNotFound)
 			}
@@ -1254,8 +1254,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path string, o obje
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", om.ContractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", om.ContractSet, err)
+		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
+			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
 		}
 
 		// Try to delete. We want to get rid of the object and its
@@ -1283,7 +1283,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path string, o obje
 			ObjectID:   path,
 			Key:        objKey,
 			Size:       o.TotalSize(),
-			MimeType:   om.MimeType,
+			MimeType:   mimeType,
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1291,7 +1291,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path string, o obje
 		}
 
 		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, om.UsedContracts)
+		contracts, err := fetchUsedContracts(tx, usedContracts)
 		if err != nil {
 			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}

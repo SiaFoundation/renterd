@@ -230,6 +230,13 @@ func UploadWithDisabledPreshardingEncryption() UploadOption {
 	}
 }
 
+// UploadWithMimeType sets the mime type that should be used for the upload
+func UploadWithMimeType(mimeType string) UploadOption {
+	return func(v url.Values) {
+		v.Set("mimetype", mimeType)
+	}
+}
+
 type DownloadRange struct {
 	Start  int64
 	Length int64

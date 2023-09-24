@@ -824,8 +824,8 @@ func performMigration00016_mimetype(txn *gorm.DB, logger *zap.SugaredLogger) err
 			return err
 		}
 	}
-	if !txn.Migrator().HasColumn(&dbMultipartPart{}, "MimeType") {
-		if err := txn.Migrator().AddColumn(&dbMultipartPart{}, "MimeType"); err != nil {
+	if !txn.Migrator().HasColumn(&dbMultipartUpload{}, "MimeType") {
+		if err := txn.Migrator().AddColumn(&dbMultipartUpload{}, "MimeType"); err != nil {
 			return err
 		}
 	}

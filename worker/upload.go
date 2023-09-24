@@ -265,16 +265,8 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		obj.PartialSlabs = partialSlabs
 	}
 
-	// construct object metadata
-	om := object.ObjectMetadata{
-		ContractSet:   up.contractSet,
-		ETag:          etag,
-		MimeType:      mimeType,
-		UsedContracts: used,
-	}
-
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, obj, om)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, mimeType, obj, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
@@ -293,16 +285,6 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		opt(&up)
 	}
 
-	// try decide mimetype by extension, otherwise wrap our reader
-	mimeType := mime.TypeByExtension(filepath.Ext(path))
-	if mimeType == "" {
-		var err error
-		mimeType, r, err = newMimeReader(r)
-		if err != nil {
-			return "", err
-		}
-	}
-
 	// upload the part
 	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
@@ -318,16 +300,8 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		obj.PartialSlabs = partialSlabs
 	}
 
-	// construct object metadata
-	om := object.ObjectMetadata{
-		ContractSet:   up.contractSet,
-		ETag:          etag,
-		MimeType:      mimeType,
-		UsedContracts: used,
-	}
-
 	// persist the part
-	err = w.bus.AddMultipartPart(ctx, bucket, path, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, om)
+	err = w.bus.AddMultipartPart(ctx, bucket, path, uploadID, up.contractSet, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add multi part: %w", err)
 	}

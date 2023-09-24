@@ -161,10 +161,10 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket, path string, o object.Object, om object.ObjectMetadata) error
+	AddObject(ctx context.Context, bucket, path, contractSet, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
-	AddMultipartPart(ctx context.Context, bucket, path, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, om object.ObjectMetadata) (err error)
+	AddMultipartPart(ctx context.Context, bucket, path, uploadID, contractSet string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)

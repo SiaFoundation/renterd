@@ -9,7 +9,6 @@ import (
 	"io"
 	"math"
 
-	"go.sia.tech/core/types"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
@@ -100,14 +99,6 @@ type Object struct {
 	Key          EncryptionKey `json:"key"`
 	Slabs        []SlabSlice   `json:"slabs"`
 	PartialSlabs []PartialSlab `json:"partialSlab,omitempty"`
-}
-
-// ObjectMetadata contains metadata about the object.
-type ObjectMetadata struct {
-	ContractSet   string                                   `json:"contractSet"`
-	ETag          string                                   `json:"eTag"`
-	MimeType      string                                   `json:"mimeType"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 }
 
 // NewObject returns a new Object with a random key.
