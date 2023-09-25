@@ -365,7 +365,7 @@ func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[st
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.CopyObjectResult{
-		ETag:         obj.ETag,
+		ETag:         api.FormatETag(obj.ETag),
 		LastModified: gofakes3.NewContentTime(obj.ModTime.UTC()),
 	}, nil
 }

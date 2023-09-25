@@ -1025,6 +1025,9 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't copy object", err) != nil {
 		return
 	}
+
+	jc.ResponseWriter.Header().Set("Last-Modified", om.LastModified())
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(om.ETag))
 	jc.Encode(om)
 }
 

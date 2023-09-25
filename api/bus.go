@@ -216,7 +216,7 @@ type ObjectMetadata struct {
 
 // LastModified returns the object's ModTime formatted for use in the
 // 'Last-Modified' header
-func (o *Object) LastModified() string {
+func (o ObjectMetadata) LastModified() string {
 	return o.ModTime.UTC().Format(http.TimeFormat)
 }
 
