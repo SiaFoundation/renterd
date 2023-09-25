@@ -1199,7 +1199,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (om api.ObjectMetadata, err error) {
+func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
 		err := tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
@@ -1241,15 +1241,19 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		dstObj.ObjectID = dstPath     // set dst path
 		dstObj.DBBucketID = bucket.ID // set dst bucket id
 		dstObj.Slabs = srcSlices      // set slices
+		if mimeType != "" {
+			dstObj.MimeType = mimeType // override mime type
+		}
 		if err := tx.Create(&dstObj).Error; err != nil {
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
 
 		om = api.ObjectMetadata{
-			Name:    dstObj.ObjectID,
-			Size:    dstObj.Size,
-			ModTime: dstObj.CreatedAt.UTC(),
-			Health:  srcObjHealth,
+			Health:   srcObjHealth,
+			MimeType: dstObj.MimeType,
+			ModTime:  dstObj.CreatedAt.UTC(),
+			Name:     dstObj.ObjectID,
+			Size:     dstObj.Size,
 		}
 		return nil
 	})

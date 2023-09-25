@@ -676,12 +676,14 @@ func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string
 
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
-func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (om api.ObjectMetadata, err error) {
+func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
 	err = c.c.WithContext(ctx).POST("/objects/copy", api.ObjectsCopyRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
 		SourcePath:        srcPath,
 		DestinationPath:   dstPath,
+
+		MimeType: opts.MimeType,
 	}, &om)
 	return
 }

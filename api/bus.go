@@ -209,11 +209,11 @@ type Object struct {
 
 // ObjectMetadata contains various metadata about an object.
 type ObjectMetadata struct {
-	Name     string    `json:"name"`
-	Size     int64     `json:"size"`
 	Health   float64   `json:"health"`
 	MimeType string    `json:"mimeType"`
 	ModTime  time.Time `json:"modTime"`
+	Name     string    `json:"name"`
+	Size     int64     `json:"size"`
 }
 
 // LastModified returns the object's ModTime formatted for use in the
@@ -259,6 +259,8 @@ type ObjectsCopyRequest struct {
 
 	DestinationBucket string `json:"destinationBucket"`
 	DestinationPath   string `json:"destinationPath"`
+
+	MimeType string `json:"mimeType"`
 }
 
 // ObjectsRenameRequest is the request type for the /objects/rename endpoint.
@@ -531,6 +533,9 @@ type GougingSettings struct {
 
 // Types related to multipart uploads.
 type (
+	CopyObjectOptions struct {
+		MimeType string `json:"mimeType"`
+	}
 	CreateMultipartOptions struct {
 		Key      object.EncryptionKey `json:"key"`
 		MimeType string               `json:"mimeType"`

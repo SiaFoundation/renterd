@@ -364,7 +364,12 @@ func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDe
 
 // TODO: use metadata when we have support for it
 func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
-	obj, err := s.b.CopyObject(context.Background(), srcBucket, dstBucket, "/"+srcKey, "/"+dstKey)
+	var opts api.CopyObjectOptions
+	if ct, ok := meta["Content-Type"]; ok {
+		opts.MimeType = ct
+	}
+
+	obj, err := s.b.CopyObject(context.Background(), srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, opts)
 	if err != nil {
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
