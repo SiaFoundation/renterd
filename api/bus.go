@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -206,9 +207,16 @@ type Object struct {
 
 // ObjectMetadata contains various metadata about an object.
 type ObjectMetadata struct {
-	Name   string  `json:"name"`
-	Size   int64   `json:"size"`
-	Health float64 `json:"health"`
+	Health  float64   `json:"health"`
+	ModTime time.Time `json:"modTime"`
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+}
+
+// LastModified returns the object's ModTime formatted for use in the
+// 'Last-Modified' header
+func (o *Object) LastModified() string {
+	return o.ModTime.UTC().Format(http.TimeFormat)
 }
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.

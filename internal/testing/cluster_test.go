@@ -300,6 +300,17 @@ func TestObjectEntries(t *testing.T) {
 		t.SkipNow()
 	}
 
+	// assert mod time & clear it afterwards so we can compare
+	start := time.Now()
+	assertModTime := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.After(start.UTC()) {
+				t.Fatal("mod time should be set")
+			}
+			entries[i].ModTime = time.Time{}
+		}
+	}
+
 	// create a test cluster
 	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
@@ -381,6 +392,9 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err, test.path)
 		}
 
+		// assert mod time & clear it afterwards so we can compare
+		assertModTime(res.Entries)
+
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
 		}
@@ -389,6 +403,9 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mod time & clear it afterwards so we can compare
+			assertModTime(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
@@ -407,6 +424,10 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mod time & clear it afterwards so we can compare
+			assertModTime(res.Entries)
+
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
 			}
@@ -422,6 +443,10 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		// assert mod time & clear it afterwards so we can compare
+		assertModTime(got)
+
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}

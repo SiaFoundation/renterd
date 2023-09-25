@@ -1017,12 +1017,11 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	} else if jc.Check("couldn't get object or entries", err) != nil {
 		return
 	}
-	jc.ResponseWriter.Header().Set("Last-Modified", time.Unix(0, 0).UTC().Format(http.TimeFormat)) // TODO: update this when object has a ModTime
-
 	if path == "" || strings.HasSuffix(path, "/") {
 		jc.Encode(res.Entries)
 		return
 	}
+	jc.ResponseWriter.Header().Set("Last-Modified", res.Object.LastModified())
 	if len(res.Object.Slabs) == 0 && len(res.Object.PartialSlabs) == 0 {
 		return
 	}

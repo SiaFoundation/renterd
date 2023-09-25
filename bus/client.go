@@ -675,13 +675,14 @@ func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string
 
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
-func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error {
-	return c.c.WithContext(ctx).POST("/objects/copy", api.ObjectsCopyRequest{
+func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (om api.ObjectMetadata, err error) {
+	err = c.c.WithContext(ctx).POST("/objects/copy", api.ObjectsCopyRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
 		SourcePath:        srcPath,
 		DestinationPath:   dstPath,
-	}, nil)
+	}, &om)
+	return
 }
 
 // DeleteObject either deletes the object at the given path or if batch=true

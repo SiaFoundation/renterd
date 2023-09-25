@@ -115,7 +115,7 @@ type (
 		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 		RemoveObject(ctx context.Context, bucket, path string) error
 		RemoveObjects(ctx context.Context, bucket, prefix string) error
@@ -1020,9 +1020,12 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	}
-	if jc.Check("couldn't copy object", b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath)) != nil {
+
+	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath)
+	if jc.Check("couldn't copy object", err) != nil {
 		return
 	}
+	jc.Encode(om)
 }
 
 func (b *bus) objectsListHandlerPOST(jc jape.Context) {

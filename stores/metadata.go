@@ -154,9 +154,12 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectKey  []byte
-		ObjectName string
-		ObjectSize int64
+		ObjectID      uint
+		ObjectKey     []byte
+		ObjectName    string
+		ObjectSize    int64
+		ObjectModTime time.Time
+		ObjectHealth  float64
 
 		// slice
 		SliceOffset uint32
@@ -173,6 +176,14 @@ type (
 		SectorID   uint
 		SectorRoot []byte
 		SectorHost publicKey
+	}
+
+	// rawObjectMetadata is used for hydrating object metadata.
+	rawObjectMetadata struct {
+		Health  float64
+		ModTime datetime
+		Name    string
+		Size    int64
 	}
 )
 
@@ -286,7 +297,16 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	return
 }
 
-func (raw rawObject) convert(tx *gorm.DB) (api.Object, error) {
+func (raw rawObjectMetadata) convert() api.ObjectMetadata {
+	return api.ObjectMetadata{
+		Health:  raw.Health,
+		ModTime: time.Time(raw.ModTime).UTC(),
+		Name:    raw.Name,
+		Size:    raw.Size,
+	}
+}
+
+func (raw rawObject) convert() (api.Object, error) {
 	if len(raw) == 0 {
 		return api.Object{}, errors.New("no slabs found")
 	}
@@ -367,9 +387,10 @@ func (raw rawObject) convert(tx *gorm.DB) (api.Object, error) {
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
-			Name:   raw[0].ObjectName,
-			Size:   raw[0].ObjectSize,
-			Health: minHealth,
+			Health:  minHealth,
+			ModTime: raw[0].ObjectModTime.UTC(),
+			Name:    raw[0].ObjectName,
+			Size:    raw[0].ObjectSize,
 		},
 		Object: object.Object{
 			Key:          key,
@@ -965,13 +986,15 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		limit += 1
 	}
 
+	var rows []rawObjectMetadata
 	query := fmt.Sprintf(`
 	SELECT
+		MAX(created_at) AS ModTime,
 		CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
 		SUM(size) AS size,
 		MIN(health) as health
 	FROM (
-		SELECT MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
+		SELECT MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
 		FROM objects
 		INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
 		LEFT JOIN slices ON objects.id = slices.db_object_id 
@@ -1007,12 +1030,21 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 
 	if err = s.db.
 		Raw(query, parameters...).
-		Scan(&metadata).
-		Error; err == nil && len(metadata) == limit {
-		metadata = metadata[:len(metadata)-1] // remove last element
-		hasMore = true
+		Scan(&rows).
+		Error; err != nil {
+		return
 	}
 
+	// trim last element if we have more
+	if len(rows) == limit {
+		hasMore = true
+		rows = rows[:len(rows)-1]
+	}
+
+	// convert rows into metadata
+	for _, row := range rows {
+		metadata = append(metadata, row.convert())
+	}
 	return
 }
 
@@ -1023,7 +1055,7 @@ func (s *SQLStore) Object(ctx context.Context, bucket, path string) (api.Object,
 		if err != nil {
 			return err
 		}
-		obj, err = o.convert(tx)
+		obj, err = o.convert()
 		return err
 	})
 	return obj, err
@@ -1160,8 +1192,8 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (om api.ObjectMetadata, err error) {
+	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
 		err := tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
 			Joins("DBBucket").
@@ -1169,6 +1201,11 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			Error
 		if err != nil {
 			return fmt.Errorf("failed to fetch src object: %w", err)
+		}
+
+		srcObjHealth, err := s.objectHealth(ctx, tx, srcObj.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch src object health: %w", err)
 		}
 
 		var srcSlices []dbSlice
@@ -1200,8 +1237,16 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		if err := tx.Create(&dstObj).Error; err != nil {
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
+
+		om = api.ObjectMetadata{
+			Name:    dstObj.ObjectID,
+			Size:    dstObj.Size,
+			ModTime: dstObj.CreatedAt.UTC(),
+			Health:  srcObjHealth,
+		}
 		return nil
 	})
+	return
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
@@ -1227,8 +1272,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet s
 			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
 		}
 
-		// Try to delete. We want to get rid of the object and its
-		// slices if it exists.
+		// Try to delete. We want to get rid of the object and its slices if it
+		// exists.
+		//
+		// NOTE: please note that the object's created_at is currently used as
+		// its ModTime, if we ever stop recreating the object but update it
+		// instead we need to take this into account
 		_, err := deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
@@ -1618,7 +1667,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.created_at as ObjectModTime, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -1635,6 +1684,21 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	}
 
 	return rows, nil
+}
+
+func (s *SQLStore) objectHealth(ctx context.Context, tx *gorm.DB, objectID uint) (health float64, err error) {
+	if err = tx.
+		Select("MIN(sla.health)").
+		Model(&dbObject{}).
+		Table("objects o").
+		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+		Where("o.id = ?", objectID).
+		Scan(&health).
+		Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		err = api.ErrObjectNotFound
+	}
+	return
 }
 
 // contract retrieves a contract from the store.
@@ -2004,9 +2068,9 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		markerExpr = gorm.Expr("o.object_id > ?", marker)
 	}
 
-	var objects []api.ObjectMetadata
+	var rows []rawObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
+		Select("o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, MAX(o.created_at) as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -2016,18 +2080,22 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		Group("o.object_id").
 		Order("o.object_id").
 		Limit(int(limit)).
-		Scan(&objects).Error
+		Scan(&rows).Error
 	if err != nil {
 		return api.ObjectsListResponse{}, err
 	}
 
-	hasMore := len(objects) == limit
-	nextMarker := ""
-	if hasMore {
-		nextMarker = objects[len(objects)-2].Name
+	var hasMore bool
+	var nextMarker string
+	if len(rows) == limit {
+		hasMore = true
+		rows = rows[:len(rows)-1]
+		nextMarker = rows[len(rows)-1].Name
 	}
-	if len(objects) == limit {
-		objects = objects[:len(objects)-1]
+
+	var objects []api.ObjectMetadata
+	for _, row := range rows {
+		objects = append(objects, row.convert())
 	}
 
 	return api.ObjectsListResponse{
