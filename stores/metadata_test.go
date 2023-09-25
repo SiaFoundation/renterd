@@ -1042,6 +1042,7 @@ func TestSQLMetadataStore(t *testing.T) {
 				Length:     200,
 			},
 		},
+		Etag: testETag,
 	}
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
