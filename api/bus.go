@@ -544,7 +544,7 @@ type (
 	MultipartListUploadsRequest struct {
 		Bucket         string `json:"bucket"`
 		Prefix         string `json:"prefix"`
-		KeyMarker      string `json:"keyMarker"`
+		PathMarker     string `json:"pathMarker"`
 		UploadIDMarker string `json:"uploadIDMarker"`
 		Limit          int    `json:"limit"`
 	}

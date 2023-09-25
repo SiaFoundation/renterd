@@ -999,7 +999,7 @@ func (c *Client) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker
 	err = c.c.WithContext(ctx).POST("/multipart/listuploads", api.MultipartListUploadsRequest{
 		Bucket:         bucket,
 		Prefix:         prefix,
-		KeyMarker:      keyMarker,
+		PathMarker:     keyMarker,
 		UploadIDMarker: uploadIDMarker,
 		Limit:          maxUploads,
 	}, &resp)
