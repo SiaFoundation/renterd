@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"mime"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -218,6 +220,21 @@ type ObjectMetadata struct {
 // 'Last-Modified' header
 func (o *Object) LastModified() string {
 	return o.ModTime.UTC().Format(http.TimeFormat)
+}
+
+// ContentType returns the object's MimeType for use in the 'Content-Type'
+// header, if the object's mime type is empty we try and deduce it from the
+// extension in the object's name.
+func (o Object) ContentType() string {
+	if o.MimeType != "" {
+		return o.MimeType
+	}
+
+	if ext := filepath.Ext(o.Name); ext != "" {
+		return mime.TypeByExtension(ext)
+	}
+
+	return ""
 }
 
 // ObjectAddRequest is the request type for the /object/*key endpoint.
