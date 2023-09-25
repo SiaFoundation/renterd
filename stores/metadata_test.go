@@ -1041,6 +1041,7 @@ func TestSQLMetadataStore(t *testing.T) {
 				Length:     200,
 			},
 		},
+		MimeType: testMimeType,
 	}
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
@@ -1409,6 +1410,15 @@ func TestObjectEntries(t *testing.T) {
 		{"/FOO/bar", 7},
 	}
 
+	assertMimeType := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			if entries[i].MimeType != testMimeType {
+				t.Fatal("unexpected mime type", entries[i].MimeType)
+			}
+			entries[i].MimeType = ""
+		}
+	}
+
 	// shuffle to ensure order does not influence the outcome of the test
 	frand.Shuffle(len(objects), func(i, j int) { objects[i], objects[j] = objects[j], objects[i] })
 
@@ -1444,6 +1454,10 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		// assert mime type & clear it afterwards so we can compare
+		assertMimeType(got)
+
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
@@ -1452,6 +1466,10 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mime type & clear it afterwards so we can compare
+			assertMimeType(got)
+
 			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
 			}
@@ -1470,6 +1488,10 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mime type & clear it afterwards so we can compare
+			assertMimeType(got)
+
 			if len(got) != 1 || got[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
 			}

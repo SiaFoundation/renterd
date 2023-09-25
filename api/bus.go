@@ -507,12 +507,13 @@ type GougingSettings struct {
 // Types related to multipart uploads.
 type (
 	CreateMultipartOptions struct {
-		MimeType string `json:"mimeType"`
+		Key      object.EncryptionKey `json:"key"`
+		MimeType string               `json:"mimeType"`
 	}
 	MultipartCreateRequest struct {
 		Bucket   string               `json:"bucket"`
-		Key      object.EncryptionKey `json:"key"`
 		Path     string               `json:"path"`
+		Key      object.EncryptionKey `json:"key"`
 		MimeType string               `json:"mimeType"`
 	}
 	MultipartCreateResponse struct {
@@ -528,7 +529,6 @@ type (
 		Path     string `json:"path"`
 		UploadID string `json:"uploadID"`
 		Parts    []MultipartCompletedPart
-		MimeType string `json:"mimeType"`
 	}
 	MultipartCompletedPart struct {
 		PartNumber int    `json:"partNumber"`

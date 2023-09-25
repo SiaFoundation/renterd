@@ -330,7 +330,6 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	fmt.Printf("DEBUG PJ: PutObject meta %+v\n", meta)
 	opts := []api.UploadOption{api.UploadWithBucket(bucketName)}
 	if ct, ok := meta["Content-Type"]; ok {
 		opts = append(opts, api.UploadWithMimeType(ct))
@@ -377,13 +376,12 @@ func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[st
 }
 
 func (s *s3) CreateMultipartUpload(bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
-	fmt.Printf("DEBUG PJ: CreateMultipartUpload meta %+v\n", meta)
-	var opt api.CreateMultipartOptions
+	opts := api.CreateMultipartOptions{Key: object.NoOpKey}
 	if ct, ok := meta["Content-Type"]; ok {
-		opt.MimeType = ct
+		opts.MimeType = ct
 	}
 
-	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+key, object.NoOpKey, opt)
+	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+key, opts)
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -478,8 +476,7 @@ func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID
 			PartNumber: part.PartNumber,
 		})
 	}
-	mimeType := "TODO: should come with CompleteMultipartUploadRequest maybe?"
-	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, "/"+object, string(id), mimeType, parts)
+	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, "/"+object, string(id), parts)
 	if err != nil {
 		return "", "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

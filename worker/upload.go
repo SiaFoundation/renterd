@@ -46,6 +46,7 @@ var (
 type uploadParameters struct {
 	ec               object.EncryptionKey
 	encryptionOffset uint64
+	mimeType         string
 
 	rs          api.RedundancySettings
 	bh          uint64
@@ -63,24 +64,6 @@ func defaultParameters() uploadParameters {
 
 type UploadOption func(*uploadParameters)
 
-func WithCustomKey(ec object.EncryptionKey) UploadOption {
-	return func(up *uploadParameters) {
-		up.ec = ec
-	}
-}
-
-func WithCustomEncryptionOffset(offset uint64) UploadOption {
-	return func(up *uploadParameters) {
-		up.encryptionOffset = offset
-	}
-}
-
-func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
-	return func(up *uploadParameters) {
-		up.rs = rs
-	}
-}
-
 func WithBlockHeight(bh uint64) UploadOption {
 	return func(up *uploadParameters) {
 		up.bh = bh
@@ -93,9 +76,33 @@ func WithContractSet(contractSet string) UploadOption {
 	}
 }
 
+func WithCustomKey(ec object.EncryptionKey) UploadOption {
+	return func(up *uploadParameters) {
+		up.ec = ec
+	}
+}
+
+func WithCustomEncryptionOffset(offset uint64) UploadOption {
+	return func(up *uploadParameters) {
+		up.encryptionOffset = offset
+	}
+}
+
+func WithMimeType(mimeType string) UploadOption {
+	return func(up *uploadParameters) {
+		up.mimeType = mimeType
+	}
+}
+
 func WithPacking(packing bool) UploadOption {
 	return func(up *uploadParameters) {
 		up.packing = packing
+	}
+}
+
+func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
+	return func(up *uploadParameters) {
+		up.rs = rs
 	}
 }
 
@@ -240,11 +247,15 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		opt(&up)
 	}
 
-	// try decide mimetype by extension, otherwise wrap our reader
-	mimeType := mime.TypeByExtension(filepath.Ext(path))
-	if mimeType == "" {
+	// if not given, try decide on a mime type using the file extension
+	if up.mimeType == "" {
+		up.mimeType = mime.TypeByExtension(filepath.Ext(path))
+	}
+
+	// if mime type is still not known, wrap the reader with a mime reader
+	if up.mimeType == "" {
 		var err error
-		mimeType, r, err = newMimeReader(r)
+		up.mimeType, r, err = newMimeReader(r)
 		if err != nil {
 			return "", err
 		}
@@ -266,7 +277,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, mimeType, obj, used)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, up.mimeType, obj, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}

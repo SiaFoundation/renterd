@@ -1101,6 +1101,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		up.ContractSet = contractset
 	}
 
+	// decode the mimetype from the query string
+	var mimeType string
+	if jc.DecodeForm("mimetype", &mimeType) != nil {
+		return
+	}
+
 	// decode the bucket from the query string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -1132,10 +1138,11 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// built options
+	// build options
 	opts := []UploadOption{
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
+		WithMimeType(mimeType),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
 	}

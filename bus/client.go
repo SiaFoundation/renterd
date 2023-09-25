@@ -953,11 +953,11 @@ func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode strin
 	return
 }
 
-func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
+func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/create", api.MultipartCreateRequest{
 		Bucket:   bucket,
-		Key:      ec,
 		Path:     path,
+		Key:      opts.Key,
 		MimeType: opts.MimeType,
 	}, &resp)
 	return
@@ -985,13 +985,12 @@ func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, 
 	return
 }
 
-func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID, mimeType string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
+func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/complete", api.MultipartCompleteRequest{
 		Bucket:   bucket,
 		Path:     path,
 		UploadID: uploadID,
 		Parts:    parts,
-		MimeType: mimeType,
 	}, &resp)
 	return
 }
