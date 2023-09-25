@@ -125,7 +125,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 							m.logger.Errorf("%v: failed to fetch autopilot settings for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							continue
 						}
-						err = w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
+						res, err := w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
 						if err != nil {
 							errMsg := fmt.Sprintf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							rerr := m.ap.alerts.RegisterAlert(ctx, alerts.Alert{
@@ -143,7 +143,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 							m.logger.Errorf(errMsg)
 							continue
 						}
-						m.logger.Debugf("%v: successfully migrated slab (health: %v) %d/%d", id, j.Health, j.slabIdx+1, j.batchSize)
+						m.logger.Debugf("%v: successfully migrated slab (health: %v migrated shards: %d) %d/%d", id, j.Health, res.NumShardsMigrated, j.slabIdx+1, j.batchSize)
 					}
 				}(w)
 			}

@@ -26,7 +26,7 @@ var ErrContractSetNotSpecified = errors.New("contract set is not specified")
 type AccountsLockHandlerRequest struct {
 	HostKey   types.PublicKey `json:"hostKey"`
 	Exclusive bool            `json:"exclusive"`
-	Duration  ParamDuration   `json:"duration"`
+	Duration  DurationMS      `json:"duration"`
 }
 
 type AccountsLockHandlerResponse struct {
@@ -44,17 +44,22 @@ type ContractsResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
+type MigrateSlabResponse struct {
+	NumShardsMigrated int `json:"numShardsMigrated"`
+}
+
 // RHPScanRequest is the request type for the /rhp/scan endpoint.
 type RHPScanRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
 	HostIP  string          `json:"hostIP"`
-	Timeout time.Duration   `json:"timeout"`
+	Timeout DurationMS      `json:"timeout"`
 }
 
 // RHPPruneContractRequest is the request type for the /rhp/contract/:id/prune
 // endpoint.
 type RHPPruneContractRequest struct {
-	Timeout time.Duration `json:"timeout"`
+	Timeout DurationMS `json:"timeout"`
 }
 
 // RHPPruneContractResponse is the response type for the /rhp/contract/:id/prune
@@ -68,12 +73,12 @@ type RHPPruneContractResponse struct {
 type RHPPriceTableRequest struct {
 	HostKey    types.PublicKey `json:"hostKey"`
 	SiamuxAddr string          `json:"siamuxAddr"`
-	Timeout    time.Duration   `json:"timeout"`
+	Timeout    DurationMS      `json:"timeout"`
 }
 
 // RHPScanResponse is the response type for the /rhp/scan endpoint.
 type RHPScanResponse struct {
-	Ping       ParamDuration        `json:"ping"`
+	Ping       DurationMS           `json:"ping"`
 	ScanError  string               `json:"scanError,omitempty"`
 	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`

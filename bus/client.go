@@ -340,14 +340,14 @@ func (c *Client) Hosts(ctx context.Context, offset, limit int) (hosts []hostdb.H
 // HostsForScanning returns 'limit' host addresses at given 'offset' which
 // haven't been scanned after lastScan.
 func (c *Client) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []hostdb.HostAddress, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/hosts/scanning?offset=%v&limit=%v&lastScan=%s", offset, limit, api.ParamTime(maxLastScan)), &hosts)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/hosts/scanning?offset=%v&limit=%v&lastScan=%s", offset, limit, api.TimeRFC3339(maxLastScan)), &hosts)
 	return
 }
 
 // RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
 func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{
-		MaxDowntimeHours:      api.ParamDurationHour(maxDowntime),
+		MaxDowntimeHours:      api.DurationH(maxDowntime),
 		MinRecentScanFailures: minRecentScanFailures,
 	}, &removed)
 	return
@@ -518,7 +518,7 @@ func (c *Client) DeleteAllContracts(ctx context.Context) (err error) {
 func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
-		Duration: api.ParamDuration(d),
+		Duration: api.DurationMS(d),
 		Priority: priority,
 	}, &resp)
 	lockID = resp.LockID
@@ -529,7 +529,7 @@ func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID,
 // contract.
 func (c *Client) KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/keepalive", fcid), api.ContractKeepaliveRequest{
-		Duration: api.ParamDuration(d),
+		Duration: api.DurationMS(d),
 		LockID:   lockID,
 	}, nil)
 	return
@@ -769,7 +769,7 @@ func (c *Client) LockAccount(ctx context.Context, id rhpv3.Account, hostKey type
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/accounts/%s/lock", id), api.AccountsLockHandlerRequest{
 		HostKey:   hostKey,
 		Exclusive: exclusive,
-		Duration:  api.ParamDuration(duration),
+		Duration:  api.DurationMS(duration),
 	}, &resp)
 	return resp.Account, resp.LockID, err
 }
@@ -813,7 +813,7 @@ func (c *Client) FileContractTax(ctx context.Context, payout types.Currency) (ta
 
 func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (slabs []api.PackedSlab, err error) {
 	err = c.c.WithContext(ctx).POST("/slabbuffer/fetch", api.PackedSlabsRequestGET{
-		LockingDuration: api.ParamDuration(lockingDuration),
+		LockingDuration: api.DurationMS(lockingDuration),
 		MinShards:       minShards,
 		TotalShards:     totalShards,
 		ContractSet:     set,

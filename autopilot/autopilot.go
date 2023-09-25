@@ -87,7 +87,7 @@ type Worker interface {
 	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
-	MigrateSlab(ctx context.Context, s object.Slab, set string) error
+	MigrateSlab(ctx context.Context, s object.Slab, set string) (api.MigrateSlabResponse, error)
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (hostdb.HostPriceTable, error)
@@ -595,10 +595,10 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.AutopilotStateResponse{
 		Configured:         err == nil,
 		Migrating:          migrating,
-		MigratingLastStart: api.ParamTime(mLastStart),
+		MigratingLastStart: api.TimeRFC3339(mLastStart),
 		Scanning:           scanning,
-		ScanningLastStart:  api.ParamTime(sLastStart),
-		UptimeMS:           api.ParamDuration(ap.Uptime()),
+		ScanningLastStart:  api.TimeRFC3339(sLastStart),
+		UptimeMS:           api.DurationMS(ap.Uptime()),
 
 		StartTime: ap.StartTime(),
 		BuildState: api.BuildState{

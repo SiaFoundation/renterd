@@ -298,9 +298,21 @@ func (mgr *SlabBufferManager) FetchPartialSlab(ctx context.Context, ec object.En
 }
 
 func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
+	// Fetch buffers.
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
+	var completeBuffers, incompleteBuffers []*SlabBuffer
+	for _, buffers := range mgr.completeBuffers {
+		completeBuffers = append(completeBuffers, buffers...)
+	}
+	for _, buffers := range mgr.incompleteBuffers {
+		incompleteBuffers = append(incompleteBuffers, buffers...)
+	}
+	mgr.mu.Unlock()
+
+	// Convert them.
 	convertBuffer := func(buffer *SlabBuffer, complete bool) api.SlabBuffer {
+		buffer.mu.Lock()
+		defer buffer.mu.Unlock()
 		return api.SlabBuffer{
 			ContractSet: "", // filled in by caller
 			Complete:    complete,
@@ -310,15 +322,11 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 			Locked:      time.Now().Before(buffer.lockedUntil),
 		}
 	}
-	for _, buffers := range mgr.completeBuffers {
-		for _, buffer := range buffers {
-			sbs = append(sbs, convertBuffer(buffer, true))
-		}
+	for _, buffer := range completeBuffers {
+		sbs = append(sbs, convertBuffer(buffer, true))
 	}
-	for _, buffers := range mgr.incompleteBuffers {
-		for _, buffer := range buffers {
-			sbs = append(sbs, convertBuffer(buffer, false))
-		}
+	for _, buffer := range incompleteBuffers {
+		sbs = append(sbs, convertBuffer(buffer, false))
 	}
 	return sbs
 }
