@@ -1874,7 +1874,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	} else if req.ContractSet == "" {
 		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
 		return
-	} else if req.ETag == "" {
+	} else if req.Etag == "" {
 		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
 		return
 	} else if req.PartNumber <= 0 || req.PartNumber > gofakes3.MaxUploadPartNumber {
@@ -1884,7 +1884,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.ETag, req.UsedContracts)
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.Etag, req.UsedContracts)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}

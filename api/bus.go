@@ -539,15 +539,14 @@ type (
 	}
 	MultipartAddPartRequest struct {
 		Bucket        string                                   `json:"bucket"`
-		ETag          string                                   `json:"eTag"`
-		ContractSet   string                                   `json:"contractSet"`
-		Object        object.Object                            `json:"object"`
-		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		Etag          string                                   `json:"eTag"`
 		Path          string                                   `json:"path"`
+		ContractSet   string                                   `json:"contractSet"`
 		UploadID      string                                   `json:"uploadID"`
 		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
 		PartNumber    int                                      `json:"partNumber"`
 		Slices        []object.SlabSlice                       `json:"slices"`
+		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 	}
 	MultipartListUploadsRequest struct {
 		Bucket         string `json:"bucket"`

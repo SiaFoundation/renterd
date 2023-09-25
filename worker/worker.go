@@ -161,7 +161,7 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket, path, contractSet, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
 	AddMultipartPart(ctx context.Context, bucket, path, uploadID, contractSet string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)

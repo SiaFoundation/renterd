@@ -60,7 +60,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", "application/octet-stream", testAutopilotConfig.Contracts.Set, object.Object{
+	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -73,7 +73,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{})
+	}, map[types.PublicKey]types.FileContractID{}, "application/octet-stream")
 	if err != nil {
 		t.Fatal(err)
 	}
