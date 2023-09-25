@@ -300,6 +300,16 @@ func TestObjectEntries(t *testing.T) {
 		t.SkipNow()
 	}
 
+	// assert mime type is set & clear it afterwards so we can compare
+	assertMimeType := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			if entries[i].MimeType == "" {
+				t.Fatal("mime type should be set", entries[i].MimeType)
+			}
+			entries[i].MimeType = ""
+		}
+	}
+
 	// create a test cluster
 	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
@@ -381,6 +391,9 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err, test.path)
 		}
 
+		// assert mime type & clear it afterwards so we can compare
+		assertMimeType(res.Entries)
+
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
 		}
@@ -389,6 +402,9 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mime type & clear it afterwards so we can compare
+			assertMimeType(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
@@ -407,6 +423,10 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// assert mime type & clear it afterwards so we can compare
+			assertMimeType(res.Entries)
+
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
 			}
@@ -422,6 +442,10 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		// assert mime type & clear it afterwards so we can compare
+		assertMimeType(got)
+
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
@@ -692,7 +716,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster, err := newTestCluster("/Users/peterjan/testing", newTestLogger())
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
