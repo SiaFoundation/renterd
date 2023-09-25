@@ -211,6 +211,7 @@ type ObjectMetadata struct {
 	ModTime time.Time `json:"modTime"`
 	Name    string    `json:"name"`
 	Size    int64     `json:"size"`
+	ETag    string    `json:"eTag"`
 }
 
 // LastModified returns the object's ModTime formatted for use in the
@@ -225,6 +226,7 @@ type ObjectAddRequest struct {
 	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	ETag          string                                   `json:"eTag"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.
@@ -540,7 +542,7 @@ type (
 	}
 	MultipartAddPartRequest struct {
 		Bucket        string                                   `json:"bucket"`
-		Etag          string                                   `json:"eTag"`
+		ETag          string                                   `json:"eTag"`
 		Path          string                                   `json:"path"`
 		ContractSet   string                                   `json:"contractSet"`
 		UploadID      string                                   `json:"uploadID"`
@@ -658,6 +660,6 @@ type AddPartialSlabResponse struct {
 	Slabs []object.PartialSlab `json:"slabs"`
 }
 
-func FormatEtag(etag string) string {
-	return fmt.Sprintf("\"%s\"", etag)
+func FormatETag(ETag string) string {
+	return fmt.Sprintf("\"%s\"", ETag)
 }

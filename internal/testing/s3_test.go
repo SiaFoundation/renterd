@@ -133,6 +133,9 @@ func TestS3Basic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if res.ETag == "" {
+		t.Fatal("expected ETag to be set")
+	}
 	if res.LastModified.IsZero() {
 		t.Fatal("expected LastModified to be non-zero")
 	} else if !res.LastModified.After(start.UTC()) {

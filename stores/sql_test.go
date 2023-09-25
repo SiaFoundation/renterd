@@ -22,6 +22,7 @@ import (
 const (
 	testPersistInterval = time.Second
 	testContractSet     = "test"
+	testETag            = "d34db33f"
 )
 
 // newTestSQLStore creates a new SQLStore for testing.

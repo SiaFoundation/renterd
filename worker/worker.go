@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -161,10 +162,10 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket string, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	AddObject(ctx context.Context, bucket string, path, contractSet string, o object.Object, ETag string, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
-	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, ETag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
@@ -1021,11 +1022,20 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		jc.Encode(res.Entries)
 		return
 	}
+
+	// assert the object is set and set the appropriate response headers
+	if res.Object == nil {
+		jc.Error(errors.New("object not returned by the bus"), http.StatusInternalServerError)
+	}
 	jc.ResponseWriter.Header().Set("Last-Modified", res.Object.LastModified())
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(buildETag(jc.Request, res.Object.ETag)))
+
+	// return early if the object is empty
 	if len(res.Object.Slabs) == 0 && len(res.Object.PartialSlabs) == 0 {
 		return
 	}
 
+	// fetch gouging params
 	gp, err := w.bus.GougingParams(ctx)
 	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
 		return
@@ -1251,7 +1261,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// set etag in header response.
-	jc.ResponseWriter.Header().Set("ETag", api.FormatEtag(etag))
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(etag))
 }
 
 func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
@@ -1595,6 +1605,19 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 func isErrDuplicateTransactionSet(err error) bool {
 	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
+}
+
+func buildETag(req *http.Request, objETag string) string {
+	rh := req.Header.Get("Range")
+	if rh == "" {
+		return objETag
+	}
+
+	h := types.NewHasher()
+	h.E.Write([]byte(rh))
+	h.E.Write([]byte(objETag))
+	sum := h.Sum()
+	return hex.EncodeToString(sum[:])
 }
 
 func isPrivateIP(addr net.IP) bool {

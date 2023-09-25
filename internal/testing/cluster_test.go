@@ -73,7 +73,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{})
+	}, "imanetag", map[types.PublicKey]types.FileContractID{})
 	if err != nil {
 		t.Fatal(err)
 	}
