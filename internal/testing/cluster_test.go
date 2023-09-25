@@ -300,9 +300,17 @@ func TestObjectEntries(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// assert mime type is set & clear it afterwards so we can compare
-	assertMimeType := func(entries []api.ObjectMetadata) {
+	// assert mod time & mime type and clear it afterwards so we can compare
+	start := time.Now()
+	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
+			// assert mod time
+			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.After(start.UTC()) {
+				t.Fatal("mod time should be set")
+			}
+			entries[i].ModTime = time.Time{}
+
+			// assert mime type
 			if entries[i].MimeType == "" {
 				t.Fatal("mime type should be set", entries[i].MimeType)
 			}
@@ -391,8 +399,8 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err, test.path)
 		}
 
-		// assert mime type & clear it afterwards so we can compare
-		assertMimeType(res.Entries)
+		// assert mod time & mime type and clear it afterwards so we can compare
+		assertMetadata(res.Entries)
 
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
@@ -403,8 +411,8 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// assert mime type & clear it afterwards so we can compare
-			assertMimeType(res.Entries)
+			// assert mod time & mime type and clear it afterwards so we can compare
+			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
@@ -424,8 +432,8 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// assert mime type & clear it afterwards so we can compare
-			assertMimeType(res.Entries)
+			// assert mod time & mime type and clear it afterwards so we can compare
+			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
@@ -443,8 +451,8 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// assert mime type & clear it afterwards so we can compare
-		assertMimeType(got)
+		// assert mod time & mime type and clear it afterwards so we can compare
+		assertMetadata(res.Entries)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)

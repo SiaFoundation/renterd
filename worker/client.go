@@ -346,7 +346,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 	return api.GetObjectResponse{
 		Content:     body,
 		ContentType: header.Get("Content-Type"),
-		ModTime:     modTime,
+		ModTime:     modTime.UTC(),
 		Range:       r,
 		Size:        size,
 	}, nil

@@ -31,6 +31,7 @@ func TestS3Basic(t *testing.T) {
 		t.SkipNow()
 	}
 
+	start := time.Now()
 	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +123,7 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	// copy our object into the new bucket.
-	_, err = s3.CopyObject(context.Background(), minio.CopyDestOptions{
+	res, err := s3.CopyObject(context.Background(), minio.CopyDestOptions{
 		Bucket: bucket + "2",
 		Object: "object",
 	}, minio.CopySrcOptions{
@@ -131,6 +132,11 @@ func TestS3Basic(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.LastModified.IsZero() {
+		t.Fatal("expected LastModified to be non-zero")
+	} else if !res.LastModified.After(start.UTC()) {
+		t.Fatal("expected LastModified to be after the start of our test")
 	}
 
 	// get copied object
@@ -332,6 +338,9 @@ func TestS3List(t *testing.T) {
 	flatten := func(res minio.ListBucketResult) []string {
 		var objs []string
 		for _, obj := range res.Contents {
+			if !strings.HasSuffix(obj.Key, "/") && obj.LastModified.IsZero() {
+				t.Fatal("expected non-zero LastModified", obj.Key)
+			}
 			objs = append(objs, obj.Key)
 		}
 		for _, cp := range res.CommonPrefixes {

@@ -115,8 +115,8 @@ type (
 		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) error
-		UpdateObject(ctx context.Context, bucket, path, contractSet, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (api.ObjectMetadata, error)
+		UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) error
 		RemoveObject(ctx context.Context, bucket, path string) error
 		RemoveObjects(ctx context.Context, bucket, prefix string) error
 		RenameObject(ctx context.Context, bucket, from, to string) error
@@ -1012,7 +1012,7 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.MimeType, aor.Object, aor.UsedContracts))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts, aor.MimeType))
 }
 
 func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1020,9 +1020,12 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	}
-	if jc.Check("couldn't copy object", b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath)) != nil {
+
+	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath)
+	if jc.Check("couldn't copy object", err) != nil {
 		return
 	}
+	jc.Encode(om)
 }
 
 func (b *bus) objectsListHandlerPOST(jc jape.Context) {
@@ -1895,7 +1898,7 @@ func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.KeyMarker, req.UploadIDMarker, req.Limit)
+	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.PathMarker, req.UploadIDMarker, req.Limit)
 	if jc.Check("failed to list multipart uploads", err) != nil {
 		return
 	}

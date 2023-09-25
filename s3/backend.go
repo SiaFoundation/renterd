@@ -9,7 +9,6 @@ import (
 	"mime"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/renterd/api"
@@ -150,8 +149,8 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 
 		item := &gofakes3.Content{
 			Key:          key,
-			LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
-			ETag:         hex.EncodeToString(frand.Bytes(32)),            // TODO: don't have that
+			LastModified: gofakes3.NewContentTime(object.ModTime),
+			ETag:         hex.EncodeToString(frand.Bytes(32)), // TODO: don't have that
 			Size:         object.Size,
 			StorageClass: gofakes3.StorageStandard,
 		}
@@ -253,7 +252,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
 		"Content-Type":  res.ContentType,
-		"Last-Modified": res.ModTime.Format(http.TimeFormat),
+		"Last-Modified": res.ModTime.UTC().Format(http.TimeFormat),
 	}
 
 	return &gofakes3.Object{
@@ -284,7 +283,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
 		"Content-Type":  mime.TypeByExtension(objectName),
-		"Last-Modified": time.Unix(0, 0).UTC().Format(http.TimeFormat), // TODO: update this when object has metadata
+		"Last-Modified": res.Object.LastModified(),
 	}
 	return &gofakes3.Object{
 		Name:     gofakes3.URLEncode(objectName),
@@ -365,13 +364,13 @@ func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDe
 
 // TODO: use metadata when we have support for it
 func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
-	err := s.b.CopyObject(context.Background(), srcBucket, dstBucket, "/"+srcKey, "/"+dstKey)
+	obj, err := s.b.CopyObject(context.Background(), srcBucket, dstBucket, "/"+srcKey, "/"+dstKey)
 	if err != nil {
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.CopyObjectResult{
-		ETag:         "",                                             // TODO: don't have that
-		LastModified: gofakes3.NewContentTime(time.Unix(0, 0).UTC()), // TODO: don't have that
+		ETag:         "", // TODO: don't have that
+		LastModified: gofakes3.NewContentTime(obj.ModTime.UTC()),
 	}, nil
 }
 
