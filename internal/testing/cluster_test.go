@@ -312,7 +312,7 @@ func TestObjectEntries(t *testing.T) {
 
 			// assert mime type
 			if entries[i].MimeType == "" {
-				t.Fatal("mime type should be set", entries[i].MimeType)
+				t.Fatal("mime type should be set", entries[i].MimeType, entries[i].Name)
 			}
 			entries[i].MimeType = ""
 		}
@@ -452,7 +452,7 @@ func TestObjectEntries(t *testing.T) {
 		}
 
 		// assert mod time & mime type and clear it afterwards so we can compare
-		assertMetadata(res.Entries)
+		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
