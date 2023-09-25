@@ -2269,13 +2269,19 @@ func TestSlabBufferStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// check the slab buffers
-	buffers, err = b.SlabBuffers()
+	// check the slab buffers, again a retry loop to avoid NDFs
+	err = Retry(100, 100*time.Millisecond, func() error {
+		buffers, err = b.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(buffers) != 0 {
+			return fmt.Errorf("expected 0 slab buffers, got %d", len(buffers))
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(buffers) != 0 {
-		t.Fatal("expected 0 slab buffers, got", len(buffers))
 	}
 }
 
