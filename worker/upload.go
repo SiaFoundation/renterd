@@ -30,9 +30,8 @@ const (
 	statsRecomputeMinInterval = 3 * time.Second
 
 	defaultPackedSlabsLockDuration  = 5 * time.Minute
-	defaultPackedSlabsUploadTimeout = 10 * time.Minute
+	defaultPackedSlabsUploadTimeout = 5 * time.Minute
 	defaultPackedSlabsLimit         = 1
-	blockedUploadPackedSlabsLimit   = 5
 )
 
 var (
@@ -260,18 +259,21 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 
 	// if packing was enabled try uploading packed slabs
 	if up.packing {
-		// if we reached the buffer size limit, we upload packed slabs synchronously
+		// if we reached the buffer size limit, upload one packed slab
+		// synchronously to ensure we block and don't let the buffer grow out of
+		// control
 		if bufferSizeLimitReached {
 			ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
-			defer cancel()
-			_, err := w.uploadPackedSlabs(ctx, defaultPackedSlabsUploadTimeout, up.rs, up.contractSet, blockedUploadPackedSlabsLimit)
-			if err != nil {
+			if _, err := w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, up.rs, up.contractSet, defaultPackedSlabsLimit); err != nil {
 				w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 			}
-		} else {
-			go w.threadedUploadPackedSlabs(up.rs, up.contractSet)
+			cancel()
 		}
+
+		// make sure there's a goroutine uploading the remainder of the packed slabs
+		go w.threadedUploadPackedSlabs(up.rs, up.contractSet)
 	}
+
 	return etag, nil
 }
 
@@ -305,18 +307,21 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 
 	// if packing was enabled try uploading packed slabs
 	if up.packing {
-		// if we reached the buffer size limit, we upload packed slabs synchronously
+		// if we reached the buffer size limit, upload one packed slab
+		// synchronously to ensure we block and don't let the buffer grow out of
+		// control
 		if bufferSizeLimitReached {
 			ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
-			defer cancel()
-			_, err := w.uploadPackedSlabs(ctx, defaultPackedSlabsUploadTimeout, up.rs, up.contractSet, blockedUploadPackedSlabsLimit)
-			if err != nil {
+			if _, err := w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, up.rs, up.contractSet, defaultPackedSlabsLimit); err != nil {
 				w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 			}
-		} else {
-			go w.threadedUploadPackedSlabs(up.rs, up.contractSet)
+			cancel()
 		}
+
+		// make sure there's a goroutine uploading the remainder of the packed slabs
+		go w.threadedUploadPackedSlabs(up.rs, up.contractSet)
 	}
+
 	return etag, nil
 }
 
