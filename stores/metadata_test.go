@@ -2642,7 +2642,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Add the first slab.
 	ctx := context.Background()
-	slabs, err := db.AddPartialSlab(ctx, slab1Data, 1, 2, testContractSet)
+	slabs, bufferSize, err := db.AddPartialSlab(ctx, slab1Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2651,6 +2651,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab1Data)) || slabs[0].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	} else if bufferSize != int64(len(slab1Data)) {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
@@ -2711,7 +2713,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add the second slab.
-	slabs, err = db.AddPartialSlab(ctx, slab2Data, 1, 2, testContractSet)
+	slabs, bufferSize, err = db.AddPartialSlab(ctx, slab2Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2720,6 +2722,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab2Data)) || slabs[0].Offset != uint32(len(slab1Data)) {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	} else if bufferSize != int64(len(slab1Data)+len(slab2Data)) {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err = db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
@@ -2748,7 +2752,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add third slab.
-	slabs, err = db.AddPartialSlab(ctx, slab3Data, 1, 2, testContractSet)
+	slabs, bufferSize, err = db.AddPartialSlab(ctx, slab3Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2760,6 +2764,9 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[1].Length != uint32(len(slab3Data)-1) || slabs[1].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	}
+	if bufferSize != rhpv2.SectorSize+1 {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	if data1, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
 		t.Fatal(err)
@@ -2860,11 +2867,11 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add 2 more partial slabs.
-	_, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	_, _, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	_, bufferSize, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2881,6 +2888,9 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("expected buffer to be complete")
 	} else if buffersBefore[1].Complete {
 		t.Fatal("expected buffer to be incomplete")
+	}
+	if bufferSize != rhpv2.SectorSize+buffersBefore[1].Size {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 
 	// Close manager to make sure we can restart the database without
@@ -3431,7 +3441,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
-	_, err = db.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	_, _, err = db.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}

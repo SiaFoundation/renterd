@@ -844,7 +844,7 @@ func (c *Client) AddUploadingSector(ctx context.Context, uID api.UploadID, id ty
 	return
 }
 
-func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error) {
+func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error) {
 	c.c.Custom("POST", "/slabs/partial", nil, &api.AddPartialSlabResponse{})
 	values := url.Values{}
 	values.Set("minShards", fmt.Sprint(minShards))
@@ -863,20 +863,20 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := io.ReadAll(resp.Body)
-		return nil, errors.New(string(err))
+		return nil, false, errors.New(string(err))
 	}
 	var apsr api.AddPartialSlabResponse
 	err = json.NewDecoder(resp.Body).Decode(&apsr)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return apsr.Slabs, nil
+	return apsr.Slabs, apsr.SlabBufferMaxSizeSoftReached, nil
 }
 
 func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
