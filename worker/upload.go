@@ -248,16 +248,17 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// if not given, try decide on a mime type using the file extension
-	if up.mimeType == "" {
-		up.mimeType = mime.TypeByExtension(filepath.Ext(path))
-	}
+	mimeType := up.mimeType
+	if mimeType == "" {
+		mimeType = mime.TypeByExtension(filepath.Ext(path))
 
-	// if mime type is still not known, wrap the reader with a mime reader
-	if up.mimeType == "" {
-		var err error
-		up.mimeType, r, err = newMimeReader(r)
-		if err != nil {
-			return "", err
+		// if mime type is still not known, wrap the reader with a mime reader
+		if mimeType == "" {
+			var err error
+			mimeType, r, err = newMimeReader(r)
+			if err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -277,7 +278,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, up.mimeType, obj, used)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, mimeType, obj, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
