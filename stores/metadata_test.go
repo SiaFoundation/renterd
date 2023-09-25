@@ -3429,7 +3429,7 @@ func TestCopyObject(t *testing.T) {
 	}
 
 	// Copy it within the same bucket.
-	if om, err := os.CopyObject(ctx, "src", "src", "/foo", "/bar"); err != nil {
+	if om, err := os.CopyObject(ctx, "src", "src", "/foo", "/bar", ""); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := os.ObjectEntries(ctx, "src", "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3442,7 +3442,7 @@ func TestCopyObject(t *testing.T) {
 	}
 
 	// Copy it cross buckets.
-	if om, err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar"); err != nil {
+	if om, err := os.CopyObject(ctx, "src", "dst", "/foo", "/bar", ""); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := os.ObjectEntries(ctx, "dst", "/", "", "", 0, -1); err != nil {
 		t.Fatal(err)
