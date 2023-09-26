@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/SiaFoundation/gofakes3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -70,14 +70,14 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 		w:      w,
 		logger: namedLogger,
 	}
-	faker, err := gofakes3.New(backend,
+	faker, err := gofakes3.New(
+		newAuthenticatedBackend(backend, opts.AuthKeyPairs),
 		gofakes3.WithHostBucket(false),
 		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,
 		}),
 		gofakes3.WithRequestID(rand.Uint64()),
 		gofakes3.WithoutVersioning(),
-		gofakes3.WithV4Auth(opts.AuthKeyPairs),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create s3 server: %w", err)

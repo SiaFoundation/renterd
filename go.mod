@@ -3,7 +3,6 @@ module go.sia.tech/renterd
 go 1.20
 
 require (
-	github.com/SiaFoundation/gofakes3 v0.0.0-20230919115219-af470842bcfa
 	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.19.0
@@ -18,6 +17,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.16.0
 	go.opentelemetry.io/otel/trace v1.16.0
 	go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be
+	go.sia.tech/gofakes3 v0.0.0-20230926110632-5b2c588c6928
 	go.sia.tech/hostd v0.1.4
 	go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb
 	go.sia.tech/mux v1.2.0

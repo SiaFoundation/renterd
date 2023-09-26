@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SiaFoundation/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/s3"
 	"go.uber.org/zap"
