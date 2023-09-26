@@ -674,7 +674,7 @@ func padBandwidth(pt rhpv3.HostPriceTable, rc rhpv3.ResourceCost) rhpv3.Resource
 	}
 	minPacketSize := uint64(1460)
 	minIngress := pt.UploadBandwidthCost.Mul64(minPacketSize)
-	minEgress := pt.DownloadBandwidthCost.Mul64(3 * minPacketSize)
+	minEgress := pt.DownloadBandwidthCost.Mul64(3*minPacketSize + responseLeeway)
 	rc.Ingress = padCost(rc.Ingress, minIngress)
 	rc.Egress = padCost(rc.Egress, minEgress)
 	return rc
