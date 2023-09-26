@@ -24,7 +24,6 @@ import (
 
 var (
 	errBucketNotExists = errors.New("specified bucket does not exist")
-	errBucketNotFound  = errors.New("bucket not found")
 )
 
 func TestS3Basic(t *testing.T) {
@@ -95,7 +94,7 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
-	if err == nil || !strings.Contains(err.Error(), errBucketNotFound.Error()) {
+	if err == nil || !strings.Contains(err.Error(), errBucketNotExists.Error()) {
 		t.Fatal(err)
 	}
 
