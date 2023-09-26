@@ -47,9 +47,10 @@ func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
 }
 
 // CreateBucket creates a new bucket.
-func (c *Client) CreateBucket(ctx context.Context, name string) error {
+func (c *Client) CreateBucket(ctx context.Context, name string, policy api.BucketPolicy) error {
 	return c.c.WithContext(ctx).POST("/buckets", api.Bucket{
-		Name: name,
+		Name:   name,
+		Policy: policy,
 	}, nil)
 }
 

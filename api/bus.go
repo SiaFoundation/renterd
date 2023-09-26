@@ -609,9 +609,14 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
+type BucketPolicy struct {
+	PublicReadAccess bool `json:"publicReadAccess"`
+}
+
 type Bucket struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Name      string    `json:"name"`
+	CreatedAt time.Time    `json:"createdAt"`
+	Name      string       `json:"name"`
+	Policy    BucketPolicy `json:"policy"`
 }
 
 type SearchHostsRequest struct {

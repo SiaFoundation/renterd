@@ -92,7 +92,8 @@ type (
 	dbBucket struct {
 		Model
 
-		Name string `gorm:"unique;index;NOT NULL"`
+		Policy api.BucketPolicy `gorm:"serializer:json"`
+		Name   string           `gorm:"unique;index;NOT NULL"`
 	}
 
 	dbSlice struct {
@@ -447,16 +448,20 @@ func (s *SQLStore) Bucket(ctx context.Context, bucket string) (api.Bucket, error
 	return api.Bucket{
 		CreatedAt: b.CreatedAt.UTC(),
 		Name:      b.Name,
+		Policy:    b.Policy,
 	}, nil
 }
 
-func (s *SQLStore) CreateBucket(ctx context.Context, bucket string) error {
+func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
 	// Create bucket.
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		res := tx.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).
-			Create(&dbBucket{Name: bucket})
+			Create(&dbBucket{
+				Name:   bucket,
+				Policy: policy,
+			})
 		if res.Error != nil {
 			return res.Error
 		} else if res.RowsAffected == 0 {
@@ -507,6 +512,7 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 		resp[i] = api.Bucket{
 			CreatedAt: b.CreatedAt.UTC(),
 			Name:      b.Name,
+			Policy:    b.Policy,
 		}
 	}
 	return resp, nil

@@ -164,7 +164,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 // If the bucket already exists, a gofakes3.ResourceError with
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(ctx context.Context, name string) error {
-	if err := s.b.CreateBucket(ctx, name); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+	if err := s.b.CreateBucket(ctx, name, api.BucketPolicy{}); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
 		return gofakes3.ErrBucketAlreadyExists
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())

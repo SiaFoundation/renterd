@@ -106,7 +106,7 @@ type (
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
 		Bucket(_ context.Context, bucket string) (api.Bucket, error)
-		CreateBucket(_ context.Context, bucket string) error
+		CreateBucket(_ context.Context, bucket string, policy api.BucketPolicy) error
 		DeleteBucket(_ context.Context, bucket string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 
@@ -260,7 +260,7 @@ func (b *bus) bucketsHandlerPOST(jc jape.Context) {
 	} else if bucket.Name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.ms.CreateBucket(jc.Request.Context(), bucket.Name)) != nil {
+	} else if jc.Check("failed to create bucket", b.ms.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)) != nil {
 		return
 	}
 }
