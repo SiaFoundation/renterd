@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -136,18 +137,84 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 	})
 }
 
-// TODO: f/u with support for 'prefix', 'keyMarker' and 'uploadIDMarker'
-func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
+func (s *SQLStore) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		var dbUpload dbMultipartUpload
+		err := tx.
+			Model(&dbMultipartUpload{}).
+			Joins("DBBucket").
+			Where("upload_id", uploadID).
+			Take(&dbUpload).
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrMultipartUploadNotFound
+		} else if err != nil {
+			return err
+		}
+		var key object.EncryptionKey
+		if err := key.UnmarshalText(dbUpload.Key); err != nil {
+			return fmt.Errorf("failed to unmarshal key: %w", err)
+		}
+		resp = api.MultipartUpload{
+			Bucket:    dbUpload.DBBucket.Name,
+			Key:       key,
+			Path:      dbUpload.ObjectID,
+			UploadID:  dbUpload.UploadID,
+			CreatedAt: dbUpload.CreatedAt.UTC(),
+		}
+		return nil
+	})
+	return
+}
+
+func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (resp api.MultipartListUploadsResponse, err error) {
+	limitUsed := limit > 0
+	if !limitUsed {
+		limit = math.MaxInt64
+	} else {
+		limit++
+	}
+
+	prefixExpr := gorm.Expr("TRUE")
+	if prefix != "" {
+		prefixExpr = gorm.Expr("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+	}
+	keyMarkerExpr := gorm.Expr("TRUE")
+	if keyMarker != "" {
+		keyMarkerExpr = gorm.Expr("object_id > ?", keyMarker)
+	}
+	uploadIDMarkerExpr := gorm.Expr("TRUE")
+	if uploadIDMarker != "" {
+		uploadIDMarkerExpr = gorm.Expr("upload_id > ?", keyMarker)
+	}
+
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var dbUploads []dbMultipartUpload
-		err := tx.Limit(int(maxUploads)).
+		err := tx.
+			Model(&dbMultipartUpload{}).
+			Joins("DBBucket").
+			Where("? AND ? AND ?", prefixExpr, keyMarkerExpr, uploadIDMarkerExpr).
+			Limit(limit).
 			Find(&dbUploads).
 			Error
 		if err != nil {
 			return err
 		}
+		// Check if there are more uploads beyond 'limit'.
+		if limitUsed && len(dbUploads) == int(limit) {
+			resp.HasMore = true
+			dbUploads = dbUploads[:len(dbUploads)-1]
+			resp.NextPathMarker = dbUploads[len(dbUploads)-1].ObjectID
+			resp.NextUploadIDMarker = dbUploads[len(dbUploads)-1].UploadID
+		}
 		for _, upload := range dbUploads {
-			resp.Uploads = append(resp.Uploads, api.MultipartListUploadItem{
+			var key object.EncryptionKey
+			if err := key.UnmarshalText(upload.Key); err != nil {
+				return fmt.Errorf("failed to unmarshal key: %w", err)
+			}
+			resp.Uploads = append(resp.Uploads, api.MultipartUpload{
+				Bucket:    upload.DBBucket.Name,
+				Key:       key,
 				Path:      upload.ObjectID,
 				UploadID:  upload.UploadID,
 				CreatedAt: upload.CreatedAt.UTC(),

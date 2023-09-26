@@ -76,6 +76,10 @@ var (
 	// database.
 	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
 
+	// ErrMultipartUploadNotFound is returned if the specified multipart upload
+	// wasn't found.
+	ErrMultipartUploadNotFound = errors.New("multipart upload not found")
+
 	// ErrPartNotFound is returned if the specified part of a multipart upload
 	// wasn't found.
 	ErrPartNotFound = errors.New("multipart upload part not found")
@@ -557,12 +561,17 @@ type (
 		Limit          int    `json:"limit"`
 	}
 	MultipartListUploadsResponse struct {
-		Uploads []MultipartListUploadItem `json:"uploads"`
+		HasMore            bool              `json:"hasMore"`
+		NextPathMarker     string            `json:"nextMarker"`
+		NextUploadIDMarker string            `json:"nextUploadIDMarker"`
+		Uploads            []MultipartUpload `json:"uploads"`
 	}
-	MultipartListUploadItem struct {
-		Path      string    `json:"path"`
-		UploadID  string    `json:"uploadID"`
-		CreatedAt time.Time `json:"createdAt"`
+	MultipartUpload struct {
+		Bucket    string               `json:"bucket"`
+		Key       object.EncryptionKey `json:"key"`
+		Path      string               `json:"path"`
+		UploadID  string               `json:"uploadID"`
+		CreatedAt time.Time            `json:"createdAt"`
 	}
 	MultipartListPartsRequest struct {
 		Bucket           string `json:"bucket"`

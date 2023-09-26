@@ -2332,3 +2332,117 @@ func TestAlerts(t *testing.T) {
 		t.Fatal("alert found")
 	}
 }
+
+func TestMultipartUploads(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cluster.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	b := cluster.Bus
+	w := cluster.Worker
+
+	// Enable upload packing to speed up test.
+	err = b.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add hosts
+	if _, err := cluster.AddHostsBlocking(testRedundancySettings.TotalShards); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a new multipart upload.
+	objPath := "/foo"
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, object.GenerateEncryptionKey())
+	if err != nil {
+		t.Fatal(err)
+	} else if mpr.UploadID == "" {
+		t.Fatal("expected non-empty upload ID")
+	}
+
+	// List uploads
+	lmu, err := b.MultipartUploads(context.Background(), api.DefaultBucketName, "/f", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(lmu.Uploads) != 1 {
+		t.Fatal("expected 1 upload got", len(lmu.Uploads))
+	} else if upload := lmu.Uploads[0]; upload.UploadID != mpr.UploadID || upload.Path != objPath {
+		t.Fatal("unexpected upload:", upload)
+	}
+
+	// Add 3 parts out of order to make sure the object is reconstructed
+	// correctly.
+	putPart := func(partNum int, offset int, data []byte) string {
+		t.Helper()
+		etag, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), objPath, mpr.UploadID, partNum, api.UploadWithEncryptionOffset(int64(offset)))
+		if err != nil {
+			t.Fatal(err)
+		} else if etag == "" {
+			t.Fatal("expected non-empty ETag")
+		}
+		return etag
+	}
+	data1 := frand.Bytes(64)
+	data2 := frand.Bytes(128)
+	data3 := frand.Bytes(64)
+	etag2 := putPart(2, len(data1), data2)
+	etag1 := putPart(1, 0, data1)
+	etag3 := putPart(3, len(data1)+len(data2), data3)
+
+	// List parts
+	mup, err := b.MultipartUploadParts(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(mup.Parts) != 3 {
+		t.Fatal("expected 3 parts got", len(mup.Parts))
+	} else if part1 := mup.Parts[0]; part1.PartNumber != 1 || part1.Size != int64(len(data1)) || part1.ETag == "" {
+		t.Fatal("unexpected part:", part1)
+	} else if part2 := mup.Parts[1]; part2.PartNumber != 2 || part2.Size != int64(len(data2)) || part2.ETag == "" {
+		t.Fatal("unexpected part:", part2)
+	} else if part3 := mup.Parts[2]; part3.PartNumber != 3 || part3.Size != int64(len(data3)) || part3.ETag == "" {
+		t.Fatal("unexpected part:", part3)
+	}
+
+	// Complete upload
+	ui, err := b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
+		{
+			PartNumber: 1,
+			ETag:       etag1,
+		},
+		{
+			PartNumber: 2,
+			ETag:       etag2,
+		},
+		{
+			PartNumber: 3,
+			ETag:       etag3,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if ui.ETag == "" {
+		t.Fatal("unexpected response:", ui)
+	}
+
+	// Download object
+	gor, err := w.GetObject(context.Background(), api.DefaultBucketName, objPath)
+	if err != nil {
+		t.Fatal(err)
+	} else if data, err := io.ReadAll(gor.Content); err != nil {
+		t.Fatal(err)
+	} else if expectedData := append(data1, append(data2, data3...)...); !bytes.Equal(data, expectedData) {
+		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
+	}
+}
