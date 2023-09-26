@@ -250,7 +250,7 @@ func TestS3Authentication(t *testing.T) {
 	}
 
 	// List buckets. Shouldn't work.
-	if _, err := s3Client.ListBuckets(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported algorithm") {
+	if _, err := s3Client.ListBuckets(context.Background()); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatal(err)
 	}
 
