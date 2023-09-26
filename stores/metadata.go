@@ -471,6 +471,18 @@ func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.B
 	})
 }
 
+func (s *SQLStore) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return tx.
+			Model(&dbBucket{}).
+			Where("name", bucket).
+			Updates(dbBucket{
+				Policy: policy,
+			}).
+			Error
+	})
+}
+
 func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 	// Delete bucket.
 	return s.retryTransaction(func(tx *gorm.DB) error {

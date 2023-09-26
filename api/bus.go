@@ -619,6 +619,15 @@ type Bucket struct {
 	Policy    BucketPolicy `json:"policy"`
 }
 
+type BucketCreateRequest struct {
+	Name   string       `json:"name"`
+	Policy BucketPolicy `json:"policy"`
+}
+
+type BucketUpdatePolicyRequest struct {
+	Policy BucketPolicy `json:"policy"`
+}
+
 type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`
 	Limit           int               `json:"limit"`

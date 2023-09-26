@@ -48,10 +48,17 @@ func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
 
 // CreateBucket creates a new bucket.
 func (c *Client) CreateBucket(ctx context.Context, name string, policy api.BucketPolicy) error {
-	return c.c.WithContext(ctx).POST("/buckets", api.Bucket{
+	return c.c.WithContext(ctx).POST("/buckets", api.BucketCreateRequest{
 		Name:   name,
 		Policy: policy,
 	}, nil)
+}
+
+// UpdateBucketPolicy updates the policy of an existing bucket.
+func (c *Client) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/buckets/%s/policy", bucket), api.BucketUpdatePolicyRequest{
+		Policy: policy,
+	})
 }
 
 // DeleteBucket deletes an existing bucket. Fails if the bucket isn't empty.

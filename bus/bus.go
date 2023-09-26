@@ -109,6 +109,7 @@ type (
 		CreateBucket(_ context.Context, bucket string, policy api.BucketPolicy) error
 		DeleteBucket(_ context.Context, bucket string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
+		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
 		ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucket, path string) (api.Object, error)
@@ -254,13 +255,25 @@ func (b *bus) bucketsHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) bucketsHandlerPOST(jc jape.Context) {
-	var bucket api.Bucket
+	var bucket api.BucketCreateRequest
 	if jc.Decode(&bucket) != nil {
 		return
 	} else if bucket.Name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
 	} else if jc.Check("failed to create bucket", b.ms.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)) != nil {
+		return
+	}
+}
+
+func (b *bus) bucketsHandlerPolicyPUT(jc jape.Context) {
+	var req api.BucketUpdatePolicyRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if bucket := jc.PathParam("name"); bucket == "" {
+		jc.Error(errors.New("no bucket provided"), http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to create bucket", b.ms.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)) != nil {
 		return
 	}
 }
@@ -1988,10 +2001,11 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
-		"GET    /buckets":       b.bucketsHandlerGET,
-		"POST   /buckets":       b.bucketsHandlerPOST,
-		"DELETE /buckets/:name": b.bucketHandlerDELETE,
-		"GET    /buckets/:name": b.bucketHandlerGET,
+		"GET    /buckets":              b.bucketsHandlerGET,
+		"POST   /buckets":              b.bucketsHandlerPOST,
+		"PUT    /buckets/:name/policy": b.bucketsHandlerPolicyPUT,
+		"DELETE /buckets/:name":        b.bucketHandlerDELETE,
+		"GET    /buckets/:name":        b.bucketHandlerGET,
 
 		"GET    /objects/*path":  b.objectsHandlerGET,
 		"PUT    /objects/*path":  b.objectsHandlerPUT,
