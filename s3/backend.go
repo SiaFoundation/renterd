@@ -328,7 +328,9 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // support it.
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
 	err := s.w.UploadObject(ctx, input, key, api.UploadWithBucket(bucketName))
-	if err != nil {
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
+	} else if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.PutObjectResult{

@@ -86,7 +86,9 @@ func permsFromCtx(ctx context.Context) permissions {
 }
 
 func newAuthenticatedBackend(b unauthenticatedBackend, keyPairs map[string]string) *authenticatedBackend {
+	signature.StoreKeys(keyPairs)
 	return &authenticatedBackend{
+		backend:    b,
 		v4AuthPair: keyPairs,
 	}
 }
