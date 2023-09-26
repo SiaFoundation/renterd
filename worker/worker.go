@@ -185,6 +185,8 @@ type Bus interface {
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+
+	Bucket(_ context.Context, bucket string) (api.Bucket, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -1103,6 +1105,13 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// return early if the bucket does not exist
+	_, err = w.bus.Bucket(ctx, bucket)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
+		return
+	}
+
 	// cancel the upload if no contract set is specified
 	if up.ContractSet == "" {
 		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
@@ -1180,6 +1189,13 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// decode the bucket from the query string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+
+	// return early if the bucket does not exist
+	_, err = w.bus.Bucket(ctx, bucket)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
 
