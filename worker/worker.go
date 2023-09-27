@@ -1029,7 +1029,10 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// assert the object is set and set the appropriate response headers
 	if res.Object == nil {
 		jc.Error(errors.New("object not returned by the bus"), http.StatusInternalServerError)
+		return
 	}
+
+	// write the response headers
 	jc.ResponseWriter.Header().Set("Last-Modified", res.Object.LastModified())
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(buildETag(jc.Request, res.Object.ETag)))
 
