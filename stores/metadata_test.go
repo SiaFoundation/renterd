@@ -2651,7 +2651,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab1Data)) || slabs[0].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
-	} else if bufferSize != int64(len(slab1Data)) {
+	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
@@ -2722,7 +2722,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab2Data)) || slabs[0].Offset != uint32(len(slab1Data)) {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
-	} else if bufferSize != int64(len(slab1Data)+len(slab2Data)) {
+	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err = db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
@@ -2765,7 +2765,7 @@ func TestPartialSlab(t *testing.T) {
 	if slabs[1].Length != uint32(len(slab3Data)-1) || slabs[1].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
 	}
-	if bufferSize != rhpv2.SectorSize+1 {
+	if bufferSize != 2*rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	if data1, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
@@ -2889,7 +2889,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if buffersBefore[1].Complete {
 		t.Fatal("expected buffer to be incomplete")
 	}
-	if bufferSize != rhpv2.SectorSize+buffersBefore[1].Size {
+	if bufferSize != 2*rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 
