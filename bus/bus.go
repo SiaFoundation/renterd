@@ -126,6 +126,7 @@ type (
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, ETag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 		CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error)
+		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
 		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 		MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
@@ -1890,6 +1891,14 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) multipartHandlerUploadGET(jc jape.Context) {
+	resp, err := b.ms.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
+	if jc.Check("failed to get multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
 func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	var req api.MultipartListUploadsRequest
 	if jc.Decode(&req) != nil {
@@ -2037,6 +2046,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
 		"POST   /multipart/complete":    b.multipartHandlerCompletePOST,
 		"PUT    /multipart/part":        b.multipartHandlerUploadPartPUT,
+		"GET    /multipart/upload/:id":  b.multipartHandlerUploadGET,
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 

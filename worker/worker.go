@@ -166,6 +166,7 @@ type Bus interface {
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
 	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, ETag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
@@ -186,6 +187,8 @@ type Bus interface {
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+
+	Bucket(_ context.Context, bucket string) (api.Bucket, error)
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -1113,6 +1116,13 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// return early if the bucket does not exist
+	_, err = w.bus.Bucket(ctx, bucket)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
+		return
+	}
+
 	// cancel the upload if no contract set is specified
 	if up.ContractSet == "" {
 		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
@@ -1193,6 +1203,13 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// return early if the bucket does not exist
+	_, err = w.bus.Bucket(ctx, bucket)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
+		return
+	}
+
 	// decode the upload id
 	var uploadID string
 	if jc.DecodeForm("uploadid", &uploadID) != nil {
@@ -1225,16 +1242,15 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
 		return
 	}
-	if !disablePreshardingEncryption {
-		jc.Error(errors.New("presharding encryption is not yet supported for multipart uploads"), http.StatusNotImplemented)
-		return
-	}
 	if !disablePreshardingEncryption && jc.Request.FormValue("offset") == "" {
 		jc.Error(errors.New("if presharding encryption isn't disabled, the offset needs to be set"), http.StatusBadRequest)
 		return
 	}
-	var offset uint64
+	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(errors.New("offset must be positive"), http.StatusBadRequest)
 		return
 	}
 
@@ -1248,7 +1264,13 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if disablePreshardingEncryption {
 		opts = append(opts, WithCustomKey(object.NoOpKey))
 	} else {
-		opts = append(opts, WithCustomEncryptionOffset(offset))
+		upload, err := w.bus.MultipartUpload(jc.Request.Context(), uploadID)
+		if err != nil {
+			jc.Error(err, http.StatusBadRequest)
+			return
+		}
+		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
+		opts = append(opts, WithCustomKey(upload.Key))
 	}
 
 	// attach gouging checker to the context

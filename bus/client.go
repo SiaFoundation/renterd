@@ -997,6 +997,11 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path strin
 	return
 }
 
+func (c *Client) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/multipart/upload/%s", uploadID), &resp)
+	return
+}
+
 func (c *Client) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/listuploads", api.MultipartListUploadsRequest{
 		Bucket:         bucket,
