@@ -1890,7 +1890,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 
 func (b *bus) multipartHandlerUploadGET(jc jape.Context) {
 	resp, err := b.ms.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
-	if jc.Check("failed to list multipart uploads", err) != nil {
+	if jc.Check("failed to get multipart upload", err) != nil {
 		return
 	}
 	jc.Encode(resp)

@@ -151,18 +151,8 @@ func (s *SQLStore) MultipartUpload(ctx context.Context, uploadID string) (resp a
 		} else if err != nil {
 			return err
 		}
-		var key object.EncryptionKey
-		if err := key.UnmarshalText(dbUpload.Key); err != nil {
-			return fmt.Errorf("failed to unmarshal key: %w", err)
-		}
-		resp = api.MultipartUpload{
-			Bucket:    dbUpload.DBBucket.Name,
-			Key:       key,
-			Path:      dbUpload.ObjectID,
-			UploadID:  dbUpload.UploadID,
-			CreatedAt: dbUpload.CreatedAt.UTC(),
-		}
-		return nil
+		resp, err = dbUpload.convert()
+		return err
 	})
 	return
 }
@@ -208,17 +198,11 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 			resp.NextUploadIDMarker = dbUploads[len(dbUploads)-1].UploadID
 		}
 		for _, upload := range dbUploads {
-			var key object.EncryptionKey
-			if err := key.UnmarshalText(upload.Key); err != nil {
-				return fmt.Errorf("failed to unmarshal key: %w", err)
+			u, err := upload.convert()
+			if err != nil {
+				return err
 			}
-			resp.Uploads = append(resp.Uploads, api.MultipartUpload{
-				Bucket:    upload.DBBucket.Name,
-				Key:       key,
-				Path:      upload.ObjectID,
-				UploadID:  upload.UploadID,
-				CreatedAt: upload.CreatedAt.UTC(),
-			})
+			resp.Uploads = append(resp.Uploads, u)
 		}
 		return nil
 	})
@@ -430,4 +414,18 @@ func (s sortedSlices) Less(i, j int) bool {
 
 func (s sortedSlices) Swap(i, j int) {
 	s[i].ID, s[j].ID = s[j].ID, s[i].ID
+}
+
+func (u dbMultipartUpload) convert() (api.MultipartUpload, error) {
+	var key object.EncryptionKey
+	if err := key.UnmarshalText(u.Key); err != nil {
+		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal key: %w", err)
+	}
+	return api.MultipartUpload{
+		Bucket:    u.DBBucket.Name,
+		Key:       key,
+		Path:      u.ObjectID,
+		UploadID:  u.UploadID,
+		CreatedAt: u.CreatedAt.UTC(),
+	}, nil
 }
