@@ -137,7 +137,7 @@ type (
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
-		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, bufferSize int64, err error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
@@ -1269,12 +1269,18 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to read request body", err) != nil {
 		return
 	}
-	slabs, err := b.ms.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards), contractSet)
+	slabs, bufferSize, err := b.ms.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards), contractSet)
 	if jc.Check("failed to add partial slab", err) != nil {
 		return
 	}
+	var pus api.UploadPackingSettings
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
+		return
+	}
 	jc.Encode(api.AddPartialSlabResponse{
-		Slabs: slabs,
+		Slabs:                        slabs,
+		SlabBufferMaxSizeSoftReached: bufferSize >= pus.SlabBufferMaxSizeSoft,
 	})
 }
 

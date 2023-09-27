@@ -149,17 +149,17 @@ func (mgr *SlabBufferManager) Close() error {
 	return errors.Join(errs...)
 }
 
-func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.PartialSlab, error) {
+func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.PartialSlab, int64, error) {
 	gid := bufferGID(minShards, totalShards, uint32(contractSet))
 
 	// Sanity check input.
 	slabSize := bufferedSlabSize(minShards)
 	if minShards == 0 || totalShards == 0 || minShards > totalShards {
-		return nil, fmt.Errorf("invalid shard configuration: minShards=%v, totalShards=%v", minShards, totalShards)
+		return nil, 0, fmt.Errorf("invalid shard configuration: minShards=%v, totalShards=%v", minShards, totalShards)
 	} else if contractSet == 0 {
-		return nil, fmt.Errorf("contract set must be set")
+		return nil, 0, fmt.Errorf("contract set must be set")
 	} else if len(data) > slabSize {
-		return nil, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
+		return nil, 0, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
 	}
 
 	// Deep copy available buffers. We don't want to block the manager while we
@@ -178,7 +178,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		var used bool
 		slab, data, used, err = buffer.recordAppend(data)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if used {
 			usedBuffers = append(usedBuffers, buffer)
@@ -195,11 +195,11 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 			return err
 		})
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		slab, data, _, err = sb.recordAppend(data)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if len(data) > 0 {
 			panic("remaining data after creating new buffer")
@@ -222,9 +222,9 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	}
 	var dbUpdates []dbUpdate
 	for _, buffer := range usedBuffers {
-		syncSize, complete, err := buffer.commitAppend(data, mgr.bufferedSlabCompletionThreshold)
+		syncSize, complete, err := buffer.commitAppend(mgr.bufferedSlabCompletionThreshold)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		// Move the buffer from incomplete to complete if it is now complete.
 		if complete {
@@ -278,10 +278,23 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 			return nil
 		}()
 		if err != nil {
-			return nil, fmt.Errorf("failed to update size/complete in db: %w", err)
+			return nil, 0, fmt.Errorf("failed to update size/complete in db: %w", err)
 		}
 	}
-	return slabs, nil
+
+	return slabs, mgr.BufferSize(gid), nil
+}
+
+func (mgr *SlabBufferManager) BufferSize(gid bufferGroupID) (total int64) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	for _, buffer := range mgr.completeBuffers[gid] {
+		total += buffer.maxSize
+	}
+	for _, buffer := range mgr.incompleteBuffers[gid] {
+		total += buffer.maxSize
+	}
+	return
 }
 
 func (mgr *SlabBufferManager) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {
@@ -441,7 +454,7 @@ func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bo
 	}
 }
 
-func (buf *SlabBuffer) commitAppend(data []byte, completionThreshold int64) (int64, bool, error) {
+func (buf *SlabBuffer) commitAppend(completionThreshold int64) (int64, bool, error) {
 	// Fetch the current size first. We know that we have at least synced the
 	// buffer up to this point upon success.
 	buf.mu.Lock()
