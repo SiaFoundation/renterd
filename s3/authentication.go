@@ -121,7 +121,7 @@ func (b *authenticatedBackend) AuthenticationMiddleware(handler http.Handler) ht
 				// Authentication attempted but failed.
 				resp := signature.GetAPIError(result)
 				w.WriteHeader(resp.HTTPStatusCode)
-				w.Header().Add("content-type", "application/xml")
+				w.Header().Add("Content-Type", "application/xml")
 				_, _ = w.Write(signature.EncodeAPIErrorToResponse(resp))
 				return
 			} else {

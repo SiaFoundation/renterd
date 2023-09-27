@@ -271,7 +271,7 @@ func (b *bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	} else if bucket := jc.PathParam("name"); bucket == "" {
-		jc.Error(errors.New("no bucket provided"), http.StatusBadRequest)
+		jc.Error(errors.New("no bucket name provided"), http.StatusBadRequest)
 		return
 	} else if jc.Check("failed to create bucket", b.ms.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)) != nil {
 		return
