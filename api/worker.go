@@ -235,6 +235,12 @@ func UploadWithDisabledPreshardingEncryption() UploadOption {
 	}
 }
 
+func UploadWithEncryptionOffset(offset int64) UploadOption {
+	return func(v url.Values) {
+		v.Set("offset", fmt.Sprint(offset))
+	}
+}
+
 type DownloadRange struct {
 	Start  int64
 	Length int64
