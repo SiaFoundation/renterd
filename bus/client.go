@@ -966,7 +966,7 @@ func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string,
 	return
 }
 
-func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, uploadID, contractSet string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT("/multipart/part", api.MultipartAddPartRequest{
 		Bucket:        bucket,
 		Etag:          etag,
@@ -997,6 +997,11 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uplo
 		UploadID: uploadID,
 		Parts:    parts,
 	}, &resp)
+	return
+}
+
+func (c *Client) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/multipart/upload/%s", uploadID), &resp)
 	return
 }
 

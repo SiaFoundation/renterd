@@ -313,7 +313,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	}
 
 	// persist the part
-	err = w.bus.AddMultipartPart(ctx, bucket, path, uploadID, up.contractSet, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)
+	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add multi part: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -139,22 +140,72 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 	})
 }
 
-// TODO: f/u with support for 'prefix', 'keyMarker' and 'uploadIDMarker'
-func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, err error) {
+func (s *SQLStore) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		var dbUpload dbMultipartUpload
+		err := tx.
+			Model(&dbMultipartUpload{}).
+			Joins("DBBucket").
+			Where("upload_id", uploadID).
+			Take(&dbUpload).
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrMultipartUploadNotFound
+		} else if err != nil {
+			return err
+		}
+		resp, err = dbUpload.convert()
+		return err
+	})
+	return
+}
+
+func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (resp api.MultipartListUploadsResponse, err error) {
+	limitUsed := limit > 0
+	if !limitUsed {
+		limit = math.MaxInt64
+	} else {
+		limit++
+	}
+
+	prefixExpr := gorm.Expr("TRUE")
+	if prefix != "" {
+		prefixExpr = gorm.Expr("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+	}
+	keyMarkerExpr := gorm.Expr("TRUE")
+	if keyMarker != "" {
+		keyMarkerExpr = gorm.Expr("object_id > ?", keyMarker)
+	}
+	uploadIDMarkerExpr := gorm.Expr("TRUE")
+	if uploadIDMarker != "" {
+		uploadIDMarkerExpr = gorm.Expr("upload_id > ?", keyMarker)
+	}
+
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var dbUploads []dbMultipartUpload
-		err := tx.Limit(int(maxUploads)).
+		err := tx.
+			Model(&dbMultipartUpload{}).
+			Joins("DBBucket").
+			Where("? AND ? AND ?", prefixExpr, keyMarkerExpr, uploadIDMarkerExpr).
+			Limit(limit).
 			Find(&dbUploads).
 			Error
 		if err != nil {
 			return err
 		}
+		// Check if there are more uploads beyond 'limit'.
+		if limitUsed && len(dbUploads) == int(limit) {
+			resp.HasMore = true
+			dbUploads = dbUploads[:len(dbUploads)-1]
+			resp.NextPathMarker = dbUploads[len(dbUploads)-1].ObjectID
+			resp.NextUploadIDMarker = dbUploads[len(dbUploads)-1].UploadID
+		}
 		for _, upload := range dbUploads {
-			resp.Uploads = append(resp.Uploads, api.MultipartListUploadItem{
-				Path:      upload.ObjectID,
-				UploadID:  upload.UploadID,
-				CreatedAt: upload.CreatedAt.UTC(),
-			})
+			u, err := upload.convert()
+			if err != nil {
+				return err
+			}
+			resp.Uploads = append(resp.Uploads, u)
 		}
 		return nil
 	})
@@ -367,4 +418,18 @@ func (s sortedSlices) Less(i, j int) bool {
 
 func (s sortedSlices) Swap(i, j int) {
 	s[i].ID, s[j].ID = s[j].ID, s[i].ID
+}
+
+func (u dbMultipartUpload) convert() (api.MultipartUpload, error) {
+	var key object.EncryptionKey
+	if err := key.UnmarshalText(u.Key); err != nil {
+		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal key: %w", err)
+	}
+	return api.MultipartUpload{
+		Bucket:    u.DBBucket.Name,
+		Key:       key,
+		Path:      u.ObjectID,
+		UploadID:  u.UploadID,
+		CreatedAt: u.CreatedAt.UTC(),
+	}, nil
 }

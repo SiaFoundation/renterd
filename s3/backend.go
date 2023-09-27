@@ -310,7 +310,7 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
 	err := s.b.DeleteObject(context.Background(), bucketName, objectName, false)
-	if err != nil && !strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -334,7 +334,9 @@ func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.
 		opts = append(opts, api.UploadWithMimeType(ct))
 	}
 	err := s.w.UploadObject(context.Background(), input, key, opts...)
-	if err != nil {
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
+	} else if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.PutObjectResult{
@@ -392,12 +394,17 @@ func (s *s3) CreateMultipartUpload(bucket, key string, meta map[string]string) (
 	return gofakes3.UploadID(resp.UploadID), nil
 }
 
-func (s *s3) UploadPart(bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (etag string, err error) {
-	etag, err = s.w.UploadMultipartUploadPart(context.Background(), input, object, string(id), partNumber, api.UploadWithDisabledPreshardingEncryption())
-	if err != nil {
-		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+func (s *s3) UploadPart(bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
+	opts := []api.UploadOption{
+		api.UploadWithBucket(bucket),
+		api.UploadWithDisabledPreshardingEncryption(),
 	}
-	return etag, nil
+
+	etag, err := s.w.UploadMultipartUploadPart(context.Background(), input, object, string(id), partNumber, opts...)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+	return &gofakes3.UploadPartResult{ETag: api.FormatEtag(etag)}, nil
 }
 
 func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
@@ -472,7 +479,7 @@ func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) e
 	return nil
 }
 
-func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (versionID gofakes3.VersionID, etag string, err error) {
+func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
 	var parts []api.MultipartCompletedPart
 	for _, part := range input.Parts {
 		parts = append(parts, api.MultipartCompletedPart{
@@ -482,7 +489,10 @@ func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID
 	}
 	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, "/"+object, string(id), parts)
 	if err != nil {
-		return "", "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
-	return "", resp.ETag, nil
+
+	return &gofakes3.CompleteMultipartUploadResult{
+		ETag: api.FormatEtag(resp.ETag),
+	}, nil
 }
