@@ -230,6 +230,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
+			ID: "00016_bucketPolicy",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00016_bucketPolicy(tx, logger)
+			},
+		},
+		{
 			ID: "00017_mimetype",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00017_mimetype(tx, logger)
@@ -814,6 +820,15 @@ func performMigration00015_multipartUploads(txn *gorm.DB, logger *zap.SugaredLog
 		}
 	}
 	logger.Info("migration 00015_multipartUploads complete")
+	return nil
+}
+
+func performMigration00016_bucketPolicy(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00016_bucketPolicy")
+	if err := txn.Migrator().AutoMigrate(&dbBucket{}); err != nil {
+		return err
+	}
+	logger.Info("migration 00016_bucketPolicy complete")
 	return nil
 }
 

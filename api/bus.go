@@ -647,9 +647,23 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
+type BucketPolicy struct {
+	PublicReadAccess bool `json:"publicReadAccess"`
+}
+
 type Bucket struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Name      string    `json:"name"`
+	CreatedAt time.Time    `json:"createdAt"`
+	Name      string       `json:"name"`
+	Policy    BucketPolicy `json:"policy"`
+}
+
+type BucketCreateRequest struct {
+	Name   string       `json:"name"`
+	Policy BucketPolicy `json:"policy"`
+}
+
+type BucketUpdatePolicyRequest struct {
+	Policy BucketPolicy `json:"policy"`
 }
 
 type SearchHostsRequest struct {
@@ -662,7 +676,8 @@ type SearchHostsRequest struct {
 }
 
 type UploadPackingSettings struct {
-	Enabled bool `json:"enabled"`
+	Enabled               bool  `json:"enabled"`
+	SlabBufferMaxSizeSoft int64 `json:"slabBufferMaxSizeSoft"`
 }
 
 // RedundancySettings contain settings that dictate an object's redundancy.
@@ -693,7 +708,8 @@ func (rs RedundancySettings) Validate() error {
 }
 
 type AddPartialSlabResponse struct {
-	Slabs []object.PartialSlab `json:"slabs"`
+	SlabBufferMaxSizeSoftReached bool                 `json:"slabBufferMaxSizeSoftReached"`
+	Slabs                        []object.PartialSlab `json:"slabs"`
 }
 
 func FormatEtag(etag string) string {

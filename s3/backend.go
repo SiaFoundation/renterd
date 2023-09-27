@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/SiaFoundation/gofakes3"
+	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -34,8 +34,8 @@ type s3 struct {
 // ListBuckets returns a list of all buckets owned by the authenticated
 // sender of the request.
 // https://docs.aws.amazon.com/AmazonS3/latest/API/RESTServiceGET.html
-func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
-	buckets, err := s.b.ListBuckets(context.Background())
+func (s *s3) ListBuckets(ctx context.Context) ([]gofakes3.BucketInfo, error) {
+	buckets, err := s.b.ListBuckets(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list buckets: %w", err)
 	}
@@ -71,14 +71,7 @@ func (s *s3) ListBuckets() ([]gofakes3.BucketInfo, error) {
 //
 // TODO: This implementation is not ideal because it fetches all objects. We
 // will eventually want to support this type of pagination in the bus.
-func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
-	exists, err := s.BucketExists(bucketName)
-	if err != nil {
-		return nil, err
-	} else if !exists {
-		return nil, gofakes3.BucketNotFound(bucketName)
-	}
-
+func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
 	if prefix == nil {
 		prefix = &gofakes3.Prefix{}
 	}
@@ -97,6 +90,7 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	}
 
 	var objects []api.ObjectMetadata
+	var err error
 	response := gofakes3.NewObjectList()
 	if prefix.HasDelimiter {
 		// Handle request with delimiter.
@@ -115,8 +109,10 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 			opts = append(opts, api.ObjectsWithPrefix(adjustedPrefix))
 		}
 		var res api.ObjectsResponse
-		res, err = s.b.Object(context.Background(), path, opts...)
-		if err != nil {
+		res, err = s.b.Object(ctx, path, opts...)
+		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+			return nil, gofakes3.BucketNotFound(bucketName)
+		} else if err != nil {
 			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 		}
 		objects = res.Entries
@@ -127,8 +123,10 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 	} else {
 		// Handle request without delimiter.
 		var res api.ObjectsListResponse
-		res, err = s.b.ListObjects(context.Background(), bucketName, "/"+prefix.Prefix, page.Marker, int(page.MaxKeys))
-		if err != nil {
+		res, err = s.b.ListObjects(ctx, bucketName, "/"+prefix.Prefix, page.Marker, int(page.MaxKeys))
+		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+			return nil, gofakes3.BucketNotFound(bucketName)
+		} else if err != nil {
 			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 		}
 		objects = res.Objects
@@ -165,8 +163,8 @@ func (s *s3) ListBucket(bucketName string, prefix *gofakes3.Prefix, page gofakes
 //
 // If the bucket already exists, a gofakes3.ResourceError with
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
-func (s *s3) CreateBucket(name string) error {
-	if err := s.b.CreateBucket(context.Background(), name); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+func (s *s3) CreateBucket(ctx context.Context, name string) error {
+	if err := s.b.CreateBucket(ctx, name, api.BucketPolicy{}); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
 		return gofakes3.ErrBucketAlreadyExists
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -178,8 +176,8 @@ func (s *s3) CreateBucket(name string) error {
 // an error if the backend was unable to determine existence.
 //
 // TODO: backend could be improved to allow for checking specific dir in root.
-func (s *s3) BucketExists(name string) (bool, error) {
-	_, err := s.b.Bucket(context.Background(), name)
+func (s *s3) BucketExists(ctx context.Context, name string) (bool, error) {
+	_, err := s.b.Bucket(ctx, name)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return false, nil
 	} else if err != nil {
@@ -198,8 +196,8 @@ func (s *s3) BucketExists(name string) (bool, error) {
 // AWS does not validate the bucket's name for anything other than existence.
 // TODO: This check is not atomic. The backend needs to be updated to support
 // atomically checking whether a bucket is empty.
-func (s *s3) DeleteBucket(name string) error {
-	if err := s.b.DeleteBucket(context.Background(), name); err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
+func (s *s3) DeleteBucket(ctx context.Context, name string) error {
+	if err := s.b.DeleteBucket(ctx, name); err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
 		return gofakes3.ErrBucketNotEmpty
 	} else if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.BucketNotFound(name)
@@ -224,7 +222,7 @@ func (s *s3) DeleteBucket(name string) error {
 // If the backend is a VersionedBackend, GetObject retrieves the latest version.
 // TODO: Range requests starting from the end are not supported yet. Backend
 // needs to be updated for that.
-func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
+func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
 	if rangeRequest != nil && rangeRequest.FromEnd {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "range request from end not supported")
 	}
@@ -233,7 +231,7 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 	if rangeRequest != nil {
 		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, rangeRequest.End))
 	}
-	res, err := s.w.GetObject(context.Background(), bucketName, objectName, opts...)
+	res, err := s.w.GetObject(ctx, bucketName, objectName, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return nil, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
@@ -273,8 +271,8 @@ func (s *s3) GetObject(bucketName, objectName string, rangeRequest *gofakes3.Obj
 //
 // HeadObject should return a NotFound() error if the object does not
 // exist.
-func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(context.Background(), objectName, api.ObjectsWithBucket(bucketName), api.ObjectsWithIgnoreDelim(true))
+func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
+	res, err := s.b.Object(ctx, objectName, api.ObjectsWithBucket(bucketName), api.ObjectsWithIgnoreDelim(true))
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
@@ -308,8 +306,8 @@ func (s *s3) HeadObject(bucketName, objectName string) (*gofakes3.Object, error)
 //	Removes the null version (if there is one) of an object and inserts a
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
-func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(context.Background(), bucketName, objectName, false)
+func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
+	err := s.b.DeleteObject(ctx, bucketName, objectName, false)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
@@ -328,12 +326,12 @@ func (s *s3) DeleteObject(bucketName, objectName string) (gofakes3.ObjectDeleteR
 // gofakes3.ReadAll() for this job rather than ioutil.ReadAll().
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
-func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
+func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
 	opts := []api.UploadOption{api.UploadWithBucket(bucketName)}
 	if ct, ok := meta["Content-Type"]; ok {
 		opts = append(opts, api.UploadWithMimeType(ct))
 	}
-	err := s.w.UploadObject(context.Background(), input, key, opts...)
+	err := s.w.UploadObject(ctx, input, key, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
@@ -344,10 +342,10 @@ func (s *s3) PutObject(bucketName, key string, meta map[string]string, input io.
 	}, nil
 }
 
-func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
+func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
-		err := s.b.DeleteObject(context.Background(), bucketName, objectName, false)
+		err := s.b.DeleteObject(ctx, bucketName, objectName, false)
 		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     objectName,
@@ -364,14 +362,12 @@ func (s *s3) DeleteMulti(bucketName string, objects ...string) (gofakes3.MultiDe
 	return res, nil
 }
 
-// TODO: use metadata when we have support for it
-func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
+func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
 	var opts api.CopyObjectOptions
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct
 	}
-
-	obj, err := s.b.CopyObject(context.Background(), srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, opts)
+	obj, err := s.b.CopyObject(ctx, srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, opts)
 	if err != nil {
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -381,33 +377,32 @@ func (s *s3) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[st
 	}, nil
 }
 
-func (s *s3) CreateMultipartUpload(bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
+func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
 	opts := api.CreateMultipartOptions{Key: object.NoOpKey}
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct
 	}
-
-	resp, err := s.b.CreateMultipartUpload(context.Background(), bucket, "/"+key, opts)
+	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, opts)
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.UploadID(resp.UploadID), nil
 }
 
-func (s *s3) UploadPart(bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
+func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
 	opts := []api.UploadOption{
 		api.UploadWithBucket(bucket),
 		api.UploadWithDisabledPreshardingEncryption(),
 	}
 
-	etag, err := s.w.UploadMultipartUploadPart(context.Background(), input, object, string(id), partNumber, opts...)
+	etag, err := s.w.UploadMultipartUploadPart(ctx, input, object, string(id), partNumber, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return &gofakes3.UploadPartResult{ETag: api.FormatEtag(etag)}, nil
 }
 
-func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
+func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
 	prefix.HasPrefix = prefix.Prefix != ""
 	prefix.HasDelimiter = prefix.Delimiter != ""
 	if prefix.HasDelimiter && prefix.Delimiter != "/" {
@@ -417,7 +412,7 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 	} else if marker != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "marker not supported")
 	}
-	resp, err := s.b.MultipartUploads(context.Background(), bucket, "", "", "", int(limit))
+	resp, err := s.b.MultipartUploads(ctx, bucket, "", "", "", int(limit))
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -444,8 +439,8 @@ func (s *s3) ListMultipartUploads(bucket string, marker *gofakes3.UploadListMark
 	}, nil
 }
 
-func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker int, limit int64) (*gofakes3.ListMultipartUploadPartsResult, error) {
-	resp, err := s.b.MultipartUploadParts(context.Background(), bucket, "/"+object, string(uploadID), marker, limit)
+func (s *s3) ListParts(ctx context.Context, bucket, object string, uploadID gofakes3.UploadID, marker int, limit int64) (*gofakes3.ListMultipartUploadPartsResult, error) {
+	resp, err := s.b.MultipartUploadParts(ctx, bucket, "/"+object, string(uploadID), marker, limit)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -471,15 +466,15 @@ func (s *s3) ListParts(bucket, object string, uploadID gofakes3.UploadID, marker
 	}, nil
 }
 
-func (s *s3) AbortMultipartUpload(bucket, object string, id gofakes3.UploadID) error {
-	err := s.b.AbortMultipartUpload(context.Background(), bucket, "/"+object, string(id))
+func (s *s3) AbortMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID) error {
+	err := s.b.AbortMultipartUpload(ctx, bucket, "/"+object, string(id))
 	if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return nil
 }
 
-func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
+func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
 	var parts []api.MultipartCompletedPart
 	for _, part := range input.Parts {
 		parts = append(parts, api.MultipartCompletedPart{
@@ -487,7 +482,7 @@ func (s *s3) CompleteMultipartUpload(bucket, object string, id gofakes3.UploadID
 			PartNumber: part.PartNumber,
 		})
 	}
-	resp, err := s.b.CompleteMultipartUpload(context.Background(), bucket, "/"+object, string(id), parts)
+	resp, err := s.b.CompleteMultipartUpload(ctx, bucket, "/"+object, string(id), parts)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

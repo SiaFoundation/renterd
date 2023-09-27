@@ -1,8 +1,6 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
-github.com/SiaFoundation/gofakes3 v0.0.0-20230926105940-8aab3bc35165 h1:ZE6ENLIFHmzcOrL8I/VcEsBpC3BNVj3APn9U3k+24wU=
-github.com/SiaFoundation/gofakes3 v0.0.0-20230926105940-8aab3bc35165/go.mod h1:02EoKXW29E0owiR6uE0NUbpLiSm78VrmFq42qp2ojRo=
 github.com/VividCortex/ewma v1.1.1/go.mod h1:2Tkkvm3sRDVXaiyucHiACn4cqf7DpdyLvmxzcbUokwA=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d/go.mod h1:asat636LX7Bqt5lYEZ27JNDcqxfjdBQuJ/MM4CN/Lzo=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=
@@ -309,6 +307,8 @@ go.opentelemetry.io/proto/otlp v1.0.0 h1:T0TX0tmXU8a3CbNXzEKGeU5mIVOdf0oykP+u2lI
 go.opentelemetry.io/proto/otlp v1.0.0/go.mod h1:Sy6pihPLfYHkr3NkUbEhGHFhINUSI/v80hjKIs5JXpM=
 go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be h1:fKfwYsCF5ua3Z/NNdLU+4sS9MM6M4EetMA0V4Y8zPKg=
 go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be/go.mod h1:D17UWSn99SEfQnEaR9G9n6Kz9+BwqMoUgZ6Cl424LsQ=
+go.sia.tech/gofakes3 v0.0.0-20230926110632-5b2c588c6928 h1:W4deJEIzIODrBkwU5coScxKWLKhwPsegnyJPB6CnFeQ=
+go.sia.tech/gofakes3 v0.0.0-20230926110632-5b2c588c6928/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
 go.sia.tech/hostd v0.1.4 h1:r6PSo8ed0hmxjf4pvFQfRCfGk/DVRd/R/T9K9B0JhJ4=
 go.sia.tech/hostd v0.1.4/go.mod h1:o+Z9ZGJZRY31MvRNXyyAlmBHjjiTE/3TgAB4pCHgr2c=
 go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb h1:yLDEqkqC19E/HgBoq2Uhw9oH3SMNRyeRjZ7Ep4dPKR8=

@@ -34,7 +34,7 @@ const (
 	statsRecomputeMinInterval = 3 * time.Second
 
 	defaultPackedSlabsLockDuration  = 5 * time.Minute
-	defaultPackedSlabsUploadTimeout = 10 * time.Minute
+	defaultPackedSlabsUploadTimeout = 5 * time.Minute
 	defaultPackedSlabsLimit         = 1
 )
 
@@ -268,13 +268,13 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
 
-	// add parital slabs
+	// add partial slabs
+	var bufferSizeLimitReached bool
 	if len(partialSlabData) > 0 {
-		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		obj.PartialSlabs, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return "", err
 		}
-		obj.PartialSlabs = partialSlabs
 	}
 
 	// persist the object
@@ -283,10 +283,13 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
 
-	// if packing was enabled try uploading packed slabs in a separate goroutine
+	// if packing was enabled try uploading packed slabs
 	if up.packing {
-		go w.tryUploadPackedSlabs(up.rs, up.contractSet)
+		if err := w.tryUploadPackedSlabs(ctx, up.rs, up.contractSet, bufferSizeLimitReached); err != nil {
+			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
+		}
 	}
+
 	return etag, nil
 }
 
@@ -304,12 +307,12 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	}
 
 	// add parital slabs
+	var bufferSizeLimitReached bool
 	if len(partialSlabData) > 0 {
-		partialSlabs, err := w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		obj.PartialSlabs, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return "", err
 		}
-		obj.PartialSlabs = partialSlabs
 	}
 
 	// persist the part
@@ -318,14 +321,17 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		return "", fmt.Errorf("couldn't add multi part: %w", err)
 	}
 
-	// if packing was enabled try uploading packed slabs in a separate goroutine
+	// if packing was enabled try uploading packed slabs
 	if up.packing {
-		go w.tryUploadPackedSlabs(up.rs, up.contractSet)
+		if err := w.tryUploadPackedSlabs(ctx, up.rs, up.contractSet, bufferSizeLimitReached); err != nil {
+			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
+		}
 	}
+
 	return etag, nil
 }
 
-func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet string) {
+func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string) {
 	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
 
 	w.uploadsMu.Lock()
@@ -345,34 +351,50 @@ func (w *worker) tryUploadPackedSlabs(rs api.RedundancySettings, contractSet str
 
 	// keep uploading packed slabs until we're done
 	for {
-		// fetch packed slabs
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, defaultPackedSlabsLimit)
+		uploaded, err := w.uploadPackedSlabs(context.Background(), defaultPackedSlabsLockDuration, rs, contractSet, defaultPackedSlabsLimit)
 		if err != nil {
-			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
-			cancel()
+			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 			return
-		}
-		cancel()
-
-		// if there's no packed slabs, we're done
-		if len(packedSlabs) == 0 {
+		} else if uploaded == 0 {
 			return
-		}
-
-		// upload packed slabs
-		for _, ps := range packedSlabs {
-			if err := w.uploadPackedSlab(ps, rs, contractSet); err != nil {
-				w.logger.Errorf("failed to upload packed slab, err: %v", err)
-				return
-			}
 		}
 	}
 }
 
-func (w *worker) uploadPackedSlab(ps api.PackedSlab, rs api.RedundancySettings, contractSet string) error {
+func (w *worker) tryUploadPackedSlabs(ctx context.Context, rs api.RedundancySettings, contractSet string, block bool) (err error) {
+	// if we want to block, try and upload one packed slab synchronously
+	if block {
+		ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
+		defer cancel()
+		_, err = w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, rs, contractSet, defaultPackedSlabsLimit)
+	}
+
+	// make sure there's a goroutine uploading the remainder of the packed slabs
+	go w.threadedUploadPackedSlabs(rs, contractSet)
+	return
+}
+
+func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Duration, rs api.RedundancySettings, contractSet string, limit int) (uploaded int, err error) {
+	// fetch packed slabs
+	packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, lockingDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, limit)
+	if err != nil {
+		return 0, fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+	}
+
+	// upload packed slabs
+	for _, ps := range packedSlabs {
+		err = w.uploadPackedSlab(ctx, ps, rs, contractSet)
+		if err != nil {
+			return
+		}
+		uploaded++
+	}
+	return
+}
+
+func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api.RedundancySettings, contractSet string) error {
 	// create a context with sane timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
+	ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
 	defer cancel()
 
 	// fetch contracts
