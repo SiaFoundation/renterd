@@ -288,10 +288,11 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 func (mgr *SlabBufferManager) BufferSize(gid bufferGroupID) (total int64) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	for _, buffer := range append(mgr.completeBuffers[gid], mgr.incompleteBuffers[gid]...) {
-		buffer.mu.Lock()
-		total += buffer.size
-		buffer.mu.Unlock()
+	for _, buffer := range mgr.completeBuffers[gid] {
+		total += buffer.maxSize
+	}
+	for _, buffer := range mgr.incompleteBuffers[gid] {
+		total += buffer.maxSize
 	}
 	return
 }

@@ -596,6 +596,7 @@ func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, e
 	return
 }
 
+// UploadPackingSettings returns the upload packing settings.
 func (c *Client) UploadPackingSettings(ctx context.Context) (ups api.UploadPackingSettings, err error) {
 	err = c.Setting(ctx, api.SettingUploadPacking, &ups)
 	return
