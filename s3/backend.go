@@ -308,7 +308,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
 	err := s.b.DeleteObject(ctx, bucketName, objectName, false)
-	if err != nil && !strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -379,13 +379,16 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 }
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
-	etag, err := s.w.UploadMultipartUploadPart(ctx, input, object, string(id), partNumber, api.UploadWithDisabledPreshardingEncryption())
+	opts := []api.UploadOption{
+		api.UploadWithBucket(bucket),
+		api.UploadWithDisabledPreshardingEncryption(),
+	}
+
+	etag, err := s.w.UploadMultipartUploadPart(ctx, input, object, string(id), partNumber, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
-	return &gofakes3.UploadPartResult{
-		ETag: etag,
-	}, nil
+	return &gofakes3.UploadPartResult{ETag: api.FormatEtag(etag)}, nil
 }
 
 func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
@@ -472,8 +475,8 @@ func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string,
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
+
 	return &gofakes3.CompleteMultipartUploadResult{
-		VersionID: "",
-		ETag:      resp.ETag,
+		ETag: api.FormatEtag(resp.ETag),
 	}, nil
 }
