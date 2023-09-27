@@ -3202,9 +3202,9 @@ func TestBuckets(t *testing.T) {
 	// Create 2 more buckets and delete the default one. This should result in
 	// 2 buckets.
 	b1, b2 := "bucket1", "bucket2"
-	if err := db.CreateBucket(context.Background(), b1); err != nil {
+	if err := db.CreateBucket(context.Background(), b1, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := db.CreateBucket(context.Background(), b2); err != nil {
+	} else if err := db.CreateBucket(context.Background(), b2, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
 	} else if err := db.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
@@ -3220,7 +3220,7 @@ func TestBuckets(t *testing.T) {
 
 	// Creating an existing buckets shouldn't work and neither should deleting
 	// one that doesn't exist.
-	if err := db.CreateBucket(context.Background(), b1); !errors.Is(err, api.ErrBucketExists) {
+	if err := db.CreateBucket(context.Background(), b1, api.BucketPolicy{}); !errors.Is(err, api.ErrBucketExists) {
 		t.Fatal("expected ErrBucketExists", err)
 	} else if err := db.DeleteBucket(context.Background(), "foo"); !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
@@ -3242,11 +3242,11 @@ func TestBucketObjects(t *testing.T) {
 
 	// Create buckest for the test.
 	b1, b2 := "bucket1", "bucket2"
-	if err := os.CreateBucket(context.Background(), b1); err != nil {
+	if err := os.CreateBucket(context.Background(), b1, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := os.CreateBucket(context.Background(), b2); err != nil {
+	} else if err := os.CreateBucket(context.Background(), b2, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := os.CreateBucket(context.Background(), b2); !errors.Is(err, api.ErrBucketExists) {
+	} else if err := os.CreateBucket(context.Background(), b2, api.BucketPolicy{}); !errors.Is(err, api.ErrBucketExists) {
 		t.Fatal(err)
 	}
 
@@ -3407,9 +3407,9 @@ func TestCopyObject(t *testing.T) {
 
 	// Create the buckets.
 	ctx := context.Background()
-	if err := os.CreateBucket(ctx, "src"); err != nil {
+	if err := os.CreateBucket(ctx, "src", api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := os.CreateBucket(ctx, "dst"); err != nil {
+	} else if err := os.CreateBucket(ctx, "dst", api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
 	}
 
