@@ -230,9 +230,9 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00016_etags",
+			ID: "00018_etags",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00016_etags(tx, logger)
+				return performMigration00018_etags(tx, logger)
 			},
 		},
 	}
@@ -817,13 +817,13 @@ func performMigration00015_multipartUploads(txn *gorm.DB, logger *zap.SugaredLog
 	return nil
 }
 
-func performMigration00016_etags(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00016_etags")
+func performMigration00018_etags(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00018_etags")
 	if !txn.Migrator().HasColumn(&dbObject{}, "etag") {
 		if err := txn.Migrator().AddColumn(&dbObject{}, "etag"); err != nil {
 			return err
 		}
 	}
-	logger.Info("migration 00016_etags complete")
+	logger.Info("migration 00018_etags complete")
 	return nil
 }

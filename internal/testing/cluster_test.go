@@ -300,14 +300,20 @@ func TestObjectEntries(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// assert mod time & clear it afterwards so we can compare
+	// assertMetadata asserts both ModTime and Etag are set and then clears it
+	// afterwards so we can compare
 	start := time.Now()
-	assertModTime := func(entries []api.ObjectMetadata) {
+	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
 			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.After(start.UTC()) {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = time.Time{}
+
+			if entries[i].ETag == "" {
+				t.Fatal("ETag should be set")
+			}
+			entries[i].ETag = ""
 		}
 	}
 
@@ -392,8 +398,8 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err, test.path)
 		}
 
-		// assert mod time & clear it afterwards so we can compare
-		assertModTime(res.Entries)
+		// assert ModTime & ETag and clear it afterwards so we can compare
+		assertMetadata(res.Entries)
 
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
@@ -404,8 +410,8 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// assert mod time & clear it afterwards so we can compare
-			assertModTime(res.Entries)
+			// assert ModTime & ETag and clear it afterwards so we can compare
+			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
@@ -425,8 +431,8 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// assert mod time & clear it afterwards so we can compare
-			assertModTime(res.Entries)
+			// assert ModTime & ETag and clear it afterwards so we can compare
+			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
@@ -444,8 +450,8 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// assert mod time & clear it afterwards so we can compare
-		assertModTime(got)
+		// assert ModTime & ETag and clear it afterwards so we can compare
+		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
