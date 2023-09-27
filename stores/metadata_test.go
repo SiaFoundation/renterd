@@ -2687,7 +2687,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Add the first slab.
 	ctx := context.Background()
-	slabs, err := db.AddPartialSlab(ctx, slab1Data, 1, 2, testContractSet)
+	slabs, bufferSize, err := db.AddPartialSlab(ctx, slab1Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2696,6 +2696,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab1Data)) || slabs[0].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	} else if bufferSize != rhpv2.SectorSize {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
@@ -2756,7 +2758,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add the second slab.
-	slabs, err = db.AddPartialSlab(ctx, slab2Data, 1, 2, testContractSet)
+	slabs, bufferSize, err = db.AddPartialSlab(ctx, slab2Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2765,6 +2767,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab2Data)) || slabs[0].Offset != uint32(len(slab1Data)) {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	} else if bufferSize != rhpv2.SectorSize {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err = db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
@@ -2793,7 +2797,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add third slab.
-	slabs, err = db.AddPartialSlab(ctx, slab3Data, 1, 2, testContractSet)
+	slabs, bufferSize, err = db.AddPartialSlab(ctx, slab3Data, 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2805,6 +2809,9 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[1].Length != uint32(len(slab3Data)-1) || slabs[1].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
+	}
+	if bufferSize != 2*rhpv2.SectorSize {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	if data1, err := db.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
 		t.Fatal(err)
@@ -2905,11 +2912,11 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add 2 more partial slabs.
-	_, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	_, _, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	_, bufferSize, err = db.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2926,6 +2933,9 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("expected buffer to be complete")
 	} else if buffersBefore[1].Complete {
 		t.Fatal("expected buffer to be incomplete")
+	}
+	if bufferSize != 2*rhpv2.SectorSize {
+		t.Fatal("unexpected buffer size", bufferSize)
 	}
 
 	// Close manager to make sure we can restart the database without
@@ -3209,9 +3219,9 @@ func TestBuckets(t *testing.T) {
 	// Create 2 more buckets and delete the default one. This should result in
 	// 2 buckets.
 	b1, b2 := "bucket1", "bucket2"
-	if err := db.CreateBucket(context.Background(), b1); err != nil {
+	if err := db.CreateBucket(context.Background(), b1, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := db.CreateBucket(context.Background(), b2); err != nil {
+	} else if err := db.CreateBucket(context.Background(), b2, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
 	} else if err := db.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
@@ -3227,7 +3237,7 @@ func TestBuckets(t *testing.T) {
 
 	// Creating an existing buckets shouldn't work and neither should deleting
 	// one that doesn't exist.
-	if err := db.CreateBucket(context.Background(), b1); !errors.Is(err, api.ErrBucketExists) {
+	if err := db.CreateBucket(context.Background(), b1, api.BucketPolicy{}); !errors.Is(err, api.ErrBucketExists) {
 		t.Fatal("expected ErrBucketExists", err)
 	} else if err := db.DeleteBucket(context.Background(), "foo"); !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
@@ -3249,11 +3259,11 @@ func TestBucketObjects(t *testing.T) {
 
 	// Create buckest for the test.
 	b1, b2 := "bucket1", "bucket2"
-	if err := os.CreateBucket(context.Background(), b1); err != nil {
+	if err := os.CreateBucket(context.Background(), b1, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := os.CreateBucket(context.Background(), b2); err != nil {
+	} else if err := os.CreateBucket(context.Background(), b2, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := os.CreateBucket(context.Background(), b2); !errors.Is(err, api.ErrBucketExists) {
+	} else if err := os.CreateBucket(context.Background(), b2, api.BucketPolicy{}); !errors.Is(err, api.ErrBucketExists) {
 		t.Fatal(err)
 	}
 
@@ -3414,9 +3424,9 @@ func TestCopyObject(t *testing.T) {
 
 	// Create the buckets.
 	ctx := context.Background()
-	if err := os.CreateBucket(ctx, "src"); err != nil {
+	if err := os.CreateBucket(ctx, "src", api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := os.CreateBucket(ctx, "dst"); err != nil {
+	} else if err := os.CreateBucket(ctx, "dst", api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3480,7 +3490,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
-	_, err = db.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	_, _, err = db.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}

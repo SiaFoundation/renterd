@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SiaFoundation/gofakes3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/s3"
 	"go.uber.org/zap"
@@ -243,21 +243,34 @@ func TestS3Authentication(t *testing.T) {
 	}
 	go s3Server.Serve(s3Listener)
 
+	assertAuth := func(c *minio.Client, shouldWork bool) {
+		t.Helper()
+		resp := c.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{})
+		for obj := range resp {
+			err := obj.Err
+			if shouldWork && err != nil {
+				t.Fatal(err)
+			} else if !shouldWork && err == nil {
+				t.Fatal("expected error")
+			} else if !shouldWork && err != nil && !strings.Contains(err.Error(), "AccessDenied") {
+				t.Fatal("wrong error")
+			}
+		}
+	}
+
 	// Create client.
-	s3Client, err := minio.New(s3Listener.Addr().String(), &minio.Options{
+	s3Unauthenticated, err := minio.New(s3Listener.Addr().String(), &minio.Options{
 		Creds: nil, // no authentication
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// List buckets. Shouldn't work.
-	if _, err := s3Client.ListBuckets(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported algorithm") {
-		t.Fatal(err)
-	}
+	// List bucket. Shouldn't work.
+	assertAuth(s3Unauthenticated, false)
 
 	// Create client with credentials and try again..
-	s3Client, err = minio.New(s3Listener.Addr().String(), &minio.Options{
+	s3Authenticated, err := minio.New(s3Listener.Addr().String(), &minio.Options{
 		Creds: testS3Credentials,
 	})
 	if err != nil {
@@ -265,9 +278,29 @@ func TestS3Authentication(t *testing.T) {
 	}
 
 	// List buckets. Should work.
-	if _, err := s3Client.ListBuckets(context.Background()); err != nil {
+	assertAuth(s3Authenticated, true)
+
+	// Update the policy of the bucket to allow public read access.
+	err = cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
+		PublicReadAccess: true,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Listing should work now.
+	assertAuth(s3Unauthenticated, true)
+
+	// Update the policy again to disable access.
+	err = cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
+		PublicReadAccess: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Listing should not work now.
+	assertAuth(s3Unauthenticated, false)
 }
 
 func TestS3List(t *testing.T) {

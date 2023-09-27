@@ -168,7 +168,7 @@ type Bus interface {
 	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, ETag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 
-	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, err error)
+	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
