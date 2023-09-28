@@ -22,6 +22,7 @@ import (
 const (
 	testPersistInterval = time.Second
 	testContractSet     = "test"
+	testMimeType        = "application/octet-stream"
 )
 
 // newTestSQLStore creates a new SQLStore for testing.

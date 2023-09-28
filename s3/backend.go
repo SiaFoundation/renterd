@@ -327,7 +327,11 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	err := s.w.UploadObject(ctx, input, key, api.UploadWithBucket(bucketName))
+	opts := []api.UploadOption{api.UploadWithBucket(bucketName)}
+	if ct, ok := meta["Content-Type"]; ok {
+		opts = append(opts, api.UploadWithMimeType(ct))
+	}
+	err := s.w.UploadObject(ctx, input, key, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
@@ -358,9 +362,12 @@ func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...stri
 	return res, nil
 }
 
-// TODO: use metadata when we have support for it
 func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
-	obj, err := s.b.CopyObject(ctx, srcBucket, dstBucket, "/"+srcKey, "/"+dstKey)
+	var opts api.CopyObjectOptions
+	if ct, ok := meta["Content-Type"]; ok {
+		opts.MimeType = ct
+	}
+	obj, err := s.b.CopyObject(ctx, srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, opts)
 	if err != nil {
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -371,7 +378,11 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 }
 
 func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
-	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, object.NoOpKey)
+	opts := api.CreateMultipartOptions{Key: object.NoOpKey}
+	if ct, ok := meta["Content-Type"]; ok {
+		opts.MimeType = ct
+	}
+	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, opts)
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

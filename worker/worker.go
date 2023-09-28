@@ -161,7 +161,7 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket string, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
 	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
@@ -1100,6 +1100,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		up.ContractSet = contractset
 	}
 
+	// decode the mimetype from the query string
+	var mimeType string
+	if jc.DecodeForm("mimetype", &mimeType) != nil {
+		return
+	}
+
 	// decode the bucket from the query string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -1138,10 +1144,11 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// built options
+	// build options
 	opts := []UploadOption{
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
+		WithMimeType(mimeType),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
 	}
