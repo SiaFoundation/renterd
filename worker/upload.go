@@ -1149,14 +1149,14 @@ outer:
 			default:
 			}
 
-			// pop the next upload
-			upload := u.pop()
-			if upload == nil {
+			// pop the next upload req
+			req := u.pop()
+			if req == nil {
 				continue outer
 			}
 
 			// skip if upload is done
-			if upload.done() {
+			if req.done() {
 				continue
 			}
 
@@ -1164,32 +1164,32 @@ outer:
 			var root types.Hash256
 			start := time.Now()
 			fcid, _, _ := u.contractInfo()
-			err := rl.withRevision(upload.ctx, defaultRevisionFetchTimeout, fcid, u.hk, u.siamuxAddr, upload.upload.lockPriority, u.blockHeight(), func(rev types.FileContractRevision) error {
+			err := rl.withRevision(req.ctx, defaultRevisionFetchTimeout, fcid, u.hk, u.siamuxAddr, req.upload.lockPriority, u.blockHeight(), func(rev types.FileContractRevision) error {
 				if rev.RevisionNumber == math.MaxUint64 {
 					return errMaxRevisionReached
 				}
 
 				var err error
-				root, err = u.execute(upload, rev)
+				root, err = u.execute(req, rev)
 				return err
 			})
 
 			// the uploader's contract got renewed, requeue the request, try and refresh the contract
 			if errors.Is(err, errMaxRevisionReached) {
-				u.requeue(upload)
+				u.requeue(req)
 				u.mgr.renewUploader(u)
 				continue outer
 			}
 
 			// send the response
 			if err != nil {
-				upload.fail(err)
+				req.fail(err)
 			} else {
-				upload.succeed(root)
+				req.succeed(root)
 			}
 
 			// track the error, ignore gracefully closed streams and canceled overdrives
-			canceledOverdrive := upload.done() && upload.overdrive && err != nil
+			canceledOverdrive := req.done() && req.overdrive && err != nil
 			if !canceledOverdrive && !isClosedStream(err) {
 				u.trackSectorUpload(err, time.Since(start))
 			}
@@ -1331,29 +1331,29 @@ func (u *uploader) pop() *sectorUploadReq {
 	return nil
 }
 
-func (upload *sectorUploadReq) succeed(root types.Hash256) {
+func (req *sectorUploadReq) succeed(root types.Hash256) {
 	select {
-	case <-upload.ctx.Done():
-	case upload.responseChan <- sectorUploadResp{
-		req:  upload,
+	case <-req.ctx.Done():
+	case req.responseChan <- sectorUploadResp{
+		req:  req,
 		root: root,
 	}:
 	}
 }
 
-func (upload *sectorUploadReq) fail(err error) {
+func (req *sectorUploadReq) fail(err error) {
 	select {
-	case <-upload.ctx.Done():
-	case upload.responseChan <- sectorUploadResp{
-		req: upload,
+	case <-req.ctx.Done():
+	case req.responseChan <- sectorUploadResp{
+		req: req,
 		err: err,
 	}:
 	}
 }
 
-func (upload *sectorUploadReq) done() bool {
+func (req *sectorUploadReq) done() bool {
 	select {
-	case <-upload.ctx.Done():
+	case <-req.ctx.Done():
 		return true
 	default:
 		return false
