@@ -344,7 +344,7 @@ func (w *worker) tryUploadPackedSlabs(ctx context.Context, rs api.RedundancySett
 	}
 
 	// make sure there's a goroutine uploading the remainder of the packed slabs
-	go w.threadedUploadPackedSlabs(rs, contractSet, lockingPriorityUpload)
+	go w.threadedUploadPackedSlabs(rs, contractSet, lockingPriorityUpload-1)
 	return
 }
 
