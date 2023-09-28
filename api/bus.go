@@ -230,7 +230,7 @@ func (o ObjectMetadata) LastModified() string {
 // ContentType returns the object's MimeType for use in the 'Content-Type'
 // header, if the object's mime type is empty we try and deduce it from the
 // extension in the object's name.
-func (o Object) ContentType() string {
+func (o ObjectMetadata) ContentType() string {
 	if o.MimeType != "" {
 		return o.MimeType
 	}
