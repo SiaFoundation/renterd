@@ -106,7 +106,7 @@ var (
 		},
 		S3: config.S3{
 			Address:     build.DefaultS3Address,
-			Enabled:     false,
+			Enabled:     true,
 			DisableAuth: false,
 			KeypairsV4:  nil,
 		},
