@@ -292,7 +292,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			return api.MultipartCompleteResponse{}, fmt.Errorf("duplicate part number %v", parts[i].PartNumber)
 		}
 	}
-	var ETag string
+	var eTag string
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		// Find multipart upload.
 		var mu dbMultipartUpload
@@ -363,7 +363,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 
 		// Compute ETag.
 		sum := h.Sum()
-		ETag = hex.EncodeToString(sum[:])
+		eTag = hex.EncodeToString(sum[:])
 
 		// Sort their primary keys to make sure retrieving them later will
 		// respect the part order.
@@ -402,7 +402,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		return api.MultipartCompleteResponse{}, err
 	}
 	return api.MultipartCompleteResponse{
-		ETag: ETag,
+		ETag: eTag,
 	}, nil
 }
 

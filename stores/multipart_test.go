@@ -61,7 +61,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		etag := hex.EncodeToString(frand.Bytes(16))
-		err = db.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, testETag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs, usedContracts)
+		err = db.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs, usedContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
