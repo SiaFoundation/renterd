@@ -88,7 +88,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to create s3 server: %w", err)
 	}
-	return faker.Server(), err
+	return faker.Server(), nil
 }
 
 // Parsev4AuthKeys parses a list of accessKey-secretKey pairs and returns a map
