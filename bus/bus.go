@@ -1026,7 +1026,7 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, aor.ETag, aor.MimeType, jc.PathParam("path"), aor.ContractSet, aor.Object, aor.UsedContracts))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Object, aor.UsedContracts))
 }
 
 func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {

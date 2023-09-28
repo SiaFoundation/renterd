@@ -31,6 +31,11 @@ import (
 	"lukechampine.com/frand"
 )
 
+const (
+	testEtag     = "d34db33f"
+	testMimeType = "application/octet-stream"
+)
+
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.
 func TestNewTestCluster(t *testing.T) {
@@ -60,7 +65,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, object.Object{
+	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, testEtag, testMimeType, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -73,7 +78,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, "imanetag", map[types.PublicKey]types.FileContractID{}, "application/octet-stream")
+	}, map[types.PublicKey]types.FileContractID{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -278,7 +278,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, ETag, used, mimeType)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, ETag, mimeType, obj, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
@@ -300,7 +300,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	}
 
 	// upload the part
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
+	obj, partialSlabData, used, eTag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -315,7 +315,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	}
 
 	// persist the part
-	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, etag, used)
+	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, eTag, uploadID, partNumber, obj.Slabs, obj.PartialSlabs, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add multi part: %w", err)
 	}
@@ -327,7 +327,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 		}
 	}
 
-	return etag, nil
+	return eTag, nil
 }
 
 func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string) {

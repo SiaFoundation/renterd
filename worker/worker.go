@@ -2,24 +2,19 @@ package worker
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/big"
-	"mime"
 	"net"
 	"net/http"
-	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gotd/contrib/http_range"
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -162,10 +157,10 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, ETag string, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) error
+	AddObject(ctx context.Context, bucket, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
 
-	AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, ETag string, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
@@ -1026,16 +1021,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	// assert the object is set and set the appropriate response headers
-	if res.Object == nil {
-		jc.Error(errors.New("object not returned by the bus"), http.StatusInternalServerError)
-		return
-	}
-
-	// write the response headers
-	jc.ResponseWriter.Header().Set("Last-Modified", res.Object.LastModified())
-	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(buildETag(jc.Request, res.Object.ETag)))
-
 	// return early if the object is empty
 	if len(res.Object.Slabs) == 0 && len(res.Object.PartialSlabs) == 0 {
 		return
@@ -1047,41 +1032,6 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// NOTE: ideally we would use http.ServeContent in this handler, but that
-	// has performance issues. If we implemented io.ReadSeeker in the most
-	// straightforward fashion, we would need one (or more!) RHP RPCs for each
-	// Read call. We can improve on this to some degree by buffering, but
-	// without knowing the exact ranges being requested, this will always be
-	// suboptimal. Thus, sadly, we have to roll our own range support.
-	ranges, err := http_range.ParseRange(jc.Request.Header.Get("Range"), res.Object.Size)
-	if err != nil {
-		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
-		return
-	}
-	var offset int64
-	length := res.Object.Size
-	status := http.StatusOK
-	if len(ranges) > 0 {
-		status = http.StatusPartialContent
-		jc.ResponseWriter.Header().Set("Content-Range", ranges[0].ContentRange(res.Object.Size))
-		offset, length = ranges[0].Start, ranges[0].Length
-		if offset < 0 || length < 0 || offset+length > res.Object.Size {
-			jc.Error(fmt.Errorf("invalid range: %v %v", offset, length), http.StatusRequestedRangeNotSatisfiable)
-			return
-		}
-	}
-	jc.ResponseWriter.Header().Set("Content-Length", strconv.FormatInt(length, 10))
-	jc.ResponseWriter.Header().Set("Accept-Ranges", "bytes")
-	if ext := filepath.Ext(path); ext != "" {
-		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
-			jc.ResponseWriter.Header().Set("Content-Type", mimeType)
-		}
-	}
-	rw := rangedResponseWriter{rw: jc.ResponseWriter, defaultStatusCode: status}
-
 	// fetch all contracts
 	contracts, err := w.bus.Contracts(ctx)
 	if err != nil {
@@ -1089,9 +1039,16 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	// download the object
-	if jc.Check(fmt.Sprintf("couldn't download object '%v'", path), w.downloadManager.DownloadObject(ctx, &rw, res.Object.Object, uint64(offset), uint64(length), contracts)) != nil {
-		return
+	// create a download function
+	downloadFn := func(wr io.Writer, offset, length int64) error {
+		ctx = WithGougingChecker(ctx, w.bus, gp)
+		return w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
+	}
+
+	// serve the content
+	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, downloadFn)
+	if err != nil {
+		jc.Error(err, status)
 	}
 }
 
@@ -1637,19 +1594,6 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 func isErrDuplicateTransactionSet(err error) bool {
 	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
-}
-
-func buildETag(req *http.Request, objETag string) string {
-	rh := req.Header.Get("Range")
-	if rh == "" {
-		return objETag
-	}
-
-	h := types.NewHasher()
-	h.E.Write([]byte(rh))
-	h.E.Write([]byte(objETag))
-	sum := h.Sum()
-	return hex.EncodeToString(sum[:])
 }
 
 func isPrivateIP(addr net.IP) bool {
