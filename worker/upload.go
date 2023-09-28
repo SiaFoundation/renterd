@@ -263,7 +263,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// perform the upload
-	obj, partialSlabData, used, etag, err := w.uploadManager.Upload(ctx, r, up)
+	obj, partialSlabData, used, ETag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -278,7 +278,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, used, mimeType)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, ETag, used, mimeType)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
@@ -289,8 +289,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 		}
 	}
-
-	return etag, nil
+	return ETag, nil
 }
 
 func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts ...UploadOption) (string, error) {
@@ -552,7 +551,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadParameters) (_ object.Object, partialSlab []byte, used map[types.PublicKey]types.FileContractID, etag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadParameters) (_ object.Object, partialSlab []byte, used map[types.PublicKey]types.FileContractID, ETag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

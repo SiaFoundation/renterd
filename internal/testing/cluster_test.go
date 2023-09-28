@@ -73,7 +73,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{}, "application/octet-stream")
+	}, "imanetag", map[types.PublicKey]types.FileContractID{}, "application/octet-stream")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,8 @@ func TestObjectEntries(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// assert mod time & mime type and clear it afterwards so we can compare
+	// assertMetadata asserts ModTime, ETag and MimeType are set and then clears
+	// them afterwards so we can compare without having to specify the metadata
 	start := time.Now()
 	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
@@ -315,6 +316,12 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal("mime type should be set", entries[i].MimeType, entries[i].Name)
 			}
 			entries[i].MimeType = ""
+
+			// assert etag
+			if entries[i].ETag == "" {
+				t.Fatal("ETag should be set")
+			}
+			entries[i].ETag = ""
 		}
 	}
 
@@ -398,8 +405,6 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
-
-		// assert mod time & mime type and clear it afterwards so we can compare
 		assertMetadata(res.Entries)
 
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
@@ -410,8 +415,6 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			// assert mod time & mime type and clear it afterwards so we can compare
 			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
@@ -431,8 +434,6 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			// assert mod time & mime type and clear it afterwards so we can compare
 			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
@@ -450,8 +451,6 @@ func TestObjectEntries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		// assert mod time & mime type and clear it afterwards so we can compare
 		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {

@@ -241,6 +241,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00017_mimetype(tx, logger)
 			},
 		},
+		{
+			ID: "00018_etags",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00018_etags(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -845,5 +851,16 @@ func performMigration00017_mimetype(txn *gorm.DB, logger *zap.SugaredLogger) err
 		}
 	}
 	logger.Info("migration 00017_mimetype complete")
+	return nil
+}
+
+func performMigration00018_etags(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00018_etags")
+	if !txn.Migrator().HasColumn(&dbObject{}, "etag") {
+		if err := txn.Migrator().AddColumn(&dbObject{}, "etag"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00018_etags complete")
 	return nil
 }
