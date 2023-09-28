@@ -37,7 +37,7 @@ var (
 	// DefaultUploadPackingSettings define the default upload packing settings
 	// the bus is configured with on startup.
 	DefaultUploadPackingSettings = api.UploadPackingSettings{
-		Enabled:               false,
+		Enabled:               true,
 		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
 	}
 

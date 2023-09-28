@@ -235,6 +235,13 @@ func UploadWithDisabledPreshardingEncryption() UploadOption {
 	}
 }
 
+// UploadWithMimeType sets the mime type that should be used for the upload
+func UploadWithMimeType(mimeType string) UploadOption {
+	return func(v url.Values) {
+		v.Set("mimetype", mimeType)
+	}
+}
+
 func UploadWithEncryptionOffset(offset int64) UploadOption {
 	return func(v url.Values) {
 		v.Set("offset", fmt.Sprint(offset))

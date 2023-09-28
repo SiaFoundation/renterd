@@ -428,6 +428,10 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
+	err = busClient.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{Enabled: false})
+	if err != nil {
+		return nil, err
+	}
 
 	// Fund the bus.
 	if funding {

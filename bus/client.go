@@ -677,25 +677,28 @@ func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOpt
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContract map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
 		Bucket:        bucket,
 		ContractSet:   contractSet,
 		Object:        o,
-		UsedContracts: usedContract,
+		UsedContracts: usedContracts,
+		MimeType:      mimeType,
 	})
 	return
 }
 
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
-func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string) (om api.ObjectMetadata, err error) {
+func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
 	err = c.c.WithContext(ctx).POST("/objects/copy", api.ObjectsCopyRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
 		SourcePath:        srcPath,
 		DestinationPath:   dstPath,
+
+		MimeType: opts.MimeType,
 	}, &om)
 	return
 }
@@ -968,11 +971,12 @@ func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode strin
 	return
 }
 
-func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (resp api.MultipartCreateResponse, err error) {
+func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/create", api.MultipartCreateRequest{
-		Bucket: bucket,
-		Key:    ec,
-		Path:   path,
+		Bucket:   bucket,
+		Path:     path,
+		Key:      opts.Key,
+		MimeType: opts.MimeType,
 	}, &resp)
 	return
 }
@@ -1001,7 +1005,7 @@ func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, 
 	return
 }
 
-func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
+func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/complete", api.MultipartCompleteRequest{
 		Bucket:   bucket,
 		Path:     path,

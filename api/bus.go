@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"mime"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -212,10 +214,11 @@ type Object struct {
 
 // ObjectMetadata contains various metadata about an object.
 type ObjectMetadata struct {
-	Health  float64   `json:"health"`
-	ModTime time.Time `json:"modTime"`
-	Name    string    `json:"name"`
-	Size    int64     `json:"size"`
+	Health   float64   `json:"health"`
+	MimeType string    `json:"mimeType"`
+	ModTime  time.Time `json:"modTime"`
+	Name     string    `json:"name"`
+	Size     int64     `json:"size"`
 }
 
 // LastModified returns the object's ModTime formatted for use in the
@@ -224,12 +227,28 @@ func (o *Object) LastModified() string {
 	return o.ModTime.UTC().Format(http.TimeFormat)
 }
 
+// ContentType returns the object's MimeType for use in the 'Content-Type'
+// header, if the object's mime type is empty we try and deduce it from the
+// extension in the object's name.
+func (o Object) ContentType() string {
+	if o.MimeType != "" {
+		return o.MimeType
+	}
+
+	if ext := filepath.Ext(o.Name); ext != "" {
+		return mime.TypeByExtension(ext)
+	}
+
+	return ""
+}
+
 // ObjectAddRequest is the request type for the /object/*key endpoint.
 type ObjectAddRequest struct {
 	Bucket        string                                   `json:"bucket"`
 	ContractSet   string                                   `json:"contractSet"`
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	MimeType      string                                   `json:"mimeType"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.
@@ -245,6 +264,8 @@ type ObjectsCopyRequest struct {
 
 	DestinationBucket string `json:"destinationBucket"`
 	DestinationPath   string `json:"destinationPath"`
+
+	MimeType string `json:"mimeType"`
 }
 
 // ObjectsRenameRequest is the request type for the /objects/rename endpoint.
@@ -521,10 +542,18 @@ type S3AuthenticationSettings struct {
 
 // Types related to multipart uploads.
 type (
+	CopyObjectOptions struct {
+		MimeType string `json:"mimeType"`
+	}
+	CreateMultipartOptions struct {
+		Key      object.EncryptionKey `json:"key"`
+		MimeType string               `json:"mimeType"`
+	}
 	MultipartCreateRequest struct {
-		Bucket string               `json:"bucket"`
-		Key    object.EncryptionKey `json:"key"`
-		Path   string               `json:"path"`
+		Bucket   string               `json:"bucket"`
+		Path     string               `json:"path"`
+		Key      object.EncryptionKey `json:"key"`
+		MimeType string               `json:"mimeType"`
 	}
 	MultipartCreateResponse struct {
 		UploadID string `json:"uploadID"`

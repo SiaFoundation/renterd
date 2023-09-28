@@ -73,7 +73,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{})
+	}, map[types.PublicKey]types.FileContractID{}, "application/octet-stream")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,14 +300,21 @@ func TestObjectEntries(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// assert mod time & clear it afterwards so we can compare
+	// assert mod time & mime type and clear it afterwards so we can compare
 	start := time.Now()
-	assertModTime := func(entries []api.ObjectMetadata) {
+	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
+			// assert mod time
 			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.After(start.UTC()) {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = time.Time{}
+
+			// assert mime type
+			if entries[i].MimeType == "" {
+				t.Fatal("mime type should be set", entries[i].MimeType, entries[i].Name)
+			}
+			entries[i].MimeType = ""
 		}
 	}
 
@@ -392,8 +399,8 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err, test.path)
 		}
 
-		// assert mod time & clear it afterwards so we can compare
-		assertModTime(res.Entries)
+		// assert mod time & mime type and clear it afterwards so we can compare
+		assertMetadata(res.Entries)
 
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
@@ -404,8 +411,8 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// assert mod time & clear it afterwards so we can compare
-			assertModTime(res.Entries)
+			// assert mod time & mime type and clear it afterwards so we can compare
+			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
@@ -425,8 +432,8 @@ func TestObjectEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// assert mod time & clear it afterwards so we can compare
-			assertModTime(res.Entries)
+			// assert mod time & mime type and clear it afterwards so we can compare
+			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
@@ -444,8 +451,8 @@ func TestObjectEntries(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// assert mod time & clear it afterwards so we can compare
-		assertModTime(got)
+		// assert mod time & mime type and clear it afterwards so we can compare
+		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
@@ -760,6 +767,9 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatal("expected one entry to be returned", len(entries))
+	}
+	if entries[0].MimeType != "application/octet-stream" {
+		t.Fatal("wrong mime type", entries[0].MimeType)
 	}
 
 	// fetch entries with "file" prefix
@@ -2259,13 +2269,19 @@ func TestSlabBufferStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// check the slab buffers
-	buffers, err = b.SlabBuffers()
+	// check the slab buffers, again a retry loop to avoid NDFs
+	err = Retry(100, 100*time.Millisecond, func() error {
+		buffers, err = b.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(buffers) != 0 {
+			return fmt.Errorf("expected 0 slab buffers, got %d", len(buffers))
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(buffers) != 0 {
-		t.Fatal("expected 0 slab buffers, got", len(buffers))
 	}
 }
 
@@ -2365,7 +2381,7 @@ func TestMultipartUploads(t *testing.T) {
 
 	// Start a new multipart upload.
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, object.GenerateEncryptionKey())
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
 	if err != nil {
 		t.Fatal(err)
 	} else if mpr.UploadID == "" {

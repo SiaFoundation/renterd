@@ -27,6 +27,7 @@ type (
 		DBBucket   dbBucket
 		DBBucketID uint              `gorm:"index;NOT NULL"`
 		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
+		MimeType   string            `gorm:"index"`
 	}
 
 	dbMultipartPart struct {
@@ -36,6 +37,7 @@ type (
 		Size                uint64
 		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
 		Slabs               []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+
 	}
 )
 
@@ -47,7 +49,7 @@ func (dbMultipartPart) TableName() string {
 	return "multipart_parts"
 }
 
-func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey) (api.MultipartCreateResponse, error) {
+func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error) {
 	// Marshal key
 	key, err := ec.MarshalText()
 	if err != nil {
@@ -72,6 +74,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 			Key:        key,
 			UploadID:   uploadID,
 			ObjectID:   path,
+			MimeType:   mimeType,
 		}).Error; err != nil {
 			return fmt.Errorf("failed to create multipart upload: %w", err)
 		}
@@ -82,7 +85,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, eTag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
@@ -119,7 +122,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 		}
 		// Create a new part.
 		part := dbMultipartPart{
-			Etag:                etag,
+			Etag:                eTag,
 			PartNumber:          partNumber,
 			DBMultipartUploadID: mu.ID,
 			Size:                size,
@@ -372,6 +375,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			ObjectID:   path,
 			Key:        mu.Key,
 			Size:       int64(size),
+			MimeType:   mu.MimeType,
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
