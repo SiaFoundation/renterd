@@ -337,10 +337,10 @@ func (raw rawObject) convert() (api.Object, error) {
 	// hydrate all slabs
 	slabs := make([]object.SlabSlice, 0, len(filtered))
 	if len(filtered) > 0 {
-		curr := filtered[0].SlabID
+		curr := filtered[0]
 		var start int
 		// create a helper function to add a slab and update the state
-		addSlab := func(end int, id uint) error {
+		addSlab := func(end int) error {
 			if filtered[start].SlabBuffered {
 				return nil // ignore partial slabs
 			}
@@ -348,7 +348,6 @@ func (raw rawObject) convert() (api.Object, error) {
 				return err
 			} else {
 				slabs = append(slabs, slab)
-				curr = id
 				start = end
 			}
 			return nil
@@ -358,13 +357,16 @@ func (raw rawObject) convert() (api.Object, error) {
 			if sector.SectorID == 0 {
 				return api.Object{}, api.ErrObjectCorrupted
 			}
-			if sector.SlabID != curr {
-				if err := addSlab(j, sector.SlabID); err != nil {
+			if sector.SlabID != curr.SlabID ||
+				sector.SliceOffset != curr.SliceOffset ||
+				sector.SliceLength != curr.SliceLength {
+				if err := addSlab(j); err != nil {
 					return api.Object{}, err
 				}
+				curr = sector
 			}
 		}
-		if err := addSlab(len(filtered), 0); err != nil {
+		if err := addSlab(len(filtered)); err != nil {
 			return api.Object{}, err
 		}
 	} else {
@@ -1584,7 +1586,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		return fmt.Errorf("either objID or multiPartID must be set")
 	}
 
-	var dbSlices []dbSlice
 	for i, ss := range slices {
 		// Create Slab if it doesn't exist yet.
 		slabKey, err := ss.Key.MarshalText()
@@ -1617,7 +1618,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		if err != nil {
 			return fmt.Errorf("failed to create slice %v/%v: %w", i+1, len(slices), err)
 		}
-		dbSlices = append(dbSlices, slice)
 
 		for j, shard := range ss.Shards {
 			// Create sector if it doesn't exist yet.

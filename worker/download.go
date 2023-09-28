@@ -227,7 +227,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		}
 		data, slab, err := mgr.pss.PartialSlab(ctx, slabs[i].SlabSlice.Key, slabs[i].SlabSlice.Offset, slabs[i].SlabSlice.Length)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to fetch partial slab data: %w", err)
 		}
 		if slab != nil {
 			slabs[i].SlabSlice.Slab = *slab
