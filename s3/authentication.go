@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/gofakes3/signature"
@@ -82,28 +81,10 @@ func writeResponse(w http.ResponseWriter, err signature.APIError) {
 	_, _ = w.Write(signature.EncodeAPIErrorToResponse(err))
 }
 
-func newAuthenticatedBackend(b *s3, keyPairs map[string]string) (*authenticatedBackend, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// fetch keys from bus
-	as, err := b.b.S3AuthenticationSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// merge keys
-	for k, v := range keyPairs {
-		as.V4Keypairs[k] = v
-	}
-	// update settings
-	if err := b.b.UpdateSetting(ctx, api.SettingS3Authentication, as); err != nil {
-		return nil, err
-	}
-	// reload active keys in memory
-	signature.ReloadKeys(as.V4Keypairs)
+func newAuthenticatedBackend(b *s3) *authenticatedBackend {
 	return &authenticatedBackend{
 		backend: b,
-	}, nil
+	}
 }
 
 func (b *authenticatedBackend) applyBucketPolicy(ctx context.Context, bucketName string, p *permissions) error {

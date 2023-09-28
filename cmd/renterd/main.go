@@ -515,7 +515,6 @@ func main() {
 			if cfg.S3.Enabled {
 				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
 					AuthDisabled: cfg.S3.DisableAuth,
-					AuthKeyPairs: cfg.S3.KeypairsV4,
 				})
 				if err != nil {
 					log.Fatal("failed to create s3 client", err)
@@ -565,6 +564,23 @@ func main() {
 
 	// Start server.
 	go srv.Serve(l)
+
+	// Set initial S3 keys.
+	if cfg.S3.Enabled && !cfg.S3.DisableAuth {
+		as, err := bc.S3AuthenticationSettings(context.Background())
+		if err != nil {
+			logger.Fatal("failed to fetch S3 authentication settings: " + err.Error())
+		}
+		// merge keys
+		for k, v := range cfg.S3.KeypairsV4 {
+			as.V4Keypairs[k] = v
+		}
+		// update settings
+		if err := bc.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
+			logger.Fatal("failed to update S3 authentication settings: " + err.Error())
+		}
+	}
+
 	logger.Info("api: Listening on " + l.Addr().String())
 
 	if s3Srv != nil {

@@ -21,7 +21,6 @@ type gofakes3Logger struct {
 
 type Opts struct {
 	AuthDisabled bool
-	AuthKeyPairs map[string]string
 }
 
 type bus interface {
@@ -75,11 +74,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 	}
 	backend := gofakes3.Backend(s3Backend)
 	if !opts.AuthDisabled {
-		var err error
-		backend, err = newAuthenticatedBackend(s3Backend, opts.AuthKeyPairs)
-		if err != nil {
-			return nil, err
-		}
+		backend = newAuthenticatedBackend(s3Backend)
 	}
 	faker, err := gofakes3.New(
 		backend,
