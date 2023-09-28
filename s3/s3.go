@@ -20,6 +20,7 @@ type gofakes3Logger struct {
 }
 
 type Opts struct {
+	AuthDisabled bool
 	AuthKeyPairs map[string]string
 }
 
@@ -41,6 +42,8 @@ type bus interface {
 	MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
+	S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error)
+	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
@@ -65,13 +68,21 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 
 func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
 	namedLogger := logger.Named("s3")
-	backend := &s3{
+	s3Backend := &s3{
 		b:      b,
 		w:      w,
 		logger: namedLogger,
 	}
+	backend := gofakes3.Backend(s3Backend)
+	if !opts.AuthDisabled {
+		var err error
+		backend, err = newAuthenticatedBackend(s3Backend, opts.AuthKeyPairs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	faker, err := gofakes3.New(
-		newAuthenticatedBackend(backend, opts.AuthKeyPairs),
+		backend,
 		gofakes3.WithHostBucket(false),
 		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,

@@ -513,10 +513,8 @@ func main() {
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
-				if len(cfg.S3.KeypairsV4) == 0 && !cfg.S3.DisableAuth {
-					log.Fatal("no S3 keypairs provided and S3 authentication is not disabled - please provide at least one keypair e.g. 'accessKeyID1,secretAccessKey1;accessKeyID2,secretAccessKey2")
-				}
 				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
+					AuthDisabled: cfg.S3.DisableAuth,
 					AuthKeyPairs: cfg.S3.KeypairsV4,
 				})
 				if err != nil {

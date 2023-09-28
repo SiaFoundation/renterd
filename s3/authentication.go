@@ -2,9 +2,11 @@ package s3
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/gofakes3/signature"
@@ -19,8 +21,7 @@ var (
 
 type (
 	authenticatedBackend struct {
-		backend    *s3
-		v4AuthPair map[string]string
+		backend *s3
 	}
 
 	permissions struct {
@@ -75,12 +76,34 @@ var (
 	noAccessPerms = permissions{}
 )
 
-func newAuthenticatedBackend(b *s3, keyPairs map[string]string) *authenticatedBackend {
-	signature.StoreKeys(keyPairs)
-	return &authenticatedBackend{
-		backend:    b,
-		v4AuthPair: keyPairs,
+func writeResponse(w http.ResponseWriter, err signature.APIError) {
+	w.WriteHeader(err.HTTPStatusCode)
+	w.Header().Add("Content-Type", "application/xml")
+	_, _ = w.Write(signature.EncodeAPIErrorToResponse(err))
+}
+
+func newAuthenticatedBackend(b *s3, keyPairs map[string]string) (*authenticatedBackend, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// fetch keys from bus
+	as, err := b.b.S3AuthenticationSettings(ctx)
+	if err != nil {
+		return nil, err
 	}
+	// merge keys
+	for k, v := range keyPairs {
+		as.V4Keypairs[k] = v
+	}
+	// update settings
+	if err := b.b.UpdateSetting(ctx, api.SettingS3Authentication, as); err != nil {
+		return nil, err
+	}
+	// reload active keys in memory
+	signature.ReloadKeys(as.V4Keypairs)
+	return &authenticatedBackend{
+		backend: b,
+	}, nil
 }
 
 func (b *authenticatedBackend) applyBucketPolicy(ctx context.Context, bucketName string, p *permissions) error {
@@ -110,24 +133,34 @@ func (b *authenticatedBackend) permsFromCtx(ctx context.Context, bucket string) 
 	return perms
 }
 
+func (b *authenticatedBackend) reloadV4Keys(ctx context.Context) error {
+	as, err := b.backend.b.S3AuthenticationSettings(ctx)
+	if err != nil {
+		return err
+	}
+	signature.ReloadKeys(as.V4Keypairs)
+	return nil
+}
+
 func (b *authenticatedBackend) AuthenticationMiddleware(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
 		perms := noAccessPerms
-		if len(b.v4AuthPair) > 0 {
-			if rq.Header.Get("Authorization") == "" {
-				// No auth header, we use guest permissions.
-				// TODO: guest permissions
-			} else if result := signature.V4SignVerify(rq); result != signature.ErrNone {
-				// Authentication attempted but failed.
-				resp := signature.GetAPIError(result)
-				w.WriteHeader(resp.HTTPStatusCode)
-				w.Header().Add("Content-Type", "application/xml")
-				_, _ = w.Write(signature.EncodeAPIErrorToResponse(resp))
-				return
-			} else {
-				// Authenticated request, treat as root user.
-				perms = rootPerms
-			}
+		if rq.Header.Get("Authorization") == "" {
+			// No auth header, we continue without permissions. Request might
+			// still succeed due to bucket policy.
+		} else if err := b.reloadV4Keys(rq.Context()); err != nil {
+			writeResponse(w, signature.APIError{
+				Code:        string(gofakes3.ErrInternal),
+				Description: fmt.Sprintf("failed to reload v4 keys: %v", err),
+			})
+			return
+		} else if result := signature.V4SignVerify(rq); result != signature.ErrNone {
+			// Authentication attempted but failed.
+			writeResponse(w, signature.GetAPIError(result))
+			return
+		} else {
+			// Authenticated request, treat as root user.
+			perms = rootPerms
 		}
 		// Add permissions to context.
 		ctx := context.WithValue(rq.Context(), permissionKey, &perms)

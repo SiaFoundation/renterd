@@ -616,6 +616,12 @@ func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySetti
 	return
 }
 
+// GougingSettings returns the gouging settings.
+func (c *Client) S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error) {
+	err = c.Setting(ctx, api.SettingS3Authentication, &as)
+	return
+}
+
 // SearchHosts returns all hosts that match certain search criteria.
 func (c *Client) SearchHosts(ctx context.Context, filterMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (hosts []hostdb.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{

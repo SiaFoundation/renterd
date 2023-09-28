@@ -33,10 +33,11 @@ const (
 
 	DefaultBucketName = "default"
 
-	SettingContractSet   = "contractset"
-	SettingGouging       = "gouging"
-	SettingRedundancy    = "redundancy"
-	SettingUploadPacking = "uploadpacking"
+	SettingContractSet      = "contractset"
+	SettingGouging          = "gouging"
+	SettingRedundancy       = "redundancy"
+	SettingS3Authentication = "s3authentication"
+	SettingUploadPacking    = "uploadpacking"
 )
 
 var (
@@ -512,6 +513,10 @@ type GougingSettings struct {
 	// MinMaxEphemeralAccountBalance is the minimum accepted value for
 	// `MaxEphemeralAccountBalance` in the host's price settings.
 	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
+}
+
+type S3AuthenticationSettings struct {
+	V4Keypairs map[string]string `json:"v4Keypairs"`
 }
 
 // Types related to multipart uploads.
