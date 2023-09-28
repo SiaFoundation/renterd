@@ -3,6 +3,7 @@ module go.sia.tech/renterd
 go 1.20
 
 require (
+	github.com/gabriel-vasile/mimetype v1.4.2
 	github.com/go-gormigrate/gormigrate/v2 v2.1.0
 	github.com/google/go-cmp v0.5.9
 	github.com/gotd/contrib v0.19.0
