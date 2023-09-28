@@ -307,7 +307,10 @@ func (mgr *SlabBufferManager) FetchPartialSlab(ctx context.Context, ec object.En
 
 	data := make([]byte, length)
 	_, err := buffer.file.ReadAt(data, int64(offset))
-	return data, err
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data from buffer (offset: %v, length: %v): %w", offset, length, err)
+	}
+	return data, nil
 }
 
 func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
