@@ -568,8 +568,10 @@ func main() {
 	// Set initial S3 keys.
 	if cfg.S3.Enabled && !cfg.S3.DisableAuth {
 		as, err := bc.S3AuthenticationSettings(context.Background())
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
 			logger.Fatal("failed to fetch S3 authentication settings: " + err.Error())
+		} else if as.V4Keypairs == nil {
+			as.V4Keypairs = make(map[string]string)
 		}
 		// merge keys
 		for k, v := range cfg.S3.KeypairsV4 {
