@@ -48,9 +48,10 @@ const (
 	lockingPriorityRenew                  = 80
 	lockingPriorityPriceTable             = 60
 	lockingPriorityFunding                = 40
-	lockingPrioritySyncing                = 20
-	lockingPriorityPruning                = 10
-	lockingPriorityUpload                 = 1 // lowest
+	lockingPrioritySyncing                = 30
+	lockingPriorityPruning                = 20
+	lockingPriorityUpload                 = 10
+	lockingPriorityMigrations             = 1 // lowest
 )
 
 var privateSubnets []*net.IPNet

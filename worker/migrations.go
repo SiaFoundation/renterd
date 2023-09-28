@@ -94,8 +94,16 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 		}
 	}
 
+	// prioritise this migration
+	lockPriority := lockingPriorityMigrations
+	if s.Health < .25 {
+		lockPriority = lockingPriorityUpload + 1
+	} else if s.Health < .5 {
+		lockPriority = lockingPriorityUpload
+	}
+
 	// migrate the shards
-	uploaded, used, err := u.Migrate(ctx, shards, allowed, bh)
+	uploaded, used, err := u.UploadShards(ctx, shards, allowed, bh, lockPriority)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
