@@ -359,13 +359,15 @@ func main() {
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
 	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
 
-	var keyPairsV4 string
-	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
-	if keyPairsV4 != "" {
-		var err error
-		cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
-		if err != nil {
-			log.Fatalf("failed to parse keypairs: %v", err)
+	if cfg.S3.Enabled {
+		var keyPairsV4 string
+		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
+		if !cfg.S3.DisableAuth && keyPairsV4 != "" {
+			var err error
+			cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
+			if err != nil {
+				log.Fatalf("failed to parse keypairs: %v", err)
+			}
 		}
 	}
 
