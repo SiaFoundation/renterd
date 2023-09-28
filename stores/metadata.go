@@ -337,7 +337,6 @@ func (raw rawObject) convert() (api.Object, error) {
 	// hydrate all slabs
 	slabs := make([]object.SlabSlice, 0, len(filtered))
 	if len(filtered) > 0 {
-		curr := filtered[0]
 		var start int
 		// create a helper function to add a slab and update the state
 		addSlab := func(end int) error {
@@ -353,6 +352,7 @@ func (raw rawObject) convert() (api.Object, error) {
 			return nil
 		}
 
+		curr := filtered[0]
 		for j, sector := range filtered {
 			if sector.SectorID == 0 {
 				return api.Object{}, api.ErrObjectCorrupted
