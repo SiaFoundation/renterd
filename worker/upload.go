@@ -263,7 +263,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// perform the upload
-	obj, partialSlabData, used, ETag, err := w.uploadManager.Upload(ctx, r, up)
+	obj, partialSlabData, used, eTag, err := w.uploadManager.Upload(ctx, r, up)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -278,7 +278,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, ETag, mimeType, obj, used)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, eTag, mimeType, obj, used)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}
@@ -289,7 +289,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 		}
 	}
-	return ETag, nil
+	return eTag, nil
 }
 
 func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts ...UploadOption) (string, error) {
