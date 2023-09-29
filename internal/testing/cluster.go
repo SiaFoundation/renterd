@@ -321,9 +321,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 	workerShutdownFns = append(workerShutdownFns, wShutdownFn)
 
 	// Create S3 API.
-	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{
-		AuthKeyPairs: testS3AuthPairs,
-	})
+	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{})
 	if err != nil {
 		return nil, err
 	}
@@ -421,6 +419,12 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 		return nil, err
 	}
 	err = busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings)
+	if err != nil {
+		return nil, err
+	}
+	err = busClient.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
+		V4Keypairs: testS3AuthPairs,
+	})
 	if err != nil {
 		return nil, err
 	}
