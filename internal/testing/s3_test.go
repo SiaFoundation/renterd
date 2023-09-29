@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +15,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/s3"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -227,22 +223,6 @@ func TestS3Authentication(t *testing.T) {
 		}
 	}()
 
-	// Create a new S3 server that connects to the cluster.
-	s3Listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s3Handler, err := s3.New(cluster.Bus, cluster.Worker, zap.NewNop().Sugar(), s3.Opts{
-		AuthKeyPairs: testS3AuthPairs,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s3Server := http.Server{
-		Handler: s3Handler,
-	}
-	go s3Server.Serve(s3Listener)
-
 	assertAuth := func(c *minio.Client, shouldWork bool) {
 		t.Helper()
 		resp := c.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{})
@@ -259,7 +239,8 @@ func TestS3Authentication(t *testing.T) {
 	}
 
 	// Create client.
-	s3Unauthenticated, err := minio.New(s3Listener.Addr().String(), &minio.Options{
+	url := cluster.S3.EndpointURL().Host
+	s3Unauthenticated, err := minio.New(url, &minio.Options{
 		Creds: nil, // no authentication
 	})
 	if err != nil {
@@ -270,7 +251,7 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Unauthenticated, false)
 
 	// Create client with credentials and try again..
-	s3Authenticated, err := minio.New(s3Listener.Addr().String(), &minio.Options{
+	s3Authenticated, err := minio.New(url, &minio.Options{
 		Creds: testS3Credentials,
 	})
 	if err != nil {

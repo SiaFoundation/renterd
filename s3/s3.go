@@ -20,7 +20,7 @@ type gofakes3Logger struct {
 }
 
 type Opts struct {
-	AuthKeyPairs map[string]string
+	AuthDisabled bool
 }
 
 type bus interface {
@@ -41,6 +41,8 @@ type bus interface {
 	MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
+	S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error)
+	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
@@ -65,13 +67,17 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 
 func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
 	namedLogger := logger.Named("s3")
-	backend := &s3{
+	s3Backend := &s3{
 		b:      b,
 		w:      w,
 		logger: namedLogger,
 	}
+	backend := gofakes3.Backend(s3Backend)
+	if !opts.AuthDisabled {
+		backend = newAuthenticatedBackend(s3Backend)
+	}
 	faker, err := gofakes3.New(
-		newAuthenticatedBackend(backend, opts.AuthKeyPairs),
+		backend,
 		gofakes3.WithHostBucket(false),
 		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,
@@ -82,7 +88,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to create s3 server: %w", err)
 	}
-	return faker.Server(), err
+	return faker.Server(), nil
 }
 
 // Parsev4AuthKeys parses a list of accessKey-secretKey pairs and returns a map
