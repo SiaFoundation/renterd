@@ -560,27 +560,25 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		resp.NumObjects = objInfo.NumObjects
 		resp.TotalObjectsSize = objInfo.TotalObjectsSize
 
-		var sectorsSize int64
+		var totalSectors uint64
 		err = tx.Model(&dbSector{}).
 			Raw("SELECT COUNT(*) FROM (SELECT 1 FROM contract_sectors cs GROUP BY cs.db_sector_id)").
-			Scan(&sectorsSize).
+			Scan(&totalSectors).
 			Error
 		if err != nil {
 			return err
 		}
-		sectorsSize *= int64(rhpv2.SectorSize)
 
-		var uploadedSize int64
+		var totalUploaded int64
 		err = tx.Model(&dbContractSector{}).
-			Count(&uploadedSize).
+			Count(&totalUploaded).
 			Error
 		if err != nil {
 			return err
 		}
-		uploadedSize *= int64(rhpv2.SectorSize)
 
-		resp.TotalSectorsSize = uint64(sectorsSize)
-		resp.TotalUploadedSize = uint64(uploadedSize)
+		resp.TotalSectorsSize = totalSectors * rhpv2.SectorSize
+		resp.TotalUploadedSize = uint64(totalUploaded) * rhpv2.SectorSize
 		return nil
 	})
 }
