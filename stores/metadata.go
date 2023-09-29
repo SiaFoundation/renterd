@@ -562,7 +562,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 
 		var totalSectors uint64
 		err = tx.Model(&dbSector{}).
-			Raw("SELECT COUNT(*) FROM (SELECT 1 FROM contract_sectors cs GROUP BY cs.db_sector_id)").
+			Raw("SELECT COUNT(*) FROM (SELECT 1 FROM contract_sectors cs GROUP BY cs.db_sector_id) sectors").
 			Scan(&totalSectors).
 			Error
 		if err != nil {
