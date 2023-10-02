@@ -95,7 +95,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	}
 
 	// migrate the shards
-	uploaded, used, err := u.Migrate(ctx, shards, allowed, bh)
+	uploaded, used, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
