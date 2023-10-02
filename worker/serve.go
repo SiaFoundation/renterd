@@ -1,13 +1,12 @@
 package worker
 
 import (
-	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/gotd/contrib/http_range"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -24,26 +23,21 @@ type (
 	}
 )
 
-func newContentReader(r io.Reader, obj api.Object) (io.ReadSeeker, string, error) {
-	contentType := obj.ContentType()
-	if contentType == "" {
-		header := bytes.NewBuffer(nil)
-		mtype, err := mimetype.DetectReader(io.TeeReader(r, header))
-		if err != nil {
-			return nil, "", err
-		}
-		r = io.MultiReader(header, r)
-		contentType = mtype.String()
-	}
-
+func newContentReader(r io.Reader, obj api.Object) io.ReadSeeker {
 	return &contentReader{
 		r:    r,
 		size: obj.Size,
-	}, contentType, nil
+	}
 }
 
 func (cr *contentReader) Seek(offset int64, whence int) (int64, error) {
-	return cr.size, nil
+	if offset == 0 && whence == io.SeekEnd {
+		return cr.size, nil
+	} else if offset == 0 && whence == io.SeekStart {
+		return 0, nil
+	} else {
+		return 0, errors.New("unexpected seek")
+	}
 }
 
 func (cr *contentReader) Read(p []byte) (int, error) {
@@ -67,10 +61,16 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 		}
 	}()
 
-	// create a content reader, this will return the object's content type
-	rs, contentType, err := newContentReader(pr, obj)
-	if err != nil {
-		return http.StatusInternalServerError, err
+	// create a content reader
+	rs := newContentReader(pr, obj)
+
+	// fetch the content type, if not set and we can't infer it from object's
+	// name we default to application/octet-stream, that is important because we
+	// have to avoid http.ServeContent to sniff the content type as it would
+	// require a seek
+	contentType := obj.ContentType()
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
 
 	// set the response headers, no need to set Last-Modified header as

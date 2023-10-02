@@ -376,6 +376,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			Key:        mu.Key,
 			Size:       int64(size),
 			MimeType:   mu.MimeType,
+			Etag:       eTag,
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
