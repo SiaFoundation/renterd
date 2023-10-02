@@ -373,13 +373,13 @@ func TestObjectEntries(t *testing.T) {
 
 	for _, upload := range uploads {
 		if upload.size == 0 {
-			if err := w.UploadObject(context.Background(), bytes.NewReader(nil), upload.path); err != nil {
+			if _, err := w.UploadObject(context.Background(), bytes.NewReader(nil), upload.path); err != nil {
 				t.Fatal(err)
 			}
 		} else {
 			data := make([]byte, upload.size)
 			frand.Read(data)
-			if err := w.UploadObject(context.Background(), bytes.NewReader(data), upload.path); err != nil {
+			if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), upload.path); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -525,7 +525,7 @@ func TestObjectsRename(t *testing.T) {
 		"/foo/baz/quuz",
 	}
 	for _, path := range uploads {
-		if err := w.UploadObject(context.Background(), bytes.NewReader(nil), path); err != nil {
+		if _, err := w.UploadObject(context.Background(), bytes.NewReader(nil), path); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -584,7 +584,7 @@ func TestUploadDownloadEmpty(t *testing.T) {
 	}
 
 	// upload an empty file
-	if err := w.UploadObject(context.Background(), bytes.NewReader(nil), "empty"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(nil), "empty"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -644,7 +644,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// upload the data
 	name := fmt.Sprintf("data_%v", len(data))
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 		t.Fatal(err)
 	}
 
@@ -757,10 +757,10 @@ func TestUploadDownloadExtended(t *testing.T) {
 	file2 := make([]byte, rhpv2.SectorSize/12)
 	frand.Read(file1)
 	frand.Read(file2)
-	if err := w.UploadObject(context.Background(), bytes.NewReader(file1), "fileś/file1"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(file1), "fileś/file1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.UploadObject(context.Background(), bytes.NewReader(file2), "fileś/file2"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(file2), "fileś/file2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -814,7 +814,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		name := fmt.Sprintf("data_%v", len(data))
-		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+		if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -984,7 +984,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 			// upload the data
 			name := fmt.Sprintf("data_%v", len(data))
-			if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+			if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1320,7 +1320,7 @@ func TestParallelUpload(t *testing.T) {
 
 		// upload the data
 		name := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
-		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+		if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 			return err
 		}
 		return nil
@@ -1350,7 +1350,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Upload one more object.
-	if err := w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1420,7 +1420,7 @@ func TestParallelDownload(t *testing.T) {
 
 	// upload the data
 	data := frand.Bytes(rhpv2.SectorSize)
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1642,7 +1642,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload a file
 	data := frand.Bytes(5*rhpv2.SectorSize + 1)
-	err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
+	_, err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1899,7 +1899,7 @@ func TestUploadPacking(t *testing.T) {
 	}
 	uploadDownload := func(name string, data []byte) {
 		t.Helper()
-		if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+		if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 			t.Fatal(err)
 		}
 		download(name, data, 0, int64(len(data)))
@@ -2175,7 +2175,7 @@ func TestSlabBufferStats(t *testing.T) {
 	frand.Read(data2)
 
 	// upload the first file - buffer should still be incomplete after this
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data1), "1"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data1), "1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2238,7 +2238,7 @@ func TestSlabBufferStats(t *testing.T) {
 	}
 
 	// upload the second file - this should fill the buffer
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data2), "2"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data2), "2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2406,14 +2406,15 @@ func TestMultipartUploads(t *testing.T) {
 	// correctly.
 	putPart := func(partNum int, offset int, data []byte) string {
 		t.Helper()
-		etag, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), objPath, mpr.UploadID, partNum, api.UploadWithEncryptionOffset(int64(offset)))
+		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), objPath, mpr.UploadID, partNum, api.UploadWithEncryptionOffset(int64(offset)))
 		if err != nil {
 			t.Fatal(err)
-		} else if etag == "" {
+		} else if res.ETag == "" {
 			t.Fatal("expected non-empty ETag")
 		}
-		return etag
+		return res.ETag
 	}
+
 	data1 := frand.Bytes(64)
 	data2 := frand.Bytes(128)
 	data3 := frand.Bytes(64)

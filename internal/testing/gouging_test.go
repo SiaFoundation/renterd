@@ -63,7 +63,7 @@ func TestGouging(t *testing.T) {
 
 	// upload the data
 	name := fmt.Sprintf("data_%v", len(data))
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,7 +98,7 @@ func TestGouging(t *testing.T) {
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// upload some data - should fail
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err == nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err == nil {
 		t.Fatal("expected upload to fail")
 	}
 

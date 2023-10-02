@@ -84,9 +84,17 @@ func TestS3Basic(t *testing.T) {
 
 	// add object to the bucket
 	data := frand.Bytes(10)
-	_, err = s3.PutObject(context.Background(), bucket, "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	uploadInfo, err := s3.PutObject(context.Background(), bucket, "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	busObject, err := cluster.Bus.Object(context.Background(), "object", api.ObjectsWithBucket(bucket))
+	if err != nil {
+		t.Fatal(err)
+	} else if busObject.Object == nil {
+		t.Fatal("expected object to exist")
+	} else if busObject.Object.ETag != uploadInfo.ETag {
+		t.Fatalf("expected ETag %q, got %q", uploadInfo.ETag, busObject.Object.ETag)
 	}
 
 	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})

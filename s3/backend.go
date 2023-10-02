@@ -331,13 +331,14 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 	if ct, ok := meta["Content-Type"]; ok {
 		opts = append(opts, api.UploadWithMimeType(ct))
 	}
-	err := s.w.UploadObject(ctx, input, key, opts...)
+	ur, err := s.w.UploadObject(ctx, input, key, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 	return gofakes3.PutObjectResult{
+		ETag:      ur.ETag,
 		VersionID: "", // not supported
 	}, nil
 }
@@ -395,11 +396,11 @@ func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.
 		api.UploadWithDisabledPreshardingEncryption(),
 	}
 
-	etag, err := s.w.UploadMultipartUploadPart(ctx, input, object, string(id), partNumber, opts...)
+	res, err := s.w.UploadMultipartUploadPart(ctx, input, object, string(id), partNumber, opts...)
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
-	return &gofakes3.UploadPartResult{ETag: api.FormatETag(etag)}, nil
+	return &gofakes3.UploadPartResult{ETag: res.ETag}, nil
 }
 
 func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {

@@ -1291,7 +1291,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
 
@@ -1344,7 +1344,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			Key:        objKey,
 			Size:       o.TotalSize(),
 			MimeType:   mimeType,
-			Etag:       ETag,
+			Etag:       eTag,
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
