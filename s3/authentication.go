@@ -131,8 +131,9 @@ func (b *authenticatedBackend) AuthenticationMiddleware(handler http.Handler) ht
 			// still succeed due to bucket policy.
 		} else if err := b.reloadV4Keys(rq.Context()); err != nil {
 			writeResponse(w, signature.APIError{
-				Code:        string(gofakes3.ErrInternal),
-				Description: fmt.Sprintf("failed to reload v4 keys: %v", err),
+				Code:           string(gofakes3.ErrInternal),
+				Description:    fmt.Sprintf("failed to reload v4 keys: %v", err),
+				HTTPStatusCode: http.StatusInternalServerError,
 			})
 			return
 		} else if result := signature.V4SignVerify(rq); result != signature.ErrNone {
