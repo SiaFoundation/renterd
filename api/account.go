@@ -12,6 +12,9 @@ type (
 		// ID identifies an account. It's a public key.
 		ID rhpv3.Account `json:"id"`
 
+		// CleanShutdown indicates whether the account was saved during a clean
+		CleanShutdown bool `json:"cleanShutdown"`
+
 		// HostKey describes the host the account was created with.
 		HostKey types.PublicKey `json:"hostKey"`
 

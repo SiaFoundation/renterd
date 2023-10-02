@@ -17,6 +17,10 @@ type (
 		// AccountID identifies an account.
 		AccountID publicKey `gorm:"unique;NOT NULL;size:32"`
 
+		// CleanShutdown indicates whether the account was saved during a clean
+		// shutdown.
+		CleanShutdown bool `gorm:"default:false"`
+
 		// Host describes the host the account was created with.
 		Host publicKey `gorm:"NOT NULL"`
 
@@ -39,11 +43,12 @@ func (dbAccount) TableName() string {
 
 func (a dbAccount) convert() api.Account {
 	return api.Account{
-		ID:           rhpv3.Account(a.AccountID),
-		HostKey:      types.PublicKey(a.Host),
-		Balance:      (*big.Int)(a.Balance),
-		Drift:        (*big.Int)(a.Drift),
-		RequiresSync: a.RequiresSync,
+		ID:            rhpv3.Account(a.AccountID),
+		CleanShutdown: a.CleanShutdown,
+		HostKey:       types.PublicKey(a.Host),
+		Balance:       (*big.Int)(a.Balance),
+		Drift:         (*big.Int)(a.Drift),
+		RequiresSync:  a.RequiresSync,
 	}
 }
 
@@ -58,6 +63,19 @@ func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 		accounts[i] = acc.convert()
 	}
 	return accounts, nil
+}
+
+// SetCleanShutdown sets the clean shutdown flag on the accounts to 'false' and
+// also sets the 'requires_sync' flag. That way, the autopilot will know to sync
+// all accounts after an unclean shutdown and the bus will know not to apply
+// drift.
+func (s *SQLStore) SetUncleanShutdown() error {
+	return s.db.Model(&dbAccount{}).
+		Updates(map[string]interface{}{
+			"clean_shutdown": false,
+			"requires_sync":  true,
+		}).
+		Error
 }
 
 // SaveAccounts saves the given accounts in the db, overwriting any existing
