@@ -78,10 +78,11 @@ type (
 	}
 
 	S3 struct {
-		Address     string            `yaml:"address"`
-		DisableAuth bool              `yaml:"disableAuth"`
-		Enabled     bool              `yaml:"enabled"`
-		KeypairsV4  map[string]string `yaml:"keypairsV4"`
+		Address           string            `yaml:"address"`
+		DisableAuth       bool              `yaml:"disableAuth"`
+		Enabled           bool              `yaml:"enabled"`
+		KeypairsV4        map[string]string `yaml:"keypairsV4"`
+		HostBucketEnabled bool              `yaml:"hostBucketEnabled"`
 	}
 
 	// Worker contains the configuration for a worker.

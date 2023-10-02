@@ -310,6 +310,7 @@ func main() {
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "address to serve S3 API on - can be overwritten using the RENTERD_S3_ADDRESS environment variable")
 	flag.BoolVar(&cfg.S3.DisableAuth, "s3.disableAuth", cfg.S3.DisableAuth, "disables authentication for the S3 API - can be overwritten using the RENTERD_S3_DISABLE_AUTH environment variable")
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "enable/disable the S3 API (only works if worker.enabled is also 'true') - can be overwritten using the RENTERD_S3_ENABLED environment variable")
+	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "enables bucket rewriting in the router -  - can be overwritten using the RENTERD_S3_HOST_BUCKET_ENABLED environment variable")
 
 	flag.Parse()
 
@@ -358,6 +359,7 @@ func main() {
 	parseEnvVar("RENTERD_S3_ADDRESS", &cfg.S3.Address)
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
 	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
+	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
 
 	if cfg.S3.Enabled {
 		var keyPairsV4 string
@@ -516,7 +518,8 @@ func main() {
 
 			if cfg.S3.Enabled {
 				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
-					AuthDisabled: cfg.S3.DisableAuth,
+					AuthDisabled:      cfg.S3.DisableAuth,
+					HostBucketEnabled: cfg.S3.HostBucketEnabled,
 				})
 				if err != nil {
 					log.Fatal("failed to create s3 client", err)
