@@ -158,12 +158,11 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	delta := new(big.Int).Sub(balance, acc.Balance)
 	balanceBefore := acc.Balance.String()
 	driftBefore := acc.Drift.String()
-	if !acc.CleanShutdown {
-		acc.CleanShutdown = true
-	} else {
+	if acc.CleanShutdown {
 		acc.Drift = acc.Drift.Add(acc.Drift, delta)
 	}
 	acc.Balance.Set(balance)
+	acc.CleanShutdown = true
 	acc.RequiresSync = false // resetting the balance resets the sync field
 	acc.mu.Unlock()
 
@@ -212,11 +211,12 @@ func (a *accounts) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 
 func (a *account) convert() api.Account {
 	return api.Account{
-		ID:           a.ID,
-		Balance:      new(big.Int).Set(a.Balance),
-		Drift:        new(big.Int).Set(a.Drift),
-		HostKey:      a.HostKey,
-		RequiresSync: a.RequiresSync,
+		ID:            a.ID,
+		Balance:       new(big.Int).Set(a.Balance),
+		CleanShutdown: a.CleanShutdown,
+		Drift:         new(big.Int).Set(a.Drift),
+		HostKey:       a.HostKey,
+		RequiresSync:  a.RequiresSync,
 	}
 }
 
