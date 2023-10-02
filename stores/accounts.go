@@ -71,6 +71,7 @@ func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 // drift.
 func (s *SQLStore) SetUncleanShutdown() error {
 	return s.db.Model(&dbAccount{}).
+		Where("TRUE").
 		Updates(map[string]interface{}{
 			"clean_shutdown": false,
 			"requires_sync":  true,
