@@ -20,7 +20,8 @@ type gofakes3Logger struct {
 }
 
 type Opts struct {
-	AuthDisabled bool
+	AuthDisabled      bool
+	HostBucketEnabled bool
 }
 
 type bus interface {
@@ -78,7 +79,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 	}
 	faker, err := gofakes3.New(
 		backend,
-		gofakes3.WithHostBucket(false),
+		gofakes3.WithHostBucket(opts.HostBucketEnabled),
 		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,
 		}),

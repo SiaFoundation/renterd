@@ -40,13 +40,16 @@ const (
 	defaultLockTimeout          = time.Minute
 	defaultRevisionFetchTimeout = 30 * time.Second
 
-	lockingPriorityActiveContractRevision = 100 // highest
+	lockingPriorityActiveContractRevision = 100
 	lockingPriorityRenew                  = 80
 	lockingPriorityPriceTable             = 60
 	lockingPriorityFunding                = 40
-	lockingPrioritySyncing                = 20
-	lockingPriorityPruning                = 10
-	lockingPriorityUpload                 = 1 // lowest
+	lockingPrioritySyncing                = 30
+	lockingPriorityPruning                = 20
+
+	lockingPriorityBlockedUpload    = 15
+	lockingPriorityUpload           = 10
+	lockingPriorityBackgroundUpload = 5
 )
 
 var privateSubnets []*net.IPNet
