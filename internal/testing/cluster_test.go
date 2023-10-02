@@ -715,8 +715,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 }
 
-// TestUploadDownloadBasic is an integration test that verifies objects can be
-// uploaded and download correctly.
+// TestUploadDownloadExtended is an integration test that verifies objects can
+// be uploaded and download correctly.
 func TestUploadDownloadExtended(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()

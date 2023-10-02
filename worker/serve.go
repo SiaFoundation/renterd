@@ -18,22 +18,24 @@ type (
 	// only if the caller made sure to manipulate the request in such a way that
 	// the only seeks are to find out the object's size
 	contentReader struct {
-		r    io.Reader
-		size int64
+		r      io.Reader
+		size   int64
+		offset int64
 	}
 )
 
-func newContentReader(r io.Reader, obj api.Object) io.ReadSeeker {
+func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
 	return &contentReader{
-		r:    r,
-		size: obj.Size,
+		r:      r,
+		offset: offset,
+		size:   obj.Size,
 	}
 }
 
 func (cr *contentReader) Seek(offset int64, whence int) (int64, error) {
 	if offset == 0 && whence == io.SeekEnd {
 		return cr.size, nil
-	} else if offset == 0 && whence == io.SeekStart {
+	} else if (offset == 0 || offset == cr.offset) && whence == io.SeekStart {
 		return 0, nil
 	} else {
 		return 0, errors.New("unexpected seek")
@@ -62,7 +64,7 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	}()
 
 	// create a content reader
-	rs := newContentReader(pr, obj)
+	rs := newContentReader(pr, obj, offset)
 
 	// fetch the content type, if not set and we can't infer it from object's
 	// name we default to application/octet-stream, that is important because we
