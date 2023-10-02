@@ -1238,7 +1238,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
-		err := tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
+		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
 			Joins("DBBucket").
 			Take(&srcObj).
 			Error
@@ -1249,6 +1249,21 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		srcObjHealth, err := s.objectHealth(ctx, tx, srcObj.ID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch src object health: %w", err)
+		}
+
+		if srcBucket == dstBucket && srcPath == dstPath {
+			om = api.ObjectMetadata{
+				Health:   srcObjHealth,
+				MimeType: srcObj.MimeType,
+				ModTime:  srcObj.CreatedAt.UTC(),
+				Name:     srcObj.ObjectID,
+				Size:     srcObj.Size,
+			}
+			return nil
+		}
+		_, err = deleteObject(tx, dstBucket, dstPath)
+		if err != nil {
+			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		var srcSlices []dbSlice
