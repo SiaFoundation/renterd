@@ -222,38 +222,38 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
-	c, s, pt := ci.contract, ci.settings, ci.priceTable
+func (c *contractor) isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, renterFunds types.Currency, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
+	contract, s, pt := ci.contract, ci.settings, ci.priceTable
 
 	usable = true
-	if bh > c.EndHeight() {
+	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
 		usable = false
 		recoverable = false
 		refresh = false
 		renew = false
-	} else if c.Revision.RevisionNumber == math.MaxUint64 {
+	} else if contract.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber.Error())
 		usable = false
 		recoverable = false
 		refresh = false
 		renew = false
 	} else {
-		if isOutOfCollateral(c, s, pt, renterFunds, cfg.Contracts.Period, bh) {
+		if isOutOfCollateral(contract, s, pt, renterFunds, cfg.Contracts.Period, bh) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = false
 			recoverable = true
 			refresh = true
 			renew = false
 		}
-		if isOutOfFunds(cfg, s, c) {
+		if isOutOfFunds(cfg, s, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
 			usable = false
 			recoverable = true
 			refresh = true
 			renew = false
 		}
-		if shouldRenew, secondHalf := isUpForRenewal(cfg, *c.Revision, bh); shouldRenew {
+		if shouldRenew, secondHalf := isUpForRenewal(cfg, *contract.Revision, bh); shouldRenew {
 			reasons = append(reasons, fmt.Errorf("%w; second half: %t", errContractUpForRenewal, secondHalf).Error())
 			usable = usable && !secondHalf // only unusable if in second half of renew window
 			recoverable = true
@@ -263,13 +263,13 @@ func isUsableContract(cfg api.AutopilotConfig, ci contractInfo, bh uint64, rente
 	}
 
 	// IP check should be last since it modifies the filter
-	if !cfg.Hosts.AllowRedundantIPs && (usable || recoverable) && f.isRedundantIP(c.HostIP, c.HostKey) {
+	shouldFilter := !cfg.Hosts.AllowRedundantIPs && (usable || recoverable)
+	if shouldFilter && f.IsRedundantIP(contract.HostIP, contract.HostKey) {
 		reasons = append(reasons, errHostRedundantIP.Error())
 		usable = false
 		recoverable = false // do not use in the contract set, but keep it around for downloads
 		renew = false       // do not renew, but allow refreshes so the contracts stays funded
 	}
-
 	return
 }
 
