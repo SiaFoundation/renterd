@@ -542,45 +542,57 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
 func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
-	var resp api.ObjectsStatsResponse
-	return resp, s.db.Transaction(func(tx *gorm.DB) error {
-		// Number of objects.
-		var objInfo struct {
-			NumObjects       uint64
-			TotalObjectsSize uint64
-		}
-		err := tx.
-			Model(&dbObject{}).
-			Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
-			Scan(&objInfo).
-			Error
-		if err != nil {
-			return err
-		}
-		resp.NumObjects = objInfo.NumObjects
-		resp.TotalObjectsSize = objInfo.TotalObjectsSize
+	// Number of objects.
+	var objInfo struct {
+		NumObjects       uint64
+		TotalObjectsSize uint64
+	}
+	err := s.db.
+		Model(&dbObject{}).
+		Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
+		Scan(&objInfo).
+		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
 
-		var totalSectors uint64
-		err = tx.Model(&dbSector{}).
-			Raw("SELECT COUNT(*) FROM (SELECT 1 FROM contract_sectors cs GROUP BY cs.db_sector_id) sectors").
-			Scan(&totalSectors).
-			Error
-		if err != nil {
-			return err
-		}
+	var totalSectors uint64
 
-		var totalUploaded int64
-		err = tx.Model(&dbContractSector{}).
-			Count(&totalUploaded).
-			Error
-		if err != nil {
-			return err
+	batchSize := 10000000
+	marker := uint64(0)
+	for offset := 0; ; offset += batchSize {
+		var result struct {
+			Sectors uint64
+			Marker  uint64
 		}
+		res := s.db.
+			Model(&dbSector{}).
+			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM contract_sectors cs WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", marker, batchSize).
+			Scan(&result)
+		if err := res.Error; err != nil {
+			return api.ObjectsStatsResponse{}, err
+		} else if result.Sectors == 0 {
+			break // done
+		}
+		totalSectors += result.Sectors
+		marker = result.Marker
+	}
 
-		resp.TotalSectorsSize = totalSectors * rhpv2.SectorSize
-		resp.TotalUploadedSize = uint64(totalUploaded) * rhpv2.SectorSize
-		return nil
-	})
+	var totalUploaded int64
+	err = s.db.
+		Model(&dbContractSector{}).
+		Count(&totalUploaded).
+		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
+
+	return api.ObjectsStatsResponse{
+		NumObjects:        objInfo.NumObjects,
+		TotalObjectsSize:  objInfo.TotalObjectsSize,
+		TotalSectorsSize:  totalSectors * rhpv2.SectorSize,
+		TotalUploadedSize: uint64(totalUploaded) * rhpv2.SectorSize,
+	}, nil
 }
 
 func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
