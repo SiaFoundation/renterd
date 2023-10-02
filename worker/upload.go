@@ -340,11 +340,11 @@ func (w *worker) tryUploadPackedSlabs(ctx context.Context, rs api.RedundancySett
 	// if we want to block, try and upload one packed slab synchronously, we use
 	// a slightly higher upload priority to avoid reaching the context deadline
 	if block {
-		_, err = w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, rs, contractSet, defaultPackedSlabsLimit, lockingPriorityUpload+1)
+		_, err = w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, rs, contractSet, defaultPackedSlabsLimit, lockingPriorityBlockedUpload)
 	}
 
 	// make sure there's a goroutine uploading the remainder of the packed slabs
-	go w.threadedUploadPackedSlabs(rs, contractSet, lockingPriorityUpload-1)
+	go w.threadedUploadPackedSlabs(rs, contractSet, lockingPriorityBackgroundUpload)
 	return
 }
 
