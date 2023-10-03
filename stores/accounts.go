@@ -18,7 +18,7 @@ type (
 		AccountID publicKey `gorm:"unique;NOT NULL;size:32"`
 
 		// CleanShutdown indicates whether the account was saved during a clean
-		// shutdown.
+		// shutdown shutdown.
 		CleanShutdown bool `gorm:"default:false"`
 
 		// Host describes the host the account was created with.

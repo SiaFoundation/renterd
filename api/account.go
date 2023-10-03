@@ -13,6 +13,7 @@ type (
 		ID rhpv3.Account `json:"id"`
 
 		// CleanShutdown indicates whether the account was saved during a clean
+		// shutdown
 		CleanShutdown bool `json:"cleanShutdown"`
 
 		// HostKey describes the host the account was created with.
