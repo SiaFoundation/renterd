@@ -572,6 +572,17 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal("unexpected data:", string(data))
 	}
 
+	// Download again with range request.
+	b := make([]byte, 5)
+	downloadedObj, err = s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if _, err = downloadedObj.ReadAt(b, 5); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(b, []byte("world")) {
+		t.Fatal("unexpected data:", string(b))
+	}
+
 	// Start a second multipart upload.
 	uploadID, err = core.NewMultipartUpload(context.Background(), "multipart", "bar", minio.PutObjectOptions{})
 	if err != nil {

@@ -313,6 +313,13 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		if mu.DBBucket.Name != bucket {
 			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
 		}
+
+		// Delete potentially existing object.
+		_, err := deleteObject(tx, bucket, path)
+		if err != nil {
+			return fmt.Errorf("failed to delete object: %w", err)
+		}
+
 		// Sort the parts.
 		sort.Slice(mu.Parts, func(i, j int) bool {
 			return mu.Parts[i].PartNumber < mu.Parts[j].PartNumber
