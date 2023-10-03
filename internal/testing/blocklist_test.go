@@ -18,53 +18,37 @@ func TestBlocklist(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster.Shutdown(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
 	b := cluster.Bus
+	tt := cluster.tt
 
 	// add hosts
-	_, err = cluster.AddHostsBlocking(3)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cluster.AddHostsBlocking(3)
 
 	// wait until we have 3 contracts in the set
 	var contracts []api.ContractMetadata
-	if err := Retry(5, time.Second, func() (err error) {
+	tt.Retry(5, time.Second, func() (err error) {
 		contracts, err = b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(contracts) != 3 {
+		tt.OK(err)
+		if len(contracts) != 3 {
 			err = fmt.Errorf("unexpected number of contracts, %v != 3", len(contracts))
 			return
 		}
 		return
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// add h1 and h2 to the allowlist
 	hk1 := contracts[0].HostKey
 	hk2 := contracts[1].HostKey
 	hk3 := contracts[2].HostKey
-	err = b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
 
 	// assert h3 is no longer in the contract set
-	if err := Retry(5, time.Second, func() error {
+	tt.Retry(5, time.Second, func() error {
 		contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(contracts) != 2 {
+		tt.OK(err)
+		if len(contracts) != 2 {
 			return fmt.Errorf("unexpected number of contracts, %v != 2", len(contracts))
 		}
 		for _, c := range contracts {
@@ -73,26 +57,18 @@ func TestBlocklist(t *testing.T) {
 			}
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// add h1 to the blocklist
 	h1, err := b.Host(context.Background(), hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
+	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false))
 
 	// assert h1 is no longer in the contract set
-	if err := Retry(5, time.Second, func() error {
+	tt.Retry(5, time.Second, func() error {
 		contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(contracts) != 1 {
+		tt.OK(err)
+		if len(contracts) != 1 {
 			return fmt.Errorf("unexpected number of contracts, %v != 1", len(contracts))
 		}
 		for _, c := range contracts {
@@ -101,54 +77,32 @@ func TestBlocklist(t *testing.T) {
 			}
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// clear the allowlist and blocklist and assert we have 3 contracts again
-	err = b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := Retry(5, time.Second, func() error {
+	tt.OK(b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false))
+	tt.OK(b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false))
+	tt.Retry(5, time.Second, func() error {
 		contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(contracts) != 3 {
+		tt.OK(err)
+		if len(contracts) != 3 {
 			return fmt.Errorf("unexpected number of contracts, %v != 3", len(contracts))
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// create a new host
-	h, err := cluster.NewHost()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := cluster.NewHost()
 
 	// update blocklist to block just that host
-	err = b.UpdateHostBlocklist(context.Background(), []string{h.RHPv2Addr()}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h.RHPv2Addr()}, nil, false))
 
 	// add the host
-	err = cluster.AddHost(h)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cluster.AddHost(h)
 
 	// try and fetch the host
 	host, err := b.Host(context.Background(), h.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// assert it's blocked
 	if !host.Blocked {
@@ -156,16 +110,11 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// clear blocklist
-	err = b.UpdateHostBlocklist(context.Background(), nil, nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(b.UpdateHostBlocklist(context.Background(), nil, nil, true))
 
 	// try and fetch the host again
 	host, err = b.Host(context.Background(), h.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// assert it's no longer blocked
 	if host.Blocked {
@@ -174,36 +123,23 @@ func TestBlocklist(t *testing.T) {
 
 	// assert we have 4 hosts
 	hosts, err := b.Hosts(context.Background(), 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(hosts) != 4 {
 		t.Fatal("unexpected number of hosts", len(hosts))
 	}
 
 	// create a new host
-	h, err = cluster.NewHost()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h = cluster.NewHost()
 
 	// update allowlist to allow just that host
-	err = b.UpdateHostAllowlist(context.Background(), []types.PublicKey{h.PublicKey()}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(b.UpdateHostAllowlist(context.Background(), []types.PublicKey{h.PublicKey()}, nil, false))
 
 	// add the host
-	err = cluster.AddHost(h)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cluster.AddHost(h)
 
 	// try and fetch the host
 	host, err = b.Host(context.Background(), h.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// assert it's not blocked
 	if host.Blocked {
@@ -212,24 +148,17 @@ func TestBlocklist(t *testing.T) {
 
 	// assert all others are blocked
 	hosts, err = b.Hosts(context.Background(), 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(hosts) != 1 {
 		t.Fatal("unexpected number of hosts", len(hosts))
 	}
 
 	// clear allowlist
-	err = b.UpdateHostAllowlist(context.Background(), nil, nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(b.UpdateHostAllowlist(context.Background(), nil, nil, true))
 
 	// assert no hosts are blocked
 	hosts, err = b.Hosts(context.Background(), 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(hosts) != 5 {
 		t.Fatal("unexpected number of hosts", len(hosts))
 	}

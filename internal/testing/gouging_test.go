@@ -19,25 +19,18 @@ func TestGouging(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLoggerCustom(zapcore.DebugLevel))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster.Shutdown(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cluster := newTestCluster(t, testClusterOptions{
+		logger: newTestLoggerCustom(zapcore.DebugLevel),
+	})
+	defer cluster.Shutdown()
 
 	cfg := testAutopilotConfig.Contracts
 	b := cluster.Bus
 	w := cluster.Worker
+	tt := cluster.tt
 
 	// add hosts
-	hosts, err := cluster.AddHostsBlocking(int(cfg.Amount))
-	if err != nil {
-		t.Fatal(err)
-	}
+	hosts := cluster.AddHostsBlocking(int(cfg.Amount))
 
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
@@ -46,32 +39,22 @@ func TestGouging(t *testing.T) {
 	}
 
 	// wait until we have a full contract set
-	if err := cluster.WaitForContractSet(cfg.Set, int(cfg.Amount)); err != nil {
-		t.Fatal(err)
-	}
+	cluster.WaitForContractSet(cfg.Set, int(cfg.Amount))
 
 	// wait until accounts are ready and funded
-	if _, err := cluster.WaitForAccounts(); err != nil {
-		t.Fatal(err)
-	}
+	cluster.WaitForAccounts()
 
 	// upload and download some data, asserting we have a working contract set
 	data := make([]byte, rhpv2.SectorSize/12)
-	if _, err := frand.Read(data); err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(frand.Read(data))
 
 	// upload the data
 	name := fmt.Sprintf("data_%v", len(data))
-	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
 
 	// download the data
 	var buffer bytes.Buffer
-	if err := w.DownloadObject(context.Background(), &buffer, name); err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(w.DownloadObject(context.Background(), &buffer, name))
 	if !bytes.Equal(data, buffer.Bytes()) {
 		t.Fatal("unexpected data")
 	}
@@ -89,18 +72,14 @@ func TestGouging(t *testing.T) {
 	settings.IngressPrice = types.Siacoins(1)
 	settings.EgressPrice = types.Siacoins(1)
 	settings.ContractPrice = types.Siacoins(11)
-	if err := host.UpdateSettings(settings); err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(host.UpdateSettings(settings))
 
 	// make sure the price table expires so the worker is forced to fetch it
 	// again, this is necessary for the host to be considered price gouging
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// upload some data - should fail
-	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err == nil {
-		t.Fatal("expected upload to fail")
-	}
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
 
 	// update all host settings so they're gouging
 	for _, h := range hosts {
