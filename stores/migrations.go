@@ -860,6 +860,7 @@ func performMigration00019_accountsShutdown(txn *gorm.DB, logger *zap.SugaredLog
 		return err
 	}
 	if err := txn.Model(&dbAccount{}).
+		Where("TRUE").
 		Updates(map[string]interface{}{
 			"clean_shutdown": false,
 			"requires_sync":  true,
