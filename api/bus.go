@@ -214,6 +214,7 @@ type Object struct {
 
 // ObjectMetadata contains various metadata about an object.
 type ObjectMetadata struct {
+	ETag     string    `json:"eTag"`
 	Health   float64   `json:"health"`
 	MimeType string    `json:"mimeType"`
 	ModTime  time.Time `json:"modTime"`
@@ -223,14 +224,14 @@ type ObjectMetadata struct {
 
 // LastModified returns the object's ModTime formatted for use in the
 // 'Last-Modified' header
-func (o *Object) LastModified() string {
+func (o ObjectMetadata) LastModified() string {
 	return o.ModTime.UTC().Format(http.TimeFormat)
 }
 
 // ContentType returns the object's MimeType for use in the 'Content-Type'
 // header, if the object's mime type is empty we try and deduce it from the
 // extension in the object's name.
-func (o Object) ContentType() string {
+func (o ObjectMetadata) ContentType() string {
 	if o.MimeType != "" {
 		return o.MimeType
 	}
@@ -249,6 +250,7 @@ type ObjectAddRequest struct {
 	Object        object.Object                            `json:"object"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
 	MimeType      string                                   `json:"mimeType"`
+	ETag          string                                   `json:"eTag"`
 }
 
 // ObjectsResponse is the response type for the /objects endpoint.
@@ -578,7 +580,7 @@ type (
 	}
 	MultipartAddPartRequest struct {
 		Bucket        string                                   `json:"bucket"`
-		Etag          string                                   `json:"eTag"`
+		ETag          string                                   `json:"eTag"`
 		Path          string                                   `json:"path"`
 		ContractSet   string                                   `json:"contractSet"`
 		UploadID      string                                   `json:"uploadID"`
@@ -717,6 +719,6 @@ type AddPartialSlabResponse struct {
 	Slabs                        []object.PartialSlab `json:"slabs"`
 }
 
-func FormatEtag(etag string) string {
-	return fmt.Sprintf("\"%s\"", etag)
+func FormatETag(ETag string) string {
+	return fmt.Sprintf("\"%s\"", ETag)
 }

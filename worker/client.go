@@ -181,7 +181,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 }
 
 // UploadObject uploads the data in r, creating an object at the given path.
-func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error) {
+func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (*api.UploadObjectResponse, error) {
 	path = strings.TrimPrefix(path, "/")
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
@@ -201,19 +201,19 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := io.ReadAll(resp.Body)
-		return errors.New(string(err))
+		return nil, errors.New(string(err))
 	}
-	return
+	return &api.UploadObjectResponse{ETag: resp.Header.Get("ETag")}, nil
 }
 
 // UploadMultipartUploadPart uploads part of the data for a multipart upload.
-func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error) {
+func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (*api.UploadMultipartUploadPartResponse, error) {
 	path = strings.TrimPrefix(path, "/")
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
@@ -235,15 +235,15 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, pat
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer io.Copy(io.Discard, resp.Body)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		err, _ := io.ReadAll(resp.Body)
-		return "", errors.New(string(err))
+		return nil, errors.New(string(err))
 	}
-	return strings.Trim(resp.Header.Get("ETag"), "\""), nil
+	return &api.UploadMultipartUploadPartResponse{ETag: resp.Header.Get("ETag")}, nil
 }
 
 func (c *Client) object(ctx context.Context, bucket, path, prefix string, offset, limit int, opts ...api.DownloadObjectOption) (_ io.ReadCloser, _ http.Header, err error) {
@@ -305,16 +305,16 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 	return err
 }
 
-func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (_ api.GetObjectResponse, err error) {
+func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api.DownloadObjectOption) (*api.GetObjectResponse, error) {
 	if strings.HasSuffix(path, "/") {
-		return api.GetObjectResponse{}, errors.New("the given path is a directory, use ObjectEntries instead")
+		return nil, errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
 	// Start download.
 	path = strings.TrimPrefix(path, "/")
 	body, header, err := c.object(ctx, bucket, path, "", 0, -1, opts...)
 	if err != nil {
-		return api.GetObjectResponse{}, err
+		return nil, err
 	}
 	defer func() {
 		if err != nil {
@@ -327,23 +327,23 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 	var size int64
 	_, err = fmt.Sscan(header.Get("Content-Length"), &size)
 	if err != nil {
-		return api.GetObjectResponse{}, err
+		return nil, err
 	}
 	var r *api.DownloadRange
 	if cr := header.Get("Content-Range"); cr != "" {
 		dr, err := api.ParseDownloadRange(cr)
 		if err != nil {
-			return api.GetObjectResponse{}, err
+			return nil, err
 		}
 		r = &dr
 	}
 	// Parse Last-Modified
 	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
 	if err != nil {
-		return api.GetObjectResponse{}, err
+		return nil, err
 	}
 
-	return api.GetObjectResponse{
+	return &api.GetObjectResponse{
 		Content:     body,
 		ContentType: header.Get("Content-Type"),
 		ModTime:     modTime.UTC(),

@@ -23,6 +23,7 @@ const (
 	testPersistInterval = time.Second
 	testContractSet     = "test"
 	testMimeType        = "application/octet-stream"
+	testETag            = "d34db33f"
 )
 
 // newTestSQLStore creates a new SQLStore for testing.

@@ -73,7 +73,7 @@ func TestMigrations(t *testing.T) {
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	if err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
+	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
 		t.Fatal(err)
 	}
 

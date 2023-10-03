@@ -677,7 +677,7 @@ func (c *Client) Object(ctx context.Context, path string, opts ...api.ObjectsOpt
 }
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) (err error) {
+func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	path = strings.TrimPrefix(path, "/")
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
 		Bucket:        bucket,
@@ -685,6 +685,7 @@ func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string
 		Object:        o,
 		UsedContracts: usedContracts,
 		MimeType:      mimeType,
+		ETag:          eTag,
 	})
 	return
 }
@@ -981,10 +982,10 @@ func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string,
 	return
 }
 
-func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, etag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	err = c.c.WithContext(ctx).PUT("/multipart/part", api.MultipartAddPartRequest{
 		Bucket:        bucket,
-		Etag:          etag,
+		ETag:          eTag,
 		Path:          path,
 		ContractSet:   contractSet,
 		UploadID:      uploadID,

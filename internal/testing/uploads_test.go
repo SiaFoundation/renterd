@@ -77,7 +77,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	// upload an object using our custom reader
 	br := newBlockedReader(data)
 	go func() {
-		err = w.UploadObject(context.Background(), br, t.Name())
+		_, err = w.UploadObject(context.Background(), br, t.Name())
 		if err != nil {
 			t.Error(err)
 		}
