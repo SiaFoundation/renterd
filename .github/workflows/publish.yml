@@ -226,11 +226,11 @@ jobs:
       - name: Set build tag environment variable
         run: |
           if ( "${{ matrix.network }}" -eq "zen" ) {
-            echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
-            echo "ZIP_OUTPUT_SUFFIX=_zen" >> $GITHUB_ENV
+            "BUILD_TAGS=testnet netgo" >> $env:GITHUB_ENV
+            "ZIP_OUTPUT_SUFFIX=_zen" >> $env:GITHUB_ENV
           } else {
-            echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
-            echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
+            "BUILD_TAGS=netgo" >> $env:GITHUB_ENV
+            "ZIP_OUTPUT_SUFFIX=" >> $env:GITHUB_ENV
           }
       - name: Setup
         shell: bash
