@@ -133,7 +133,7 @@ func TestS3Basic(t *testing.T) {
 
 	// assert deleting the bucket fails because it doesn't exist
 	err = s3.RemoveBucket(context.Background(), bucket+"nonexistent")
-	tt.AssertIs(err, gofakes3.ErrBucketNotEmpty)
+	tt.AssertIs(err, errBucketNotExists)
 
 	// remove the object
 	tt.OK(s3.RemoveObject(context.Background(), bucket, "object", minio.RemoveObjectOptions{}))
