@@ -214,9 +214,9 @@ type Object struct {
 
 // ObjectMetadata contains various metadata about an object.
 type ObjectMetadata struct {
-	ETag     string    `json:"eTag"`
+	ETag     string    `json:"eTag,omitempty"`
 	Health   float64   `json:"health"`
-	MimeType string    `json:"mimeType"`
+	MimeType string    `json:"mimeType,omitempty"`
 	ModTime  time.Time `json:"modTime"`
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
