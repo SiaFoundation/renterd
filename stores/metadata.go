@@ -1252,6 +1252,9 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		}
 
 		if srcBucket == dstBucket && srcPath == dstPath {
+			// No copying is happening. We just update the metadata on the src
+			// object.
+			srcObj.MimeType = mimeType
 			om = api.ObjectMetadata{
 				Health:   srcObjHealth,
 				MimeType: srcObj.MimeType,
@@ -1259,7 +1262,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 				Name:     srcObj.ObjectID,
 				Size:     srcObj.Size,
 			}
-			return nil
+			return tx.Save(&srcObj).Error
 		}
 		_, err = deleteObject(tx, dstBucket, dstPath)
 		if err != nil {
