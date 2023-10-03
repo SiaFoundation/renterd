@@ -69,7 +69,7 @@ func TestGouging(t *testing.T) {
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// upload some data - should fail
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
 
 	// update all host settings so they're gouging
 	for _, h := range cluster.hosts {

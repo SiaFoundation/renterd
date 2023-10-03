@@ -127,6 +127,15 @@ func (t TT) OKAll(vs ...interface{}) {
 	}
 }
 
+func (t TT) FailAll(vs ...interface{}) {
+	t.Helper()
+	for _, v := range vs {
+		if err, ok := v.(error); ok && err == nil {
+			t.Fatal("should've failed")
+		}
+	}
+}
+
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
@@ -529,6 +538,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForContracts()
+		cluster.WaitForContractSet(testContractSet, nHosts)
 		_ = cluster.WaitForAccounts()
 	}
 
