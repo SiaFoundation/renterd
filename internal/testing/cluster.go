@@ -287,7 +287,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	tt := TT{t}
+	tt := &TT{t}
 
 	// Apply options.
 	dbName := opts.dbName
@@ -441,6 +441,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		dbName: dbName,
 		logger: logger,
 		miner:  busCfg.Miner,
+		tt:     tt,
 		wk:     wk,
 
 		Autopilot: autopilotClient,
