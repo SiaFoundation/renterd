@@ -1250,13 +1250,13 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the multipart
-	etag, err := w.uploadMultiPart(ctx, jc.Request.Body, bucket, jc.PathParam("path"), uploadID, partNumber, opts...)
+	eTag, err := w.uploadMultiPart(ctx, jc.Request.Body, bucket, jc.PathParam("path"), uploadID, partNumber, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
 
 	// set etag header
-	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(etag))
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(eTag))
 }
 
 func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
