@@ -247,6 +247,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00018_etags(tx, logger)
 			},
 		},
+		{
+			ID: "00019_accounts_shutdown",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00019_accountsShutdown(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -862,5 +868,23 @@ func performMigration00018_etags(txn *gorm.DB, logger *zap.SugaredLogger) error 
 		}
 	}
 	logger.Info("migration 00018_etags complete")
+	return nil
+}
+
+func performMigration00019_accountsShutdown(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00019_accounts_shutdown")
+	if err := txn.Migrator().AutoMigrate(&dbAccount{}); err != nil {
+		return err
+	}
+	if err := txn.Model(&dbAccount{}).
+		Updates(map[string]interface{}{
+			"clean_shutdown": false,
+			"requires_sync":  true,
+			"drift":          "0",
+		}).
+		Error; err != nil {
+		return fmt.Errorf("failed to update accounts: %w", err)
+	}
+	logger.Info("migration 00019_accounts_shutdown complete")
 	return nil
 }

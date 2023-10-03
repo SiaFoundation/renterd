@@ -166,6 +166,7 @@ type (
 	EphemeralAccountStore interface {
 		Accounts(context.Context) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
+		SetUncleanShutdown() error
 	}
 )
 
@@ -1846,6 +1847,12 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		return nil, err
 	}
 	b.accounts = newAccounts(accounts, b.logger)
+
+	// Mark the shutdown as unclean. This will be overwritten when/if the
+	// accounts are saved on shutdown.
+	if err := eas.SetUncleanShutdown(); err != nil {
+		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
+	}
 	return b, nil
 }
 

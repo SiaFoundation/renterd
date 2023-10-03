@@ -1160,6 +1160,26 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Newly created accounts are !cleanShutdown. Simulate a sync to change
+	// that.
+	for _, acc := range accounts {
+		if acc.CleanShutdown {
+			t.Fatal("new account should indicate an unclean shutdown")
+		} else if acc.RequiresSync {
+			t.Fatal("new account should not require a sync")
+		}
+		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, acc.Balance); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch accounts again.
+	accounts, err = cluster.Bus.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	acc := accounts[0]
 	minExpectedBalance := types.Siacoins(1).Sub(types.NewCurrency64(1))
 	if acc.Balance.Cmp(minExpectedBalance.Big()) < 0 {
@@ -1170,6 +1190,9 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 	if acc.HostKey != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
+	}
+	if !acc.CleanShutdown {
+		t.Fatal("account should indicate a clean shutdown")
 	}
 
 	// Fetch account from bus directly.
