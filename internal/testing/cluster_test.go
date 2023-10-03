@@ -81,11 +81,8 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Wait for contracts to form.
 	var contract api.Contract
-	if contracts, err := cluster.WaitForContracts(); err != nil {
-		t.Fatal(err)
-	} else {
-		contract = contracts[0]
-	}
+	contracts := cluster.WaitForContracts()
+	contract = contracts[0]
 
 	// Make sure the contract set exists.
 	sets, err := cluster.Bus.ContractSets(context.Background())
@@ -281,19 +278,14 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// upload the following paths
 	uploads := []struct {
@@ -313,15 +305,11 @@ func TestObjectEntries(t *testing.T) {
 
 	for _, upload := range uploads {
 		if upload.size == 0 {
-			if _, err := w.UploadObject(context.Background(), bytes.NewReader(nil), upload.path); err != nil {
-				t.Fatal(err)
-			}
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), upload.path))
 		} else {
 			data := make([]byte, upload.size)
 			frand.Read(data)
-			if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), upload.path); err != nil {
-				t.Fatal(err)
-			}
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), upload.path))
 		}
 	}
 
@@ -430,18 +418,14 @@ func TestObjectsRename(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
+	tt := cluster.tt
 
 	// upload the following paths
 	uploads := []string{
@@ -451,9 +435,7 @@ func TestObjectsRename(t *testing.T) {
 		"/foo/baz/quuz",
 	}
 	for _, path := range uploads {
-		if _, err := w.UploadObject(context.Background(), bytes.NewReader(nil), path); err != nil {
-			t.Fatal(err)
-		}
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), path))
 	}
 
 	// rename
@@ -486,18 +468,13 @@ func TestUploadDownloadEmpty(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
-	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// upload an empty file
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), "empty"))
@@ -525,18 +502,13 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
-	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// prepare a file
 	data := make([]byte, 128)
@@ -613,19 +585,14 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// upload two files under /foo
 	file1 := make([]byte, rhpv2.SectorSize/12)
@@ -747,18 +714,14 @@ func TestUploadDownloadSpending(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
 	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// check that the funding was recorded
 	tt.Retry(100, testBusFlushInterval, func() error {
@@ -943,11 +906,8 @@ func TestEphemeralAccounts(t *testing.T) {
 
 	// Wait for contracts to form.
 	var contract api.Contract
-	if contracts, err := cluster.WaitForContracts(); err != nil {
-		t.Fatal(err)
-	} else {
-		contract = contracts[0]
-	}
+	contracts := cluster.WaitForContracts()
+	contract = contracts[0]
 
 	// Wait for account to appear.
 	accounts := cluster.WaitForAccounts()
@@ -1058,32 +1018,23 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
-	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(int(rs.TotalShards))
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	upload := func() error {
 		t.Helper()
 		// prepare some data - make sure it's more than one sector
 		data := make([]byte, rhpv2.SectorSize)
-		if _, err := frand.Read(data); err != nil {
-			return err
-		}
+		tt.OKAll(frand.Read(data))
 
 		// upload the data
 		name := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
-		if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
-			return err
-		}
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
 		return nil
 	}
 
@@ -1109,9 +1060,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Upload one more object.
-	if _, err := w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"); err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"))
 
 	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
 	tt.OK(err)
@@ -1147,23 +1096,17 @@ func TestParallelDownload(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
-	rs := testRedundancySettings
-
-	// add hosts
-	_ = cluster.AddHostsBlocking(int(rs.TotalShards))
-
-	// Wait for accounts to be funded.
-	_ = cluster.WaitForAccounts()
+	tt := cluster.tt
 
 	// upload the data
 	data := frand.Bytes(rhpv2.SectorSize)
-	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), "foo"))
 
 	download := func() error {
 		t.Helper()
@@ -1202,18 +1145,10 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	dir := t.TempDir()
 	cluster := newTestCluster(t, testClusterOptions{
-		dir: dir,
+		dir:   dir,
+		hosts: 1,
 	})
 	tt := cluster.tt
-
-	// add host
-	_ = cluster.AddHosts(1)
-
-	// Wait for account to appear.
-	accounts := cluster.WaitForAccounts()
-	if len(accounts) != 1 || accounts[0].RequiresSync {
-		t.Fatal("account shouldn't require a sync")
-	}
 
 	// Shut down the autopilot to prevent it from manipulating the account.
 	cluster.ShutdownAutopilot(context.Background())
@@ -1221,8 +1156,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 	// Fetch the account balance before setting the balance
 	accounts, err := cluster.Bus.Accounts(context.Background())
 	tt.OK(err)
-	if len(accounts) != 1 {
-		t.Fatal("unexpected number of accounts")
+	if len(accounts) != 1 || accounts[0].RequiresSync {
+		t.Fatal("account shouldn't require a sync")
 	}
 	acc := accounts[0]
 
@@ -1278,15 +1213,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: 1,
+	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
-
-	// add host.
-	cluster.AddHostsBlocking(1)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// shut down the autopilot to prevent it from doing contract maintenance if any kind
 	cluster.ShutdownAutopilot(context.Background())
@@ -1360,13 +1291,11 @@ func TestContractArchival(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
+		hosts:  1,
 		logger: zap.NewNop(),
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
-
-	// add host.
-	cluster.AddHostsBlocking(1)
 
 	// check that we have 1 contract
 	contracts, err := cluster.Bus.Contracts(context.Background())
@@ -1492,24 +1421,16 @@ func TestUploadPacking(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
 	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// Enable upload packing.
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	}))
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// prepare 3 files which are all smaller than a slab but together make up
 	// for 2 full slabs.
@@ -1536,9 +1457,7 @@ func TestUploadPacking(t *testing.T) {
 	}
 	uploadDownload := func(name string, data []byte) {
 		t.Helper()
-		if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), name); err != nil {
-			t.Fatal(err)
-		}
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
 		download(name, data, 0, int64(len(data)))
 		res, err := b.Object(context.Background(), name)
 		if err != nil {
@@ -1747,7 +1666,9 @@ func TestSlabBufferStats(t *testing.T) {
 	threshold := 1 << 12 // 4 KiB
 	busCfg.SlabBufferCompletionThreshold = int64(threshold)
 	cluster := newTestCluster(t, testClusterOptions{
-		busCfg: &busCfg,
+		busCfg:        &busCfg,
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
 
@@ -1755,17 +1676,6 @@ func TestSlabBufferStats(t *testing.T) {
 	w := cluster.Worker
 	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// Enable upload packing.
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	}))
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// prepare 3 files which are all smaller than a slab but together make up
 	// for 2 full slabs.
@@ -1922,19 +1832,15 @@ func TestMultipartUploads(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
+	defer cluster.Shutdown()
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
-
-	// Enable upload packing to speed up test.
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	}))
-
-	// add hosts
-	cluster.AddHostsBlocking(testRedundancySettings.TotalShards)
 
 	// Start a new multipart upload.
 	objPath := "/foo"

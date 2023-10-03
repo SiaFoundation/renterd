@@ -28,7 +28,9 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	start := time.Now()
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 
 	// delete default bucket before testing.
@@ -37,9 +39,6 @@ func TestS3Basic(t *testing.T) {
 	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
 	}
-
-	// add hosts
-	cluster.AddHostsBlocking(testRedundancySettings.TotalShards)
 
 	// create bucket
 	bucket := "bucket"
@@ -229,20 +228,15 @@ func TestS3Authentication(t *testing.T) {
 }
 
 func TestS3List(t *testing.T) {
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
 	defer cluster.Shutdown()
 
 	s3 := cluster.S3
 	core := cluster.S3Core
 	tt := cluster.tt
-
-	// enable upload packing to speed up test
-	cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	})
-
-	// add hosts
-	cluster.AddHostsBlocking(testRedundancySettings.TotalShards)
 
 	// create bucket
 	tt.OK(s3.MakeBucket(context.Background(), "bucket", minio.MakeBucketOptions{}))
@@ -369,7 +363,10 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
 	defer cluster.Shutdown()
 	s3 := cluster.S3
 	core := cluster.S3Core
@@ -377,14 +374,6 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// delete default bucket before testing.
 	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
-
-	// Enable upload packing to speed up test.
-	cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	})
-
-	// add hosts
-	cluster.AddHostsBlocking(testRedundancySettings.TotalShards)
 
 	// Create bucket.
 	tt.OK(s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{}))
@@ -500,7 +489,10 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
 	defer cluster.Shutdown()
 
 	s3 := cluster.S3
@@ -510,14 +502,6 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 
 	// delete default bucket before testing.
 	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
-
-	// This test requires upload packing.
-	cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	})
-
-	// add hosts
-	cluster.AddHostsBlocking(testRedundancySettings.TotalShards)
 
 	// Create bucket.
 	tt.OK(s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{}))
@@ -559,18 +543,13 @@ func TestS3SpecialChars(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
 	defer cluster.Shutdown()
 	s3 := cluster.S3
 	tt := cluster.tt
-
-	// enable upload packing to speed up test
-	cluster.Bus.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled: true,
-	})
-
-	// add hosts
-	cluster.AddHostsBlocking(testRedundancySettings.TotalShards)
 
 	// manually create the 'a/' object as a directory. It should also be
 	// possible to call StatObject on it without errors.

@@ -47,18 +47,14 @@ func TestUploadingSectorsCache(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
 	defer cluster.Shutdown()
 	w := cluster.Worker
 	b := cluster.Bus
 	rs := testRedundancySettings
 	tt := cluster.tt
-
-	// add hosts
-	cluster.AddHostsBlocking(rs.TotalShards)
-
-	// wait for accounts to be funded
-	cluster.WaitForAccounts()
 
 	// generate some random data
 	data := make([]byte, rhpv2.SectorSize*rs.MinShards)

@@ -20,6 +20,7 @@ func TestGouging(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
+		hosts:  int(testAutopilotConfig.Contracts.Amount),
 		logger: newTestLoggerCustom(zapcore.DebugLevel),
 	})
 	defer cluster.Shutdown()
@@ -29,20 +30,11 @@ func TestGouging(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	// add hosts
-	hosts := cluster.AddHostsBlocking(int(cfg.Amount))
-
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
-	for _, h := range hosts {
+	for _, h := range cluster.hosts {
 		hostsMap[h.PublicKey().String()] = h
 	}
-
-	// wait until we have a full contract set
-	cluster.WaitForContractSet(cfg.Set, int(cfg.Amount))
-
-	// wait until accounts are ready and funded
-	cluster.WaitForAccounts()
 
 	// upload and download some data, asserting we have a working contract set
 	data := make([]byte, rhpv2.SectorSize/12)
@@ -80,7 +72,7 @@ func TestGouging(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
 
 	// update all host settings so they're gouging
-	for _, h := range hosts {
+	for _, h := range cluster.hosts {
 		settings := h.settings.Settings()
 		settings.EgressPrice = types.Siacoins(1)
 		if err := h.UpdateSettings(settings); err != nil {

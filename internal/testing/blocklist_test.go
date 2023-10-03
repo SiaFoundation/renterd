@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 )
 
 func TestBlocklist(t *testing.T) {
@@ -18,25 +17,19 @@ func TestBlocklist(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: 3,
+	})
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
 
-	// add hosts
-	cluster.AddHostsBlocking(3)
-
-	// wait until we have 3 contracts in the set
-	var contracts []api.ContractMetadata
-	tt.Retry(5, time.Second, func() (err error) {
-		contracts, err = b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
-		tt.OK(err)
-		if len(contracts) != 3 {
-			err = fmt.Errorf("unexpected number of contracts, %v != 3", len(contracts))
-			return
-		}
-		return
-	})
+	// fetch contracts
+	contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
+	tt.OK(err)
+	if len(contracts) != 3 {
+		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
+	}
 
 	// add h1 and h2 to the allowlist
 	hk1 := contracts[0].HostKey

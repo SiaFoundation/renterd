@@ -245,11 +245,13 @@ func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.Autopil
 }
 
 type testClusterOptions struct {
-	dbName    string // custom MySQL database name
-	dir       string // dir of the cluster - defaults to t.TempDir()
-	funding   *bool  // whether to fund the bus
-	logger    *zap.Logger
-	walletKey *types.PrivateKey
+	dbName        string
+	dir           string
+	funding       *bool
+	hosts         int
+	logger        *zap.Logger
+	uploadPacking bool
+	walletKey     *types.PrivateKey
 
 	autopilotCfg *node.AutopilotConfig // autopilot config - defaults to testAutopilotConfig
 	busCfg       *node.BusConfig       // bus config - defaults to testBusConfig
@@ -314,6 +316,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	funding := true
 	if opts.funding != nil {
 		funding = *opts.funding
+	}
+	nHosts := 0
+	if opts.hosts != 0 {
+		nHosts = opts.hosts
+	}
+	enableUploadPacking := false
+	if opts.uploadPacking {
+		enableUploadPacking = opts.uploadPacking
 	}
 
 	// Check if we are testing against an external database. If so, we create a
@@ -474,33 +484,22 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
-	err = busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
-	tt.OK(err)
+	tt.OK(busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{}))
 
 	// Update the autopilot to use test settings
-	err = busClient.UpdateAutopilot(context.Background(), api.Autopilot{
+	tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
 		ID:     apCfg.ID,
 		Config: testAutopilotConfig,
-	})
-	tt.OK(err)
+	}))
 
 	// Update the bus settings.
-	err = busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings)
-	tt.OK(err)
-
-	err = busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings)
-	tt.OK(err)
-
-	err = busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings)
-	tt.OK(err)
-
-	err = busClient.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
+	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings))
+	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings))
+	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings))
+	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
 		V4Keypairs: testS3AuthPairs,
-	})
-	tt.OK(err)
-
-	err = busClient.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{Enabled: false})
-	tt.OK(err)
+	}))
+	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
 
 	// Fund the bus.
 	if funding {
@@ -525,6 +524,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			return nil
 		})
 	}
+
+	if nHosts > 0 {
+		cluster.AddHostsBlocking(nHosts)
+		cluster.WaitForContracts()
+		_ = cluster.WaitForAccounts()
+	}
+
 	return cluster
 }
 
@@ -654,7 +660,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 	return accounts
 }
 
-func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
+func (c *TestCluster) WaitForContracts() []api.Contract {
 	c.tt.Helper()
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
@@ -667,13 +673,11 @@ func (c *TestCluster) WaitForContracts() ([]api.Contract, error) {
 
 	// fetch all contracts
 	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
-	if err != nil {
-		return nil, err
-	}
+	c.tt.OK(err)
 	if resp.Error != "" {
-		return nil, errors.New(resp.Error)
+		c.tt.Fatal(resp.Error)
 	}
-	return resp.Contracts, nil
+	return resp.Contracts
 }
 
 func (c *TestCluster) RemoveHost(host *Host) {
