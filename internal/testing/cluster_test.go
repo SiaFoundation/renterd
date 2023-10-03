@@ -46,9 +46,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Upload packing should be disabled by default.
 	ups, err := b.UploadPackingSettings(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if ups.Enabled {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
@@ -68,21 +66,15 @@ func TestNewTestCluster(t *testing.T) {
 			},
 		},
 	}, map[types.PublicKey]types.FileContractID{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// Try talking to the worker and request the object.
 	err = w.DeleteObject(context.Background(), "foo", false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// See if autopilot is running by triggering the loop.
 	_, err = cluster.Autopilot.Trigger(false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// Add a host.
 	cluster.AddHosts(1)
@@ -97,9 +89,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Make sure the contract set exists.
 	sets, err := cluster.Bus.ContractSets(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(sets) != 1 {
 		t.Fatal("invalid number of setse", len(sets))
 	}
@@ -170,15 +160,11 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// Get host info for every host.
 	hosts, err := cluster.Bus.Hosts(context.Background(), 0, math.MaxInt)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	for _, host := range hosts {
 		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)
 		if err != nil {
@@ -202,9 +188,7 @@ func TestNewTestCluster(t *testing.T) {
 		}
 	}
 	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
@@ -228,17 +212,13 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(hostInfosUnusable) != 0 {
 		t.Fatal("there should be no unusable hosts", len(hostInfosUnusable))
 	}
 
 	hostInfosUsable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	for _, hI := range hostInfosUsable {
 		delete(allHosts, hI.Host.PublicKey)
 	}
@@ -248,9 +228,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Fetch the autopilot state
 	state, err := cluster.Autopilot.State()
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if time.Time(state.StartTime).IsZero() {
 		t.Fatal("autopilot should have start time")
 	}
@@ -933,9 +911,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
@@ -1010,9 +986,7 @@ func TestEphemeralAccounts(t *testing.T) {
 
 	// Fetch account from bus directly.
 	busAccounts, err := cluster.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(busAccounts) != 1 {
 		t.Fatal("expected one account but got", len(busAccounts))
 	}
@@ -1026,9 +1000,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// fee.
 	time.Sleep(2 * testBusFlushInterval)
 	cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	fundAmt := types.Siacoins(1)
 	if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
 		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
@@ -1041,9 +1013,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	busAccounts, err = cluster.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	busAcc = busAccounts[0]
 	maxNewDrift := newDrift.Add(newDrift, types.NewCurrency64(2).Big()) // forgive 2H
 	if busAcc.Drift.Cmp(maxNewDrift) > 0 {
@@ -1056,9 +1026,7 @@ func TestEphemeralAccounts(t *testing.T) {
 
 	// Check that accounts were loaded from the bus.
 	accounts2, err := cluster2.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	for _, acc := range accounts2 {
 		if acc.Balance.Cmp(big.NewInt(0)) == 0 {
 			t.Fatal("account balance wasn't loaded")
@@ -1072,16 +1040,12 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	accounts2, err = cluster2.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
 		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
 	}
 	accounts2, err = cluster2.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
 		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
 	}
@@ -1099,6 +1063,7 @@ func TestParallelUpload(t *testing.T) {
 
 	w := cluster.Worker
 	rs := testRedundancySettings
+	tt := cluster.tt
 
 	// add hosts
 	cluster.AddHostsBlocking(int(rs.TotalShards))
@@ -1138,9 +1103,7 @@ func TestParallelUpload(t *testing.T) {
 
 	// Check if objects exist.
 	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/dir/", 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(objects) != 3 {
 		t.Fatal("wrong number of objects", len(objects))
 	}
@@ -1151,9 +1114,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(objects) != 4 {
 		t.Fatal("wrong number of objects", len(objects))
 	}
@@ -1163,9 +1124,7 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(objects) != 1 {
 		t.Fatal("objects weren't deleted")
 	}
@@ -1175,9 +1134,7 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(objects) != 0 {
 		t.Fatal("objects weren't deleted")
 	}
@@ -1263,9 +1220,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// Fetch the account balance before setting the balance
 	accounts, err := cluster.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(accounts) != 1 {
 		t.Fatal("unexpected number of accounts")
 	}
@@ -1279,9 +1234,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	accounts, err = cluster.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(accounts) != 1 || !accounts[0].RequiresSync {
 		t.Fatal("account wasn't updated")
 	}
@@ -1292,9 +1245,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// Account should need a sync.
 	account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.HostKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if !account.RequiresSync {
 		t.Fatal("flag wasn't persisted")
 	}
@@ -1313,9 +1264,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// Flag should also be reset on bus now.
 	accounts, err = cluster2.Bus.Accounts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(accounts) != 1 || accounts[0].RequiresSync {
 		t.Fatal("account wasn't updated")
 	}
@@ -1331,6 +1280,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
+	tt := cluster.tt
 
 	// add host.
 	cluster.AddHostsBlocking(1)
@@ -1343,13 +1293,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// get wallet address
 	renterAddress, err := cluster.Bus.WalletAddress(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
+
 	ac, err := cluster.Worker.Contracts(context.Background(), time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
+
 	contracts := ac.Contracts
 	if len(contracts) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
@@ -1358,47 +1306,30 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// form 2 more contracts with the same host
 	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// create a contract set with all 3 contracts
 	err = cluster.Bus.SetContractSet(context.Background(), testAutopilotConfig.Contracts.Set, []types.FileContractID{c.ID, c2.ID, c3.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// check the bus returns the desired contracts
 	up, err := cluster.Bus.UploadParams(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	csc, err := cluster.Bus.ContractSetContracts(context.Background(), up.ContractSet)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(csc) != 3 {
 		t.Fatal("expected 3 contracts", len(csc))
 	}
 
 	// upload a file
 	data := frand.Bytes(5*rhpv2.SectorSize + 1)
-	_, err = cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo"))
 
 	// Download the file multiple times.
 	var wg sync.WaitGroup
@@ -1439,9 +1370,7 @@ func TestContractArchival(t *testing.T) {
 
 	// check that we have 1 contract
 	contracts, err := cluster.Bus.Contracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(contracts) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
 	}
@@ -1452,9 +1381,7 @@ func TestContractArchival(t *testing.T) {
 	// mine until the contract is archived
 	endHeight := contracts[0].WindowEnd
 	cs, err := cluster.Bus.ConsensusState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1))
 
 	// check that we have 0 contracts
@@ -1468,9 +1395,7 @@ func TestContractArchival(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 }
 
 func TestWalletTransactions(t *testing.T) {
@@ -1493,9 +1418,7 @@ func TestWalletTransactions(t *testing.T) {
 
 	// Get all transactions of the wallet.
 	allTxns, err := b.WalletTransactions(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(allTxns) < 5 {
 		t.Fatalf("expected at least 5 transactions, got %v", len(allTxns))
 	}
@@ -1687,9 +1610,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// assert number of objects
 	os, err := b.ObjectsStats()
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if os.NumObjects != 5 {
 		t.Fatalf("expected 5 objects, got %v", os.NumObjects)
 	}
@@ -1715,20 +1636,14 @@ func TestUploadPacking(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.
 	res, err := b.Object(context.Background(), "file1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].Key)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if len(objs) != 2 {
 		t.Fatal("expected 2 objects", len(objs))
 	}
@@ -1756,9 +1671,7 @@ func TestWallet(t *testing.T) {
 
 	// Check wallet info is sane after startup.
 	wallet, err := b.Wallet(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 	if wallet.ScanHeight == 0 {
 		t.Fatal("wallet scan height should not be 0")
 	}

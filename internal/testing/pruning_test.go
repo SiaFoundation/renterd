@@ -166,9 +166,7 @@ func TestSectorPruning(t *testing.T) {
 
 	// create a contracts dict
 	contracts, err := b.Contracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {

@@ -61,9 +61,7 @@ func TestGouging(t *testing.T) {
 
 	// fetch current contract set
 	contracts, err := b.ContractSetContracts(context.Background(), cfg.Set)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// update the host settings so it's gouging
 	hk := contracts[0].HostKey
