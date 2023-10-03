@@ -229,7 +229,11 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 
 	var opts []api.DownloadObjectOption
 	if rangeRequest != nil {
-		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, rangeRequest.End))
+		length := int64(-1)
+		if rangeRequest.End >= 0 {
+			length = rangeRequest.End - rangeRequest.Start + 1
+		}
+		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, length))
 	}
 	res, err := s.w.GetObject(ctx, bucketName, objectName, opts...)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
