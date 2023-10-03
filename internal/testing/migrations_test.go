@@ -19,8 +19,13 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// create a new test cluster
+	cfg := testAutopilotConfig
+	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: int(testAutopilotConfig.Contracts.Amount),
+		// configure the cluster to use 1 more host than the total shards in the
+		// redundancy settings.
+		autopilotSettings: &cfg,
+		hosts:             int(testRedundancySettings.TotalShards) + 1,
 	})
 	defer cluster.Shutdown()
 
@@ -44,20 +49,8 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// convenience variables
-	cfg := testAutopilotConfig
 	w := cluster.Worker
 	tt := cluster.tt
-
-	// configure the cluster to use 1 more host than the total shards in the
-	// redundancy settings.
-	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
-	cluster.UpdateAutopilotConfig(context.Background(), cfg)
-
-	// add hosts
-	hosts := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
-
-	// wait until we have accounts
-	cluster.WaitForAccounts()
 
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
@@ -72,7 +65,7 @@ func TestMigrations(t *testing.T) {
 
 	// select one host to remove
 	var removed types.PublicKey
-	for _, h := range hosts {
+	for _, h := range cluster.hosts {
 		if _, ok := used[h.PublicKey()]; ok {
 			cluster.RemoveHost(h)
 			removed = h.PublicKey()

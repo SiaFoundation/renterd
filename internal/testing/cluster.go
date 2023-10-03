@@ -262,9 +262,10 @@ type testClusterOptions struct {
 	uploadPacking bool
 	walletKey     *types.PrivateKey
 
-	autopilotCfg *node.AutopilotConfig // autopilot config - defaults to testAutopilotConfig
-	busCfg       *node.BusConfig       // bus config - defaults to testBusConfig
-	workerCfg    *config.Worker        // worker config - defaults to testWorkerConfig
+	autopilotCfg      *node.AutopilotConfig
+	autopilotSettings *api.AutopilotConfig
+	busCfg            *node.BusConfig
+	workerCfg         *config.Worker
 }
 
 // newTestLogger creates a console logger used for testing.
@@ -333,6 +334,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	enableUploadPacking := false
 	if opts.uploadPacking {
 		enableUploadPacking = opts.uploadPacking
+	}
+	apSettings := testAutopilotConfig
+	if opts.autopilotSettings != nil {
+		apSettings = *opts.autopilotSettings
 	}
 
 	// Check if we are testing against an external database. If so, we create a
@@ -499,7 +504,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	// Update the autopilot to use test settings
 	tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
 		ID:     apCfg.ID,
-		Config: testAutopilotConfig,
+		Config: apSettings,
 	}))
 
 	// Update the bus settings.
