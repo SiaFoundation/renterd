@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -29,6 +30,21 @@ import (
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
+
+// Client re-exports the client from the client package.
+type Client struct {
+	*client.Client
+}
+
+// NewClient returns a new bus client.
+func NewClient(addr, password string) *Client {
+	return &Client{
+		client.NewClient(
+			addr,
+			password,
+		),
+	}
+}
 
 type (
 	// A ChainManager manages blockchain state.

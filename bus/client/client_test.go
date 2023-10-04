@@ -1,4 +1,4 @@
-package bus_test
+package client_test
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.uber.org/zap"
@@ -61,7 +61,7 @@ func TestClient(t *testing.T) {
 	}
 }
 
-func newTestClient(dir string) (*bus.Client, func() error, func(context.Context) error, error) {
+func newTestClient(dir string) (*client.Client, func() error, func(context.Context) error, error) {
 	// create listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -69,7 +69,7 @@ func newTestClient(dir string) (*bus.Client, func() error, func(context.Context)
 	}
 
 	// create client
-	client := bus.NewClient("http://"+l.Addr().String(), "test")
+	client := client.NewClient("http://"+l.Addr().String(), "test")
 	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			Bootstrap:      false,

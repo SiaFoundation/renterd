@@ -1,4 +1,4 @@
-package bus
+package client
 
 import (
 	"encoding/json"
