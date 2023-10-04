@@ -71,7 +71,8 @@ var (
 
 	// errSectorNotFound is returned by the host when it can not find the
 	// requested sector.
-	errSectorNotFound = errors.New("sector not found")
+	errSectorNotFoundOld = errors.New("could not find the desired sector")
+	errSectorNotFound    = errors.New("sector not found")
 
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
@@ -83,11 +84,13 @@ func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxEx
 func isClosedStream(err error) bool {
 	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
 }
-func isInsufficientFunds(err error) bool   { return isError(err, ErrInsufficientFunds) }
-func isMaxRevisionReached(err error) bool  { return isError(err, errMaxRevisionReached) }
-func isPriceTableExpired(err error) bool   { return isError(err, errPriceTableExpired) }
-func isPriceTableNotFound(err error) bool  { return isError(err, errPriceTableNotFound) }
-func isSectorNotFound(err error) bool      { return isError(err, errSectorNotFound) }
+func isInsufficientFunds(err error) bool  { return isError(err, ErrInsufficientFunds) }
+func isMaxRevisionReached(err error) bool { return isError(err, errMaxRevisionReached) }
+func isPriceTableExpired(err error) bool  { return isError(err, errPriceTableExpired) }
+func isPriceTableNotFound(err error) bool { return isError(err, errPriceTableNotFound) }
+func isSectorNotFound(err error) bool {
+	return isError(err, errSectorNotFound) || isError(err, errSectorNotFoundOld)
+}
 func isWithdrawalsInactive(err error) bool { return isError(err, errWithdrawalsInactive) }
 
 func isError(err error, target error) bool {

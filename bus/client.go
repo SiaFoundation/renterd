@@ -1072,3 +1072,10 @@ func (c *Client) do(req *http.Request, resp interface{}) error {
 	}
 	return json.NewDecoder(r.Body).Decode(resp)
 }
+
+func (c *Client) MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+	return c.c.WithContext(ctx).POST("/sectors/lost", api.SectorsLostRequest{
+		HostKey: hk,
+		Root:    root,
+	}, nil)
+}

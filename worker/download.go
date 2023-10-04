@@ -35,6 +35,7 @@ type (
 	downloadManager struct {
 		hp     hostProvider
 		pss    partialSlabStore
+		slm    sectorLostMarker
 		logger *zap.SugaredLogger
 
 		maxOverdrive     uint64
@@ -71,8 +72,13 @@ type (
 		numDownloads uint64
 	}
 
+	sectorLostMarker interface {
+		MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+	}
+
 	slabDownload struct {
 		mgr *downloadManager
+		slm sectorLostMarker
 
 		dID       id
 		sID       slabID
@@ -119,6 +125,7 @@ type (
 	sectorDownloadResp struct {
 		overdrive   bool
 		hk          types.PublicKey
+		root        types.Hash256
 		sectorIndex int
 		sector      []byte
 		err         error
@@ -148,13 +155,14 @@ func (w *worker) initDownloadManager(maxOverdrive uint64, overdriveTimeout time.
 		panic("download manager already initialized") // developer error
 	}
 
-	w.downloadManager = newDownloadManager(w, w, maxOverdrive, overdriveTimeout, logger)
+	w.downloadManager = newDownloadManager(w, w, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, pss partialSlabStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(hp hostProvider, pss partialSlabStore, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
 		hp:     hp,
 		pss:    pss,
+		slm:    slm,
 		logger: logger,
 
 		maxOverdrive:     maxOverdrive,
@@ -539,6 +547,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	// create slab download
 	return &slabDownload{
 		mgr: mgr,
+		slm: mgr.slm,
 
 		dID:       dID,
 		sID:       sID,
@@ -824,6 +833,7 @@ func (d *downloader) execute(req *sectorDownloadReq) (err error) {
 func (req *sectorDownloadReq) succeed(sector []byte) {
 	req.resps.Add(&sectorDownloadResp{
 		hk:          req.hk,
+		root:        req.root,
 		overdrive:   req.overdrive,
 		sectorIndex: req.sectorIndex,
 		sector:      sector,
@@ -834,6 +844,7 @@ func (req *sectorDownloadReq) fail(err error) {
 	req.resps.Add(&sectorDownloadResp{
 		err:       err,
 		hk:        req.hk,
+		root:      req.root,
 		overdrive: req.overdrive,
 	})
 }
@@ -1009,6 +1020,14 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabChan chan str
 			resp := resps.Next()
 			if resp == nil {
 				break
+			}
+
+			if isSectorNotFound(resp.err) {
+				if err := s.slm.MarkSectorLost(ctx, resp.hk, resp.root); err != nil {
+					s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.hk, "root", resp.root, "err", err)
+				} else {
+					s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.hk, "root", resp.root)
+				}
 			}
 
 			done, next = s.receive(*resp)

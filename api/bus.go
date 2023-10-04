@@ -722,3 +722,8 @@ type AddPartialSlabResponse struct {
 func FormatETag(ETag string) string {
 	return fmt.Sprintf("\"%s\"", ETag)
 }
+
+type SectorsLostRequest struct {
+	HostKey types.PublicKey `json:"hostKey"`
+	Root    types.Hash256   `json:"root"`
+}

@@ -135,6 +135,8 @@ type (
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
+		MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, bufferSize int64, err error)
@@ -1160,6 +1162,17 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
 }
 
+func (b *bus) sectorsLostHandlerPOST(jc jape.Context) {
+	var slr api.SectorsLostRequest
+	if jc.Decode(&slr) != nil {
+		return
+	}
+	err := b.ms.MarkSectorLost(jc.Request.Context(), slr.HostKey, slr.Root)
+	if jc.Check("failed to mark sector as lost", err) != nil {
+		return
+	}
+}
+
 func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {
@@ -2051,6 +2064,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+
+		"POST   /sectors/lost": b.sectorsLostHandlerPOST,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
