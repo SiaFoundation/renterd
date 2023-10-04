@@ -17,43 +17,44 @@ const (
 	ipv4FilterRange = 24
 	ipv6FilterRange = 32
 
+	// ipCacheEntryValidity defines the amount of time the IP filter uses a
+	// cached entry when it encounters an error while trying to resolve a host's
+	// IP address
+	ipCacheEntryValidity = 24 * time.Hour
+
 	// resolverLookupTimeout is the timeout we apply when resolving a host's IP address
 	resolverLookupTimeout = 5 * time.Second
 )
 
 var (
+	errIOTimeout         = errors.New("i/o timeout")
 	errNoSuchHost        = errors.New("no such host")
+	errServerMisbehaving = errors.New("server misbehaving")
 	errTooManyAddresses  = errors.New("host has more than two addresses, or two of the same type")
 	errUnparsableAddress = errors.New("host address could not be parsed to a subnet")
 )
 
-type resolver interface {
-	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
-}
+type (
+	ipFilter struct {
+		subnetToHostKey map[string]string
+		resolver        *ipResolver
 
-type ipFilter struct {
-	hostIPToSubnetsCache map[string][]string
-	subnets              map[string]string
-	resolver             resolver
-	timeout              time.Duration
+		logger *zap.SugaredLogger
+	}
+)
 
-	logger *zap.SugaredLogger
-}
-
-func newIPFilter(logger *zap.SugaredLogger) *ipFilter {
+func (c *contractor) newIPFilter() *ipFilter {
+	c.resolver.pruneCache()
 	return &ipFilter{
-		hostIPToSubnetsCache: make(map[string][]string),
-		subnets:              make(map[string]string),
-		resolver:             &net.Resolver{},
-		timeout:              resolverLookupTimeout,
-
-		logger: logger,
+		subnetToHostKey: make(map[string]string),
+		resolver:        c.resolver,
+		logger:          c.logger,
 	}
 }
 
 func (f *ipFilter) IsRedundantIP(hostIP string, hostKey types.PublicKey) bool {
-	// perform DNS lookup
-	subnets, err := f.performDNSLookup(hostIP)
+	// perform lookup
+	subnets, err := f.resolver.lookup(hostIP)
 	if err != nil {
 		if !strings.Contains(err.Error(), errNoSuchHost.Error()) {
 			f.logger.Errorf("failed to check for redundant IP, treating host %v with IP %v as redundant, err: %v", hostKey, hostIP, err)
@@ -61,57 +62,83 @@ func (f *ipFilter) IsRedundantIP(hostIP string, hostKey types.PublicKey) bool {
 		return true
 	}
 
-	// if the lookup failed parse out the host
+	// return early if we couldn't resolve to a subnet
 	if len(subnets) == 0 {
-		f.logger.Errorf("failed to check for redundant IP, treating host %v with IP %v as redundant, err: %v", hostKey, hostIP, errUnparsableAddress)
+		f.logger.Errorf("failed to resolve IP to a subnet, treating host %v with IP %v as redundant, err: %v", hostKey, hostIP, errUnparsableAddress)
 		return true
 	}
 
-	// we register all subnets under the host key, so we can safely use the
-	// first subnet to check whether we already know this host
-	host, found := f.subnets[subnets[0]]
+	// check if we know about this subnet, if not register all the subnets
+	host, found := f.subnetToHostKey[subnets[0]]
 	if !found {
 		for _, subnet := range subnets {
-			f.subnets[subnet] = hostKey.String()
+			f.subnetToHostKey[subnet] = hostKey.String()
 		}
 		return false
 	}
 
-	// if the given host matches the known host, it's not redundant
+	// otherwise compare host keys
 	sameHost := host == hostKey.String()
 	return !sameHost
 }
 
-// Resetting clears the subnets, but not the cache, allowing to rebuild the IP
-// filter with a list of hosts.
-func (f *ipFilter) Reset() {
-	f.subnets = make(map[string]string)
-}
-
-func (f *ipFilter) performDNSLookup(hostIP string) ([]string, error) {
-	// check the cache
-	subnets, found := f.hostIPToSubnetsCache[hostIP]
-	if found {
-		return subnets, nil
+type (
+	resolver interface {
+		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 	}
 
-	// lookup all IP addresses for the given host
+	ipResolver struct {
+		resolver resolver
+		cache    map[string]ipCacheEntry
+		timeout  time.Duration
+
+		logger *zap.SugaredLogger
+	}
+
+	ipCacheEntry struct {
+		created time.Time
+		subnets []string
+	}
+)
+
+func newIPResolver(timeout time.Duration, logger *zap.SugaredLogger) *ipResolver {
+	if timeout == 0 {
+		panic("timeout must be greater than zero") // developer error
+	}
+	return &ipResolver{
+		resolver: &net.Resolver{},
+		cache:    make(map[string]ipCacheEntry),
+		timeout:  resolverLookupTimeout,
+		logger:   logger,
+	}
+}
+
+func (r *ipResolver) pruneCache() {
+	for hostIP, entry := range r.cache {
+		if time.Since(entry.created) > ipCacheEntryValidity {
+			delete(r.cache, hostIP)
+		}
+	}
+}
+
+func (r *ipResolver) lookup(hostIP string) ([]string, error) {
+	// split off host
 	host, _, err := net.SplitHostPort(hostIP)
 	if err != nil {
 		return nil, err
 	}
 
-	// create a context
-	ctx := context.Background()
-	if f.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), f.timeout)
-		defer cancel()
-	}
+	// make sure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
+	defer cancel()
 
 	// lookup IP addresses
-	addrs, err := f.resolver.LookupIPAddr(ctx, host)
-	if err != nil {
+	addrs, err := r.resolver.LookupIPAddr(ctx, host)
+	if err != nil && (isErr(err, errIOTimeout) || isErr(err, errServerMisbehaving)) {
+		if entry, found := r.cache[hostIP]; found && time.Since(entry.created) < ipCacheEntryValidity {
+			r.logger.Debugf("using cached IP addresses for %v, err: %v", hostIP, err)
+			return entry.subnets, nil
+		}
 		return nil, err
 	}
 
@@ -121,12 +148,14 @@ func (f *ipFilter) performDNSLookup(hostIP string) ([]string, error) {
 	}
 
 	// parse out subnets
-	subnets = parseSubnets(addrs)
+	subnets := parseSubnets(addrs)
 
-	// cache them and return
-	if len(subnets) > 0 {
-		f.hostIPToSubnetsCache[hostIP] = subnets
+	// add to cache
+	r.cache[hostIP] = ipCacheEntry{
+		created: time.Now(),
+		subnets: subnets,
 	}
+
 	return subnets, nil
 }
 
@@ -152,4 +181,11 @@ func parseSubnets(addresses []net.IPAddr) []string {
 	}
 
 	return subnets
+}
+
+func isErr(err error, target error) bool {
+	if errors.Is(err, target) {
+		return true
+	}
+	return err != nil && target != nil && strings.Contains(err.Error(), target.Error())
 }

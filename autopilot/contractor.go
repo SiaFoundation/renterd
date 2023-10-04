@@ -90,8 +90,9 @@ const (
 
 type (
 	contractor struct {
-		ap     *Autopilot
-		logger *zap.SugaredLogger
+		ap       *Autopilot
+		resolver *ipResolver
+		logger   *zap.SugaredLogger
 
 		maintenanceTxnID          types.TransactionID
 		revisionBroadcastInterval time.Duration
@@ -125,9 +126,11 @@ type (
 )
 
 func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
+	logger := ap.logger.Named("contractor")
 	return &contractor{
 		ap:                        ap,
-		logger:                    ap.logger.Named("contractor"),
+		resolver:                  newIPResolver(resolverLookupTimeout, logger),
+		logger:                    logger,
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
@@ -258,11 +261,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	c.cachedMinScore = minScore
 	c.mu.Unlock()
 
-	// create a new ip filter
-	ipFilter := newIPFilter(c.logger)
-
 	// run checks
-	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore, ipFilter)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -344,7 +344,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if uint64(len(updatedSet)) < threshold {
-		formed, err = c.runContractFormations(ctx, w, hosts, usedHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, minScore, ipFilter)
+		formed, err = c.runContractFormations(ctx, w, hosts, usedHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining, minScore)
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
@@ -586,7 +586,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64, ipFilter *ipFilter) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -594,13 +594,15 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 	// convenience variables
 	state := c.ap.State()
-	shouldFilter := !state.cfg.Hosts.AllowRedundantIPs
 
 	// fetch consensus state
 	cs, err := c.ap.bus.ConsensusState(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+
+	// create new IP filter
+	ipFilter := c.newIPFilter()
 
 	// calculate 'maxKeepLeeway' which defines the amount of contracts we'll be
 	// lenient towards when we fail to either fetch a valid price table or the
@@ -711,7 +713,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		if contract.Revision == nil {
 			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
-			} else if shouldFilter && ipFilter.IsRedundantIP(contract.HostIP, contract.HostKey) {
+			} else if !state.cfg.Hosts.AllowRedundantIPs && ipFilter.IsRedundantIP(contract.HostIP, contract.HostKey) {
 				toStopUsing[fcid] = fmt.Sprintf("%v; %v", errHostRedundantIP, errContractNoRevision)
 			} else {
 				toKeep = append(toKeep, fcid)
@@ -769,7 +771,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, missing uint64, budget *types.Currency, minScore float64, ipFilter *ipFilter) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, missing uint64, budget *types.Currency, minScore float64) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -815,7 +817,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// prepare an IP filter that contains all used hosts
-	ipFilter.Reset()
+	ipFilter := c.newIPFilter()
 	for _, h := range hosts {
 		if _, used := usedHosts[h.PublicKey]; used {
 			_ = ipFilter.IsRedundantIP(h.NetAddress, h.PublicKey)
