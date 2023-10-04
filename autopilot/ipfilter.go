@@ -37,9 +37,9 @@ var (
 type (
 	ipFilter struct {
 		subnetToHostKey map[string]string
-		resolver        *ipResolver
 
-		logger *zap.SugaredLogger
+		resolver *ipResolver
+		logger   *zap.SugaredLogger
 	}
 )
 
@@ -47,8 +47,9 @@ func (c *contractor) newIPFilter() *ipFilter {
 	c.resolver.pruneCache()
 	return &ipFilter{
 		subnetToHostKey: make(map[string]string),
-		resolver:        c.resolver,
-		logger:          c.logger,
+
+		resolver: c.resolver,
+		logger:   c.logger,
 	}
 }
 

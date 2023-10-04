@@ -126,11 +126,10 @@ type (
 )
 
 func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
-	logger := ap.logger.Named("contractor")
 	return &contractor{
 		ap:                        ap,
-		resolver:                  newIPResolver(resolverLookupTimeout, logger),
-		logger:                    logger,
+		resolver:                  newIPResolver(resolverLookupTimeout, ap.logger.Named("resolver")),
+		logger:                    ap.logger.Named("contractor"),
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
@@ -818,9 +817,11 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 	// prepare an IP filter that contains all used hosts
 	ipFilter := c.newIPFilter()
-	for _, h := range hosts {
-		if _, used := usedHosts[h.PublicKey]; used {
-			_ = ipFilter.IsRedundantIP(h.NetAddress, h.PublicKey)
+	if shouldFilter {
+		for _, h := range hosts {
+			if _, used := usedHosts[h.PublicKey]; used {
+				_ = ipFilter.IsRedundantIP(h.NetAddress, h.PublicKey)
+			}
 		}
 	}
 
