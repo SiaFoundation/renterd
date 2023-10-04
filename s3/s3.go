@@ -20,7 +20,8 @@ type gofakes3Logger struct {
 }
 
 type Opts struct {
-	AuthDisabled bool
+	AuthDisabled      bool
+	HostBucketEnabled bool
 }
 
 type bus interface {
@@ -29,7 +30,7 @@ type bus interface {
 	DeleteBucket(ctx context.Context, name string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) (err error)
+	AddObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
 	DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error)
 	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
@@ -47,9 +48,9 @@ type bus interface {
 }
 
 type worker interface {
-	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (err error)
-	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (api.GetObjectResponse, error)
-	UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (etag string, err error)
+	UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (*api.UploadObjectResponse, error)
+	GetObject(ctx context.Context, path, bucket string, opts ...api.DownloadObjectOption) (*api.GetObjectResponse, error)
+	UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (*api.UploadMultipartUploadPartResponse, error)
 }
 
 func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
@@ -78,7 +79,7 @@ func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 	}
 	faker, err := gofakes3.New(
 		backend,
-		gofakes3.WithHostBucket(false),
+		gofakes3.WithHostBucket(opts.HostBucketEnabled),
 		gofakes3.WithLogger(&gofakes3Logger{
 			l: namedLogger,
 		}),

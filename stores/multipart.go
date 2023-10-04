@@ -85,7 +85,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, eTag string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
@@ -292,7 +292,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			return api.MultipartCompleteResponse{}, fmt.Errorf("duplicate part number %v", parts[i].PartNumber)
 		}
 	}
-	var etag string
+	var eTag string
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		// Find multipart upload.
 		var mu dbMultipartUpload
@@ -313,6 +313,13 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		if mu.DBBucket.Name != bucket {
 			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
 		}
+
+		// Delete potentially existing object.
+		_, err := deleteObject(tx, bucket, path)
+		if err != nil {
+			return fmt.Errorf("failed to delete object: %w", err)
+		}
+
 		// Sort the parts.
 		sort.Slice(mu.Parts, func(i, j int) bool {
 			return mu.Parts[i].PartNumber < mu.Parts[j].PartNumber
@@ -361,9 +368,9 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			}
 		}
 
-		// Compute etag.
+		// Compute ETag.
 		sum := h.Sum()
-		etag = hex.EncodeToString(sum[:])
+		eTag = hex.EncodeToString(sum[:])
 
 		// Sort their primary keys to make sure retrieving them later will
 		// respect the part order.
@@ -376,6 +383,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			Key:        mu.Key,
 			Size:       int64(size),
 			MimeType:   mu.MimeType,
+			Etag:       eTag,
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
@@ -402,7 +410,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		return api.MultipartCompleteResponse{}, err
 	}
 	return api.MultipartCompleteResponse{
-		ETag: etag,
+		ETag: eTag,
 	}, nil
 }
 

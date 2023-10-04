@@ -146,8 +146,10 @@ func (a *accounts) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
 	acc.mu.Unlock()
 }
 
-// SetBalance sets the balance of a given account to the provided amount. If
-// the account doesn't exist, it is created.
+// SetBalance sets the balance of a given account to the provided amount. If the
+// account doesn't exist, it is created.
+// If an account hasn't been saved successfully upon the last shutdown, no drift
+// will be added upon the first call to SetBalance.
 func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int) {
 	acc := a.account(id, hk)
 
@@ -156,8 +158,11 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	delta := new(big.Int).Sub(balance, acc.Balance)
 	balanceBefore := acc.Balance.String()
 	driftBefore := acc.Drift.String()
-	acc.Drift = acc.Drift.Add(acc.Drift, delta)
+	if acc.CleanShutdown {
+		acc.Drift = acc.Drift.Add(acc.Drift, delta)
+	}
 	acc.Balance.Set(balance)
+	acc.CleanShutdown = true
 	acc.RequiresSync = false // resetting the balance resets the sync field
 	acc.mu.Unlock()
 
@@ -206,11 +211,12 @@ func (a *accounts) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 
 func (a *account) convert() api.Account {
 	return api.Account{
-		ID:           a.ID,
-		Balance:      new(big.Int).Set(a.Balance),
-		Drift:        new(big.Int).Set(a.Drift),
-		HostKey:      a.HostKey,
-		RequiresSync: a.RequiresSync,
+		ID:            a.ID,
+		Balance:       new(big.Int).Set(a.Balance),
+		CleanShutdown: a.CleanShutdown,
+		Drift:         new(big.Int).Set(a.Drift),
+		HostKey:       a.HostKey,
+		RequiresSync:  a.RequiresSync,
 	}
 }
 
@@ -257,11 +263,12 @@ func (a *accounts) ToPersist() []api.Account {
 	for _, acc := range a.byID {
 		acc.mu.Lock()
 		accounts = append(accounts, api.Account{
-			ID:           acc.ID,
-			Balance:      new(big.Int).Set(acc.Balance),
-			Drift:        new(big.Int).Set(acc.Drift),
-			HostKey:      acc.HostKey,
-			RequiresSync: acc.RequiresSync,
+			ID:            acc.ID,
+			Balance:       new(big.Int).Set(acc.Balance),
+			CleanShutdown: acc.CleanShutdown,
+			Drift:         new(big.Int).Set(acc.Drift),
+			HostKey:       acc.HostKey,
+			RequiresSync:  acc.RequiresSync,
 		})
 		acc.mu.Unlock()
 	}
@@ -277,11 +284,12 @@ func (a *accounts) account(id rhpv3.Account, hk types.PublicKey) *account {
 	if !exists {
 		acc = &account{
 			Account: api.Account{
-				ID:           id,
-				HostKey:      hk,
-				Balance:      big.NewInt(0),
-				Drift:        big.NewInt(0),
-				RequiresSync: false,
+				ID:            id,
+				CleanShutdown: false,
+				HostKey:       hk,
+				Balance:       big.NewInt(0),
+				Drift:         big.NewInt(0),
+				RequiresSync:  false,
 			},
 			locks: map[uint64]*accountLock{},
 		}

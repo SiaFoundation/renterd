@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        network: ["mainnet" , "testnet"]
+        network: ["mainnet" , "zen"]
     permissions:
       packages: write
     steps:
@@ -38,12 +38,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare environment variables
         run: |
-          if [[ "${{ matrix.network }}" == "testnet" ]]; then
+          if [[ "${{ matrix.network }}" == "zen" ]]; then
             echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
-            echo "DOCKER_METADATA_suffix=-testnet" >> $GITHUB_ENV
+            echo "DOCKER_METADATA_SUFFIX=-zen" >> $GITHUB_ENV
           else
             echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
-            echo "DOCKER_METADATA_suffix=" >> $GITHUB_ENV
+            echo "DOCKER_METADATA_SUFFIX=" >> $GITHUB_ENV
           fi
       - uses: docker/metadata-action@v4
         name: Generate tags
@@ -51,7 +51,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
-            suffix=${{ env.DOCKER_METADATA_suffix }},onlatest=true
+            suffix=${{ env.DOCKER_METADATA_SUFFIX }},onlatest=true
           tags: |
             type=ref,event=branch
             type=sha,prefix=
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        network: ["mainnet" , "testnet"]
+        network: ["mainnet" , "zen"]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
@@ -82,10 +82,12 @@ jobs:
           go generate ./...
       - name: Set build tag environment variable
         run: |
-          if [[ "${{ matrix.network }}" == "testnet" ]]; then
+          if [[ "${{ matrix.network }}" == "zen" ]]; then
             echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
+            echo "ZIP_OUTPUT_SUFFIX=_zen" >> $GITHUB_ENV
           else
             echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+            echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
           fi
       - name: Build amd64
         env:
@@ -94,7 +96,7 @@ jobs:
           GOARCH: amd64
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd_${{ matrix.network }}_${GOOS}_${GOARCH}.zip
+          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
@@ -106,7 +108,7 @@ jobs:
           CC: aarch64-linux-gnu-gcc
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd_${{ matrix.network }}_${GOOS}_${GOARCH}.zip
+          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
@@ -118,7 +120,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        network: ["mainnet" , "testnet"]
+        network: ["mainnet" , "zen"]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
@@ -159,10 +161,12 @@ jobs:
           go generate ./...
       - name: Set build tag environment variable
         run: |
-          if [[ "${{ matrix.network }}" == "testnet" ]]; then
-            echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
+          if [[ "${{ matrix.network }}" == "zen" ]]; then
+              echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
+              echo "ZIP_OUTPUT_SUFFIX=_zen" >> $GITHUB_ENV
           else
-            echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+              echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+              echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
           fi
       - name: Build amd64
         env:
@@ -177,8 +181,8 @@ jobs:
           GOOS: darwin
           GOARCH: amd64
         run: |
-          ZIP_OUTPUT=release/renterd_${{ matrix.network }}_${GOOS}_${GOARCH}.zip
           mkdir -p release
+          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
           cp README.md LICENSE bin/
           /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
@@ -197,8 +201,8 @@ jobs:
           GOOS: darwin
           GOARCH: arm64
         run: |
-          ZIP_OUTPUT=release/renterd_${{ matrix.network }}_${GOOS}_${GOARCH}.zip
           mkdir -p release
+          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
           cp README.md LICENSE bin/
           /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
@@ -212,7 +216,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        network: ["mainnet" , "testnet"]
+        network: ["mainnet" , "zen"]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
@@ -220,10 +224,12 @@ jobs:
           go-version: 'stable'
       - name: Set build tag environment variable
         run: |
-          if ( "${{ matrix.network }}" -eq "testnet" ) {
-            echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
+          if ( "${{ matrix.network }}" -eq "zen" ) {
+            "BUILD_TAGS=testnet netgo" >> $env:GITHUB_ENV
+            "ZIP_OUTPUT_SUFFIX=_zen" >> $env:GITHUB_ENV
           } else {
-            echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+            "BUILD_TAGS=netgo" >> $env:GITHUB_ENV
+            "ZIP_OUTPUT_SUFFIX=" >> $env:GITHUB_ENV
           }
       - name: Setup
         shell: bash
@@ -238,7 +244,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd_${{ matrix.network }}_${GOOS}_${GOARCH}.zip
+          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           azuresigntool sign -kvu "${{ secrets.AZURE_KEY_VAULT_URI }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc ${{ secrets.AZURE_CERT_NAME }} -tr http://timestamp.digicert.com -v bin/renterd.exe
           cp README.md LICENSE bin/

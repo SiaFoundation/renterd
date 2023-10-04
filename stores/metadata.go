@@ -89,6 +89,7 @@ type (
 		Size  int64
 
 		MimeType string `json:"index"`
+		Etag     string `gorm:"index"`
 	}
 
 	dbBucket struct {
@@ -164,6 +165,7 @@ type (
 		ObjectModTime  time.Time
 		ObjectMimeType string
 		ObjectHealth   float64
+		ObjectETag     string
 
 		// slice
 		SliceOffset uint32
@@ -184,11 +186,12 @@ type (
 
 	// rawObjectMetadata is used for hydrating object metadata.
 	rawObjectMetadata struct {
+		ETag     string
 		Health   float64
-		Name     string
-		Size     int64
 		MimeType string
 		ModTime  datetime
+		Name     string
+		Size     int64
 	}
 )
 
@@ -304,11 +307,12 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 	return api.ObjectMetadata{
+		ETag:     raw.ETag,
 		Health:   raw.Health,
-		Name:     raw.Name,
-		Size:     raw.Size,
 		MimeType: raw.MimeType,
 		ModTime:  time.Time(raw.ModTime).UTC(),
+		Name:     raw.Name,
+		Size:     raw.Size,
 	}
 }
 
@@ -395,11 +399,12 @@ func (raw rawObject) convert() (api.Object, error) {
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
-			Name:     raw[0].ObjectName,
-			Size:     raw[0].ObjectSize,
+			ETag:     raw[0].ObjectETag,
 			Health:   minHealth,
 			MimeType: raw[0].ObjectMimeType,
 			ModTime:  raw[0].ObjectModTime.UTC(),
+			Name:     raw[0].ObjectName,
+			Size:     raw[0].ObjectSize,
 		},
 		Object: object.Object{
 			Key:          key,
@@ -542,45 +547,57 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
 func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
-	var resp api.ObjectsStatsResponse
-	return resp, s.db.Transaction(func(tx *gorm.DB) error {
-		// Number of objects.
-		var objInfo struct {
-			NumObjects       uint64
-			TotalObjectsSize uint64
-		}
-		err := tx.
-			Model(&dbObject{}).
-			Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
-			Scan(&objInfo).
-			Error
-		if err != nil {
-			return err
-		}
-		resp.NumObjects = objInfo.NumObjects
-		resp.TotalObjectsSize = objInfo.TotalObjectsSize
+	// Number of objects.
+	var objInfo struct {
+		NumObjects       uint64
+		TotalObjectsSize uint64
+	}
+	err := s.db.
+		Model(&dbObject{}).
+		Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
+		Scan(&objInfo).
+		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
 
-		var totalSectors uint64
-		err = tx.Model(&dbSector{}).
-			Raw("SELECT COUNT(*) FROM (SELECT 1 FROM contract_sectors cs GROUP BY cs.db_sector_id) sectors").
-			Scan(&totalSectors).
-			Error
-		if err != nil {
-			return err
-		}
+	var totalSectors uint64
 
-		var totalUploaded int64
-		err = tx.Model(&dbContractSector{}).
-			Count(&totalUploaded).
-			Error
-		if err != nil {
-			return err
+	batchSize := 10000000
+	marker := uint64(0)
+	for offset := 0; ; offset += batchSize {
+		var result struct {
+			Sectors uint64
+			Marker  uint64
 		}
+		res := s.db.
+			Model(&dbSector{}).
+			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM contract_sectors cs WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", marker, batchSize).
+			Scan(&result)
+		if err := res.Error; err != nil {
+			return api.ObjectsStatsResponse{}, err
+		} else if result.Sectors == 0 {
+			break // done
+		}
+		totalSectors += result.Sectors
+		marker = result.Marker
+	}
 
-		resp.TotalSectorsSize = totalSectors * rhpv2.SectorSize
-		resp.TotalUploadedSize = uint64(totalUploaded) * rhpv2.SectorSize
-		return nil
-	})
+	var totalUploaded int64
+	err = s.db.
+		Model(&dbContractSector{}).
+		Count(&totalUploaded).
+		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
+
+	return api.ObjectsStatsResponse{
+		NumObjects:        objInfo.NumObjects,
+		TotalObjectsSize:  objInfo.TotalObjectsSize,
+		TotalSectorsSize:  totalSectors * rhpv2.SectorSize,
+		TotalUploadedSize: uint64(totalUploaded) * rhpv2.SectorSize,
+	}, nil
 }
 
 func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
@@ -1019,13 +1036,14 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 	var rows []rawObjectMetadata
 	query := fmt.Sprintf(`
 	SELECT
+		MAX(etag) AS ETag,
 		MAX(created_at) AS ModTime,
 		CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
 		SUM(size) AS size,
 		MIN(health) as health,
 		MAX(mimeType) as MimeType
 	FROM (
-		SELECT MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
+		SELECT MAX(etag) AS etag, MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
 		FROM objects
 		INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
 		LEFT JOIN slices ON objects.id = slices.db_object_id 
@@ -1226,7 +1244,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
-		err := tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
+		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
 			Joins("DBBucket").
 			Take(&srcObj).
 			Error
@@ -1237,6 +1255,24 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		srcObjHealth, err := s.objectHealth(ctx, tx, srcObj.ID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch src object health: %w", err)
+		}
+
+		if srcBucket == dstBucket && srcPath == dstPath {
+			// No copying is happening. We just update the metadata on the src
+			// object.
+			srcObj.MimeType = mimeType
+			om = api.ObjectMetadata{
+				Health:   srcObjHealth,
+				MimeType: srcObj.MimeType,
+				ModTime:  srcObj.CreatedAt.UTC(),
+				Name:     srcObj.ObjectID,
+				Size:     srcObj.Size,
+			}
+			return tx.Save(&srcObj).Error
+		}
+		_, err = deleteObject(tx, dstBucket, dstPath)
+		if err != nil {
+			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		var srcSlices []dbSlice
@@ -1273,8 +1309,9 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		}
 
 		om = api.ObjectMetadata{
-			Health:   srcObjHealth,
 			MimeType: dstObj.MimeType,
+			ETag:     dstObj.Etag,
+			Health:   srcObjHealth,
 			ModTime:  dstObj.CreatedAt.UTC(),
 			Name:     dstObj.ObjectID,
 			Size:     dstObj.Size,
@@ -1284,7 +1321,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, mimeType string) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
 
@@ -1337,6 +1374,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet s
 			Key:        objKey,
 			Size:       o.TotalSize(),
 			MimeType:   mimeType,
+			Etag:       eTag,
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -1447,10 +1485,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		var slab dbSlab
 		if err = tx.
 			Where(&dbSlab{Key: key}).
-			Assign(&dbSlab{
-				DBContractSetID: cs.ID,
-				TotalShards:     uint8(len(slab.Shards)),
-			}).
 			Preload("Shards").
 			Take(&slab).
 			Error; err == gorm.ErrRecordNotFound {
@@ -1459,19 +1493,23 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return err
 		}
 
-		// invalidate health but optimistically indicate the slab's health is 1
+		// update fields
 		if err := tx.Model(&slab).
 			Where(&slab).
 			Updates(map[string]interface{}{
-				"health_valid": false,
-				"health":       1,
+				"db_contract_set_id": cs.ID,
+				"health_valid":       false,
+				"health":             1,
+				"total_shards":       len(s.Shards),
 			}).
 			Error; err != nil {
 			return err
 		}
 
 		// loop updated shards
+		toKeep := make(map[types.Hash256]struct{})
 		for _, shard := range s.Shards {
+			toKeep[shard.Root] = struct{}{}
 			// ensure the sector exists
 			var sector dbSector
 			if err := tx.
@@ -1494,6 +1532,15 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 					Append(&contract); err != nil {
 					return err
 				}
+			}
+		}
+		for _, shard := range slab.Shards {
+			root := *(*types.Hash256)(shard.Root)
+			if _, found := toKeep[root]; found {
+				continue
+			}
+			if err := tx.Delete(shard).Error; err != nil {
+				return fmt.Errorf("failed to delete shard: %w", err)
 			}
 		}
 		return nil
@@ -1532,6 +1579,9 @@ LIMIT ?
 `, refreshHealthBatchSize)
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
+			s.objectsMu.Lock()
+			defer s.objectsMu.Unlock()
+
 			var res *gorm.DB
 			if isSQLite(s.db) {
 				res = s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
@@ -1701,7 +1751,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).

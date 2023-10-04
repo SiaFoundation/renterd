@@ -215,7 +215,7 @@ func TestSectorPruning(t *testing.T) {
 	// add several objects
 	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
-		if err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
+		if _, err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
 			t.Fatal(err)
 		}
 	}

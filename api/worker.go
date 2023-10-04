@@ -253,6 +253,14 @@ type DownloadRange struct {
 	Length int64
 }
 
+type UploadObjectResponse struct {
+	ETag string `json:"etag"`
+}
+
+type UploadMultipartUploadPartResponse struct {
+	ETag string `json:"etag"`
+}
+
 type GetObjectResponse struct {
 	Content     io.ReadCloser  `json:"content"`
 	ContentType string         `json:"contentType"`
