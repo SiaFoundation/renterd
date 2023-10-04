@@ -70,6 +70,7 @@ func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetOb
 
 	path = strings.TrimPrefix(path, "/")
 	path += "?" + values.Encode()
+
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &res)
 	return
 }

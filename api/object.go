@@ -138,11 +138,11 @@ type (
 		Batch bool `json:"batch"`
 	}
 	GetObjectOptions struct {
-		Prefix          string `json:"prefix"`
-		Offset          int    `json:"offset"`
-		Limit           int    `json:"limit"`
-		IgnoreDelimiter bool   `json:"ignoreDelimiter"`
-		Marker          string `json:"marker"`
+		Prefix      string `json:"prefix"`
+		Offset      int    `json:"offset"`
+		Limit       int    `json:"limit"`
+		IgnoreDelim bool   `json:"ignoreDelim"`
+		Marker      string `json:"marker"`
 	}
 	ListObjectOptions struct {
 		Prefix string `json:"prefix"`
@@ -172,8 +172,8 @@ func (opts GetObjectOptions) Apply(values url.Values) {
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
-	if opts.IgnoreDelimiter {
-		values.Set("ignoreDelimiter", "true")
+	if opts.IgnoreDelim {
+		values.Set("ignoreDelim", "true")
 	}
 	if opts.Marker != "" {
 		values.Set("marker", opts.Marker)

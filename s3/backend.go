@@ -94,7 +94,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 	response := gofakes3.NewObjectList()
 	if prefix.HasDelimiter {
 		// Handle request with delimiter.
-		opts := &api.GetObjectOptions{}
+		opts := api.GetObjectOptions{}
 		if page.HasMarker {
 			opts.Marker = page.Marker
 			opts.Limit = int(page.MaxKeys)
@@ -109,7 +109,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 			opts.Prefix = adjustedPrefix
 		}
 		var res api.ObjectsResponse
-		res, err = s.b.Object(ctx, bucketName, path, api.GetObjectOptions{})
+		res, err = s.b.Object(ctx, bucketName, path, opts)
 		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
@@ -282,7 +282,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelimiter: true})
+	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
