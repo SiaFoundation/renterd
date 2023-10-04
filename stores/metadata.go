@@ -1485,26 +1485,17 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		var slab dbSlab
 		if err = tx.
 			Where(&dbSlab{Key: key}).
-			Assign(&dbSlab{
-				DBContractSetID: cs.ID,
-				TotalShards:     uint8(len(slab.Shards)),
+			Assign(map[string]interface{}{
+				"db_contract_set_id": cs.ID,
+				"total_shards":       len(slab.Shards),
+				"health_valid":       false,
+				"health":             1,
 			}).
 			Preload("Shards").
 			Take(&slab).
 			Error; err == gorm.ErrRecordNotFound {
 			return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
 		} else if err != nil {
-			return err
-		}
-
-		// invalidate health but optimistically indicate the slab's health is 1
-		if err := tx.Model(&slab).
-			Where(&slab).
-			Updates(map[string]interface{}{
-				"health_valid": false,
-				"health":       1,
-			}).
-			Error; err != nil {
 			return err
 		}
 
