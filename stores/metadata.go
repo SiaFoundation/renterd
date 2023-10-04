@@ -1485,12 +1485,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		var slab dbSlab
 		if err = tx.
 			Where(&dbSlab{Key: key}).
-			Assign(map[string]interface{}{
-				"db_contract_set_id": cs.ID,
-				"total_shards":       len(slab.Shards),
-				"health_valid":       false,
-				"health":             1,
-			}).
 			Preload("Shards").
 			Take(&slab).
 			Error; err == gorm.ErrRecordNotFound {
@@ -1499,8 +1493,23 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return err
 		}
 
+		// update fields
+		if err := tx.Model(&slab).
+			Where(&slab).
+			Updates(map[string]interface{}{
+				"db_contract_set_id": cs.ID,
+				"health_valid":       false,
+				"health":             1,
+				"total_shards":       len(s.Shards),
+			}).
+			Error; err != nil {
+			return err
+		}
+
 		// loop updated shards
+		toKeep := make(map[types.Hash256]struct{})
 		for _, shard := range s.Shards {
+			toKeep[shard.Root] = struct{}{}
 			// ensure the sector exists
 			var sector dbSector
 			if err := tx.
@@ -1523,6 +1532,15 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 					Append(&contract); err != nil {
 					return err
 				}
+			}
+		}
+		for _, shard := range slab.Shards {
+			root := *(*types.Hash256)(shard.Root)
+			if _, found := toKeep[root]; found {
+				continue
+			}
+			if err := tx.Delete(shard).Error; err != nil {
+				return fmt.Errorf("failed to delete shard: %w", err)
 			}
 		}
 		return nil
@@ -1561,6 +1579,9 @@ LIMIT ?
 `, refreshHealthBatchSize)
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
+			s.objectsMu.Lock()
+			defer s.objectsMu.Unlock()
+
 			var res *gorm.DB
 			if isSQLite(s.db) {
 				res = s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
