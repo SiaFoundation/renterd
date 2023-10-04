@@ -173,7 +173,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert we have 4 hosts
-	hosts, err := b.Hosts(context.Background(), 0, -1)
+	hosts, err := b.Hosts(context.Background(), api.GetHostsOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert all others are blocked
-	hosts, err = b.Hosts(context.Background(), 0, -1)
+	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert no hosts are blocked
-	hosts, err = b.Hosts(context.Background(), 0, -1)
+	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

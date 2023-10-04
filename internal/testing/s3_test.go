@@ -88,7 +88,7 @@ func TestS3Basic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	busObject, err := cluster.Bus.Object(context.Background(), "object", api.ObjectsWithBucket(bucket))
+	busObject, err := cluster.Bus.Object(context.Background(), bucket, "object", api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	} else if busObject.Object == nil {

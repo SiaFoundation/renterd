@@ -65,7 +65,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, testEtag, testMimeType, object.Object{
+	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
 			{
@@ -78,7 +78,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{})
+	}, map[types.PublicKey]types.FileContractID{}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Get host info for every host.
-	hosts, err := cluster.Bus.Hosts(context.Background(), 0, math.MaxInt)
+	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix))
+		res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{Prefix: test.prefix})
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
@@ -416,7 +416,7 @@ func TestObjectEntries(t *testing.T) {
 			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			res, err := b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithOffset(offset), api.ObjectsWithLimit(1))
+			res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{Prefix: test.prefix, Offset: offset, Limit: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -435,7 +435,7 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			res, err = b.Object(context.Background(), test.path, api.ObjectsWithPrefix(test.prefix), api.ObjectsWithMarker(test.want[offset].Name), api.ObjectsWithLimit(1))
+			res, err = b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{Prefix: test.prefix, Marker: test.want[offset].Name, Limit: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -777,7 +777,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "file" prefix
-	res, err := cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("file"))
+	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{Prefix: "file"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +786,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries with "fileś" prefix
-	res, err = cluster.Bus.Object(context.Background(), "fileś/", api.ObjectsWithPrefix("foo"))
+	res, err = cluster.Bus.Object(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{Prefix: "fileś"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -989,7 +989,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 			}
 
 			// Should be registered in bus.
-			res, err := cluster.Bus.Object(context.Background(), "")
+			res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "", api.GetObjectOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1021,21 +1021,21 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "", 0, -1)
+	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "ata", 0, -1)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "ata"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "1258", 0, -1)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "1258"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1364,7 +1364,7 @@ func TestParallelUpload(t *testing.T) {
 	wg.Wait()
 
 	// Check if objects exist.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/dir/", 0, 100)
+	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/dir/", Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1377,7 +1377,7 @@ func TestParallelUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1386,10 +1386,10 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects under /dir/.
-	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/dir/", true); err != nil {
+	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/dir/", api.DeleteObjectOptions{Batch: true}); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1398,10 +1398,10 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects under /.
-	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/", true); err != nil {
+	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/", api.DeleteObjectOptions{Batch: true}); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, "/", 0, 100)
+	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1926,7 +1926,7 @@ func TestUploadPacking(t *testing.T) {
 			t.Fatal(err)
 		}
 		download(name, data, 0, int64(len(data)))
-		res, err := b.Object(context.Background(), name)
+		res, err := b.Object(context.Background(), api.DefaultBucketName, name, api.GetObjectOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2030,7 +2030,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.
-	res, err := b.Object(context.Background(), "file1")
+	res, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

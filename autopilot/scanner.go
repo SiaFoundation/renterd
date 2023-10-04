@@ -32,8 +32,8 @@ type (
 		// a bit, we currently use inline interfaces to avoid having to update the
 		// scanner tests with every interface change
 		bus interface {
-			Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-			HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
+			Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
+			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 
@@ -234,7 +234,11 @@ func (s *scanner) launchHostScans() chan scanReq {
 		cutoff := time.Now().Add(-s.scanMinInterval)
 		for !s.ap.isStopped() && !exhausted {
 			// fetch next batch
-			hosts, err := s.bus.HostsForScanning(context.Background(), cutoff, offset, int(s.scanBatchSize))
+			hosts, err := s.bus.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+				MaxLastScan: cutoff,
+				Offset:      offset,
+				Limit:       int(s.scanBatchSize),
+			})
 			if err != nil {
 				s.logger.Errorf("could not get hosts for scanning, err: %v", err)
 				break

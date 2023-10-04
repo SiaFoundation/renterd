@@ -542,11 +542,119 @@ type S3AuthenticationSettings struct {
 	V4Keypairs map[string]string `json:"v4Keypairs"`
 }
 
-// Types related to multipart uploads.
+// Option types.
 type (
+	AddObjectOptions struct {
+		MimeType string `json:"mimeType"`
+		ETag     string `json:"eTag"`
+	}
 	CopyObjectOptions struct {
 		MimeType string `json:"mimeType"`
 	}
+	DeleteObjectOptions struct {
+		Batch bool `json:"batch"`
+	}
+	GetObjectOptions struct {
+		Prefix          string `json:"prefix"`
+		Offset          int    `json:"offset"`
+		Limit           int    `json:"limit"`
+		IgnoreDelimiter bool   `json:"ignoreDelimiter"`
+		Marker          string `json:"marker"`
+	}
+	ListObjectOptions struct {
+		Prefix string `json:"prefix"`
+		Marker string `json:"marker"`
+		Limit  int    `json:"limit"`
+	}
+	GetHostsOptions struct {
+		Offset int `json:"offset"`
+		Limit  int `json:"limit"`
+	}
+	HostsForScanningOptions struct {
+		MaxLastScan time.Time `json:"maxLastScan"`
+		Limit       int       `json:"limit"`
+		Offset      int       `json:"offset"`
+	}
+	SearchObjectOptions struct {
+		Key    string `json:"key"`
+		Offset int    `json:"offset"`
+		Limit  int    `json:"limit"`
+	}
+	SearchHostOptions struct {
+		AddressContains string            `json:"addressContains"`
+		FilterMode      string            `json:"filterMode"`
+		KeyIn           []types.PublicKey `json:"keyIn"`
+		Limit           int               `json:"limit"`
+		Offset          int               `json:"offset"`
+	}
+)
+
+func DefaultSearchHostOptions() SearchHostOptions {
+	return SearchHostOptions{
+		Limit:      -1,
+		FilterMode: HostFilterModeAll,
+	}
+}
+
+func (opts DeleteObjectOptions) Apply(values url.Values) {
+	if opts.Batch {
+		values.Set("batch", "true")
+	}
+}
+
+func (opts GetObjectOptions) Apply(values url.Values) {
+	if opts.Prefix != "" {
+		values.Set("prefix", opts.Prefix)
+	}
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+	if opts.IgnoreDelimiter {
+		values.Set("ignoreDelimiter", "true")
+	}
+	if opts.Marker != "" {
+		values.Set("marker", opts.Marker)
+	}
+}
+
+func (opts GetHostsOptions) Apply(values url.Values) {
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+}
+
+func (opts HostsForScanningOptions) Apply(values url.Values) {
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+	if !opts.MaxLastScan.IsZero() {
+		values.Set("maxLastScan", fmt.Sprint(TimeRFC3339(opts.MaxLastScan)))
+	}
+}
+
+func (opts SearchObjectOptions) Apply(values url.Values) {
+	if opts.Key != "" {
+		values.Set("key", opts.Key)
+	}
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+}
+
+// Types related to multipart uploads.
+type (
 	CreateMultipartOptions struct {
 		Key      object.EncryptionKey `json:"key"`
 		MimeType string               `json:"mimeType"`
@@ -654,24 +762,30 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
-type BucketPolicy struct {
-	PublicReadAccess bool `json:"publicReadAccess"`
-}
+type (
+	Bucket struct {
+		CreatedAt time.Time    `json:"createdAt"`
+		Name      string       `json:"name"`
+		Policy    BucketPolicy `json:"policy"`
+	}
 
-type Bucket struct {
-	CreatedAt time.Time    `json:"createdAt"`
-	Name      string       `json:"name"`
-	Policy    BucketPolicy `json:"policy"`
-}
+	BucketPolicy struct {
+		PublicReadAccess bool `json:"publicReadAccess"`
+	}
 
-type BucketCreateRequest struct {
-	Name   string       `json:"name"`
-	Policy BucketPolicy `json:"policy"`
-}
+	BucketCreateRequest struct {
+		Name   string       `json:"name"`
+		Policy BucketPolicy `json:"policy"`
+	}
 
-type BucketUpdatePolicyRequest struct {
-	Policy BucketPolicy `json:"policy"`
-}
+	BucketUpdatePolicyRequest struct {
+		Policy BucketPolicy `json:"policy"`
+	}
+
+	CreateBucketOptions struct {
+		Policy BucketPolicy `json:"policy"`
+	}
+)
 
 type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`

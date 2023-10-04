@@ -95,7 +95,13 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 	wanted := limit
 	for {
 		// fetch up to 'limit' hosts.
-		hosts, err := c.ap.bus.SearchHosts(ctx, filterMode, addressContains, keyIn, offset, limit)
+		hosts, err := c.ap.bus.SearchHosts(ctx, api.SearchHostOptions{
+			Offset:          offset,
+			Limit:           limit,
+			FilterMode:      filterMode,
+			AddressContains: addressContains,
+			KeyIn:           keyIn,
+		})
 		if err != nil {
 			return nil, err
 		}
