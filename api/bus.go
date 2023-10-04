@@ -4,10 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"mime"
-	"net/http"
 	"net/url"
-	"path/filepath"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -25,9 +22,6 @@ const (
 	ContractArchivalReasonHostPruned = "hostpruned"
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
-
-	ObjectsRenameModeSingle = "single"
-	ObjectsRenameModeMulti  = "multi"
 
 	UsabilityFilterModeAll      = "all"
 	UsabilityFilterModeUsable   = "usable"
@@ -52,14 +46,6 @@ var (
 	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
-
-	// ErrObjectNotFound is returned when an object can't be retrieved from the
-	// database.
-	ErrObjectNotFound = errors.New("object not found")
-
-	// ErrObjectCorrupted is returned if we were unable to retrieve the object
-	// from the database.
-	ErrObjectCorrupted = errors.New("object corrupted")
 
 	// ErrContractNotFound is returned when a contract can't be retrieved from
 	// the database.
@@ -194,86 +180,6 @@ type HostsPriceTablesRequest struct {
 type HostsRemoveRequest struct {
 	MaxDowntimeHours      DurationH `json:"maxDowntimeHours"`
 	MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
-}
-
-// Object wraps an object.Object with its metadata.
-type Object struct {
-	ObjectMetadata
-	object.Object
-}
-
-// ObjectMetadata contains various metadata about an object.
-type ObjectMetadata struct {
-	ETag     string    `json:"eTag,omitempty"`
-	Health   float64   `json:"health"`
-	MimeType string    `json:"mimeType,omitempty"`
-	ModTime  time.Time `json:"modTime"`
-	Name     string    `json:"name"`
-	Size     int64     `json:"size"`
-}
-
-// LastModified returns the object's ModTime formatted for use in the
-// 'Last-Modified' header
-func (o ObjectMetadata) LastModified() string {
-	return o.ModTime.UTC().Format(http.TimeFormat)
-}
-
-// ContentType returns the object's MimeType for use in the 'Content-Type'
-// header, if the object's mime type is empty we try and deduce it from the
-// extension in the object's name.
-func (o ObjectMetadata) ContentType() string {
-	if o.MimeType != "" {
-		return o.MimeType
-	}
-
-	if ext := filepath.Ext(o.Name); ext != "" {
-		return mime.TypeByExtension(ext)
-	}
-
-	return ""
-}
-
-// ObjectAddRequest is the request type for the /object/*key endpoint.
-type ObjectAddRequest struct {
-	Bucket        string                                   `json:"bucket"`
-	ContractSet   string                                   `json:"contractSet"`
-	Object        object.Object                            `json:"object"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
-	MimeType      string                                   `json:"mimeType"`
-	ETag          string                                   `json:"eTag"`
-}
-
-// ObjectsResponse is the response type for the /objects endpoint.
-type ObjectsResponse struct {
-	HasMore bool             `json:"hasMore"`
-	Entries []ObjectMetadata `json:"entries,omitempty"`
-	Object  *Object          `json:"object,omitempty"`
-}
-
-type ObjectsCopyRequest struct {
-	SourceBucket string `json:"sourceBucket"`
-	SourcePath   string `json:"sourcePath"`
-
-	DestinationBucket string `json:"destinationBucket"`
-	DestinationPath   string `json:"destinationPath"`
-
-	MimeType string `json:"mimeType"`
-}
-
-// ObjectsRenameRequest is the request type for the /objects/rename endpoint.
-type ObjectsRenameRequest struct {
-	Bucket string `json:"bucket"`
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Mode   string `json:"mode"`
-}
-
-// ObjectsStatsResponse is the response type for the /stats/objects endpoint.
-type ObjectsStatsResponse struct {
-	NumObjects        uint64 `json:"numObjects"`        // number of objects
-	TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
-	TotalSectorsSize  uint64 `json:"totalSectorsSize"`  // uploaded size of all objects
-	TotalUploadedSize uint64 `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
 }
 
 type SlabBuffer struct {
@@ -447,19 +353,6 @@ type PackedSlabsRequestGET struct {
 	TotalShards     uint8      `json:"totalShards"`
 	ContractSet     string     `json:"contractSet"`
 	Limit           int        `json:"limit"`
-}
-
-type ObjectsListRequest struct {
-	Bucket string `json:"bucket"`
-	Limit  int    `json:"limit"`
-	Prefix string `json:"prefix"`
-	Marker string `json:"marker"`
-}
-
-type ObjectsListResponse struct {
-	HasMore    bool             `json:"hasMore"`
-	NextMarker string           `json:"nextMarker"`
-	Objects    []ObjectMetadata `json:"objects"`
 }
 
 type PackedSlabsRequestPOST struct {
