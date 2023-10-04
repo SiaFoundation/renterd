@@ -1321,6 +1321,39 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
+func (s *SQLStore) MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		// Fetch sectors to delete.
+		var sectors []dbContractSector
+		err := tx.Model(&dbContractSector{}).
+			Joins("INNER JOIN sectors s ON s.id = contract_sectors.db_sector_id AND s.root = ?", hash256(root)).
+			Joins("INNER JOIN contracts c ON c.id = contract_sectors.db_contract_id").
+			Joins("INNER JOIN hosts h ON h.id = c.host_id AND h.public_key = ?", publicKey(hk)).
+			Find(&sectors).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch contract sectors for deletion: %w", err)
+		}
+
+		// Update the affected slabs.
+		var sectorIDs []uint
+		uniqueIDs := make(map[uint]struct{})
+		for _, s := range sectors {
+			if _, exists := uniqueIDs[s.DBSectorID]; !exists {
+				uniqueIDs[s.DBSectorID] = struct{}{}
+				sectorIDs = append(sectorIDs, s.DBSectorID)
+			}
+		}
+		err = tx.Exec("UPDATE slabs SET health_valid = 0 WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", sectorIDs).Error
+		if err != nil {
+			return fmt.Errorf("failed to invalidate slab health: %w", err)
+		}
+
+		// Delete sectors.
+		return tx.Delete(sectors).Error
+	})
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error {
 	s.objectsMu.Lock()
 	defer s.objectsMu.Unlock()
