@@ -2,8 +2,10 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"time"
 
@@ -43,7 +45,7 @@ type (
 		Size     int64     `json:"size"`
 	}
 
-	// ObjectAddRequest is the request type for the /object/*key endpoint.
+	// ObjectAddRequest is the request type for the /bus/object/*key endpoint.
 	ObjectAddRequest struct {
 		Bucket        string                                   `json:"bucket"`
 		ContractSet   string                                   `json:"contractSet"`
@@ -53,14 +55,14 @@ type (
 		ETag          string                                   `json:"eTag"`
 	}
 
-	// ObjectsResponse is the response type for the /objects endpoint.
+	// ObjectsResponse is the response type for the /bus/objects endpoint.
 	ObjectsResponse struct {
 		HasMore bool             `json:"hasMore"`
 		Entries []ObjectMetadata `json:"entries,omitempty"`
 		Object  *Object          `json:"object,omitempty"`
 	}
 
-	// ObjectsCopyRequest is the request type for the /objects/copy endpoint.
+	// ObjectsCopyRequest is the request type for the /bus/objects/copy endpoint.
 	ObjectsCopyRequest struct {
 		SourceBucket string `json:"sourceBucket"`
 		SourcePath   string `json:"sourcePath"`
@@ -71,7 +73,7 @@ type (
 		MimeType string `json:"mimeType"`
 	}
 
-	// ObjectsDeleteRequest is the request type for the /objects/list endpoint.
+	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
 	ObjectsListRequest struct {
 		Bucket string `json:"bucket"`
 		Limit  int    `json:"limit"`
@@ -79,14 +81,14 @@ type (
 		Marker string `json:"marker"`
 	}
 
-	// ObjectsListResponse is the response type for the /objects/list endpoint.
+	// ObjectsListResponse is the response type for the /bus/objects/list endpoint.
 	ObjectsListResponse struct {
 		HasMore    bool             `json:"hasMore"`
 		NextMarker string           `json:"nextMarker"`
 		Objects    []ObjectMetadata `json:"objects"`
 	}
 
-	// ObjectsRenameRequest is the request type for the /objects/rename endpoint.
+	// ObjectsRenameRequest is the request type for the /bus/objects/rename endpoint.
 	ObjectsRenameRequest struct {
 		Bucket string `json:"bucket"`
 		From   string `json:"from"`
@@ -94,7 +96,7 @@ type (
 		Mode   string `json:"mode"`
 	}
 
-	// ObjectsStatsResponse is the response type for the /stats/objects endpoint.
+	// ObjectsStatsResponse is the response type for the /bus/stats/objects endpoint.
 	ObjectsStatsResponse struct {
 		NumObjects        uint64 `json:"numObjects"`        // number of objects
 		TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
@@ -122,4 +124,70 @@ func (o ObjectMetadata) ContentType() string {
 	}
 
 	return ""
+}
+
+type (
+	AddObjectOptions struct {
+		MimeType string `json:"mimeType"`
+		ETag     string `json:"eTag"`
+	}
+	CopyObjectOptions struct {
+		MimeType string `json:"mimeType"`
+	}
+	DeleteObjectOptions struct {
+		Batch bool `json:"batch"`
+	}
+	GetObjectOptions struct {
+		Prefix          string `json:"prefix"`
+		Offset          int    `json:"offset"`
+		Limit           int    `json:"limit"`
+		IgnoreDelimiter bool   `json:"ignoreDelimiter"`
+		Marker          string `json:"marker"`
+	}
+	ListObjectOptions struct {
+		Prefix string `json:"prefix"`
+		Marker string `json:"marker"`
+		Limit  int    `json:"limit"`
+	}
+	SearchObjectOptions struct {
+		Key    string `json:"key"`
+		Offset int    `json:"offset"`
+		Limit  int    `json:"limit"`
+	}
+)
+
+func (opts DeleteObjectOptions) Apply(values url.Values) {
+	if opts.Batch {
+		values.Set("batch", "true")
+	}
+}
+
+func (opts GetObjectOptions) Apply(values url.Values) {
+	if opts.Prefix != "" {
+		values.Set("prefix", opts.Prefix)
+	}
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+	if opts.IgnoreDelimiter {
+		values.Set("ignoreDelimiter", "true")
+	}
+	if opts.Marker != "" {
+		values.Set("marker", opts.Marker)
+	}
+}
+
+func (opts SearchObjectOptions) Apply(values url.Values) {
+	if opts.Key != "" {
+		values.Set("key", opts.Key)
+	}
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
 }

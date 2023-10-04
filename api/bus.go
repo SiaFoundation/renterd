@@ -163,6 +163,7 @@ type ContractsPrunableDataResponse struct {
 	TotalSize     uint64                 `json:"totalSize"`
 }
 
+// ContractPrunableData wraps a contract's size information with its id.
 type ContractPrunableData struct {
 	ID types.FileContractID `json:"id"`
 	ContractSize
@@ -379,28 +380,6 @@ type GougingParams struct {
 
 // Option types.
 type (
-	AddObjectOptions struct {
-		MimeType string `json:"mimeType"`
-		ETag     string `json:"eTag"`
-	}
-	CopyObjectOptions struct {
-		MimeType string `json:"mimeType"`
-	}
-	DeleteObjectOptions struct {
-		Batch bool `json:"batch"`
-	}
-	GetObjectOptions struct {
-		Prefix          string `json:"prefix"`
-		Offset          int    `json:"offset"`
-		Limit           int    `json:"limit"`
-		IgnoreDelimiter bool   `json:"ignoreDelimiter"`
-		Marker          string `json:"marker"`
-	}
-	ListObjectOptions struct {
-		Prefix string `json:"prefix"`
-		Marker string `json:"marker"`
-		Limit  int    `json:"limit"`
-	}
 	GetHostsOptions struct {
 		Offset int `json:"offset"`
 		Limit  int `json:"limit"`
@@ -409,11 +388,6 @@ type (
 		MaxLastScan time.Time `json:"maxLastScan"`
 		Limit       int       `json:"limit"`
 		Offset      int       `json:"offset"`
-	}
-	SearchObjectOptions struct {
-		Key    string `json:"key"`
-		Offset int    `json:"offset"`
-		Limit  int    `json:"limit"`
 	}
 	SearchHostOptions struct {
 		AddressContains string            `json:"addressContains"`
@@ -428,30 +402,6 @@ func DefaultSearchHostOptions() SearchHostOptions {
 	return SearchHostOptions{
 		Limit:      -1,
 		FilterMode: HostFilterModeAll,
-	}
-}
-
-func (opts DeleteObjectOptions) Apply(values url.Values) {
-	if opts.Batch {
-		values.Set("batch", "true")
-	}
-}
-
-func (opts GetObjectOptions) Apply(values url.Values) {
-	if opts.Prefix != "" {
-		values.Set("prefix", opts.Prefix)
-	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if opts.IgnoreDelimiter {
-		values.Set("ignoreDelimiter", "true")
-	}
-	if opts.Marker != "" {
-		values.Set("marker", opts.Marker)
 	}
 }
 
@@ -473,18 +423,6 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 	}
 	if !opts.MaxLastScan.IsZero() {
 		values.Set("maxLastScan", fmt.Sprint(TimeRFC3339(opts.MaxLastScan)))
-	}
-}
-
-func (opts SearchObjectOptions) Apply(values url.Values) {
-	if opts.Key != "" {
-		values.Set("key", opts.Key)
-	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 }
 
