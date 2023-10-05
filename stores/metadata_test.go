@@ -3631,7 +3631,7 @@ func TestListObjects(t *testing.T) {
 	}
 }
 
-func TestMarkSectorLost(t *testing.T) {
+func TestDeleteHostSector(t *testing.T) {
 	db, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -3686,7 +3686,7 @@ func TestMarkSectorLost(t *testing.T) {
 	}
 
 	// Prune the sector from hk1.
-	if err := db.MarkSectorLost(context.Background(), hk1, root); err != nil {
+	if err := db.DeleteHostSector(context.Background(), hk1, root); err != nil {
 		t.Fatal(err)
 	}
 

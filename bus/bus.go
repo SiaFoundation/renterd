@@ -135,7 +135,7 @@ type (
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
-		MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
@@ -1162,12 +1162,15 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
 }
 
-func (b *bus) sectorsLostHandlerPOST(jc jape.Context) {
-	var slr api.SectorsLostRequest
-	if jc.Decode(&slr) != nil {
+func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
+	var hk types.PublicKey
+	var root types.Hash256
+	if jc.DecodeParam("hk", &hk) != nil {
+		return
+	} else if jc.DecodeParam("root", &root) != nil {
 		return
 	}
-	err := b.ms.MarkSectorLost(jc.Request.Context(), slr.HostKey, slr.Root)
+	err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
 	if jc.Check("failed to mark sector as lost", err) != nil {
 		return
 	}
@@ -2065,7 +2068,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 
-		"POST   /sectors/lost": b.sectorsLostHandlerPOST,
+		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,

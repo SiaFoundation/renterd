@@ -1321,7 +1321,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
-func (s *SQLStore) MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch sectors to delete.
 		var sectors []dbContractSector

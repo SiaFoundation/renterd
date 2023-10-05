@@ -73,7 +73,7 @@ type (
 	}
 
 	sectorLostMarker interface {
-		MarkSectorLost(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 	}
 
 	slabDownload struct {
@@ -1023,7 +1023,7 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabChan chan str
 			}
 
 			if isSectorNotFound(resp.err) {
-				if err := s.slm.MarkSectorLost(ctx, resp.hk, resp.root); err != nil {
+				if err := s.slm.DeleteHostSector(ctx, resp.hk, resp.root); err != nil {
 					s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.hk, "root", resp.root, "err", err)
 				} else {
 					s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.hk, "root", resp.root)
