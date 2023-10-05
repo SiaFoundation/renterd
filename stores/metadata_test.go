@@ -2324,6 +2324,34 @@ func TestPutSlab(t *testing.T) {
 	} else if obj.Slabs[0].ID != updated.ID {
 		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].ID, updated.ID)
 	}
+
+	// update the slab to change its contract set and total shards.
+	if err := db.SetContractSet(ctx, "other", nil); err != nil {
+		t.Fatal(err)
+	}
+	slab.Shards = nil // remove all shards
+	err = db.UpdateSlab(ctx, slab, "other", map[types.PublicKey]types.FileContractID{
+		hk1: fcid1,
+		hk3: fcid3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s dbSlab
+	if err := db.db.Model(&dbSlab{}).
+		Joins("DBContractSet").
+		Preload("Shards").
+		Where("key = ?", key).
+		Take(&s).
+		Error; err != nil {
+		t.Fatal(err)
+	} else if s.DBContractSet.Name != "other" {
+		t.Fatal("contract set was not updated")
+	} else if s.TotalShards != 0 {
+		t.Fatal("total shards was not updated")
+	} else if len(s.Shards) != 0 {
+		t.Fatal("shards were not deleted")
+	}
 }
 
 func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileContractID) {
