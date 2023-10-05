@@ -65,10 +65,9 @@ API to the host system and the gateway to the world.
 
 ## Wallet
 
-Make sure the wallet is funded, it's a good rule of thumb to have at least twice the allowance in the wallet. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoints:
+Make sure the wallet is funded, it's a good rule of thumb to have at least twice the allowance in the wallet. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoint:
 
-- `GET /api/bus/wallet/address`
-- `GET /api/bus/wallet/balance`
+- `GET /api/bus/wallet`
 
 The autopilot will automatically redistribute the wallet funds over a certain number of outputs that make sense with regards to the autopilot's configuration. Contract formation and renewals work best when the autopilot has a good amount of outputs at its disposal. It's definitely a good idea to verify whether this is the case because if not it means that it's likely the autopilot is misconfigured, in which case the logs should be of help.
 
