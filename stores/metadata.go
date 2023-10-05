@@ -1337,8 +1337,6 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 			Error
 		if err != nil {
 			return fmt.Errorf("failed to fetch contract sectors for deletion: %w", err)
-		} else if len(sectors) == 0 {
-			return fmt.Errorf("root %v for host %v not found: %w", root, hk, gorm.ErrRecordNotFound)
 		}
 
 		if len(sectors) > 0 {
