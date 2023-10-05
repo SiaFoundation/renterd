@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -1325,14 +1326,20 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch sectors to delete.
 		var sectors []dbContractSector
-		err := tx.Model(&dbContractSector{}).
-			Joins("INNER JOIN sectors s ON s.id = contract_sectors.db_sector_id AND s.root = ?", hash256(root)).
-			Joins("INNER JOIN contracts c ON c.id = contract_sectors.db_contract_id").
-			Joins("INNER JOIN hosts h ON h.id = c.host_id AND h.public_key = ?", publicKey(hk)).
-			Find(&sectors).
+		err := tx.Raw(fmt.Sprintf(`
+			SELECT contract_sectors.*
+			FROM contract_sectors
+			INNER JOIN sectors s ON s.id = contract_sectors.db_sector_id
+			INNER JOIN contracts c ON c.id = contract_sectors.db_contract_id
+			INNER JOIN hosts h ON h.id = c.host_id
+			WHERE s.root = x'%s' AND h.public_key = x'%s'
+			`, hex.EncodeToString(root[:]), hex.EncodeToString(hk[:]))).
+			Scan(&sectors).
 			Error
 		if err != nil {
 			return fmt.Errorf("failed to fetch contract sectors for deletion: %w", err)
+		} else if len(sectors) == 0 {
+			return fmt.Errorf("root %v for host %v not found: %w", root, hk, gorm.ErrRecordNotFound)
 		}
 
 		// Update the affected slabs.
@@ -1349,8 +1356,31 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 			return fmt.Errorf("failed to invalidate slab health: %w", err)
 		}
 
-		// Delete sectors.
-		return tx.Delete(sectors).Error
+		// Delete contract_sectors.
+		res := tx.Delete(&sectors)
+		if err := res.Error; err != nil {
+			return fmt.Errorf("failed to delete contract sectors: %w", err)
+		} else if res.RowsAffected != int64(len(sectors)) {
+			return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
+		}
+
+		// Fetch the sectors and update the latest_host field.
+		var dbSectors []dbSector
+		err = tx.Where("id IN (?)", sectorIDs).
+			Preload("Contracts.Host").
+			Find(&dbSectors).
+			Error
+		if err != nil {
+			return fmt.Errorf("failed to fetch sectors: %w", err)
+		}
+		for i, sector := range dbSectors {
+			if len(sector.Contracts) == 0 {
+				dbSectors[i].LatestHost = publicKey{} // no more hosts
+			} else {
+				dbSectors[i].LatestHost = sector.Contracts[len(sector.Contracts)-1].Host.PublicKey // most recent contract
+			}
+		}
+		return tx.Save(dbSectors).Error
 	})
 }
 

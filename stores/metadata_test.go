@@ -3657,7 +3657,7 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// create a healthy slab with one sector that is uploaded to all contracts.
-	root := types.Hash256{1}
+	root := types.Hash256{1, 2, 3}
 	slab := dbSlab{
 		DBContractSetID: 1,
 		Key:             []byte(object.GenerateEncryptionKey().String()),
@@ -3666,8 +3666,9 @@ func TestDeleteHostSector(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				Contracts: dbContracts,
-				Root:      root[:],
+				Contracts:  dbContracts,
+				Root:       root[:],
+				LatestHost: publicKey(hk1), // hk1 is latest host
 			},
 		},
 	}
@@ -3700,9 +3701,12 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Find the slab. It should have an invalid health.
-	if err := db.db.Take(&slab).Error; err != nil {
+	var s dbSlab
+	if err := db.db.Preload("Shards").Take(&s).Error; err != nil {
 		t.Fatal(err)
-	} else if slab.HealthValid {
+	} else if s.HealthValid {
 		t.Fatal("expected health to be invalid")
+	} else if s.Shards[0].LatestHost != publicKey(hk2) {
+		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
 	}
 }
