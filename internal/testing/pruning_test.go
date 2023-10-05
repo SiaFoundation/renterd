@@ -30,18 +30,14 @@ func TestHostPruning(t *testing.T) {
 	apCfg.ScannerInterval = 0
 
 	// create a new test cluster
-	cluster, err := newTestClusterCustom(t.TempDir(), t.Name(), true, types.GeneratePrivateKey(), testBusCfg(), testWorkerCfg(), apCfg, newTestLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster.Shutdown(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cluster := newTestCluster(t, testClusterOptions{
+		autopilotCfg: &apCfg,
+	})
+	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
 	a := cluster.Autopilot
+	tt := cluster.tt
 
 	// create a helper function that records n failed interactions
 	now := time.Now()
@@ -56,67 +52,46 @@ func TestHostPruning(t *testing.T) {
 				Success:   false,
 			}
 		}
-		if err = b.RecordHostScans(context.Background(), his); err != nil {
-			t.Fatal(err)
-		}
+		tt.OK(b.RecordHostScans(context.Background(), his))
 	}
 
 	// create a helper function that waits for an autopilot loop to finish
 	waitForAutopilotLoop := func() {
 		t.Helper()
 		var nTriggered int
-		if err := Retry(10, 500*time.Millisecond, func() error {
-			if triggered, err := a.Trigger(true); err != nil {
-				t.Fatal(err)
-			} else if triggered {
+		tt.Retry(10, 500*time.Millisecond, func() error {
+			triggered, err := a.Trigger(true)
+			tt.OK(err)
+			if triggered {
 				nTriggered++
 				if nTriggered > 1 {
 					return nil
 				}
 			}
 			return errors.New("autopilot loop has not finished")
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
 	}
 
 	// add a host
-	hosts, err := cluster.AddHosts(1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	hosts := cluster.AddHosts(1)
 	h1 := hosts[0]
 
 	// fetch the host
 	h, err := b.Host(context.Background(), h1.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// scan the host (lastScan needs to be > 0 for downtime to start counting)
-	_, err = w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0))
 
 	// block the host
-	err = b.UpdateHostBlocklist(ctx, []string{h1.PublicKey().String()}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.PublicKey().String()}, nil, false))
 
 	// remove it from the cluster manually
 	cluster.hosts = cluster.hosts[1:]
-	err = hosts[0].Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(hosts[0].Close())
 
 	// shut down the worker manually, this will flush any interactions
-	err = cluster.workerShutdownFns[1](context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(cluster.workerShutdownFns[1](context.Background()))
 	cluster.workerShutdownFns = cluster.workerShutdownFns[:1]
 
 	// record 9 failed interactions, right before the pruning threshold, and
@@ -126,9 +101,8 @@ func TestHostPruning(t *testing.T) {
 
 	// assert the host was not pruned
 	hostss, err := b.Hosts(context.Background(), 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hostss) != 1 {
+	tt.OK(err)
+	if len(hostss) != 1 {
 		t.Fatal("host was pruned")
 	}
 
@@ -139,26 +113,21 @@ func TestHostPruning(t *testing.T) {
 
 	// assert the host was not pruned
 	hostss, err = b.Hosts(context.Background(), 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hostss) != 0 {
+	tt.OK(err)
+	if len(hostss) != 0 {
 		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
 	}
 
 	// assert validation on MaxDowntimeHours
 	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	ap.Config.Hosts.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
 	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}); !strings.Contains(err.Error(), api.ErrMaxDowntimeHoursTooHigh.Error()) {
 		t.Fatal(err)
 	}
 	ap.Config.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
-	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}); err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}))
 }
 
 func TestSectorPruning(t *testing.T) {
@@ -167,15 +136,8 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// create a cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster.Shutdown(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
 
 	// add a helper to check whether a root is in a given slice
 	hasRoot := func(roots []types.Hash256, root types.Hash256) bool {
@@ -192,45 +154,33 @@ func TestSectorPruning(t *testing.T) {
 	rs := testRedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
+	tt := cluster.tt
 
 	numObjects := 10
 
 	// add hosts
-	_, err = cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
 
 	// wait until we have accounts
-	if _, err := cluster.WaitForAccounts(); err != nil {
-		t.Fatal(err)
-	}
+	cluster.WaitForAccounts()
 
 	// create a contracts dict
 	contracts, err := b.Contracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
-		if _, err := w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename); err != nil {
-			t.Fatal(err)
-		}
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename))
 	}
 
 	// compare database against roots returned by the host
 	var n int
 	for _, c := range contracts {
 		dbRoots, _, err := b.ContractRoots(context.Background(), c.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		tt.OK(err)
 		cRoots, err := w.RHPContractRoots(context.Background(), c.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		tt.OK(err)
 		if len(dbRoots) != len(cRoots) {
 			t.Fatal("unexpected number of roots", dbRoots, cRoots)
 		}
@@ -247,65 +197,50 @@ func TestSectorPruning(t *testing.T) {
 
 	// reboot the cluster to ensure spending records get flushed
 	// Restart cluster to have worker fetch the account from the bus again.
-	cluster2, err := cluster.Reboot(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster2.Shutdown(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cluster2 := cluster.Reboot(context.Background())
+	defer cluster2.Shutdown()
 	b = cluster2.Bus
 	w = cluster2.Worker
 
 	// assert prunable data is 0
-	if res, err := b.PrunableData(context.Background()); err != nil {
-		t.Fatal(err)
-	} else if res.TotalPrunable != 0 {
+	res, err := b.PrunableData(context.Background())
+	tt.OK(err)
+	if res.TotalPrunable != 0 {
 		t.Fatal("expected 0 prunable data", n)
 	}
 
 	// delete every other object
 	for i := 0; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		if err := b.DeleteObject(context.Background(), api.DefaultBucketName, filename, false); err != nil {
-			t.Fatal(err)
-		}
+		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, false))
 	}
 
 	// assert amount of prunable data
-	if res, err := b.PrunableData(context.Background()); err != nil {
-		t.Fatal(err)
-	} else if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
+	res, err = b.PrunableData(context.Background())
+	tt.OK(err)
+	if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
 		t.Fatal("unexpected prunable data", n)
 	}
 
 	// prune all contracts
 	for _, c := range contracts {
-		if _, _, err := w.RHPPruneContract(context.Background(), c.ID, 0); err != nil {
-			t.Fatal(err)
-		}
+		tt.OKAll(w.RHPPruneContract(context.Background(), c.ID, 0))
 	}
 
 	// assert spending records were updated and prunable data is 0
-	if err = Retry(10, testBusFlushInterval, func() error {
-		if res, err := b.PrunableData(context.Background()); err != nil {
-			t.Fatal(err)
-		} else if res.TotalPrunable != 0 {
+	tt.Retry(10, testBusFlushInterval, func() error {
+		res, err := b.PrunableData(context.Background())
+		tt.OK(err)
+		if res.TotalPrunable != 0 {
 			return fmt.Errorf("unexpected prunable data: %d", n)
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// assert spending was updated
 	for _, c := range contracts {
 		c, err := b.Contract(context.Background(), c.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		tt.OK(err)
 		if c.Spending.SectorRoots.IsZero() {
 			t.Fatal("spending record not updated")
 		}

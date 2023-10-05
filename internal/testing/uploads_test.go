@@ -47,28 +47,14 @@ func TestUploadingSectorsCache(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster.Shutdown(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: testRedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
 	w := cluster.Worker
 	b := cluster.Bus
 	rs := testRedundancySettings
-
-	// add hosts
-	if _, err := cluster.AddHostsBlocking(rs.TotalShards); err != nil {
-		t.Fatal(err)
-	}
-
-	// wait for accounts to be funded
-	if _, err := cluster.WaitForAccounts(); err != nil {
-		t.Fatal(err)
-	}
+	tt := cluster.tt
 
 	// generate some random data
 	data := make([]byte, rhpv2.SectorSize*rs.MinShards)
@@ -77,7 +63,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	// upload an object using our custom reader
 	br := newBlockedReader(data)
 	go func() {
-		_, err = w.UploadObject(context.Background(), br, t.Name())
+		_, err := w.UploadObject(context.Background(), br, t.Name())
 		if err != nil {
 			t.Error(err)
 		}
@@ -92,19 +78,15 @@ func TestUploadingSectorsCache(t *testing.T) {
 
 	// fetch contracts
 	contracts, err := b.Contracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tt.OK(err)
 
 	// fetch pending roots for all contracts
 	pending := make(map[types.FileContractID][]types.Hash256)
-	if err := Retry(10, time.Second, func() error {
+	tt.Retry(10, time.Second, func() error {
 		var n int
 		for _, c := range contracts {
 			_, uploading, err := b.ContractRoots(context.Background(), c.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			tt.OK(err)
 			pending[c.ID] = uploading
 			n += len(uploading)
 		}
@@ -114,22 +96,18 @@ func TestUploadingSectorsCache(t *testing.T) {
 			return fmt.Errorf("expected %v uploading sectors, got %v", rs.TotalShards, n)
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// unblock the upload
 	close(br.blockChan)
 
 	// fetch uploaded roots for all contracts
 	uploaded := make(map[types.FileContractID]map[types.Hash256]struct{})
-	if err := Retry(10, time.Second, func() error {
+	tt.Retry(10, time.Second, func() error {
 		var n int
 		for _, c := range contracts {
 			roots, _, err := b.ContractRoots(context.Background(), c.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			tt.OK(err)
 			uploaded[c.ID] = make(map[types.Hash256]struct{})
 			for _, root := range roots {
 				uploaded[c.ID][root] = struct{}{}
@@ -142,9 +120,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 			return fmt.Errorf("expected %v uploading sectors, got %v", rs.TotalShards, n)
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	if len(pending) != len(uploaded) {
 		t.Fatal("unexpected number of contracts")
@@ -158,9 +134,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 		}
 
 		cr, err := w.RHPContractRoots(context.Background(), id)
-		if err != nil {
-			t.Fatal(err)
-		}
+		tt.OK(err)
 		expected := make(map[types.Hash256]struct{})
 		for _, root := range cr {
 			expected[root] = struct{}{}

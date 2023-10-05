@@ -19,15 +19,15 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster, err := newTestCluster(t.TempDir(), newTestLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := cluster.Shutdown(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	cfg := testAutopilotConfig
+	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
+	cluster := newTestCluster(t, testClusterOptions{
+		// configure the cluster to use 1 more host than the total shards in the
+		// redundancy settings.
+		autopilotSettings: &cfg,
+		hosts:             int(testRedundancySettings.TotalShards) + 1,
+	})
+	defer cluster.Shutdown()
 
 	// create a helper to fetch used hosts
 	usedHosts := func(path string) map[types.PublicKey]struct{} {
@@ -49,33 +49,13 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// convenience variables
-	cfg := testAutopilotConfig
 	w := cluster.Worker
-
-	// configure the cluster to use 1 more host than the total shards in the
-	// redundancy settings.
-	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
-	if err := cluster.UpdateAutopilotConfig(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-
-	// add hosts
-	hosts, err := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// wait until we have accounts
-	if _, err := cluster.WaitForAccounts(); err != nil {
-		t.Fatal(err)
-	}
+	tt := cluster.tt
 
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	if _, err := w.UploadObject(context.Background(), bytes.NewReader(data), "foo"); err != nil {
-		t.Fatal(err)
-	}
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), "foo"))
 
 	// assert amount of hosts used
 	used := usedHosts("foo")
@@ -85,18 +65,14 @@ func TestMigrations(t *testing.T) {
 
 	// select one host to remove
 	var removed types.PublicKey
-	for _, h := range hosts {
+	for _, h := range cluster.hosts {
 		if _, ok := used[h.PublicKey()]; ok {
-			if err := cluster.RemoveHost(h); err != nil {
-				t.Fatal(err)
-			}
+			cluster.RemoveHost(h)
 			removed = h.PublicKey()
 
 			// find the contract
 			contracts, err := cluster.Bus.Contracts(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
+			tt.OK(err)
 			var contract *api.ContractMetadata
 			for _, c := range contracts {
 				if c.HostKey == removed {
@@ -111,26 +87,18 @@ func TestMigrations(t *testing.T) {
 			// mine until we archive the contract
 			endHeight := contract.WindowEnd
 			cs, err := cluster.Bus.ConsensusState(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1)); err != nil {
-				t.Fatal(err)
-			}
+			tt.OK(err)
+			cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1))
 			break
 		}
 	}
 
 	// assert we migrated away from the bad host
-	if err := Retry(300, 100*time.Millisecond, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		if _, used := usedHosts("foo")[removed]; used {
-			if err := cluster.MineBlocks(1); err != nil {
-				t.Fatal(err)
-			}
+			cluster.MineBlocks(1)
 			return errors.New("host is still used")
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 }
