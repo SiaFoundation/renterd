@@ -44,18 +44,6 @@ func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error
 	return
 }
 
-// WalletAddress returns an address controlled by the wallet.
-func (c *Client) WalletAddress(ctx context.Context) (resp types.Address, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet/address", &resp)
-	return
-}
-
-// WalletBalance returns the current wallet balance.
-func (c *Client) WalletBalance(ctx context.Context) (bal types.Currency, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet/balance", &bal)
-	return
-}
-
 // WalletDiscard discards the provided txn, make its inputs usable again. This
 // should only be called on transactions that will never be broadcast.
 func (c *Client) WalletDiscard(ctx context.Context, txn types.Transaction) error {
