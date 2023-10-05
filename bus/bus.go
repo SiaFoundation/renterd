@@ -39,7 +39,7 @@ type Client struct {
 // NewClient returns a new bus client.
 func NewClient(addr, password string) *Client {
 	return &Client{
-		client.NewClient(
+		client.New(
 			addr,
 			password,
 		),

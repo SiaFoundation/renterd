@@ -69,7 +69,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 	}
 
 	// create client
-	client := client.NewClient("http://"+l.Addr().String(), "test")
+	client := client.New("http://"+l.Addr().String(), "test")
 	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			Bootstrap:      false,

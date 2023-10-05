@@ -20,7 +20,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
-	bc "go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/s3"
@@ -95,7 +95,7 @@ type TestCluster struct {
 	hosts []*Host
 
 	Autopilot *autopilot.Client
-	Bus       *bc.Client
+	Bus       *bus.Client
 	Worker    *worker.Client
 	S3        *minio.Client
 	S3Core    *minio.Core
@@ -272,7 +272,7 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 
 	// Create clients.
 	autopilotClient := autopilot.NewClient(autopilotAddr, autopilotPassword)
-	busClient := bc.NewClient(busAddr, busPassword)
+	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
 	s3Client, err := minio.New(s3Addr, &minio.Options{
 		Creds:  testS3Credentials,

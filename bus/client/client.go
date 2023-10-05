@@ -15,8 +15,8 @@ type Client struct {
 	c jape.Client
 }
 
-// NewClient returns a new bus client.
-func NewClient(addr, password string) *Client {
+// New returns a new bus client.
+func New(addr, password string) *Client {
 	return &Client{jape.Client{
 		BaseURL:  addr,
 		Password: password,
