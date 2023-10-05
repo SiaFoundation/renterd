@@ -90,8 +90,9 @@ const (
 
 type (
 	contractor struct {
-		ap     *Autopilot
-		logger *zap.SugaredLogger
+		ap       *Autopilot
+		resolver *ipResolver
+		logger   *zap.SugaredLogger
 
 		maintenanceTxnID          types.TransactionID
 		revisionBroadcastInterval time.Duration
@@ -127,6 +128,7 @@ type (
 func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
 	return &contractor{
 		ap:                        ap,
+		resolver:                  newIPResolver(resolverLookupTimeout, ap.logger.Named("resolver")),
 		logger:                    ap.logger.Named("contractor"),
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
@@ -598,6 +600,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		return nil, nil, nil, nil, nil, err
 	}
 
+	// create new IP filter
+	ipFilter := c.newIPFilter()
+
 	// calculate 'maxKeepLeeway' which defines the amount of contracts we'll be
 	// lenient towards when we fail to either fetch a valid price table or the
 	// contract's revision
@@ -617,9 +622,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			"toRenew", len(toRenew),
 		)
 	}()
-
-	// create a new ip filter
-	f := newIPFilter(c.logger)
 
 	// return variables
 	toArchive = make(map[types.FileContractID]string)
@@ -710,6 +712,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		if contract.Revision == nil {
 			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
+			} else if !state.cfg.Hosts.AllowRedundantIPs && ipFilter.IsRedundantIP(contract.HostIP, contract.HostKey) {
+				toStopUsing[fcid] = fmt.Sprintf("%v; %v", errHostRedundantIP, errContractNoRevision)
 			} else {
 				toKeep = append(toKeep, fcid)
 				remainingKeepLeeway-- // we let it slide
@@ -736,7 +740,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
 		}
 
-		usable, recoverable, refresh, renew, reasons := isUsableContract(state.cfg, ci, cs.BlockHeight, renterFunds, f)
+		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.cfg, ci, cs.BlockHeight, renterFunds, ipFilter)
 		ci.usable = usable
 		ci.recoverable = recoverable
 		if !usable {
@@ -777,6 +781,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 	// convenience variables
 	state := c.ap.State()
+	shouldFilter := !state.cfg.Hosts.AllowRedundantIPs
 
 	c.logger.Debugw(
 		"run contract formations",
@@ -811,10 +816,12 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// prepare an IP filter that contains all used hosts
-	f := newIPFilter(c.logger)
-	for _, h := range hosts {
-		if _, used := usedHosts[h.PublicKey]; used {
-			_ = f.isRedundantIP(h.NetAddress, h.PublicKey)
+	ipFilter := c.newIPFilter()
+	if shouldFilter {
+		for _, h := range hosts {
+			if _, used := usedHosts[h.PublicKey]; used {
+				_ = ipFilter.IsRedundantIP(h.NetAddress, h.PublicKey)
+			}
 		}
 	}
 
@@ -854,7 +861,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 		}
 
 		// check if we already have a contract with a host on that subnet
-		if !state.cfg.Hosts.AllowRedundantIPs && f.isRedundantIP(host.NetAddress, host.PublicKey) {
+		if shouldFilter && ipFilter.IsRedundantIP(host.NetAddress, host.PublicKey) {
 			continue
 		}
 
