@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -17,6 +18,8 @@ import (
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+var errMaxDriftExceeded = errors.New("drift on account is too large")
 
 var (
 	alertAccountRefillID = frand.Entropy256() // constant across restarts
@@ -154,14 +157,12 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		// launch refill if not already in progress
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, inSet bool) {
-				// add logging for contracts in the set
-				l := zap.NewNop().Sugar()
-				if inSet {
-					l = a.l
-				}
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				accountID, refilled, err := refillWorkerAccount(rCtx, a.a, a.ap.bus, w, workerID, contract, l)
-				if err == nil && refilled {
+				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, a.ap.bus, w, workerID, contract)
+				shouldLog := rerr != nil && (inSet || rerr.Is(errMaxDriftExceeded))
+				if shouldLog {
+					a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+				} else if err == nil && refilled {
 					a.l.Infow("Successfully funded account",
 						"account", accountID,
 						"host", contract.HostKey,
@@ -171,16 +172,20 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 
 				// handle registering alert.
 				alertID := types.HashBytes(append(alertAccountRefillID[:], accountID[:]...))
-				if err != nil && inSet {
-					rerr := a.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-						ID:       alertID,
-						Severity: alerts.SeverityError,
-						Message:  fmt.Sprintf("failed to refill account: %v", err),
-						Data: map[string]interface{}{
-							"accountID":  accountID.String(),
-							"contractID": contract.ID.String(),
-							"hostKey":    contract.HostKey.String(),
-						},
+				if shouldLog {
+					data := map[string]interface{}{
+						"accountID":  accountID.String(),
+						"contractID": contract.ID.String(),
+						"hostKey":    contract.HostKey.String(),
+					}
+					for i := 0; i < len(rerr.keysAndValues); i += 2 {
+						data[fmt.Sprint(rerr.keysAndValues[i])] = rerr.keysAndValues[i+1]
+					}
+					err := a.ap.alerts.RegisterAlert(ctx, alerts.Alert{
+						ID:        alertID,
+						Severity:  alerts.SeverityError,
+						Message:   fmt.Sprintf("failed to refill account: %v", err),
+						Data:      data,
 						Timestamp: time.Now(),
 					})
 					if rerr != nil {
@@ -196,26 +201,47 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter, w Worker, workerID string, contract api.ContractMetadata, logger *zap.SugaredLogger) (accountID rhpv3.Account, refilled bool, err error) {
+type refillError struct {
+	err           error
+	keysAndValues []interface{}
+}
+
+func (err *refillError) Is(target error) bool {
+	return errors.Is(err.err, target)
+}
+
+func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter, w Worker, workerID string, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
+	wrapErr := func(err error, keysAndValues ...interface{}) *refillError {
+		if err == nil {
+			return nil
+		}
+		return &refillError{
+			err:           err,
+			keysAndValues: keysAndValues,
+		}
+	}
+
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
 	span.SetAttributes(attribute.Stringer("host", contract.HostKey))
 	defer func() {
-		if err != nil {
-			span.RecordError(err)
+		if rerr != nil {
+			span.RecordError(rerr.err)
 			span.SetStatus(codes.Error, "failed to refill account")
 		}
 		span.End()
 	}()
 
 	// fetch the account
-	accountID, err = w.Account(ctx, contract.HostKey)
+	accountID, err := w.Account(ctx, contract.HostKey)
 	if err != nil {
+		rerr = wrapErr(err)
 		return
 	}
 	var account api.Account
 	account, err = a.Account(ctx, accountID, contract.HostKey)
 	if err != nil {
+		rerr = wrapErr(err)
 		return
 	}
 
@@ -228,12 +254,12 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter,
 	// negative because we don't care if we have more money than
 	// expected.
 	if account.Drift.Cmp(maxNegDrift) < 0 {
-		logger.Errorw("not refilling account since host is potentially cheating",
+		rerr = wrapErr(fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded),
 			"account", account.ID,
 			"host", contract.HostKey,
 			"balance", account.Balance,
-			"drift", account.Drift)
-		err = fmt.Errorf("drift on account is too large - not funding")
+			"drift", account.Drift,
+		)
 		return
 	}
 
@@ -242,7 +268,7 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter,
 		// sync the account
 		err = w.RHPSync(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr)
 		if err != nil {
-			logger.Errorw(fmt.Sprintf("failed to sync account's balance: %s", err),
+			rerr = wrapErr(fmt.Errorf("failed to sync account's balance: %w", err),
 				"account", account.ID,
 				"host", contract.HostKey,
 			)
@@ -252,23 +278,26 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter,
 		// refetch the account after syncing
 		account, err = a.Account(ctx, accountID, contract.HostKey)
 		if err != nil {
+			rerr = wrapErr(err)
 			return
 		}
 	}
 
 	// check if refill is needed
 	if account.Balance.Cmp(minBalance) >= 0 {
+		rerr = wrapErr(err)
 		return
 	}
 
 	// fund the account
 	err = w.RHPFund(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr, maxBalance)
 	if err != nil {
-		logger.Errorw(fmt.Sprintf("failed to fund account: %s", err),
+		rerr = wrapErr(fmt.Errorf("failed to fund account: %w", err),
 			"account", account.ID,
 			"host", contract.HostKey,
 			"balance", account.Balance,
-			"expected", maxBalance)
+			"expected", maxBalance,
+		)
 	} else {
 		refilled = true
 	}
