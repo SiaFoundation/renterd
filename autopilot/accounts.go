@@ -188,7 +188,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 						Data:      data,
 						Timestamp: time.Now(),
 					})
-					if rerr != nil {
+					if err != nil {
 						a.ap.logger.Errorf("failed to register alert: %v", err)
 					}
 				} else if err := a.ap.alerts.DismissAlerts(ctx, alertID); err != nil {
