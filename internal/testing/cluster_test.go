@@ -1612,7 +1612,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	}
 
 	// get wallet address
-	renterAddress, err := cluster.Bus.WalletAddress(context.Background())
+	wallet, err := cluster.Bus.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1627,7 +1627,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	c := contracts[0]
 
 	// form 2 more contracts with the same host
-	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
+	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1635,7 +1635,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, renterAddress, c.RenterFunds(), c.Revision.ValidHostPayout())
+	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	if err != nil {
 		t.Fatal(err)
 	}

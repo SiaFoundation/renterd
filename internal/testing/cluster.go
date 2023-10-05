@@ -446,11 +446,11 @@ func newTestClusterCustom(dir, dbName string, funding bool, wk types.PrivateKey,
 			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
 				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
 			}
-			balance, err := cluster.Bus.WalletBalance(context.Background())
+			res, err := cluster.Bus.Wallet(context.Background())
 			if err != nil {
 				return err
 			}
-			if balance.IsZero() {
+			if res.Confirmed.IsZero() {
 				return errors.New("wallet not funded")
 			}
 			return nil
@@ -551,13 +551,14 @@ func (c *TestCluster) synced(hosts []*Host) (bool, error) {
 
 // MineBlocks uses the bus' miner to mine n blocks.
 func (c *TestCluster) MineBlocks(n int) error {
-	addr, err := c.Bus.WalletAddress(context.Background())
+	wallet, err := c.Bus.Wallet(context.Background())
 	if err != nil {
 		return err
 	}
+
 	// If we don't have any hosts in the cluster mine all blocks right away.
 	if len(c.hosts) == 0 {
-		if err := c.miner.Mine(addr, n); err != nil {
+		if err := c.miner.Mine(wallet.Address, n); err != nil {
 			return err
 		}
 		return c.Sync()
@@ -569,7 +570,7 @@ func (c *TestCluster) MineBlocks(n int) error {
 		if toMine > 10 {
 			toMine = 10
 		}
-		if err := c.miner.Mine(addr, toMine); err != nil {
+		if err := c.miner.Mine(wallet.Address, toMine); err != nil {
 			return err
 		}
 		if err := c.Sync(); err != nil {
@@ -654,11 +655,11 @@ func (c *TestCluster) AddHost(h *Host) error {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	balance, err := c.Bus.WalletBalance(context.Background())
+	res, err := c.Bus.Wallet(context.Background())
 	if err != nil {
 		return err
 	}
-	fundAmt := balance.Div64(2).Div64(uint64(len(c.hosts))) // 50% of bus balance
+	fundAmt := res.Confirmed.Div64(2).Div64(uint64(len(c.hosts))) // 50% of bus balance
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
