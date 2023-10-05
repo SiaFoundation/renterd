@@ -711,7 +711,7 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 
 	// check if we have enough contracts
 	if len(contracts) < totalShards {
-		return nil, func() {}, errNotEnoughContracts
+		return nil, func() {}, fmt.Errorf("%v < %v: %w", len(contracts), totalShards, errNotEnoughContracts)
 	}
 
 	// create allowed map
