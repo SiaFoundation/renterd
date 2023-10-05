@@ -327,18 +327,6 @@ func (b *bus) walletHandler(jc jape.Context) {
 	})
 }
 
-func (b *bus) walletBalanceHandler(jc jape.Context) {
-	_, balance, _, err := b.w.Balance()
-	if jc.Check("couldn't fetch wallet balance", err) != nil {
-		return
-	}
-	jc.Encode(balance)
-}
-
-func (b *bus) walletAddressHandler(jc jape.Context) {
-	jc.Encode(b.w.Address())
-}
-
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	var before, since time.Time
 	offset := 0
@@ -2004,8 +1992,6 @@ func (b *bus) Handler() http.Handler {
 		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
 
 		"GET    /wallet":               b.walletHandler,
-		"GET    /wallet/balance":       b.walletBalanceHandler, // deprecated
-		"GET    /wallet/address":       b.walletAddressHandler, // deprecated
 		"GET    /wallet/transactions":  b.walletTransactionsHandler,
 		"GET    /wallet/outputs":       b.walletOutputsHandler,
 		"POST   /wallet/fund":          b.walletFundHandler,

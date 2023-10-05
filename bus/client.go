@@ -181,18 +181,6 @@ func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error
 	return
 }
 
-// WalletBalance returns the current wallet balance.
-func (c *Client) WalletBalance(ctx context.Context) (bal types.Currency, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet/balance", &bal)
-	return
-}
-
-// WalletAddress returns an address controlled by the wallet.
-func (c *Client) WalletAddress(ctx context.Context) (resp types.Address, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet/address", &resp)
-	return
-}
-
 // WalletOutputs returns the set of unspent outputs controlled by the wallet.
 func (c *Client) WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/outputs", &resp)
