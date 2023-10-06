@@ -36,6 +36,9 @@ func newTestSQLStore(dir string) (*SQLStore, string, modules.ConsensusChangeID, 
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
+	detectMissingIndices(sqlStore.db, func(dst interface{}, name string) {
+		panic("no index can be missing")
+	})
 	err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
 	return sqlStore, dbName, ccid, err
 }

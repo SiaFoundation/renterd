@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 
@@ -144,6 +145,15 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
 		}
 	}
+
+	// Check if any indices are missing after migrations.
+	detectMissingIndices(db, func(dst interface{}, name string) {
+		t := reflect.TypeOf(dst)
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		logger.Warnw("missing index", "table", t.Name(), "field", name)
+	})
 
 	// Get latest consensus change ID or init db.
 	ci, ccid, err := initConsensusInfo(db)
