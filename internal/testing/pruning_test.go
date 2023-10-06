@@ -100,7 +100,7 @@ func TestHostPruning(t *testing.T) {
 	waitForAutopilotLoop()
 
 	// assert the host was not pruned
-	hostss, err := b.Hosts(context.Background(), 0, -1)
+	hostss, err := b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hostss) != 1 {
 		t.Fatal("host was pruned")
@@ -112,7 +112,7 @@ func TestHostPruning(t *testing.T) {
 	waitForAutopilotLoop()
 
 	// assert the host was not pruned
-	hostss, err = b.Hosts(context.Background(), 0, -1)
+	hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hostss) != 0 {
 		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
@@ -212,7 +212,7 @@ func TestSectorPruning(t *testing.T) {
 	// delete every other object
 	for i := 0; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, false))
+		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
 	}
 
 	// assert amount of prunable data

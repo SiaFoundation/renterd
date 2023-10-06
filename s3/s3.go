@@ -25,16 +25,16 @@ type Opts struct {
 }
 
 type bus interface {
-	Bucket(ctx context.Context, name string) (api.Bucket, error)
-	CreateBucket(ctx context.Context, name string, policy api.BucketPolicy) error
-	DeleteBucket(ctx context.Context, name string) error
+	Bucket(ctx context.Context, bucketName string) (api.Bucket, error)
+	CreateBucket(ctx context.Context, bucketName string, opts api.CreateBucketOptions) error
+	DeleteBucket(ctx context.Context, bucketName string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, opts api.AddObjectOptions) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
-	DeleteObject(ctx context.Context, bucket, path string, batch bool) (err error)
-	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (res api.ObjectsResponse, err error)
-	ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (resp api.ObjectsListResponse, err error)
+	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error)
+	ListObjects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
+	Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.ObjectsResponse, err error)
 
 	AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
 	CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)

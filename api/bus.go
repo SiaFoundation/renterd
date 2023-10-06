@@ -4,10 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"mime"
-	"net/http"
 	"net/url"
-	"path/filepath"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -26,20 +23,11 @@ const (
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
 
-	ObjectsRenameModeSingle = "single"
-	ObjectsRenameModeMulti  = "multi"
-
 	UsabilityFilterModeAll      = "all"
 	UsabilityFilterModeUsable   = "usable"
 	UsabilityFilterModeUnusable = "unusable"
 
 	DefaultBucketName = "default"
-
-	SettingContractSet      = "contractset"
-	SettingGouging          = "gouging"
-	SettingRedundancy       = "redundancy"
-	SettingS3Authentication = "s3authentication"
-	SettingUploadPacking    = "uploadpacking"
 )
 
 var (
@@ -58,14 +46,6 @@ var (
 	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")
-
-	// ErrObjectNotFound is returned when an object can't be retrieved from the
-	// database.
-	ErrObjectNotFound = errors.New("object not found")
-
-	// ErrObjectCorrupted is returned if we were unable to retrieve the object
-	// from the database.
-	ErrObjectCorrupted = errors.New("object corrupted")
 
 	// ErrContractNotFound is returned when a contract can't be retrieved from
 	// the database.
@@ -86,10 +66,6 @@ var (
 	// ErrPartNotFound is returned if the specified part of a multipart upload
 	// wasn't found.
 	ErrPartNotFound = errors.New("multipart upload part not found")
-
-	// ErrSettingNotFound is returned if a requested setting is not present in the
-	// database.
-	ErrSettingNotFound = errors.New("setting not found")
 
 	// ErrUploadAlreadyExists is returned when starting an upload with an id
 	// that's already in use.
@@ -187,6 +163,7 @@ type ContractsPrunableDataResponse struct {
 	TotalSize     uint64                 `json:"totalSize"`
 }
 
+// ContractPrunableData wraps a contract's size information with its id.
 type ContractPrunableData struct {
 	ID types.FileContractID `json:"id"`
 	ContractSize
@@ -204,86 +181,6 @@ type HostsPriceTablesRequest struct {
 type HostsRemoveRequest struct {
 	MaxDowntimeHours      DurationH `json:"maxDowntimeHours"`
 	MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
-}
-
-// Object wraps an object.Object with its metadata.
-type Object struct {
-	ObjectMetadata
-	object.Object
-}
-
-// ObjectMetadata contains various metadata about an object.
-type ObjectMetadata struct {
-	ETag     string    `json:"eTag,omitempty"`
-	Health   float64   `json:"health"`
-	MimeType string    `json:"mimeType,omitempty"`
-	ModTime  time.Time `json:"modTime"`
-	Name     string    `json:"name"`
-	Size     int64     `json:"size"`
-}
-
-// LastModified returns the object's ModTime formatted for use in the
-// 'Last-Modified' header
-func (o ObjectMetadata) LastModified() string {
-	return o.ModTime.UTC().Format(http.TimeFormat)
-}
-
-// ContentType returns the object's MimeType for use in the 'Content-Type'
-// header, if the object's mime type is empty we try and deduce it from the
-// extension in the object's name.
-func (o ObjectMetadata) ContentType() string {
-	if o.MimeType != "" {
-		return o.MimeType
-	}
-
-	if ext := filepath.Ext(o.Name); ext != "" {
-		return mime.TypeByExtension(ext)
-	}
-
-	return ""
-}
-
-// ObjectAddRequest is the request type for the /object/*key endpoint.
-type ObjectAddRequest struct {
-	Bucket        string                                   `json:"bucket"`
-	ContractSet   string                                   `json:"contractSet"`
-	Object        object.Object                            `json:"object"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
-	MimeType      string                                   `json:"mimeType"`
-	ETag          string                                   `json:"eTag"`
-}
-
-// ObjectsResponse is the response type for the /objects endpoint.
-type ObjectsResponse struct {
-	HasMore bool             `json:"hasMore"`
-	Entries []ObjectMetadata `json:"entries,omitempty"`
-	Object  *Object          `json:"object,omitempty"`
-}
-
-type ObjectsCopyRequest struct {
-	SourceBucket string `json:"sourceBucket"`
-	SourcePath   string `json:"sourcePath"`
-
-	DestinationBucket string `json:"destinationBucket"`
-	DestinationPath   string `json:"destinationPath"`
-
-	MimeType string `json:"mimeType"`
-}
-
-// ObjectsRenameRequest is the request type for the /objects/rename endpoint.
-type ObjectsRenameRequest struct {
-	Bucket string `json:"bucket"`
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Mode   string `json:"mode"`
-}
-
-// ObjectsStatsResponse is the response type for the /stats/objects endpoint.
-type ObjectsStatsResponse struct {
-	NumObjects        uint64 `json:"numObjects"`        // number of objects
-	TotalObjectsSize  uint64 `json:"totalObjectsSize"`  // size of all objects
-	TotalSectorsSize  uint64 `json:"totalSectorsSize"`  // uploaded size of all objects
-	TotalUploadedSize uint64 `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
 }
 
 type SlabBuffer struct {
@@ -459,19 +356,6 @@ type PackedSlabsRequestGET struct {
 	Limit           int        `json:"limit"`
 }
 
-type ObjectsListRequest struct {
-	Bucket string `json:"bucket"`
-	Limit  int    `json:"limit"`
-	Prefix string `json:"prefix"`
-	Marker string `json:"marker"`
-}
-
-type ObjectsListResponse struct {
-	HasMore    bool             `json:"hasMore"`
-	NextMarker string           `json:"nextMarker"`
-	Objects    []ObjectMetadata `json:"objects"`
-}
-
 type PackedSlabsRequestPOST struct {
 	Slabs         []UploadedPackedSlab                     `json:"slabs"`
 	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
@@ -494,59 +378,56 @@ type GougingParams struct {
 	TransactionFee     types.Currency
 }
 
-// ContractSetSetting contains the default contract set used by the worker for
-// uploads and migrations.
-type ContractSetSetting struct {
-	Default string `json:"default"`
+// Option types.
+type (
+	GetHostsOptions struct {
+		Offset int `json:"offset"`
+		Limit  int `json:"limit"`
+	}
+	HostsForScanningOptions struct {
+		MaxLastScan time.Time `json:"maxLastScan"`
+		Limit       int       `json:"limit"`
+		Offset      int       `json:"offset"`
+	}
+	SearchHostOptions struct {
+		AddressContains string            `json:"addressContains"`
+		FilterMode      string            `json:"filterMode"`
+		KeyIn           []types.PublicKey `json:"keyIn"`
+		Limit           int               `json:"limit"`
+		Offset          int               `json:"offset"`
+	}
+)
+
+func DefaultSearchHostOptions() SearchHostOptions {
+	return SearchHostOptions{
+		Limit:      -1,
+		FilterMode: HostFilterModeAll,
+	}
 }
 
-// GougingSettings contain some price settings used in price gouging.
-type GougingSettings struct {
-	// MinMaxCollateral is the minimum value for 'MaxCollateral' in the host's
-	// price settings
-	MinMaxCollateral types.Currency `json:"minMaxCollateral"`
-
-	// MaxRPCPrice is the maximum allowed base price for RPCs
-	MaxRPCPrice types.Currency `json:"maxRPCPrice"`
-
-	// MaxContractPrice is the maximum allowed price to form a contract
-	MaxContractPrice types.Currency `json:"maxContractPrice"`
-
-	// MaxDownloadPrice is the maximum allowed price to download 1TiB of data
-	MaxDownloadPrice types.Currency `json:"maxDownloadPrice"`
-
-	// MaxUploadPrice is the maximum allowed price to upload 1TiB of data
-	MaxUploadPrice types.Currency `json:"maxUploadPrice"`
-
-	// MaxStoragePrice is the maximum allowed price to store 1 byte per block
-	MaxStoragePrice types.Currency `json:"maxStoragePrice"`
-
-	// HostBlockHeightLeeway is the amount of blocks of leeway given to the host
-	// block height in the host's price table
-	HostBlockHeightLeeway int `json:"hostBlockHeightLeeway"`
-
-	// MinPriceTableValidity is the minimum accepted value for `Validity` in the
-	// host's price settings.
-	MinPriceTableValidity time.Duration `json:"minPriceTableValidity"`
-
-	// MinAccountExpiry is the minimum accepted value for `AccountExpiry` in the
-	// host's price settings.
-	MinAccountExpiry time.Duration `json:"minAccountExpiry"`
-
-	// MinMaxEphemeralAccountBalance is the minimum accepted value for
-	// `MaxEphemeralAccountBalance` in the host's price settings.
-	MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
+func (opts GetHostsOptions) Apply(values url.Values) {
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
 }
 
-type S3AuthenticationSettings struct {
-	V4Keypairs map[string]string `json:"v4Keypairs"`
+func (opts HostsForScanningOptions) Apply(values url.Values) {
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+	if !opts.MaxLastScan.IsZero() {
+		values.Set("maxLastScan", fmt.Sprint(TimeRFC3339(opts.MaxLastScan)))
+	}
 }
 
 // Types related to multipart uploads.
 type (
-	CopyObjectOptions struct {
-		MimeType string `json:"mimeType"`
-	}
 	CreateMultipartOptions struct {
 		Key      object.EncryptionKey `json:"key"`
 		MimeType string               `json:"mimeType"`
@@ -637,41 +518,30 @@ type WalletResponse struct {
 	Unconfirmed types.Currency `json:"unconfirmed"`
 }
 
-// Validate returns an error if the gouging settings are not considered valid.
-func (gs GougingSettings) Validate() error {
-	if gs.HostBlockHeightLeeway < 3 {
-		return errors.New("HostBlockHeightLeeway must be at least 3 blocks")
+type (
+	Bucket struct {
+		CreatedAt time.Time    `json:"createdAt"`
+		Name      string       `json:"name"`
+		Policy    BucketPolicy `json:"policy"`
 	}
-	if gs.MinAccountExpiry < time.Hour {
-		return errors.New("MinAccountExpiry must be at least 1 hour")
+
+	BucketPolicy struct {
+		PublicReadAccess bool `json:"publicReadAccess"`
 	}
-	if gs.MinMaxEphemeralAccountBalance.Cmp(types.Siacoins(1)) < 0 {
-		return errors.New("MinMaxEphemeralAccountBalance must be at least 1 SC")
+
+	BucketCreateRequest struct {
+		Name   string       `json:"name"`
+		Policy BucketPolicy `json:"policy"`
 	}
-	if gs.MinPriceTableValidity < 10*time.Second {
-		return errors.New("MinPriceTableValidity must be at least 10 seconds")
+
+	BucketUpdatePolicyRequest struct {
+		Policy BucketPolicy `json:"policy"`
 	}
-	return nil
-}
 
-type BucketPolicy struct {
-	PublicReadAccess bool `json:"publicReadAccess"`
-}
-
-type Bucket struct {
-	CreatedAt time.Time    `json:"createdAt"`
-	Name      string       `json:"name"`
-	Policy    BucketPolicy `json:"policy"`
-}
-
-type BucketCreateRequest struct {
-	Name   string       `json:"name"`
-	Policy BucketPolicy `json:"policy"`
-}
-
-type BucketUpdatePolicyRequest struct {
-	Policy BucketPolicy `json:"policy"`
-}
+	CreateBucketOptions struct {
+		Policy BucketPolicy `json:"policy"`
+	}
+)
 
 type SearchHostsRequest struct {
 	Offset          int               `json:"offset"`
@@ -680,38 +550,6 @@ type SearchHostsRequest struct {
 	UsabilityMode   string            `json:"usabilityMode"`
 	AddressContains string            `json:"addressContains"`
 	KeyIn           []types.PublicKey `json:"keyIn"`
-}
-
-type UploadPackingSettings struct {
-	Enabled               bool  `json:"enabled"`
-	SlabBufferMaxSizeSoft int64 `json:"slabBufferMaxSizeSoft"`
-}
-
-// RedundancySettings contain settings that dictate an object's redundancy.
-type RedundancySettings struct {
-	MinShards   int `json:"minShards"`
-	TotalShards int `json:"totalShards"`
-}
-
-// Redundancy returns the effective storage redundancy of the
-// RedundancySettings.
-func (rs RedundancySettings) Redundancy() float64 {
-	return float64(rs.TotalShards) / float64(rs.MinShards)
-}
-
-// Validate returns an error if the redundancy settings are not considered
-// valid.
-func (rs RedundancySettings) Validate() error {
-	if rs.MinShards < 1 {
-		return errors.New("MinShards must be greater than 0")
-	}
-	if rs.TotalShards < rs.MinShards {
-		return errors.New("TotalShards must be at least MinShards")
-	}
-	if rs.TotalShards > 255 {
-		return errors.New("TotalShards must be less than 256")
-	}
-	return nil
 }
 
 type AddPartialSlabResponse struct {

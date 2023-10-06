@@ -71,7 +71,7 @@ func TestS3Basic(t *testing.T) {
 	data := frand.Bytes(10)
 	uploadInfo, err := s3.PutObject(context.Background(), bucket, "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	tt.OK(err)
-	busObject, err := cluster.Bus.Object(context.Background(), "object", api.ObjectsWithBucket(bucket))
+	busObject, err := cluster.Bus.Object(context.Background(), bucket, "object", api.GetObjectOptions{})
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")

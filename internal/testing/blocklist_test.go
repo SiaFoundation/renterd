@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 )
 
 func TestBlocklist(t *testing.T) {
@@ -115,7 +116,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert we have 4 hosts
-	hosts, err := b.Hosts(context.Background(), 0, -1)
+	hosts, err := b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hosts) != 4 {
 		t.Fatal("unexpected number of hosts", len(hosts))
@@ -140,7 +141,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert all others are blocked
-	hosts, err = b.Hosts(context.Background(), 0, -1)
+	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hosts) != 1 {
 		t.Fatal("unexpected number of hosts", len(hosts))
@@ -150,7 +151,7 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(b.UpdateHostAllowlist(context.Background(), nil, nil, true))
 
 	// assert no hosts are blocked
-	hosts, err = b.Hosts(context.Background(), 0, -1)
+	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hosts) != 5 {
 		t.Fatal("unexpected number of hosts", len(hosts))

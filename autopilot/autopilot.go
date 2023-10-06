@@ -48,9 +48,9 @@ type Bus interface {
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-	SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
-	HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
+	Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
+	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.Host, error)
+	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 
 	// contracts

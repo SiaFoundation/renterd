@@ -94,10 +94,10 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 	response := gofakes3.NewObjectList()
 	if prefix.HasDelimiter {
 		// Handle request with delimiter.
-		opts := []api.ObjectsOption{api.ObjectsWithBucket(bucketName)}
+		opts := api.GetObjectOptions{}
 		if page.HasMarker {
-			opts = append(opts, api.ObjectsWithMarker(page.Marker))
-			opts = append(opts, api.ObjectsWithLimit(int(page.MaxKeys)))
+			opts.Marker = page.Marker
+			opts.Limit = int(page.MaxKeys)
 		}
 		var path string // root of bucket
 		adjustedPrefix := prefix.Prefix
@@ -106,10 +106,10 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 			adjustedPrefix = adjustedPrefix[idx+1:]
 		}
 		if adjustedPrefix != "" {
-			opts = append(opts, api.ObjectsWithPrefix(adjustedPrefix))
+			opts.Prefix = adjustedPrefix
 		}
 		var res api.ObjectsResponse
-		res, err = s.b.Object(ctx, path, opts...)
+		res, err = s.b.Object(ctx, bucketName, path, opts)
 		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
@@ -122,8 +122,14 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		}
 	} else {
 		// Handle request without delimiter.
+		opts := api.ListObjectOptions{
+			Limit:  int(page.MaxKeys),
+			Marker: page.Marker,
+			Prefix: "/" + prefix.Prefix,
+		}
+
 		var res api.ObjectsListResponse
-		res, err = s.b.ListObjects(ctx, bucketName, "/"+prefix.Prefix, page.Marker, int(page.MaxKeys))
+		res, err = s.b.ListObjects(ctx, bucketName, opts)
 		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
@@ -164,7 +170,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 // If the bucket already exists, a gofakes3.ResourceError with
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(ctx context.Context, name string) error {
-	if err := s.b.CreateBucket(ctx, name, api.BucketPolicy{}); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+	if err := s.b.CreateBucket(ctx, name, api.CreateBucketOptions{}); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
 		return gofakes3.ErrBucketAlreadyExists
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -276,7 +282,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(ctx, objectName, api.ObjectsWithBucket(bucketName), api.ObjectsWithIgnoreDelim(true))
+	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
@@ -311,7 +317,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(ctx, bucketName, objectName, false)
+	err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
@@ -350,7 +356,7 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
-		err := s.b.DeleteObject(ctx, bucketName, objectName, false)
+		err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
 		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     objectName,

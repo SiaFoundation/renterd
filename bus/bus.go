@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
@@ -29,6 +30,21 @@ import (
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
+
+// Client re-exports the client from the client package.
+type Client struct {
+	*client.Client
+}
+
+// NewClient returns a new bus client.
+func NewClient(addr, password string) *Client {
+	return &Client{
+		client.New(
+			addr,
+			password,
+		),
+	}
+}
 
 type (
 	// A ChainManager manages blockchain state.
@@ -105,31 +121,31 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
-		Bucket(_ context.Context, bucket string) (api.Bucket, error)
-		CreateBucket(_ context.Context, bucket string, policy api.BucketPolicy) error
-		DeleteBucket(_ context.Context, bucket string) error
+		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
+		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
+		DeleteBucket(_ context.Context, bucketName string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
-		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
-		ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (api.ObjectsListResponse, error)
-		Object(ctx context.Context, bucket, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
-		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
-		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
+		ListObjects(ctx context.Context, bucketName, prefix, marker string, limit int) (api.ObjectsListResponse, error)
+		Object(ctx context.Context, bucketName, path string) (api.Object, error)
+		ObjectEntries(ctx context.Context, bucketName, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
+		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
+		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, bucket, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-		RemoveObject(ctx context.Context, bucket, path string) error
-		RemoveObjects(ctx context.Context, bucket, prefix string) error
-		RenameObject(ctx context.Context, bucket, from, to string) error
-		RenameObjects(ctx context.Context, bucket, from, to string) error
+		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		RemoveObject(ctx context.Context, bucketName, path string) error
+		RemoveObjects(ctx context.Context, bucketName, prefix string) error
+		RenameObject(ctx context.Context, bucketName, from, to string) error
+		RenameObjects(ctx context.Context, bucketName, from, to string) error
 
-		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
-		CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
-		CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error)
+		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
+		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+		CompleteMultipartUpload(ctx context.Context, bucketName, path, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
+		CreateMultipartUpload(ctx context.Context, bucketName, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
-		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
-		MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
+		MultipartUploads(ctx context.Context, bucketName, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
+		MultipartUploadParts(ctx context.Context, bucketName, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
