@@ -372,10 +372,6 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		sum := h.Sum()
 		eTag = hex.EncodeToString(sum[:])
 
-		// Sort their primary keys to make sure retrieving them later will
-		// respect the part order.
-		sort.Sort(sortedSlices(slices))
-
 		// Create the object.
 		obj := dbObject{
 			DBBucketID: mu.DBBucketID,
@@ -389,14 +385,17 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			return fmt.Errorf("failed to create object: %w", err)
 		}
 
-		// Assign the right object id and unassign the multipart upload.
+		// Assign the right object id and unassign the multipart upload.  Also
+		// clear the ID to make sure new slices are created with IDs in
+		// ascending order.
 		for i := range slices {
+			slices[i].ID = 0
 			slices[i].DBObjectID = &obj.ID
 			slices[i].DBMultipartPartID = nil
 		}
 
 		// Save updated slices.
-		if err := tx.Save(slices).Error; err != nil {
+		if err := tx.CreateInBatches(slices, 100).Error; err != nil {
 			return fmt.Errorf("failed to save slices: %w", err)
 		}
 
@@ -412,20 +411,6 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 	return api.MultipartCompleteResponse{
 		ETag: eTag,
 	}, nil
-}
-
-type sortedSlices []dbSlice
-
-func (s sortedSlices) Len() int {
-	return len(s)
-}
-
-func (s sortedSlices) Less(i, j int) bool {
-	return s[i].ID < s[j].ID
-}
-
-func (s sortedSlices) Swap(i, j int) {
-	s[i].ID, s[j].ID = s[j].ID, s[i].ID
 }
 
 func (u dbMultipartUpload) convert() (api.MultipartUpload, error) {
