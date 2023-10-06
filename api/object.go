@@ -213,7 +213,7 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	if opts.DisablePreshardingEncryption {
 		values.Set("disablepreshardingencryption", "true")
 	}
-	if opts.EncryptionOffset != 0 {
+	if !opts.DisablePreshardingEncryption || opts.EncryptionOffset != 0 {
 		values.Set("offset", fmt.Sprint(opts.EncryptionOffset))
 	}
 }
