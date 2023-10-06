@@ -995,10 +995,12 @@ func (s *slabDownload) downloadShards(ctx context.Context, nextSlabChan chan str
 	resetOverdrive := s.overdrive(ctx, resps)
 
 	// launch 'MinShard' requests
-	for i := 0; i < int(s.minShards); i++ {
+	for i := 0; i < int(s.minShards); {
 		req := s.nextRequest(ctx, resps, false)
-		if err := s.launch(req); err != nil {
-			return nil, errors.New("no hosts available")
+		if req == nil {
+			return nil, fmt.Errorf("no hosts available")
+		} else if err := s.launch(req); err == nil {
+			i++
 		}
 	}
 
