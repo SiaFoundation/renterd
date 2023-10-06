@@ -253,6 +253,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00019_accountsShutdown(tx, logger)
 			},
 		},
+		{
+			ID: "00020_healthIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00020_healthIndices(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -887,5 +893,31 @@ func performMigration00019_accountsShutdown(txn *gorm.DB, logger *zap.SugaredLog
 		return fmt.Errorf("failed to update accounts: %w", err)
 	}
 	logger.Info("migration 00019_accounts_shutdown complete")
+	return nil
+}
+
+func performMigration00020_healthIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00020_healthIndices")
+	if !txn.Migrator().HasIndex(&dbSlab{}, "Health") {
+		if err := txn.Migrator().CreateIndex(&dbSlab{}, "Health"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasIndex(&dbSlab{}, "HealthValid") {
+		if err := txn.Migrator().CreateIndex(&dbSlab{}, "HealthValid"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasIndex(&dbSlab{}, "DBBufferedSlabID") {
+		if err := txn.Migrator().CreateIndex(&dbSlab{}, "DBBufferedSlabID"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasIndex(&dbObject{}, "etag") {
+		if err := txn.Migrator().CreateIndex(&dbObject{}, "etag"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00020_healthIndices complete")
 	return nil
 }
