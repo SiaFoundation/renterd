@@ -184,7 +184,7 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 					err := a.ap.alerts.RegisterAlert(ctx, alerts.Alert{
 						ID:        alertID,
 						Severity:  alerts.SeverityError,
-						Message:   fmt.Sprintf("failed to refill account: %v", err),
+						Message:   fmt.Sprintf("failed to refill account: %v", rerr),
 						Data:      data,
 						Timestamp: time.Now(),
 					})
