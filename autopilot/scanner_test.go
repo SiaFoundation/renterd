@@ -19,15 +19,15 @@ type mockBus struct {
 	reqs  []string
 }
 
-func (b *mockBus) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
-	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", offset, offset+limit))
+func (b *mockBus) Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error) {
+	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
 
-	start := offset
+	start := opts.Offset
 	if start > len(b.hosts) {
 		return nil, nil
 	}
 
-	end := offset + limit
+	end := opts.Offset + opts.Limit
 	if end > len(b.hosts) {
 		end = len(b.hosts)
 	}
@@ -35,8 +35,11 @@ func (b *mockBus) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, 
 	return b.hosts[start:end], nil
 }
 
-func (b *mockBus) HostsForScanning(ctx context.Context, _ time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
-	hosts, err := b.Hosts(ctx, offset, limit)
+func (b *mockBus) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error) {
+	hosts, err := b.Hosts(ctx, api.GetHostsOptions{
+		Offset: opts.Offset,
+		Limit:  opts.Limit,
+	})
 	if err != nil {
 		return nil, err
 	}

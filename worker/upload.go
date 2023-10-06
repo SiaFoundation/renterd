@@ -279,7 +279,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, eTag, mimeType, obj, used)
+	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, used, api.AddObjectOptions{MimeType: mimeType, ETag: eTag})
 	if err != nil {
 		return "", fmt.Errorf("couldn't add object: %w", err)
 	}

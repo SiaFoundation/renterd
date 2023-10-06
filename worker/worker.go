@@ -159,9 +159,9 @@ type Bus interface {
 	GougingParams(ctx context.Context) (api.GougingParams, error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
-	Object(ctx context.Context, path string, opts ...api.ObjectsOption) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
-	DeleteObject(ctx context.Context, bucket, path string, batch bool) error
+	Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
+	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, opts api.AddObjectOptions) error
+	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
 
 	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
 	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
@@ -675,15 +675,14 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
-	if err == nil || (errors.Is(err, context.Canceled) && pruned > 0) {
+	if err == nil || pruned > 0 {
 		jc.Encode(api.RHPPruneContractResponse{
 			Pruned:    pruned,
 			Remaining: remaining,
+			Error:     err,
 		})
 	} else {
-		if pruned > 0 {
-			err = fmt.Errorf("%w; couldn't prune all sectors (%d/%d)", err, pruned, pruned+remaining)
-		}
+		err = fmt.Errorf("failed to prune contract; %w", err)
 		jc.Error(err, http.StatusInternalServerError)
 	}
 }
@@ -1005,16 +1004,15 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	opts := []api.ObjectsOption{
-		api.ObjectsWithBucket(bucket),
-		api.ObjectsWithPrefix(prefix),
-		api.ObjectsWithMarker(marker),
-		api.ObjectsWithOffset(off),
-		api.ObjectsWithLimit(limit),
+	opts := api.GetObjectOptions{
+		Prefix: prefix,
+		Marker: marker,
+		Offset: off,
+		Limit:  limit,
 	}
 
 	path := jc.PathParam("path")
-	res, err := w.bus.Object(ctx, path, opts...)
+	res, err := w.bus.Object(ctx, bucket, path, opts)
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1282,7 +1280,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), batch)
+	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), api.DeleteObjectOptions{Batch: batch})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return

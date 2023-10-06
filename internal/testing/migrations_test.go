@@ -32,7 +32,7 @@ func TestMigrations(t *testing.T) {
 	// create a helper to fetch used hosts
 	usedHosts := func(path string) map[types.PublicKey]struct{} {
 		// fetch used hosts
-		res, err := cluster.Bus.Object(context.Background(), path)
+		res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
 		if err != nil {
 			t.Fatal(err)
 		} else if res.Object == nil {

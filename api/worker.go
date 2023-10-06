@@ -67,6 +67,7 @@ type RHPPruneContractRequest struct {
 type RHPPruneContractResponse struct {
 	Pruned    uint64 `json:"pruned"`
 	Remaining uint64 `json:"remaining"`
+	Error     error  `json:"error,omitempty"`
 }
 
 // RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
@@ -278,50 +279,6 @@ func DownloadWithRange(offset, length int64) DownloadObjectOption {
 		} else {
 			h.Set("Range", fmt.Sprintf("bytes=%v-%v", offset, offset+length-1))
 		}
-	}
-}
-
-func DownloadWithBucket(bucket string) DownloadObjectOption {
-	return func(h http.Header) {
-		h.Set("bucket", bucket)
-	}
-}
-
-type ObjectsOption func(url.Values)
-
-func ObjectsWithPrefix(prefix string) ObjectsOption {
-	return func(v url.Values) {
-		v.Set("prefix", prefix)
-	}
-}
-
-func ObjectsWithOffset(offset int) ObjectsOption {
-	return func(v url.Values) {
-		v.Set("offset", fmt.Sprint(offset))
-	}
-}
-
-func ObjectsWithLimit(limit int) ObjectsOption {
-	return func(v url.Values) {
-		v.Set("limit", fmt.Sprint(limit))
-	}
-}
-
-func ObjectsWithBucket(bucket string) ObjectsOption {
-	return func(v url.Values) {
-		v.Set("bucket", bucket)
-	}
-}
-
-func ObjectsWithIgnoreDelim(ignore bool) ObjectsOption {
-	return func(v url.Values) {
-		v.Set("ignoreDelim", fmt.Sprint(ignore))
-	}
-}
-
-func ObjectsWithMarker(marker string) ObjectsOption {
-	return func(v url.Values) {
-		v.Set("marker", marker)
 	}
 }
 
