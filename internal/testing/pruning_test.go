@@ -171,7 +171,7 @@ func TestSectorPruning(t *testing.T) {
 	// add several objects
 	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), filename))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), api.DefaultBucketName, filename, api.UploadObjectOptions{}))
 	}
 
 	// compare database against roots returned by the host

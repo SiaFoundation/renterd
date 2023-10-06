@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/worker/client"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -51,6 +52,17 @@ const (
 	lockingPriorityUpload           = 10
 	lockingPriorityBackgroundUpload = 5
 )
+
+// re-export the client
+type Client struct {
+	*client.Client
+}
+
+func NewClient(address, password string) *Client {
+	return &Client{
+		Client: client.New(address, password),
+	}
+}
 
 var privateSubnets []*net.IPNet
 

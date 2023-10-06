@@ -131,12 +131,22 @@ type (
 		MimeType string `json:"mimeType"`
 		ETag     string `json:"eTag"`
 	}
+
 	CopyObjectOptions struct {
 		MimeType string `json:"mimeType"`
 	}
+
 	DeleteObjectOptions struct {
 		Batch bool `json:"batch"`
 	}
+
+	DownloadObjectOptions struct {
+		Prefix string        `json:"prefix"`
+		Offset int           `json:"offset"`
+		Limit  int           `json:"limit"`
+		Range  DownloadRange `json:"range,omitempty"`
+	}
+
 	GetObjectOptions struct {
 		Prefix      string `json:"prefix"`
 		Offset      int    `json:"offset"`
@@ -144,17 +154,85 @@ type (
 		IgnoreDelim bool   `json:"ignoreDelim"`
 		Marker      string `json:"marker"`
 	}
+
 	ListObjectOptions struct {
 		Prefix string `json:"prefix"`
 		Marker string `json:"marker"`
 		Limit  int    `json:"limit"`
 	}
+
 	SearchObjectOptions struct {
 		Key    string `json:"key"`
 		Offset int    `json:"offset"`
 		Limit  int    `json:"limit"`
 	}
+
+	UploadObjectOptions struct {
+		Offset                       int    `json:"offset"`
+		MinShards                    int    `json:"minshards"`
+		TotalShards                  int    `json:"totalshards"`
+		ContractSet                  string `json:"contractset"`
+		MimeType                     string `json:"mimetype"`
+		DisablePreshardingEncryption bool   `json:"disablepreshardingencryption"`
+	}
+
+	UploadMultipartUploadPartOptions struct {
+		DisablePreshardingEncryption bool `json:"disablepreshardingencryption"`
+		EncryptionOffset             int  `json:"encryptionoffset"`
+	}
 )
+
+func (opts UploadObjectOptions) Apply(values url.Values) {
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.MinShards != 0 {
+		values.Set("minshards", fmt.Sprint(opts.MinShards))
+	}
+	if opts.TotalShards != 0 {
+		values.Set("totalshards", fmt.Sprint(opts.TotalShards))
+	}
+	if opts.ContractSet != "" {
+		values.Set("contractset", opts.ContractSet)
+	}
+	if opts.MimeType != "" {
+		values.Set("mimetype", opts.MimeType)
+	}
+	if opts.DisablePreshardingEncryption {
+		values.Set("disablepreshardingencryption", "true")
+	}
+}
+
+func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
+	if opts.DisablePreshardingEncryption {
+		values.Set("disablepreshardingencryption", "true")
+	}
+	if opts.EncryptionOffset != 0 {
+		values.Set("offset", fmt.Sprint(opts.EncryptionOffset))
+	}
+}
+
+func (opts DownloadObjectOptions) Apply(values url.Values) {
+	if opts.Prefix != "" {
+		values.Set("prefix", opts.Prefix)
+	}
+	if opts.Offset != 0 {
+		values.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	if opts.Limit != 0 {
+		values.Set("limit", fmt.Sprint(opts.Limit))
+	}
+}
+
+func (opts DownloadObjectOptions) SetHeaders(h http.Header) {
+	if opts.Range != (DownloadRange{}) {
+		if opts.Range.Length == -1 {
+			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
+		} else {
+			h.Set("Range", fmt.Sprintf("bytes=%v-%v", opts.Range.Offset, opts.Range.Offset+opts.Range.Length-1))
+		}
+	}
+}
 
 func (opts DeleteObjectOptions) Apply(values url.Values) {
 	if opts.Batch {

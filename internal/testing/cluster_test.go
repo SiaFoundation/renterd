@@ -305,11 +305,11 @@ func TestObjectEntries(t *testing.T) {
 
 	for _, upload := range uploads {
 		if upload.size == 0 {
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), upload.path))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
 		} else {
 			data := make([]byte, upload.size)
 			frand.Read(data)
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), upload.path))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
 		}
 	}
 
@@ -391,7 +391,7 @@ func TestObjectEntries(t *testing.T) {
 		}
 		for _, entry := range got {
 			if !strings.HasSuffix(entry.Name, "/") {
-				if err := w.DownloadObject(context.Background(), io.Discard, entry.Name); err != nil {
+				if err := w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -435,7 +435,7 @@ func TestObjectsRename(t *testing.T) {
 		"/foo/baz/quuz",
 	}
 	for _, path := range uploads {
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), path))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 	}
 
 	// rename
@@ -454,7 +454,7 @@ func TestObjectsRename(t *testing.T) {
 		"/quuz",
 	} {
 		buf := bytes.NewBuffer(nil)
-		if err := w.DownloadObject(context.Background(), buf, path); err != nil {
+		if err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -477,11 +477,11 @@ func TestUploadDownloadEmpty(t *testing.T) {
 	tt := cluster.tt
 
 	// upload an empty file
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), "empty"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, "empty", api.UploadObjectOptions{}))
 
 	// download the empty file
 	var buffer bytes.Buffer
-	tt.OK(w.DownloadObject(context.Background(), &buffer, "empty"))
+	tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, "empty", api.DownloadObjectOptions{}))
 
 	// assert it's empty
 	if len(buffer.Bytes()) != 0 {
@@ -515,12 +515,12 @@ func TestUploadDownloadBasic(t *testing.T) {
 	tt.OKAll(frand.Read(data))
 
 	// upload the data
-	name := fmt.Sprintf("data_%v", len(data))
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 	// download data
 	var buffer bytes.Buffer
-	tt.OK(w.DownloadObject(context.Background(), &buffer, name))
+	tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 
 	// assert it matches
 	if !bytes.Equal(data, buffer.Bytes()) {
@@ -531,7 +531,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	for i := int64(0); i < 4; i++ {
 		offset := i * 32
 		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, name, api.DownloadWithRange(offset, 32)))
+		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{Range: api.DownloadRange{Offset: offset, Length: 32}}))
 		if !bytes.Equal(data[offset:offset+32], buffer.Bytes()) {
 			fmt.Println(data[offset : offset+32])
 			fmt.Println(buffer.Bytes())
@@ -599,8 +599,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	file2 := make([]byte, rhpv2.SectorSize/12)
 	frand.Read(file1)
 	frand.Read(file2)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file1), "fileś/file1"))
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), "fileś/file2"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file1), api.DefaultBucketName, "fileś/file1", api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
 	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", "", 0, -1)
@@ -641,8 +641,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	// upload the data
 	for _, data := range [][]byte{small, large} {
 		tt.OKAll(frand.Read(data))
-		name := fmt.Sprintf("data_%v", len(data))
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+		path := fmt.Sprintf("data_%v", len(data))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 	}
 
 	// check objects stats.
@@ -667,7 +667,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	for _, data := range [][]byte{small, large} {
 		name := fmt.Sprintf("data_%v", len(data))
 		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, name))
+		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, name, api.DownloadObjectOptions{}))
 
 		// assert it matches
 		if !bytes.Equal(data, buffer.Bytes()) {
@@ -690,10 +690,10 @@ func TestUploadDownloadExtended(t *testing.T) {
 
 	// download the data again
 	for _, data := range [][]byte{small, large} {
-		name := fmt.Sprintf("data_%v", len(data))
+		path := fmt.Sprintf("data_%v", len(data))
 
 		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, name))
+		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 
 		// assert it matches
 		if !bytes.Equal(data, buffer.Bytes()) {
@@ -701,7 +701,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		// delete the object
-		tt.OK(w.DeleteObject(context.Background(), name, false))
+		tt.OK(w.DeleteObject(context.Background(), path, false))
 	}
 }
 
@@ -764,8 +764,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 			tt.OKAll(frand.Read(data))
 
 			// upload the data
-			name := fmt.Sprintf("data_%v", len(data))
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+			path := fmt.Sprintf("data_%v", len(data))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 			// Should be registered in bus.
 			res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "", api.GetObjectOptions{})
@@ -773,7 +773,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 			var found bool
 			for _, entry := range res.Entries {
-				if entry.Name == fmt.Sprintf("/%s", name) {
+				if entry.Name == fmt.Sprintf("/%s", path) {
 					found = true
 					break
 				}
@@ -784,7 +784,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 			// download the data
 			var buffer bytes.Buffer
-			tt.OK(w.DownloadObject(context.Background(), &buffer, name))
+			tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 
 			// assert it matches
 			if !bytes.Equal(data, buffer.Bytes()) {
@@ -1033,8 +1033,8 @@ func TestParallelUpload(t *testing.T) {
 		tt.OKAll(frand.Read(data))
 
 		// upload the data
-		name := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+		path := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 		return nil
 	}
 
@@ -1060,7 +1060,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Upload one more object.
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), "/foo"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), api.DefaultBucketName, "/foo", api.UploadObjectOptions{}))
 
 	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
 	tt.OK(err)
@@ -1106,12 +1106,12 @@ func TestParallelDownload(t *testing.T) {
 
 	// upload the data
 	data := frand.Bytes(rhpv2.SectorSize)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), "foo"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
 
 	download := func() error {
 		t.Helper()
 		buf := bytes.NewBuffer(nil)
-		err := w.DownloadObject(context.Background(), buf, "foo")
+		err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, "foo", api.DownloadObjectOptions{})
 		if err != nil {
 			return err
 		}
@@ -1260,7 +1260,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload a file
 	data := frand.Bytes(5*rhpv2.SectorSize + 1)
-	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), "foo"))
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
 
 	// Download the file multiple times.
 	var wg sync.WaitGroup
@@ -1270,7 +1270,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 5; i++ {
 				buf := &bytes.Buffer{}
-				if err := cluster.Worker.DownloadObject(context.Background(), buf, "foo"); err != nil {
+				if err := cluster.Worker.DownloadObject(context.Background(), buf, api.DefaultBucketName, "foo", api.DownloadObjectOptions{}); err != nil {
 					t.Error(err)
 					break
 				}
@@ -1444,11 +1444,16 @@ func TestUploadPacking(t *testing.T) {
 	frand.Read(data3)
 
 	// declare helpers
-	download := func(name string, data []byte, offset, length int64) {
+	download := func(path string, data []byte, offset, length int64) {
 		t.Helper()
 		var buffer bytes.Buffer
-		if err := w.DownloadObject(context.Background(), &buffer, name,
-			api.DownloadWithRange(offset, length)); err != nil {
+		if err := w.DownloadObject(
+			context.Background(),
+			&buffer,
+			api.DefaultBucketName,
+			path,
+			api.DownloadObjectOptions{Range: api.DownloadRange{Offset: offset, Length: length}},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(data[offset:offset+length], buffer.Bytes()) {
@@ -1457,7 +1462,7 @@ func TestUploadPacking(t *testing.T) {
 	}
 	uploadDownload := func(name string, data []byte) {
 		t.Helper()
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, name, api.UploadObjectOptions{}))
 		download(name, data, 0, int64(len(data)))
 		res, err := b.Object(context.Background(), api.DefaultBucketName, name, api.GetObjectOptions{})
 		if err != nil {
@@ -1686,7 +1691,7 @@ func TestSlabBufferStats(t *testing.T) {
 	frand.Read(data2)
 
 	// upload the first file - buffer should still be incomplete after this
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data1), "1"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data1), api.DefaultBucketName, "1", api.UploadObjectOptions{}))
 
 	// assert number of objects
 	os, err := b.ObjectsStats()
@@ -1740,7 +1745,7 @@ func TestSlabBufferStats(t *testing.T) {
 	}
 
 	// upload the second file - this should fill the buffer
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data2), "2"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data2), api.DefaultBucketName, "2", api.UploadObjectOptions{}))
 
 	// assert number of objects
 	os, err = b.ObjectsStats()
@@ -1863,7 +1868,7 @@ func TestMultipartUploads(t *testing.T) {
 	// correctly.
 	putPart := func(partNum int, offset int, data []byte) string {
 		t.Helper()
-		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), objPath, mpr.UploadID, partNum, api.UploadWithEncryptionOffset(int64(offset)))
+		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: offset})
 		tt.OK(err)
 		if res.ETag == "" {
 			t.Fatal("expected non-empty ETag")
@@ -1912,7 +1917,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Download object
-	gor, err := w.GetObject(context.Background(), api.DefaultBucketName, objPath)
+	gor, err := w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{})
 	tt.OK(err)
 	if data, err := io.ReadAll(gor.Content); err != nil {
 		t.Fatal(err)
