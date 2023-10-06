@@ -563,7 +563,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 
 	var totalSectors uint64
 
-	batchSize := 10000000
+	batchSize := 5000000
 	marker := uint64(0)
 	for offset := 0; ; offset += batchSize {
 		var result struct {
