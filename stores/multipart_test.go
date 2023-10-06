@@ -70,9 +70,20 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			ETag:       etag,
 		})
 	}
-	_, err = db.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts)
-	if err != nil {
+
+	// Complete the upload. Check that the number of slices stays the same.
+	var nSlicesBefore int64
+	var nSlicesAfter int64
+	if err := db.db.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
 		t.Fatal(err)
+	} else if nSlicesBefore == 0 {
+		t.Fatal("expected some slices")
+	} else if _, err = db.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts); err != nil {
+		t.Fatal(err)
+	} else if err := db.db.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
+		t.Fatal(err)
+	} else if nSlicesBefore != nSlicesAfter {
+		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
 	}
 
 	// Fetch the object.
