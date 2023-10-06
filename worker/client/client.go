@@ -105,19 +105,21 @@ func (c *Client) ID(ctx context.Context) (id string, err error) {
 	return
 }
 
-// DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
-	path = strings.TrimPrefix(path, "/")
-	values := url.Values{}
-	values.Set("batch", fmt.Sprint(batch))
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
-	return
-}
-
 // Contracts returns all contracts from the worker. These contracts decorate a
 // bus contract with the contract's latest revision.
 func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts?hosttimeout=%s", api.DurationMS(hostTimeout)), &resp)
+	return
+}
+
+// DeleteObject deletes the object at the given path.
+func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error) {
+	values := url.Values{}
+	values.Set("bucket", bucket)
+	opts.Apply(values)
+
+	path = strings.TrimPrefix(path, "/")
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 
@@ -130,12 +132,12 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) 
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
+func (c *Client) ObjectEntries(ctx context.Context, bucket, path string, opts api.ObjectEntriesOptions) (entries []api.ObjectMetadata, err error) {
 	path = strings.TrimPrefix(path, "/")
 	body, _, err := c.object(ctx, bucket, path, api.DownloadObjectOptions{
-		Prefix: prefix,
-		Offset: offset,
-		Limit:  limit,
+		Prefix: opts.Prefix,
+		Offset: opts.Offset,
+		Limit:  opts.Limit,
 	})
 	if err != nil {
 		return nil, err

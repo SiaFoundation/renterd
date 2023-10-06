@@ -69,7 +69,7 @@ func TestNewTestCluster(t *testing.T) {
 	tt.OK(err)
 
 	// Try talking to the worker and request the object.
-	err = w.DeleteObject(context.Background(), "foo", false)
+	err = w.DeleteObject(context.Background(), api.DefaultBucketName, "foo", api.DeleteObjectOptions{})
 	tt.OK(err)
 
 	// See if autopilot is running by triggering the loop.
@@ -380,7 +380,7 @@ func TestObjectEntries(t *testing.T) {
 		}
 
 		// use the worker client
-		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, test.prefix, 0, -1)
+		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, api.ObjectEntriesOptions{Prefix: test.prefix})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -400,11 +400,11 @@ func TestObjectEntries(t *testing.T) {
 
 	// delete all uploads
 	for _, upload := range uploads {
-		tt.OK(w.DeleteObject(context.Background(), upload.path, false))
+		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, upload.path, api.DeleteObjectOptions{}))
 	}
 
 	// assert root dir is empty
-	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1); err != nil {
+	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.ObjectEntriesOptions{}); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("there should be no entries left", entries)
@@ -603,7 +603,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", "", 0, -1)
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", api.ObjectEntriesOptions{})
 	tt.OK(err)
 
 	if len(entries) != 1 {
@@ -628,7 +628,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", "", 0, -1)
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", api.ObjectEntriesOptions{})
 	tt.OK(err)
 	if len(entries) != 0 {
 		t.Fatal("expected no entries to be returned", len(entries))
@@ -701,7 +701,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		// delete the object
-		tt.OK(w.DeleteObject(context.Background(), path, false))
+		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, path, api.DeleteObjectOptions{}))
 	}
 }
 
@@ -1471,7 +1471,7 @@ func TestUploadPacking(t *testing.T) {
 		if res.Object.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", res.Object.Size, len(data))
 		}
-		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", 0, -1)
+		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.ObjectEntriesOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

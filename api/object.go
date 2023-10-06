@@ -147,6 +147,12 @@ type (
 		Range  DownloadRange `json:"range,omitempty"`
 	}
 
+	ObjectEntriesOptions struct {
+		Prefix string `json:"prefix"`
+		Offset int    `json:"offset"`
+		Limit  int    `json:"limit"`
+	}
+
 	GetObjectOptions struct {
 		Prefix      string `json:"prefix"`
 		Offset      int    `json:"offset"`

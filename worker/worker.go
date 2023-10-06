@@ -81,36 +81,6 @@ func init() {
 	}
 }
 
-// rangedResponseWriter is a wrapper around http.ResponseWriter. The difference
-// to the standard http.ResponseWriter is that it allows for overriding the
-// default status code that is sent upon the first call to Write with a custom
-// one.
-type rangedResponseWriter struct {
-	rw                http.ResponseWriter
-	defaultStatusCode int
-	headerWritten     bool
-}
-
-func (rw *rangedResponseWriter) Write(p []byte) (int, error) {
-	if !rw.headerWritten {
-		contentType := rw.Header().Get("Content-Type")
-		if contentType == "" {
-			rw.Header().Set("Content-Type", http.DetectContentType(p))
-		}
-		rw.WriteHeader(rw.defaultStatusCode)
-	}
-	return rw.rw.Write(p)
-}
-
-func (rw *rangedResponseWriter) Header() http.Header {
-	return rw.rw.Header()
-}
-
-func (rw *rangedResponseWriter) WriteHeader(statusCode int) {
-	rw.headerWritten = true
-	rw.rw.WriteHeader(statusCode)
-}
-
 type AccountStore interface {
 	Accounts(ctx context.Context) ([]api.Account, error)
 	AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
