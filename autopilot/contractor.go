@@ -1190,17 +1190,17 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
 	buffer := 50
-	candidates, lowestScore, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 5, math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	_, lowestScore, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 5, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
-	if len(candidates) == 0 {
-		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return math.SmallestNonzeroFloat64, nil
-	}
 
 	// Compute the minscore
-	minScore := lowestScore / minAllowedScoreLeeway
+	minScore := lowestScore
+	if minScore > math.SmallestNonzeroFloat64 {
+		minScore /= minAllowedScoreLeeway
+	}
+
 	c.logger.Infow("finished computing minScore",
 		"minScore", minScore,
 		"lowestScore", lowestScore)
@@ -1277,6 +1277,11 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scoredHosts), len(candidates), time.Since(start)),
 		"zeroscore", zeros,
 		"unusable", unusable)
+
+	if len(scoredHosts) == 0 {
+		c.logger.Warn("min host score is set to the smallest non-zero float because there are no good candidate hosts")
+		return nil, math.SmallestNonzeroFloat64, nil
+	}
 
 	// randomly select hosts and calculate the lowest score
 	selectedHosts, lowestScore, err := randSelectHosts(scoredHosts, wanted, rounds)
