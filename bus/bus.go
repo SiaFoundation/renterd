@@ -897,6 +897,10 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
+	if req.TotalCost.IsZero() {
+		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+		return
+	}
 
 	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
 	if jc.Check("couldn't store contract", err) == nil {
@@ -912,6 +916,10 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	}
 	if req.Contract.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
+		return
+	}
+	if req.TotalCost.IsZero() {
+		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
 		return
 	}
 
