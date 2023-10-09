@@ -1345,6 +1345,7 @@ func randSelectHosts(candidates map[types.PublicKey]scoredHost, wanted, rounds i
 		return nil, 0, err
 	}
 
+	// select up to 'wanted' hosts with the highest score
 	var hosts []hostdb.Host
 	for _, h := range selectedHosts {
 		hosts = append(hosts, h.host)
