@@ -227,7 +227,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// score all hosts
-	scoredHosts, unusableHosts, err := c.scoreHosts(ctx, hosts, make(map[types.PublicKey]struct{}), hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	scoredHosts, unusableHosts, err := c.scoreHosts(ctx, hosts, usedHosts, hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return false, err
 	}
