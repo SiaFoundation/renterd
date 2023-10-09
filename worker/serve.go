@@ -18,9 +18,10 @@ type (
 	// only if the caller made sure to manipulate the request in such a way that
 	// the only seeks are to find out the object's size
 	contentReader struct {
-		r      io.Reader
-		size   int64
-		offset int64
+		r           io.Reader
+		readStarted bool
+		size        int64
+		offset      int64
 	}
 )
 
@@ -33,16 +34,21 @@ func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
 }
 
 func (cr *contentReader) Seek(offset int64, whence int) (int64, error) {
-	if offset == 0 && whence == io.SeekEnd {
+	if cr.readStarted {
+		return 0, errors.New("can't call Seek after calling Read")
+	} else if offset == 0 && whence == io.SeekEnd {
 		return cr.size, nil
-	} else if (offset == 0 || offset == cr.offset) && whence == io.SeekStart {
+	} else if offset == 0 && whence == io.SeekStart {
 		return 0, nil
+	} else if offset == cr.offset && whence == io.SeekStart {
+		return cr.offset, nil
 	} else {
 		return 0, errors.New("unexpected seek")
 	}
 }
 
 func (cr *contentReader) Read(p []byte) (int, error) {
+	cr.readStarted = true
 	return cr.r.Read(p)
 }
 
