@@ -110,6 +110,11 @@ type (
 		UnusableResult unusableHostResult
 	}
 
+	scoredHost struct {
+		host  hostdb.Host
+		score float64
+	}
+
 	contractInfo struct {
 		contract    api.Contract
 		settings    rhpv2.HostSettings
@@ -800,7 +805,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, hosts 
 
 	// fetch candidate hosts
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates, _, err := c.candidateHosts(ctx, w, hosts, usedHosts, make(map[types.PublicKey]uint64), wanted, minScore)
+	candidates, _, err := c.candidateHosts(ctx, w, hosts, usedHosts, make(map[types.PublicKey]uint64), wanted, 1, minScore)
 	if err != nil {
 		return nil, err
 	}
@@ -1184,32 +1189,17 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	// to match the allowance. The lowest scoring host of these new hosts will
 	// be used as a baseline for determining whether our existing contracts are
 	// worthwhile.
-	var lowestScores []float64
 	buffer := 50
-	for i := 0; i < 5; i++ {
-		candidates, scores, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), math.SmallestNonzeroFloat64) // avoid 0 score hosts
-		if err != nil {
-			return 0, err
-		}
-		if len(candidates) == 0 {
-			c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-			return math.SmallestNonzeroFloat64, nil
-		}
-
-		// Find the minimum score that a host is allowed to have to be considered
-		// good for upload.
-		lowestScore := math.MaxFloat64
-		for _, score := range scores {
-			if score < lowestScore {
-				lowestScore = score
-			}
-		}
-		lowestScores = append(lowestScores, lowestScore)
-	}
-	lowestScore, err := stats.Float64Data(lowestScores).Median()
+	candidates, lowestScore, err := c.candidateHosts(ctx, w, hosts, make(map[types.PublicKey]struct{}), storedData, int(numContracts)+int(buffer), 5, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return 0, err
 	}
+	if len(candidates) == 0 {
+		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
+		return math.SmallestNonzeroFloat64, nil
+	}
+
+	// Compute the minscore
 	minScore := lowestScore / minAllowedScoreLeeway
 	c.logger.Infow("finished computing minScore",
 		"minScore", minScore,
@@ -1217,12 +1207,12 @@ func (c *contractor) managedFindMinAllowedHostScores(ctx context.Context, w Work
 	return minScore, nil
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted int, minScore float64) ([]hostdb.Host, []float64, error) {
+func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, wanted, rounds int, minScore float64) ([]hostdb.Host, float64, error) {
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
 
 	// nothing to do
 	if wanted == 0 {
-		return nil, nil, nil
+		return nil, 0, nil
 	}
 
 	state := c.ap.State()
@@ -1230,13 +1220,13 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	// fetch consensus state
 	cs, err := c.ap.bus.ConsensusState(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 
 	// create a gouging checker
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
-	// create list of candidate hosts
+	// select candidate hosts
 	var candidates []hostdb.Host
 	var excluded, notcompletedscan int
 	for _, h := range hosts {
@@ -1252,7 +1242,6 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		}
 		candidates = append(candidates, h)
 	}
-
 	c.logger.Debugw(fmt.Sprintf("selected %d candidate hosts out of %d", len(candidates), len(hosts)),
 		"excluded", excluded,
 		"notcompletedscan", notcompletedscan)
@@ -1260,9 +1249,8 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 	// score all candidate hosts
 	start := time.Now()
 	var results unusableHostResult
-	scores := make([]float64, 0, len(candidates))
-	scored := make([]hostdb.Host, 0, len(candidates))
 	var unusable, zeros int
+	scoredHosts := make(map[types.PublicKey]scoredHost)
 	for _, h := range candidates {
 		// NOTE: use the price table stored on the host for gouging checks when
 		// looking for candidate hosts, fetching the price table on the fly here
@@ -1273,36 +1261,30 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		if usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey]); usable {
-			scored = append(scored, h)
-			scores = append(scores, result.scoreBreakdown.Score())
-		} else {
-			results.merge(result)
-			if result.scoreBreakdown.Score() == 0 {
-				zeros++
-			}
-			unusable++
+		usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
+		if usable {
+			scoredHosts[h.PublicKey] = scoredHost{host: h, score: result.scoreBreakdown.Score()}
+			continue
 		}
-	}
 
-	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scored), len(candidates), time.Since(start)),
+		// keep track of unusable host results
+		results.merge(result)
+		if result.scoreBreakdown.Score() == 0 {
+			zeros++
+		}
+		unusable++
+	}
+	c.logger.Debugw(fmt.Sprintf("scored %d candidate hosts out of %v, took %v", len(scoredHosts), len(candidates), time.Since(start)),
 		"zeroscore", zeros,
 		"unusable", unusable)
 
-	// select hosts
-	var selectedHosts []hostdb.Host
-	var selectedScores []float64
-	for len(selectedHosts) < wanted && len(scored) > 0 {
-		i := randSelectByWeight(scores)
-		selectedHosts = append(selectedHosts, scored[i])
-		selectedScores = append(selectedScores, scores[i])
-
-		// remove selected host
-		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
-		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
+	// randomly select hosts and calculate the lowest score
+	selectedHosts, lowestScore, err := randSelectHosts(scoredHosts, wanted, rounds)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	// print warning if no candidate hosts were found
+	// print warning if we couldn't find enough hosts were found
 	if len(selectedHosts) < wanted {
 		msg := "no candidate hosts found"
 		if len(selectedHosts) > 0 {
@@ -1315,7 +1297,66 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 		}
 	}
 
-	return selectedHosts, selectedScores, nil
+	return selectedHosts, lowestScore, nil
+}
+
+func randSelectHosts(candidates map[types.PublicKey]scoredHost, wanted, rounds int) ([]hostdb.Host, float64, error) {
+	var lowestScores []float64
+	var selectedHosts map[types.PublicKey]scoredHost
+
+	// perform the random select 'rounds' time
+	for r := 0; r < rounds; r++ {
+		// turn map into slices
+		scores := make([]float64, 0, len(candidates))
+		scored := make([]hostdb.Host, 0, len(candidates))
+		for _, h := range candidates {
+			scored = append(scored, h.host)
+			scores = append(scores, h.score)
+		}
+
+		// select hosts
+		var selectedScores []float64
+		for len(selectedScores) < wanted && len(scored) > 0 {
+			i := randSelectByWeight(scores)
+			selectedScores = append(selectedScores, scores[i])
+			selectedHosts[scored[i].PublicKey] = scoredHost{
+				host:  scored[i],
+				score: scores[i],
+			}
+
+			// remove selected host
+			scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
+			scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
+		}
+
+		// add lowest score
+		lowestScore := math.MaxFloat64
+		for _, score := range selectedScores {
+			if score < lowestScore {
+				lowestScore = score
+			}
+		}
+		lowestScores = append(lowestScores, lowestScore)
+	}
+
+	// calculate the lowest score as the  median of the lowest score if every individual round
+	lowestScore, err := stats.Float64Data(lowestScores).Median()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var hosts []hostdb.Host
+	for _, h := range selectedHosts {
+		hosts = append(hosts, h.host)
+	}
+	sort.Slice(hosts, func(i, j int) bool {
+		return selectedHosts[hosts[i].PublicKey].score > selectedHosts[hosts[j].PublicKey].score
+	})
+	if len(hosts) > wanted {
+		hosts = hosts[:wanted]
+	}
+
+	return hosts, lowestScore, nil
 }
 
 func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
