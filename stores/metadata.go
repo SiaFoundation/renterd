@@ -1655,9 +1655,9 @@ LIMIT ?
 
 			var res *gorm.DB
 			if isSQLite(s.db) {
-				res = s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
+				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
 			} else {
-				res = s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
+				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
 			}
 			if res.Error != nil {
 				return res.Error
@@ -1667,8 +1667,7 @@ LIMIT ?
 		})
 		if err != nil {
 			return err
-		}
-		if rowsAffected == 0 {
+		} else if rowsAffected < refreshHealthBatchSize {
 			return nil // done
 		}
 		select {
@@ -2207,8 +2206,8 @@ UPDATE slabs SET health_valid = 0 WHERE id in (
 		})
 		if err != nil {
 			return fmt.Errorf("failed to invalidate slab health: %w", err)
-		} else if rowsAffected == 0 {
-			return nil
+		} else if rowsAffected < refreshHealthBatchSize {
+			return nil // done
 		}
 		select {
 		case <-ctx.Done():
