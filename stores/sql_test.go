@@ -36,6 +36,9 @@ func newTestSQLStore(dir string) (*SQLStore, string, modules.ConsensusChangeID, 
 	if err != nil {
 		return nil, "", modules.ConsensusChangeID{}, err
 	}
+	detectMissingIndices(sqlStore.db, func(dst interface{}, name string) {
+		panic("no index can be missing")
+	})
 	err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
 	return sqlStore, dbName, ccid, err
 }
@@ -145,6 +148,15 @@ func TestQueryPlan(t *testing.T) {
 		// contract_set_contracts
 		"SELECT * FROM contract_set_contracts WHERE db_contract_id = 1",
 		"SELECT * FROM contract_set_contracts WHERE db_contract_set_id = 1",
+
+		// slabs
+		"SELECT * FROM slabs WHERE health_valid = 1",
+		"SELECT * FROM slabs WHERE health > 0",
+		"SELECT * FROM slabs WHERE db_buffered_slab_id = 1",
+
+		// objects
+		"SELECT * FROM objects WHERE db_bucket_id = 1",
+		"SELECT * FROM objects WHERE etag = ''",
 	}
 
 	for _, query := range queries {
