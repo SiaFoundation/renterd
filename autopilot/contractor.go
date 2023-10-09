@@ -1302,7 +1302,7 @@ func (c *contractor) candidateHosts(ctx context.Context, w Worker, hosts []hostd
 
 func randSelectHosts(candidates map[types.PublicKey]scoredHost, wanted, rounds int) ([]hostdb.Host, float64, error) {
 	var lowestScores []float64
-	var selectedHosts map[types.PublicKey]scoredHost
+	selectedHosts := make(map[types.PublicKey]scoredHost)
 
 	// perform the random select 'rounds' time
 	for r := 0; r < rounds; r++ {
@@ -1339,7 +1339,7 @@ func randSelectHosts(candidates map[types.PublicKey]scoredHost, wanted, rounds i
 		lowestScores = append(lowestScores, lowestScore)
 	}
 
-	// calculate the lowest score as the  median of the lowest score if every individual round
+	// calculate the lowest score
 	lowestScore, err := stats.Float64Data(lowestScores).Median()
 	if err != nil {
 		return nil, 0, err
