@@ -18,31 +18,43 @@ type (
 	// only if the caller made sure to manipulate the request in such a way that
 	// the only seeks are to find out the object's size
 	contentReader struct {
-		r      io.Reader
-		size   int64
-		offset int64
+		r           io.Reader
+		readStarted bool
+		size        int64
+		seekOffset  int64
+		dataOffset  int64
 	}
 )
 
 func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
 	return &contentReader{
-		r:      r,
-		offset: offset,
-		size:   obj.Size,
+		r:          r,
+		dataOffset: offset,
+		seekOffset: offset,
+		size:       obj.Size,
 	}
 }
 
 func (cr *contentReader) Seek(offset int64, whence int) (int64, error) {
-	if offset == 0 && whence == io.SeekEnd {
-		return cr.size, nil
-	} else if (offset == 0 || offset == cr.offset) && whence == io.SeekStart {
-		return 0, nil
+	if cr.readStarted {
+		return 0, errors.New("can't call Seek after calling Read")
+	} else if offset == 0 && whence == io.SeekEnd {
+		cr.seekOffset = cr.size
+	} else if offset == 0 && whence == io.SeekStart {
+		cr.seekOffset = 0
+	} else if offset == cr.dataOffset && whence == io.SeekStart {
+		cr.seekOffset = cr.dataOffset
 	} else {
 		return 0, errors.New("unexpected seek")
 	}
+	return cr.seekOffset, nil
 }
 
 func (cr *contentReader) Read(p []byte) (int, error) {
+	if !cr.readStarted && cr.seekOffset != cr.dataOffset {
+		return 0, fmt.Errorf("contentReader: Read called but offset doesn't match data offset %v != %v", cr.seekOffset, cr.dataOffset)
+	}
+	cr.readStarted = true
 	return cr.r.Read(p)
 }
 
