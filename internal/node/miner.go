@@ -119,9 +119,9 @@ func (m *Miner) mineBlock(addr stypes.UnlockHash) error {
 		return errFailedToSolve
 	}
 
-	var b types.Block
+	var b types.V1Block
 	convertToCore(&block, &b)
-	if err := m.consensus.AcceptBlock(context.Background(), b); err != nil {
+	if err := m.consensus.AcceptBlock(context.Background(), types.Block(b)); err != nil {
 		return fmt.Errorf("failed to get block accepted: %w", err)
 	}
 	return nil

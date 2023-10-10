@@ -79,7 +79,7 @@ type chainManager struct {
 
 func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
 	var sb stypes.Block
-	convertToSiad(b, &sb)
+	convertToSiad(types.V2Block(b), &sb)
 	return cm.cs.AcceptBlock(sb)
 }
 

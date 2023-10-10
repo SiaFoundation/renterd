@@ -274,7 +274,7 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
 	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings *rhpv2.HostSettings) (err error) {
 				// delete roots
 				got, err := w.fetchContractRoots(t, &rev, settings)
 				if err != nil {
@@ -316,7 +316,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 	return
 }
 
-func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
+func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings *rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
 	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
@@ -485,7 +485,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 
 func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings *rhpv2.HostSettings) (err error) {
 			roots, err = w.fetchContractRoots(t, &rev, settings)
 			return
 		})
@@ -493,7 +493,7 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 	return
 }
 
-func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, _ error) {
+func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings *rhpv2.HostSettings) (roots []types.Hash256, _ error) {
 	// derive the renter key
 	renterKey := w.deriveRenterKey(rev.HostKey())
 
@@ -512,8 +512,8 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		}
 
 		// check funds
-		cost := rhpv2.RPCSectorRootsCost(settings, n)
-		if rev.RenterFunds().Cmp(cost) < 0 {
+		price, _ := settings.RPCSectorRootsCost(offset, n).Total()
+		if rev.RenterFunds().Cmp(price) < 0 {
 			return nil, ErrInsufficientFunds
 		}
 
@@ -524,7 +524,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		rev.Revision.RevisionNumber++
 
 		// update the revision outputs
-		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
+		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, price, types.ZeroCurrency)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +565,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		}
 
 		// update the total cost
-		totalCost = totalCost.Add(cost)
+		totalCost = totalCost.Add(price)
 
 		// append roots
 		roots = append(roots, rootsResp.SectorRoots...)
@@ -574,7 +574,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 	return
 }
 
-func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
+func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings *rhpv2.HostSettings) error) error {
 	renterKey := w.deriveRenterKey(hk)
 
 	// execute lock RPC
@@ -627,7 +627,7 @@ func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, 
 		return fmt.Errorf("couldn't unmarshal json: %w", err)
 	}
 
-	return fn(t, rev, settings)
+	return fn(t, rev, &settings)
 }
 
 func humanReadableSize(b int) string {

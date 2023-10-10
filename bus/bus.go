@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -374,7 +375,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	txn := wfr.Transaction
 	if len(txn.MinerFees) == 0 {
 		// if no fees are specified, we add some
-		fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
+		fee := b.tp.RecommendedFee().Mul64(uint64(encodedLen(txn)))
 		txn.MinerFees = []types.Currency{fee}
 	}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
@@ -461,7 +462,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(encodedLen(txn)))}
 	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -485,10 +486,6 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if jc.Decode(&wprr) != nil {
 		return
 	}
-	if wprr.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
-		return
-	}
 	if wprr.RenterKey == nil {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
@@ -503,7 +500,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	finalRevision.RevisionNumber = math.MaxUint64
 
 	// Prepare the new contract.
-	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
+	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.NewCollateral, wprr.PriceTable, wprr.EndHeight)
 
 	// Create the transaction containing both the final revision and new
 	// contract.
@@ -2138,4 +2135,28 @@ func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) e
 		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
 	}
 	return nil
+}
+
+func encodedLen(v interface{}) int {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	if et, ok := v.(types.EncoderTo); ok {
+		et.EncodeTo(e)
+	} else {
+		switch v := v.(type) {
+		case bool:
+			e.WriteBool(v)
+		case uint64:
+			e.WriteUint64(v)
+		case time.Time:
+			e.WriteTime(v)
+		case []byte:
+			e.WritePrefix(len(v))
+			e.Write(v)
+		default:
+			panic(fmt.Sprintf("cannot encode type %T", v))
+		}
+	}
+	_ = e.Flush() // no error possible
+	return buf.Len()
 }

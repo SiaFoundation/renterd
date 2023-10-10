@@ -238,7 +238,6 @@ type WalletPrepareRenewRequest struct {
 	Revision      types.FileContractRevision `json:"revision"`
 	EndHeight     uint64                     `json:"endHeight"`
 	HostAddress   types.Address              `json:"hostAddress"`
-	HostKey       types.PublicKey            `json:"hostKey"`
 	PriceTable    rhpv3.HostPriceTable       `json:"priceTable"`
 	NewCollateral types.Currency             `json:"newCollateral"`
 	RenterAddress types.Address              `json:"renterAddress"`
