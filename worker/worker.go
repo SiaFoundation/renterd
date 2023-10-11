@@ -509,6 +509,12 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		return
 	}
 
+	// check renter funds is not zero
+	if rfr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	}
+
 	// apply a pessimistic timeout on contract formations
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
@@ -717,6 +723,12 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	// decode request
 	var rrr api.RHPRenewRequest
 	if jc.Decode(&rrr) != nil {
+		return
+	}
+
+	// check renter funds is not zero
+	if rrr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
 	}
 
