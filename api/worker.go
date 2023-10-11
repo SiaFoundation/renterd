@@ -252,6 +252,7 @@ func UploadWithEncryptionOffset(offset int64) UploadOption {
 type DownloadRange struct {
 	Start  int64
 	Length int64
+	Size   int64
 }
 
 type UploadObjectResponse struct {
@@ -304,8 +305,13 @@ func ParseDownloadRange(contentRange string) (DownloadRange, error) {
 	if err != nil {
 		return DownloadRange{}, err
 	}
+	size, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return DownloadRange{}, err
+	}
 	return DownloadRange{
 		Start:  start,
 		Length: end - start + 1,
+		Size:   size,
 	}, nil
 }

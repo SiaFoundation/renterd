@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gotd/contrib/http_range"
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -1062,7 +1063,11 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	// serve the content
 	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, downloadFn)
-	if err != nil {
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+	} else if err != nil {
 		jc.Error(err, status)
 	}
 }
