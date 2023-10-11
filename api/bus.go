@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -559,4 +560,8 @@ type AddPartialSlabResponse struct {
 
 func FormatETag(ETag string) string {
 	return fmt.Sprintf("\"%s\"", ETag)
+}
+
+func ObjectPathEscape(path string) string {
+	return url.PathEscape(strings.TrimPrefix(path, "/"))
 }

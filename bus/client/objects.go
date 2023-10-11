@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -13,7 +12,7 @@ import (
 
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, opts api.AddObjectOptions) (err error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
 		Bucket:        bucket,
 		ContractSet:   contractSet,
@@ -46,7 +45,7 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
@@ -68,7 +67,7 @@ func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetOb
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	path += "?" + values.Encode()
 
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &res)

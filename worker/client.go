@@ -182,7 +182,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opts ...api.UploadOption) (*api.UploadObjectResponse, error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
 	values := make(url.Values)
@@ -214,7 +214,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, path string, opt
 
 // UploadMultipartUploadPart uploads part of the data for a multipart upload.
 func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, path, uploadID string, partNumber int, opts ...api.UploadOption) (*api.UploadMultipartUploadPartResponse, error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
 	values := make(url.Values)
@@ -277,7 +277,7 @@ func (c *Client) object(ctx context.Context, bucket, path, prefix string, offset
 
 // ObjectEntries returns the entries at the given path, which must end in /.
 func (c *Client) ObjectEntries(ctx context.Context, bucket, path, prefix string, offset, limit int) (entries []api.ObjectMetadata, err error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	body, _, err := c.object(ctx, bucket, path, prefix, offset, limit)
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, path string, o
 		return errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	body, _, err := c.object(ctx, api.DefaultBucketName, path, "", 0, -1, opts...)
 	if err != nil {
 		return err
@@ -311,7 +311,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 	}
 
 	// Start download.
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	body, header, err := c.object(ctx, bucket, path, "", 0, -1, opts...)
 	if err != nil {
 		return nil, err
@@ -354,7 +354,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts ...api
 
 // DeleteObject deletes the object at the given path.
 func (c *Client) DeleteObject(ctx context.Context, path string, batch bool) (err error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	values := url.Values{}
 	values.Set("batch", fmt.Sprint(batch))
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
