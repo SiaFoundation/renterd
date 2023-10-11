@@ -309,6 +309,10 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 				if deleted < uint64(len(indices)) {
 					remaining = uint64(len(indices)) - deleted
 				}
+
+				// return sizes instead of number of roots
+				deleted *= rhpv2.SectorSize
+				remaining *= rhpv2.SectorSize
 				return
 			})
 		})
