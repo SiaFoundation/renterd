@@ -42,6 +42,7 @@ func TestS3Basic(t *testing.T) {
 
 	// create bucket
 	bucket := "bucket"
+	objPath := "obj#ct" // special char to check escaping
 	tt.OK(s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{}))
 
 	// list buckets
@@ -69,9 +70,9 @@ func TestS3Basic(t *testing.T) {
 
 	// add object to the bucket
 	data := frand.Bytes(10)
-	uploadInfo, err := s3.PutObject(context.Background(), bucket, "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	uploadInfo, err := s3.PutObject(context.Background(), bucket, objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	tt.OK(err)
-	busObject, err := cluster.Bus.Object(context.Background(), bucket, "object", api.GetObjectOptions{})
+	busObject, err := cluster.Bus.Object(context.Background(), bucket, objPath, api.GetObjectOptions{})
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
@@ -79,11 +80,11 @@ func TestS3Basic(t *testing.T) {
 		t.Fatalf("expected ETag %q, got %q", uploadInfo.ETag, busObject.Object.ETag)
 	}
 
-	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", "object", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	tt.AssertIs(err, errBucketNotExists)
 
 	// get object
-	obj, err := s3.GetObject(context.Background(), bucket, "object", minio.GetObjectOptions{})
+	obj, err := s3.GetObject(context.Background(), bucket, objPath, minio.GetObjectOptions{})
 	tt.OK(err)
 	if b, err := io.ReadAll(obj); err != nil {
 		t.Fatal(err)
@@ -92,7 +93,7 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	// stat object
-	info, err := s3.StatObject(context.Background(), bucket, "object", minio.StatObjectOptions{})
+	info, err := s3.StatObject(context.Background(), bucket, objPath, minio.StatObjectOptions{})
 	tt.OK(err)
 	if info.Size != int64(len(data)) {
 		t.Fatal("size mismatch")
@@ -104,10 +105,10 @@ func TestS3Basic(t *testing.T) {
 	// copy our object into the new bucket.
 	res, err := s3.CopyObject(context.Background(), minio.CopyDestOptions{
 		Bucket: bucket + "2",
-		Object: "object",
+		Object: objPath,
 	}, minio.CopySrcOptions{
 		Bucket: bucket,
-		Object: "object",
+		Object: objPath,
 	})
 	tt.OK(err)
 	if res.LastModified.IsZero() {
@@ -119,7 +120,7 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	// get copied object
-	obj, err = s3.GetObject(context.Background(), bucket+"2", "object", minio.GetObjectOptions{})
+	obj, err = s3.GetObject(context.Background(), bucket+"2", objPath, minio.GetObjectOptions{})
 	tt.OK(err)
 	if b, err := io.ReadAll(obj); err != nil {
 		t.Fatal(err)
@@ -136,10 +137,10 @@ func TestS3Basic(t *testing.T) {
 	tt.AssertIs(err, errBucketNotExists)
 
 	// remove the object
-	tt.OK(s3.RemoveObject(context.Background(), bucket, "object", minio.RemoveObjectOptions{}))
+	tt.OK(s3.RemoveObject(context.Background(), bucket, objPath, minio.RemoveObjectOptions{}))
 
 	// try to get object
-	obj, err = s3.GetObject(context.Background(), bucket, "object", minio.GetObjectOptions{})
+	obj, err = s3.GetObject(context.Background(), bucket, objPath, minio.GetObjectOptions{})
 	tt.OK(err)
 	_, err = io.ReadAll(obj)
 	tt.AssertContains(err, "The specified key does not exist")
