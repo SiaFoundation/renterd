@@ -26,7 +26,7 @@ type (
 	}
 )
 
-var errMultiRangeNotSupported = errors.New("multi-range requests are not supported")
+var errMultiRangeNotSupported = errors.New("multipart ranges are not supported")
 
 func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
 	return &contentReader{
