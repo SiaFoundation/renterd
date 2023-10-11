@@ -26,6 +26,8 @@ type (
 	}
 )
 
+var errMultiRangeNotSupported = errors.New("multi-range requests are not supported")
+
 func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
 	return &contentReader{
 		r:          r,
@@ -106,11 +108,13 @@ func parseRangeHeader(req *http.Request, obj api.Object) (int64, int64, error) {
 	// extract requested offset and length
 	offset := int64(0)
 	length := obj.Size
-	if len(ranges) > 0 {
+	if len(ranges) == 1 {
 		offset, length = ranges[0].Start, ranges[0].Length
 		if offset < 0 || length < 0 || offset+length > obj.Size {
-			return 0, 0, fmt.Errorf("invalid range: %v %v", offset, length)
+			return 0, 0, fmt.Errorf("%w: %v %v", http_range.ErrInvalid, offset, length)
 		}
+	} else if len(ranges) > 1 {
+		return 0, 0, errMultiRangeNotSupported
 	}
 	return offset, length, nil
 }
