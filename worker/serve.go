@@ -92,9 +92,6 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	rw.Header().Set("ETag", api.FormatETag(buildETag(req, obj.ETag)))
 	rw.Header().Set("Content-Type", contentType)
 
-	// override the range request header to avoid seeks in http.ServeContent
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-
 	http.ServeContent(rw, req, obj.Name, obj.ModTime, rs)
 	return http.StatusOK, nil
 }
