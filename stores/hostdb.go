@@ -920,7 +920,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 	var newAnnouncements []announcement
 	for _, sb := range cc.AppliedBlocks {
 		// Fetch announcements and add them to the queue.
-		var b types.V2Block
+		var b types.V1Block
 		convertToCore(sb, &b)
 		hostdb.ForEachAnnouncement(types.Block(b), height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
 			newAnnouncements = append(newAnnouncements, announcement{
