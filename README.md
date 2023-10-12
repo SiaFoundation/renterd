@@ -23,7 +23,7 @@ app bundle. Developers and power users that don't want the UI can compile
 
 `renterd` is in beta, featuring most functionalities from `siad`. It introduces
 a new and improved web UI, as well as the autopilot functionality, but lacks
-backwards compatibility with `said` metadata. This means that, while `renterd`
+backwards compatibility with `siad` metadata. This means that, while `renterd`
 is already capable of serving as the backbone for new Sia applications, there is
 currently no way to migrate files uploaded through `siad` to `renterd`. Going
 forward, our immediate priority is continuously improving `renterd` to become
