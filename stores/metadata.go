@@ -877,7 +877,8 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		fcids[i] = fileContractID(fcid)
 	}
 
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	var diff []fileContractID
+	err := s.retryTransaction(func(tx *gorm.DB) error {
 		// fetch current contracts
 		var dbCurrentContracts []fileContractID
 		err := tx.
@@ -927,21 +928,27 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		for _, fcid := range dbCurrentContracts {
 			delete(newMap, fcid)
 		}
-		diff := make([]fileContractID, 0, len(currentMap)+len(newMap))
+		diff = make([]fileContractID, 0, len(currentMap)+len(newMap))
 		for fcid := range currentMap {
 			diff = append(diff, fcid)
 		}
 		for fcid := range newMap {
 			diff = append(diff, fcid)
 		}
-		err = invalidateSlabHealthByFCID(tx, diff)
-		if err != nil {
-			return err
-		}
 
 		// update contracts
 		return tx.Model(&contractset).Association("Contracts").Replace(&dbNewContracts)
 	})
+	if err != nil {
+		return fmt.Errorf("failed to set contract set: %w", err)
+	}
+
+	// Invalidate slab health.
+	err = s.invalidateSlabHealthByFCID(ctx, diff)
+	if err != nil {
+		return fmt.Errorf("failed to invalidate slab health: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
@@ -1648,9 +1655,9 @@ LIMIT ?
 
 			var res *gorm.DB
 			if isSQLite(s.db) {
-				res = s.db.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
+				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
 			} else {
-				res = s.db.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
+				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
 			}
 			if res.Error != nil {
 				return res.Error
@@ -1660,8 +1667,7 @@ LIMIT ?
 		})
 		if err != nil {
 			return err
-		}
-		if rowsAffected == 0 {
+		} else if rowsAffected < refreshHealthBatchSize {
 			return nil // done
 		}
 		select {
@@ -2126,9 +2132,7 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
 		}
 	}
-
-	// invalidate the slab health for affected slabs
-	return invalidateSlabHealthByFCID(tx, toInvalidate)
+	return nil
 }
 
 // deleteObject deletes an object from the store and prunes all slabs which are
@@ -2165,6 +2169,25 @@ func deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _
 
 func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
 	return tx.Exec(`
+	UPDATE slabs SET health_valid = 0 WHERE id in (
+	       SELECT *
+	       FROM (
+	               SELECT slabs.id
+	               FROM slabs
+	               LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+	               LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+	               LEFT JOIN contracts c ON c.id = cs.db_contract_id
+	               WHERE health_valid = 1 AND c.fcid IN (?)
+	       ) slab_ids
+	)
+	               `, fcids).Error
+}
+
+func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
+	for {
+		var rowsAffected int64
+		err := s.retryTransaction(func(tx *gorm.DB) error {
+			resp := tx.Exec(`
 UPDATE slabs SET health_valid = 0 WHERE id in (
 	SELECT *
 	FROM (
@@ -2174,9 +2197,24 @@ UPDATE slabs SET health_valid = 0 WHERE id in (
 		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
 		LEFT JOIN contracts c ON c.id = cs.db_contract_id
 		WHERE health_valid = 1 AND c.fcid IN (?)
+		LIMIT ?
 	) slab_ids
 )
-		`, fcids).Error
+		`, fcids, refreshHealthBatchSize)
+			rowsAffected = resp.RowsAffected
+			return resp.Error
+		})
+		if err != nil {
+			return fmt.Errorf("failed to invalidate slab health: %w", err)
+		} else if rowsAffected < refreshHealthBatchSize {
+			return nil // done
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 func sqlConcat(db *gorm.DB, a, b string) string {
