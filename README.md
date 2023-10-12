@@ -1,69 +1,70 @@
 # [![Sia](https://sia.tech/assets/banners/sia-banner-expanded-renterd.png)](http://sia.tech)
-
 [![GoDoc](https://godoc.org/go.sia.tech/renterd?status.svg)](https://godoc.org/go.sia.tech/renterd)
 
-A renter for Sia.
+# Renterd: The Next-Gen Sia Renter
 
 ## Overview
 
-`renterd` is a next-generation Sia renter, developed by the Sia Foundation. It
-aims to serve the needs of both everyday users -- who want a simple interface
-for storing and retrieving their personal data -- and developers -- who want to
-a powerful, flexible, and reliable API for building apps on Sia.
+`renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
+to cater to both casual users seeking straightforward data storage and
+developers requiring a robust API for building apps on Sia.
 
-To achieve this, we have carefully architected `renterd` to isolate its
-user-friendly functionality, which we call "autopilot," from its low-level APIs.
-Autopilot consists of background processes that scan and rank hosts, form and
-renew contracts, and automatically migrate files when necessary. Most users want
-this functionality, but for those who want absolute control over their contracts
-and data, autopilot can easily be disabled with a CLI flag. Even better, the
-autopilot code is built directly on top of the public `renterd` HTTP API,
-meaning it can be easily forked, modified, or even ported to another language.
+The high-level "autopilot" feature automates host scanning and ranking, contract
+management, and file migration. While most users will find this useful, those
+desiring full control can disable autopilot via a CLI flag. Importantly,
+autopilot is built atop the public `renterd` HTTP API, enabling easy
+customization or language porting.
 
 `renterd` also ships with an embedded web UI, rather than yet another Electron
-app bundle. Developers and power users can even compile `renterd` without a UI
-at all, reducing bloat and simplifying the build process.
+app bundle. Developers and power users that don't want the UI can compile
+`renterd` without it, reducing bloat and simplifying the build process.
 
 ## Current Status
 
-`renterd` is officially in beta and most of the features known from `siad` have
-been implemented and are ready for use. This includes autopilot functionality.
-It also comes bundled with a new and improved web UI. However, it lacks
-backwards-compatibility with `siad` renter metadata. This means that, while
-`renterd` is already capable of serving as the backbone for new Sia
-applications, there is currently no way to migrate files uploaded through `siad`
-to `renterd`.
+`renterd` is in beta, featuring most functionalities from `siad`. It introduces
+a new and improved web UI, as well as the autopilot functionality, but lacks
+backwards compatibility with `said` metadata. This means that, while `renterd`
+is already capable of serving as the backbone for new Sia applications, there is
+currently no way to migrate files uploaded through `siad` to `renterd`. Going
+forward, our immediate priority is continuously improving `renterd` to become
+more stable, scalable and performant.
 
-Going forward, our immediate priority is continuously improving `renterd` to
-become more stable, scalable and performant. However, we also want to make it
-painless for existing `siad` users to switch to `renterd`. So before shipping
-v1.0, we'll implement compatibility code that will allow you to access all of
-your `siad` files with `renterd`.
+## Documentation
 
-# DOCKER
+`renterd` and its API are documentend [here](https://api.sia.tech/renterd).
 
-Renterd comes with a `Dockerfile` which can be used for building and running
+## Docker Support
+
+`renterd` includes a `Dockerfile` which can be used for building and running
 renterd within a docker container. For the time being it is provided as-is
 without any compatibility guarantees as it will change over time and be extended
 with more configuration options.
 
-## Building Image
+### Build Image
 
 From within the root of the repo run the following command to build an image of
 `renterd` tagged `renterd`.
 
-`docker build -t renterd .`
+```bash
+docker build -t renterd .
+```
 
-## Running Container
+### Run Container
 
 Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
 
-`docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>`
+```bash
+docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>
+```
 
-# Usage
+## Usage Guidelines
 
-## Wallet
+The Web UI streamlines the initial setup and configuration for newcomers.
+However, if manual configuration is necessary, the subsequent sections outline a
+step-by-step guide to achieving a functional renterd instance.
+
+### Wallet
 
 Make sure the wallet is funded, it's a good rule of thumb to have at least twice the allowance in the wallet. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoint:
 
@@ -73,13 +74,13 @@ The autopilot will automatically redistribute the wallet funds over a certain nu
 
 - `GET /api/bus/wallet/outputs`
 
-## Consensus
+### Consensus
 
 In order for the contracts to get formed, your node has to be synced with the blockchain. If you are not bootstrapping your node this can take a while. Verify your node's consensus state using the following endpoint:
 
 - `GET /api/bus/consensus/state`
 
-## Config
+### Config
 
 The configuration can be updated through the UI or by using the following endpoints:
 
@@ -110,7 +111,7 @@ The autopilot will not perform any tasks until it is configured. An example conf
 }
 ```
 
-## Contract Set
+### Contract Set
 
 The contract set settings on the bus allow specifying a default contract set.
 This contract set will be returned by the `bus` through the upload parameters,
@@ -133,7 +134,7 @@ migrate endpoints.
 
 - `PUT /api/worker/objects/foo?contractset=foo`
 
-## Redundancy
+### Redundancy
 
 The default redundancy on mainnet is 30-10, on testnet it is 6-2. The redunancy
 can be updated using the settings API:
@@ -146,7 +147,7 @@ endpoint in the worker API:
 
 - `PUT /api/worker/objects/foo?minshards=2&totalshards=5`
 
-## Gouging
+### Gouging
 
 The default gouging settings are listed below. The gouging settings can be updated using the settings API:
 
@@ -168,7 +169,7 @@ The default gouging settings are listed below. The gouging settings can be updat
 }
 ```
 
-## Blocklist
+### Blocklist
 
 Unfortunately the Sia blockchain contains a large amount of hosts that announced themselves with faulty parameters and/or bad intentions, something which is unavoidable of course in a decentralized environment. To make sure the autopilot does not have to scan/loop through all ~80.000 hosts on every iteration of the loop, we added a blocklist.
 
@@ -182,18 +183,27 @@ The Sia Foundation does not ship `renterd` with a default blocklist, the followi
 - siacentral.ddnsfree.com
 - siacentral.mooo.com
 
-## Logging
+## Debugging
+
+### Logging
 
 `renterd` has both console and file logging, the logs are stored in `renterd.log` and contain logs from all of the components that are enabled, e.g. if only the `bus` and `worker` are enabled it will only contain the logs from those two components.
 
-## Debug
+### Ephemeral Account Drift
+
+The Autopilot manages a collection of ephemeral accounts, each corresponding to a specific contract. These accounts facilitate quicker payments to hosts for various actions, offering advantages over contract payments in terms of speed and parallel execution. Account balances are periodically synchronized with hosts, and discrepancies, if any, are detected during this process. renterd incorporates built-in safeguards to deter host manipulation, discontinuing interactions with hosts that exhibit excessive account balance drift. In rare scenarios, issues may arise due to this drift; these can be rectified by resetting the drift via a specific endpoint:
+
+- `POST   /account/:id/resetdrift`
 
 ### Contract Set Contracts
 
 The autopilot forms and manages contracts in the contract set with name configured in the autopilot's configuration object, by default this is called the `autopilot` contract set. This contract set should contain the amount of contracts configured in the contracts section of the configuration.
 
-That means that, if everything is running smoothly, the following curl call should return that number:
-`curl -u ":[YOUR_PASSWORD]"  [BASE_URL]/api/bus/contracts/set/autopilot | jq '.|length'`
+That means that, if everything is running smoothly, the following curl call should return that number
+
+```bash
+curl -u ":[YOUR_PASSWORD]"  [BASE_URL]/api/bus/contracts/set/autopilot | jq '.|length'
+```
 
 ### Autopilot Trigger
 
