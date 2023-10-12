@@ -35,6 +35,17 @@ const (
 	testMimeType = "application/octet-stream"
 )
 
+func TestInvalidSignature(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	if err := cluster.Bus.SendSiacoins(context.Background(), []types.SiacoinOutput{{
+		Value:   types.NewCurrency64(1e3),
+		Address: types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey()),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.
 func TestNewTestCluster(t *testing.T) {

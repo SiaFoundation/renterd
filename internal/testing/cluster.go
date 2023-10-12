@@ -911,8 +911,12 @@ func testNetwork() *consensus.Network {
 	n.HardforkASIC.OakTarget = types.BlockID{255, 255}
 
 	n.HardforkFoundation.Height = 50
-	n.HardforkFoundation.PrimaryAddress = types.StandardAddress(types.GeneratePrivateKey().PublicKey())
-	n.HardforkFoundation.FailsafeAddress = types.StandardAddress(types.GeneratePrivateKey().PublicKey())
+	n.HardforkFoundation.PrimaryAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
+	n.HardforkFoundation.FailsafeAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
+
+	// make it difficult to reach v2 in most tests
+	n.HardforkV2.AllowHeight = 1000
+	n.HardforkV2.RequireHeight = 1020
 
 	return n
 }
