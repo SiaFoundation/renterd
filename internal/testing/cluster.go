@@ -152,14 +152,15 @@ type TestCluster struct {
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
 
-	miner  *node.Miner
-	apID   string
-	dbName string
-	dir    string
-	logger *zap.Logger
-	tt     *TT
-	wk     types.PrivateKey
-	wg     sync.WaitGroup
+	network *consensus.Network
+	miner   *node.Miner
+	apID    string
+	dbName  string
+	dir     string
+	logger  *zap.Logger
+	tt      *TT
+	wk      types.PrivateKey
+	wg      sync.WaitGroup
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -450,13 +451,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
 
 	cluster := &TestCluster{
-		apID:   apCfg.ID,
-		dir:    dir,
-		dbName: dbName,
-		logger: logger,
-		miner:  busCfg.Miner,
-		tt:     tt,
-		wk:     wk,
+		apID:    apCfg.ID,
+		dir:     dir,
+		dbName:  dbName,
+		logger:  logger,
+		network: busCfg.Network,
+		miner:   busCfg.Miner,
+		tt:      tt,
+		wk:      wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,
@@ -712,7 +714,7 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, false)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, false)
 	c.tt.OK(err)
 
 	// Connect gateways.

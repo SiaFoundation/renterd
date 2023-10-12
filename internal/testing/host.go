@@ -1,17 +1,12 @@
 package testing
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	crhpv2 "go.sia.tech/core/rhp/v2"
 	crhpv3 "go.sia.tech/core/rhp/v3"
@@ -27,12 +22,12 @@ import (
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.sia.tech/hostd/wallet"
-	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
-	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +54,7 @@ type Host struct {
 
 	g  modules.Gateway
 	cs modules.ConsensusSet
-	tp *TXPool
+	tp bus.TransactionPool
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
@@ -97,230 +92,6 @@ var defaultHostSettings = settings.Settings{
 	MaxRegistryEntries: 1e3,
 }
 
-func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	core.EncodeTo(e)
-	e.Flush()
-	if err := siad.UnmarshalSia(&buf); err != nil {
-		panic(err)
-	}
-}
-
-func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
-	var buf bytes.Buffer
-	siad.MarshalSia(&buf)
-	d := types.NewBufDecoder(buf.Bytes())
-	core.DecodeFrom(d)
-	if d.Err() != nil {
-		panic(d.Err())
-	}
-}
-
-// TXPool wraps a siad transaction pool with core types.
-type TXPool struct {
-	tp modules.TransactionPool
-}
-
-// RecommendedFee returns the recommended fee for a transaction.
-func (tp TXPool) RecommendedFee() (fee types.Currency) {
-	_, max := tp.tp.FeeEstimation()
-	convertToCore(&max, &fee)
-	return
-}
-
-// Transactions returns all transactions in the pool.
-func (tp TXPool) Transactions() []types.Transaction {
-	stxns := tp.tp.Transactions()
-	txns := make([]types.Transaction, len(stxns))
-	for i := range txns {
-		convertToCore(&stxns[i], &txns[i])
-	}
-	return txns
-}
-
-// AcceptTransactionSet adds a transaction set to the pool.
-func (tp TXPool) AcceptTransactionSet(txns []types.Transaction) error {
-	stxns := make([]stypes.Transaction, len(txns))
-	for i := range stxns {
-		convertToSiad(&txns[i], &stxns[i])
-	}
-	err := tp.tp.AcceptTransactionSet(stxns)
-	if errors.Is(err, modules.ErrDuplicateTransactionSet) {
-		err = nil
-	}
-	return err
-}
-
-// UnconfirmedParents returns the parents of a transaction in the pool.
-func (tp TXPool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
-	pool := tp.Transactions()
-	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
-	for i, txn := range pool {
-		for j := range txn.SiacoinOutputs {
-			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
-		}
-	}
-	var parents []types.Transaction
-	seen := make(map[types.TransactionID]bool)
-	for _, sci := range txn.SiacoinInputs {
-		if parent, ok := outputToParent[sci.ParentID]; ok {
-			if txid := parent.ID(); !seen[txid] {
-				seen[txid] = true
-				parents = append(parents, *parent)
-			}
-		}
-	}
-	return parents, nil
-}
-
-// Subscribe subscribes to the transaction pool.
-func (tp TXPool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
-	tp.tp.TransactionPoolSubscribe(subscriber)
-}
-
-const maxSyncTime = time.Hour
-
-var (
-	// ErrBlockNotFound is returned when a block is not found.
-	ErrBlockNotFound = errors.New("block not found")
-	// ErrInvalidChangeID is returned to a subscriber when the change id is
-	// invalid.
-	ErrInvalidChangeID = errors.New("invalid change id")
-)
-
-// A Manager implements wallet.ChainManager
-type Manager struct {
-	cs      modules.ConsensusSet
-	network *consensus.Network
-
-	close  chan struct{}
-	mu     sync.Mutex
-	tip    consensus.State
-	synced bool
-}
-
-// ProcessConsensusChange implements the modules.ConsensusSetSubscriber interface.
-func (m *Manager) ProcessConsensusChange(cc modules.ConsensusChange) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.tip = consensus.State{
-		Network: m.network,
-		Index: types.ChainIndex{
-			ID:     types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID()),
-			Height: uint64(cc.BlockHeight),
-		},
-	}
-	m.synced = synced(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].Timestamp)
-}
-
-// Network returns the network name.
-func (m *Manager) Network() string {
-	switch m.network.Name {
-	case "zen":
-		return "Zen Testnet"
-	case "mainnet":
-		return "Mainnet"
-	default:
-		return m.network.Name
-	}
-}
-
-// Close closes the chain manager.
-func (m *Manager) Close() error {
-	select {
-	case <-m.close:
-		return nil
-	default:
-	}
-	close(m.close)
-	return m.cs.Close()
-}
-
-// Synced returns true if the chain manager is synced with the consensus set.
-func (m *Manager) Synced() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.synced
-}
-
-// BlockAtHeight returns the block at the given height.
-func (m *Manager) BlockAtHeight(height uint64) (types.Block, bool) {
-	sb, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
-	var c types.V1Block
-	convertToCore(sb, &c)
-	return types.Block(c), ok
-}
-
-// IndexAtHeight return the chain index at the given height.
-func (m *Manager) IndexAtHeight(height uint64) (types.ChainIndex, error) {
-	block, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
-	if !ok {
-		return types.ChainIndex{}, ErrBlockNotFound
-	}
-	return types.ChainIndex{
-		ID:     types.BlockID(block.ID()),
-		Height: height,
-	}, nil
-}
-
-// TipState returns the current chain state.
-func (m *Manager) TipState() consensus.State {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.tip
-}
-
-// AcceptBlock adds b to the consensus set.
-func (m *Manager) AcceptBlock(b types.Block) error {
-	var sb stypes.Block
-	convertToSiad(types.V1Block(b), &sb)
-	return m.cs.AcceptBlock(sb)
-}
-
-// Subscribe subscribes to the consensus set.
-func (m *Manager) Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error {
-	if err := m.cs.ConsensusSetSubscribe(s, ccID, cancel); err != nil {
-		if strings.Contains(err.Error(), "consensus subscription has invalid id") {
-			return ErrInvalidChangeID
-		}
-		return err
-	}
-	return nil
-}
-
-func synced(timestamp stypes.Timestamp) bool {
-	return time.Since(time.Unix(int64(timestamp), 0)) <= maxSyncTime
-}
-
-// NewManager creates a new manager.
-func NewManager(cs modules.ConsensusSet) (*Manager, error) {
-	height := cs.Height()
-	block, ok := cs.BlockAtHeight(height)
-	if !ok {
-		return nil, fmt.Errorf("failed to get block at height %d", height)
-	}
-	n, _ := build.Network()
-	m := &Manager{
-		cs:      cs,
-		network: n,
-		tip: consensus.State{
-			Network: n,
-			Index: types.ChainIndex{
-				ID:     types.BlockID(block.ID()),
-				Height: uint64(height),
-			},
-		},
-		synced: synced(block.Timestamp),
-		close:  make(chan struct{}),
-	}
-
-	if err := cs.ConsensusSetSubscribe(m, modules.ConsensusChangeRecent, m.close); err != nil {
-		return nil, fmt.Errorf("failed to subscribe to consensus set: %w", err)
-	}
-	return m, nil
-}
-
 // Close shutsdown the host
 func (h *Host) Close() error {
 	h.rhpv2.Close()
@@ -330,7 +101,7 @@ func (h *Host) Close() error {
 	h.contracts.Close()
 	h.storage.Close()
 	h.store.Close()
-	h.tp.tp.Close()
+	h.tp.Close()
 	h.cs.Close()
 	h.g.Close()
 	return nil
@@ -392,7 +163,7 @@ func (h *Host) GatewayAddr() string {
 }
 
 // NewHost initializes a new test host
-func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, error) {
+func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, debugLogging bool) (*Host, error) {
 	g, err := gateway.New("localhost:0", false, filepath.Join(dir, "gateway"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gateway: %w", err)
@@ -401,15 +172,16 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 	if err := <-errCh; err != nil {
 		return nil, fmt.Errorf("failed to create consensus set: %w", err)
 	}
-	cm, err := NewManager(cs)
+	cm, err := node.NewChainManager(cs, network)
 	if err != nil {
 		return nil, err
 	}
+
 	tpool, err := transactionpool.New(cs, g, filepath.Join(dir, "transactionpool"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transaction pool: %w", err)
 	}
-	tp := &TXPool{tpool}
+	tp := node.NewTransactionPool(tpool)
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
