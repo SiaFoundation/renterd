@@ -19,7 +19,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.16.0
 	go.sia.tech/core v0.1.12-0.20231011172826-6ca0ac7b3b6b
 	go.sia.tech/gofakes3 v0.0.0-20231003090232-776c144c0a19
-	go.sia.tech/hostd v0.1.4
+	go.sia.tech/hostd v0.2.1-0.20231012073058-6588f815b6a2
 	go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca

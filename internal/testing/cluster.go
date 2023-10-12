@@ -551,14 +551,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
-func addStorageFolderToHost(hosts []*Host) error {
+func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 	for _, host := range hosts {
 		sectors := uint64(10)
 		volumeDir := filepath.Join(host.dir, "volumes")
 		if err := os.MkdirAll(volumeDir, 0777); err != nil {
 			return err
 		}
-		if err := host.AddVolume(filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
+		if err := host.AddVolume(ctx, filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
 			return err
 		}
 	}
@@ -747,7 +747,9 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.sync(hosts)
 
 	// Announce hosts.
-	c.tt.OK(addStorageFolderToHost(hosts))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	c.tt.OK(addStorageFolderToHost(ctx, hosts))
 	c.tt.OK(announceHosts(hosts))
 
 	// Mine a few blocks. The host should show up eventually.
