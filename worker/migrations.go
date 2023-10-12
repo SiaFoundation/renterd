@@ -30,10 +30,12 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	// collect indices of shards that need to be migrated
 	usedMap := make(map[types.FileContractID]struct{})
 	var shardIndices []int
+	requiredShards := make([]bool, len(s.Shards))
 	for i, shard := range s.Shards {
 		// bad host
 		if _, exists := goodHosts[shard.Host]; !exists {
 			shardIndices = append(shardIndices, i)
+			requiredShards[i] = true
 			continue
 		}
 
@@ -41,6 +43,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 		_, exists := usedMap[h2c[shard.Host]]
 		if exists {
 			shardIndices = append(shardIndices, i)
+			requiredShards[i] = true
 			continue
 		}
 		usedMap[h2c[shard.Host]] = struct{}{}
@@ -74,17 +77,11 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	}
 
 	// download the slab
-	shards, err := d.DownloadSlab(ctx, *s, dlContracts)
+	shards, err := d.DownloadMissingShards(ctx, *s, dlContracts, requiredShards)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	s.Encrypt(shards)
-
-	// filter it down to the shards we need to migrate
-	for i, si := range shardIndices {
-		shards[i] = shards[si]
-	}
-	shards = shards[:len(shardIndices)]
 
 	// filter upload contracts to the ones we haven't used yet
 	var allowed []api.ContractMetadata
