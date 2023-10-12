@@ -309,6 +309,10 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 				if deleted < uint64(len(indices)) {
 					remaining = uint64(len(indices)) - deleted
 				}
+
+				// return sizes instead of number of roots
+				deleted *= rhpv2.SectorSize
+				remaining *= rhpv2.SectorSize
 				return
 			})
 		})
@@ -323,12 +327,6 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 	if len(indices) == 0 {
 		return 0, nil
 	}
-
-	// record contract spending
-	var totalCost types.Currency
-	defer func() {
-		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: totalCost})
-	}()
 
 	// sort in descending order so that we can use 'range'
 	sort.Slice(indices, func(i, j int) bool {
@@ -472,9 +470,11 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			rev.Signatures[0].Signature = renterSig.Signature[:]
 			rev.Signatures[1].Signature = hostSig.Signature[:]
 
-			// update total cost
-			totalCost = totalCost.Add(cost)
+			// update deleted count
 			deleted += uint64(len(batch))
+
+			// record spending
+			w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: cost})
 			return nil
 		}(); err != nil {
 			return
@@ -496,12 +496,6 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, _ error) {
 	// derive the renter key
 	renterKey := w.deriveRenterKey(rev.HostKey())
-
-	// record contract spending
-	var totalCost types.Currency
-	defer func() {
-		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: totalCost})
-	}()
 
 	// download the full set of SectorRoots
 	numsectors := rev.NumSectors()
@@ -564,12 +558,12 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 			return nil, ErrInvalidMerkleProof
 		}
 
-		// update the total cost
-		totalCost = totalCost.Add(cost)
-
 		// append roots
 		roots = append(roots, rootsResp.SectorRoots...)
 		offset += n
+
+		// record spending
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: cost})
 	}
 	return
 }

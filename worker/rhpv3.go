@@ -662,7 +662,7 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 
 	// record spending
 	h.contractSpendingRecorder.Record(rev.ParentID, rev.RevisionNumber, rev.Filesize, api.ContractSpending{Uploads: cost})
-	return root, err
+	return root, nil
 }
 
 // padBandwitdh pads the bandwidth to the next multiple of 1460 bytes.  1460
