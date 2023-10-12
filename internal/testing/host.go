@@ -35,11 +35,11 @@ const blocksPerMonth = 144 * 30
 
 type stubMetricReporter struct{}
 
-func (stubMetricReporter) StartSession(conn *rhp.Conn, proto string, version int) (_ rhp.UID, _ func()) {
-	return
+func (stubMetricReporter) StartSession(conn *rhp.Conn, proto string, version int) (rhp.UID, func()) {
+	return rhp.UID{}, func() {}
 }
-func (stubMetricReporter) StartRPC(rhp.UID, types.Specifier) (_ rhp.UID, _ func(contracts.Usage, error)) {
-	return
+func (stubMetricReporter) StartRPC(rhp.UID, types.Specifier) (rhp.UID, func(contracts.Usage, error)) {
+	return rhp.UID{}, func(contracts.Usage, error) {}
 }
 
 type stubDataMonitor struct{}
