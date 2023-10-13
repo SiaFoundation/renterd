@@ -226,6 +226,7 @@ type (
 type DownloadRange struct {
 	Offset int64
 	Length int64
+	Size   int64
 }
 
 func ParseDownloadRange(contentRange string) (DownloadRange, error) {
@@ -250,8 +251,13 @@ func ParseDownloadRange(contentRange string) (DownloadRange, error) {
 	if err != nil {
 		return DownloadRange{}, err
 	}
+	size, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return DownloadRange{}, err
+	}
 	return DownloadRange{
 		Offset: start,
 		Length: end - start + 1,
+		Size:   size,
 	}, nil
 }

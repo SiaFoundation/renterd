@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gotd/contrib/http_range"
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -151,6 +152,8 @@ type Bus interface {
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+
+	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 
 	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
 	PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
@@ -489,6 +492,12 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		return
 	}
 
+	// check renter funds is not zero
+	if rfr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	}
+
 	// apply a pessimistic timeout on contract formations
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
@@ -697,6 +706,12 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	// decode request
 	var rrr api.RHPRenewRequest
 	if jc.Decode(&rrr) != nil {
+		return
+	}
+
+	// check renter funds is not zero
+	if rrr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
 	}
 
@@ -1030,7 +1045,11 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	// serve the content
 	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, downloadFn)
-	if err != nil {
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+	} else if err != nil {
 		jc.Error(err, status)
 	}
 }

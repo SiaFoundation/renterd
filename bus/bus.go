@@ -151,6 +151,8 @@ type (
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, bufferSize int64, err error)
@@ -895,6 +897,10 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
+	if req.TotalCost.IsZero() {
+		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+		return
+	}
 
 	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
 	if jc.Check("couldn't store contract", err) == nil {
@@ -910,6 +916,10 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	}
 	if req.Contract.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
+		return
+	}
+	if req.TotalCost.IsZero() {
+		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
 		return
 	}
 
@@ -1162,6 +1172,20 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 		return
 	}
 	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
+}
+
+func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
+	var hk types.PublicKey
+	var root types.Hash256
+	if jc.DecodeParam("hk", &hk) != nil {
+		return
+	} else if jc.DecodeParam("root", &root) != nil {
+		return
+	}
+	err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
+	if jc.Check("failed to mark sector as lost", err) != nil {
+		return
+	}
 }
 
 func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
@@ -2053,6 +2077,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+
+		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,

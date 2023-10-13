@@ -18,31 +18,45 @@ type (
 	// only if the caller made sure to manipulate the request in such a way that
 	// the only seeks are to find out the object's size
 	contentReader struct {
-		r      io.Reader
-		size   int64
-		offset int64
+		r           io.Reader
+		readStarted bool
+		size        int64
+		seekOffset  int64
+		dataOffset  int64
 	}
 )
 
+var errMultiRangeNotSupported = errors.New("multipart ranges are not supported")
+
 func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
 	return &contentReader{
-		r:      r,
-		offset: offset,
-		size:   obj.Size,
+		r:          r,
+		dataOffset: offset,
+		seekOffset: offset,
+		size:       obj.Size,
 	}
 }
 
 func (cr *contentReader) Seek(offset int64, whence int) (int64, error) {
-	if offset == 0 && whence == io.SeekEnd {
-		return cr.size, nil
-	} else if (offset == 0 || offset == cr.offset) && whence == io.SeekStart {
-		return 0, nil
+	if cr.readStarted {
+		return 0, errors.New("can't call Seek after calling Read")
+	} else if offset == 0 && whence == io.SeekEnd {
+		cr.seekOffset = cr.size
+	} else if offset == 0 && whence == io.SeekStart {
+		cr.seekOffset = 0
+	} else if offset == cr.dataOffset && whence == io.SeekStart {
+		cr.seekOffset = cr.dataOffset
 	} else {
 		return 0, errors.New("unexpected seek")
 	}
+	return cr.seekOffset, nil
 }
 
 func (cr *contentReader) Read(p []byte) (int, error) {
+	if !cr.readStarted && cr.seekOffset != cr.dataOffset {
+		return 0, fmt.Errorf("contentReader: Read called but offset doesn't match data offset %v != %v", cr.seekOffset, cr.dataOffset)
+	}
+	cr.readStarted = true
 	return cr.r.Read(p)
 }
 
@@ -80,9 +94,6 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	rw.Header().Set("ETag", api.FormatETag(buildETag(req, obj.ETag)))
 	rw.Header().Set("Content-Type", contentType)
 
-	// override the range request header to avoid seeks in http.ServeContent
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
-
 	http.ServeContent(rw, req, obj.Name, obj.ModTime, rs)
 	return http.StatusOK, nil
 }
@@ -97,11 +108,13 @@ func parseRangeHeader(req *http.Request, obj api.Object) (int64, int64, error) {
 	// extract requested offset and length
 	offset := int64(0)
 	length := obj.Size
-	if len(ranges) > 0 {
+	if len(ranges) == 1 {
 		offset, length = ranges[0].Start, ranges[0].Length
 		if offset < 0 || length < 0 || offset+length > obj.Size {
-			return 0, 0, fmt.Errorf("invalid range: %v %v", offset, length)
+			return 0, 0, fmt.Errorf("%w: %v %v", http_range.ErrInvalid, offset, length)
 		}
+	} else if len(ranges) > 1 {
+		return 0, 0, errMultiRangeNotSupported
 	}
 	return offset, length, nil
 }

@@ -35,7 +35,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, bucket, path s
 		return errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	body, _, err := c.object(ctx, bucket, path, opts)
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	}
 
 	// Start download.
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	body, header, err := c.object(ctx, bucket, path, opts)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
@@ -133,7 +133,7 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) 
 
 // ObjectEntries returns the entries at the given path, which must end in /.
 func (c *Client) ObjectEntries(ctx context.Context, bucket, path string, opts api.ObjectEntriesOptions) (entries []api.ObjectMetadata, err error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	body, _, err := c.object(ctx, bucket, path, api.DownloadObjectOptions{
 		Prefix: opts.Prefix,
 		Offset: opts.Offset,
@@ -156,7 +156,7 @@ func (c *Client) State() (state api.WorkerStateResponse, err error) {
 
 // UploadMultipartUploadPart uploads part of the data for a multipart upload.
 func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
 	values := make(url.Values)
@@ -190,7 +190,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
-	path = strings.TrimPrefix(path, "/")
+	path = api.ObjectPathEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
 	values := make(url.Values)

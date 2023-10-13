@@ -274,6 +274,12 @@ func (c *contractor) isUsableContract(cfg api.AutopilotConfig, ci contractInfo, 
 }
 
 func isOutOfFunds(cfg api.AutopilotConfig, s rhpv2.HostSettings, c api.Contract) bool {
+	// TotalCost should never be zero but for legacy reasons we check and return
+	// true should it be the case
+	if c.TotalCost.IsZero() {
+		return true
+	}
+
 	blockBytes := types.NewCurrency64(rhpv2.SectorSize * cfg.Contracts.Period)
 	sectorStoragePrice := s.StoragePrice.Mul(blockBytes)
 	sectorUploadBandwidthPrice := s.UploadBandwidthPrice.Mul64(rhpv2.SectorSize)

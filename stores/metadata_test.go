@@ -3658,3 +3658,83 @@ func TestListObjects(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteHostSector(t *testing.T) {
+	db, _, _, err := newTestSQLStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create 2 hosts.
+	hks, err := db.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2 := hks[0], hks[1]
+
+	// create 2 contracts with each
+	_, _, err = db.addTestContracts([]types.PublicKey{hk1, hk1, hk2, hk2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// get all contracts
+	var dbContracts []dbContract
+	if err := db.db.Find(&dbContracts).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create a healthy slab with one sector that is uploaded to all contracts.
+	root := types.Hash256{1, 2, 3}
+	slab := dbSlab{
+		DBContractSetID: 1,
+		Key:             []byte(object.GenerateEncryptionKey().String()),
+		Health:          1.0,
+		HealthValid:     true,
+		TotalShards:     1,
+		Shards: []dbSector{
+			{
+				Contracts:  dbContracts,
+				Root:       root[:],
+				LatestHost: publicKey(hk1), // hk1 is latest host
+			},
+		},
+	}
+	if err := db.db.Create(&slab).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure 4 contractSector entries exist.
+	var n int64
+	if err := db.db.Model(&dbContractSector{}).
+		Count(&n).
+		Error; err != nil {
+		t.Fatal(err)
+	} else if n != 4 {
+		t.Fatal("expected 4 contract-sector links", n)
+	}
+
+	// Prune the sector from hk1.
+	if err := db.DeleteHostSector(context.Background(), hk1, root); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure 2 contractSector entries exist.
+	if err := db.db.Model(&dbContractSector{}).
+		Count(&n).
+		Error; err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal("expected 2 contract-sector links", n)
+	}
+
+	// Find the slab. It should have an invalid health.
+	var s dbSlab
+	if err := db.db.Preload("Shards").Take(&s).Error; err != nil {
+		t.Fatal(err)
+	} else if s.HealthValid {
+		t.Fatal("expected health to be invalid")
+	} else if s.Shards[0].LatestHost != publicKey(hk2) {
+		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
+	}
+}

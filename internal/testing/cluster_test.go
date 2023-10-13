@@ -1882,6 +1882,7 @@ func TestMultipartUploads(t *testing.T) {
 	etag2 := putPart(2, len(data1), data2)
 	etag1 := putPart(1, 0, data1)
 	etag3 := putPart(3, len(data1)+len(data2), data3)
+	size := int64(len(data1) + len(data2) + len(data3))
 
 	// List parts
 	mup, err := b.MultipartUploadParts(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, 0, 0)
@@ -1919,9 +1920,26 @@ func TestMultipartUploads(t *testing.T) {
 	// Download object
 	gor, err := w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{})
 	tt.OK(err)
-	if data, err := io.ReadAll(gor.Content); err != nil {
+	if gor.Range != nil {
+		t.Fatal("unexpected range:", gor.Range)
+	} else if gor.Size != size {
+		t.Fatal("unexpected size:", gor.Size)
+	} else if data, err := io.ReadAll(gor.Content); err != nil {
 		t.Fatal(err)
 	} else if expectedData := append(data1, append(data2, data3...)...); !bytes.Equal(data, expectedData) {
+		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
+	}
+
+	// Download a range of the object
+	gor, err = w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{Range: api.DownloadRange{Offset: 0, Length: 1}})
+	tt.OK(err)
+	if gor.Range == nil || gor.Range.Offset != 0 || gor.Range.Length != 1 {
+		t.Fatal("unexpected range:", gor.Range)
+	} else if gor.Size != size {
+		t.Fatal("unexpected size:", gor.Size)
+	} else if data, err := io.ReadAll(gor.Content); err != nil {
+		t.Fatal(err)
+	} else if expectedData := data1[:1]; !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
 	}
 }
