@@ -268,7 +268,7 @@ func TestSearchHosts(t *testing.T) {
 	// add 3 hosts
 	var hks []types.PublicKey
 	for i := 0; i < 3; i++ {
-		if err := db.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1)); err != nil {
+		if err := db.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1), time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		hks = append(hks, types.PublicKey{byte(i)})
@@ -303,7 +303,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Add a host.
 	hk := types.GeneratePrivateKey().PublicKey()
-	err = hdb.addCustomTestHost(hk, "host.com")
+	err = hdb.addCustomTestHost(hk, "host.com", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestRecordScan(t *testing.T) {
 	}
 }
 
-func TestRemoveHosts(t *testing.T) {
+func TestPruneHosts(t *testing.T) {
 	hdb, _, _, err := newTestSQLStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -442,13 +442,13 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal("downtime is not zero")
 	}
 
-	// assert no hosts are removed
-	removed, err := hdb.RemoveOfflineHosts(context.Background(), 0, time.Hour)
+	// assert no hosts got pruned
+	pruned, err := hdb.PruneHosts(context.Background(), 0, time.Hour, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 0 {
-		t.Fatal("expected no hosts to be removed")
+	if pruned != 0 {
+		t.Fatal("expected no hosts to get pruned")
 	}
 
 	now := time.Now().UTC()
@@ -474,13 +474,13 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal("recent scan failures is not 2", h.RecentScanFailures)
 	}
 
-	// assert no hosts are removed
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), 0, time.Hour)
+	// assert no hosts got pruned
+	pruned, err = hdb.PruneHosts(context.Background(), 0, time.Hour, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 0 {
-		t.Fatal("expected no hosts to be removed")
+	if pruned != 0 {
+		t.Fatal("expected no hosts to be pruned")
 	}
 
 	// record interactions
@@ -490,34 +490,67 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert no hosts are removed at 61 minutes
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), 0, time.Minute*61)
+	// assert no hosts are pruned at 61 minutes
+	pruned, err = hdb.PruneHosts(context.Background(), 0, time.Minute*61, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 0 {
-		t.Fatal("expected no hosts to be removed")
+	if pruned != 0 {
+		t.Fatal("expected no hosts to be pruned")
 	}
 
-	// assert no hosts are removed at 60 minutes if we require at least 4 failed scans
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), 4, time.Minute*60)
+	// assert no hosts are pruned at 60 minutes if we require at least 4 failed scans
+	pruned, err = hdb.PruneHosts(context.Background(), 4, time.Minute*60, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 0 {
-		t.Fatal("expected no hosts to be removed")
+	if pruned != 0 {
+		t.Fatal("expected no hosts to be pruned")
 	}
 
-	// assert hosts gets removed at 60 minutes if we require at least 3 failed scans
-	removed, err = hdb.RemoveOfflineHosts(context.Background(), 3, time.Minute*60)
+	// assert hosts gets pruned at 60 minutes if we require at least 3 failed scans
+	pruned, err = hdb.PruneHosts(context.Background(), 3, time.Minute*60, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 1 {
-		t.Fatal("expected 1 host to be removed")
+	if pruned != 1 {
+		t.Fatal("expected 1 host to be pruned")
 	}
 
-	// assert host is removed from the database
+	// assert host got pruned from the database
+	if _, err = hostByPubKey(hdb.db, hk); err != gorm.ErrRecordNotFound {
+		t.Fatal("expected record not found error")
+	}
+
+	// add a custom test host that announced right before the cutoff and assert it does not get pruned
+	hk = types.GeneratePrivateKey().PublicKey()
+	err = hdb.addCustomTestHost(hk, "", time.Now().Add(-time.Minute*59))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruned, err = hdb.PruneHosts(context.Background(), 0, 0, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pruned != 0 {
+		t.Fatal("expected 0 hosts to be pruned")
+	}
+
+	// do the same but now expect host to get pruned
+	hk = types.GeneratePrivateKey().PublicKey()
+	err = hdb.addCustomTestHost(hk, "", time.Now().Add(-time.Minute*61))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruned, err = hdb.PruneHosts(context.Background(), 0, 0, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pruned != 1 {
+		t.Fatal("expected 1 host to be pruned")
+	}
+
+	// assert host got pruned from the database
 	if _, err = hostByPubKey(hdb.db, hk); err != gorm.ErrRecordNotFound {
 		t.Fatal("expected record not found error")
 	}
@@ -835,15 +868,15 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	// add three hosts
 	hk1 := types.GeneratePrivateKey().PublicKey()
-	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000"); err != nil {
+	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	hk2 := types.GeneratePrivateKey().PublicKey()
-	if err := hdb.addCustomTestHost(hk2, "bar.baz.com:2000"); err != nil {
+	if err := hdb.addCustomTestHost(hk2, "bar.baz.com:2000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	hk3 := types.GeneratePrivateKey().PublicKey()
-	if err := hdb.addCustomTestHost(hk3, "foobar.com:3000"); err != nil {
+	if err := hdb.addCustomTestHost(hk3, "foobar.com:3000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -944,11 +977,11 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	// add two hosts, one that should be blocked by 'baz.com' and one that should not
 	hk4 := types.GeneratePrivateKey().PublicKey()
-	if err := hdb.addCustomTestHost(hk4, "foo.baz.com:3000"); err != nil {
+	if err := hdb.addCustomTestHost(hk4, "foo.baz.com:3000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	hk5 := types.GeneratePrivateKey().PublicKey()
-	if err := hdb.addCustomTestHost(hk5, "foo.baz.commmmm:3000"); err != nil {
+	if err := hdb.addCustomTestHost(hk5, "foo.baz.commmmm:3000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -962,7 +995,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// now update host 4's address so it's no longer blocked
-	if err := hdb.addCustomTestHost(hk4, "foo.baz.commmmm:3000"); err != nil {
+	if err := hdb.addCustomTestHost(hk4, "foo.baz.commmmm:3000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = hdb.Host(ctx, hk4); err != nil {
@@ -1040,7 +1073,7 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 
 	// add a host
 	hk1 := types.GeneratePrivateKey().PublicKey()
-	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000"); err != nil {
+	if err := hdb.addCustomTestHost(hk1, "foo.bar.com:1000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1057,7 +1090,7 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 	}
 
 	// reannounce to ensure it's no longer blocked
-	if err := hdb.addCustomTestHost(hk1, "bar.baz.com:1000"); err != nil {
+	if err := hdb.addCustomTestHost(hk1, "bar.baz.com:1000", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1086,15 +1119,15 @@ func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 
 // addTestHost ensures a host with given hostkey exists.
 func (s *SQLStore) addTestHost(hk types.PublicKey) error {
-	return s.addCustomTestHost(hk, "")
+	return s.addCustomTestHost(hk, "", time.Now())
 }
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
-func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
+func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string, ts time.Time) error {
 	s.unappliedHostKeys[hk] = struct{}{}
 	s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
 		hostKey:      publicKey(hk),
-		announcement: hostdb.Announcement{NetAddress: na},
+		announcement: hostdb.Announcement{NetAddress: na, Timestamp: ts},
 	}}...)
 	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)

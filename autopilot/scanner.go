@@ -3,6 +3,7 @@ package autopilot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,9 +11,11 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -26,6 +29,10 @@ const (
 	trackerTimeoutPercentile = 99
 )
 
+var (
+	alertHostPruningSkipped = frand.Entropy256() // constant until restarted
+)
+
 type (
 	scanner struct {
 		// TODO: use the actual bus and worker interfaces when they've consolidated
@@ -34,7 +41,7 @@ type (
 		bus interface {
 			Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
 			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
-			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+			PruneHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime, maxTimeSinceLastAnnouncement time.Duration) (uint64, error)
 		}
 
 		tracker *tracker
@@ -169,8 +176,6 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	s.scanning = true
 	s.mu.Unlock()
 
-	maxDowntimeHours := s.ap.State().cfg.Hosts.MaxDowntimeHours
-
 	go func() {
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.ap.isStopped() {
@@ -180,18 +185,14 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 				s.logger.Error(resp.err)
 			}
 		}
-
-		if !s.ap.isStopped() && maxDowntimeHours > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v hours", maxDowntimeHours)
-			maxDowntime := time.Hour * time.Duration(maxDowntimeHours)
-			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)
-			if removed > 0 {
-				s.logger.Infof("removed %v offline hosts", removed)
-			}
-			if err != nil {
-				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
-			}
+		if s.ap.isStopped() {
+			return
 		}
+
+		// we try and prune hosts after every scan because scanning potentially
+		// increments the number of recent scan failures, which can be part of the
+		// condition for pruning
+		s.tryPruneHosts(ctx)
 
 		s.mu.Lock()
 		s.scanning = false
@@ -199,6 +200,48 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		s.mu.Unlock()
 	}()
 	return true
+}
+
+func (s *scanner) tryPruneHosts(ctx context.Context) {
+	// convenience variables
+	hostCfg := s.ap.State().cfg.Hosts
+	maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
+	maxTimeSinceLastAnnouncement := time.Duration(hostCfg.MaxTimeSinceLastAnnouncementHours) * time.Hour
+	minRecentFailures := s.scanMinRecentFailures
+
+	if maxDowntime == 0 && maxTimeSinceLastAnnouncement == 0 {
+		// log and register an alert
+		s.logger.Warn("host pruning skipped, 'maxDowntimeHours' and 'maxTimeSinceLastAnnouncementMonths' are both zero")
+		s.ap.alerts.RegisterAlert(ctx, alerts.Alert{
+			ID:        alertHostPruningSkipped,
+			Severity:  alerts.SeverityWarning,
+			Message:   "Host pruning was skipped because 'maxDowntimeHours' and 'maxTimeSinceLastAnnouncementMonths' in the Autopilot's HostConfig are both zero. Without pruning the host database can grow very large so it is advised to configure these to sane values. This alert can be disabled by passing -1.",
+			Timestamp: time.Now(),
+		})
+	} else {
+		// dismiss the potential alert
+		s.ap.alerts.DismissAlerts(ctx, alertHostPruningSkipped)
+
+		// log exactly what hosts we are pruning
+		var conditions []string
+		if maxDowntime > 0 {
+			conditions = append(conditions, fmt.Sprintf("have been offline for more than %v and failed at least %d consecutive scans", maxDowntime, minRecentFailures))
+		}
+		if maxTimeSinceLastAnnouncement > 0 {
+			minLastAnn := time.Now().Add(-maxTimeSinceLastAnnouncement)
+			conditions = append(conditions, fmt.Sprintf("have not re-announced since %v", minLastAnn))
+		}
+
+		// prune hosts
+		if len(conditions) > 0 {
+			s.logger.Debugf("pruning hosts that %v", strings.Join(conditions, " and "))
+			if removed, err := s.bus.PruneHosts(ctx, s.scanMinRecentFailures, maxDowntime, maxTimeSinceLastAnnouncement); err != nil {
+				s.logger.Errorf("error occurred while pruning hosts, err: %v", err)
+			} else if removed > 0 {
+				s.logger.Infof("pruned %v hosts", removed)
+			}
+		}
+	}
 }
 
 func (s *scanner) tryUpdateTimeout() {

@@ -178,8 +178,13 @@ type HostsPriceTablesRequest struct {
 	PriceTableUpdates []hostdb.PriceTableUpdate `json:"priceTableUpdates"`
 }
 
-// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
-type HostsRemoveRequest struct {
+// PruneHostsRequest is the request type for the /hosts/prune endpoint.
+type PruneHostsRequest struct {
+	MaxTimeSinceLastAnnouncementHours DurationH `json:"maxTimeSinceLastAnnouncementHours"`
+
+	// MaxDowntimeHours and MinRecentScanFailures work together in that a host
+	// will only be pruned if he is down for more than 'MaxDowntimeHours' but
+	// also has a minimum of 'MinRecentScanFailures' consecutive scan failures
 	MaxDowntimeHours      DurationH `json:"maxDowntimeHours"`
 	MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 }

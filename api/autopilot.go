@@ -22,10 +22,6 @@ const (
 var (
 	// ErrAutopilotNotFound is returned when an autopilot can't be found.
 	ErrAutopilotNotFound = errors.New("couldn't find autopilot")
-
-	// ErrMaxDowntimeHoursTooHigh is returned if the autopilot config is updated
-	// with a value that exceeds the maximum of 99 years.
-	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
 )
 
 type (
@@ -57,9 +53,10 @@ type (
 
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
-		AllowRedundantIPs bool                        `json:"allowRedundantIPs"`
-		MaxDowntimeHours  uint64                      `json:"maxDowntimeHours"`
-		ScoreOverrides    map[types.PublicKey]float64 `json:"scoreOverrides"`
+		AllowRedundantIPs                 bool                        `json:"allowRedundantIPs"`
+		MaxDowntimeHours                  uint64                      `json:"maxDowntimeHours"`
+		MaxTimeSinceLastAnnouncementHours uint64                      `json:"maxTimeSinceLastAnnouncementHours"`
+		ScoreOverrides                    map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 
 	// WalletConfig contains all wallet settings used in the autopilot.
@@ -191,11 +188,4 @@ func (hgb HostGougingBreakdown) Reasons() string {
 
 func (sb HostScoreBreakdown) Score() float64 {
 	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
-}
-
-func (c AutopilotConfig) Validate() error {
-	if c.Hosts.MaxDowntimeHours > 99*365*24 {
-		return ErrMaxDowntimeHoursTooHigh
-	}
-	return nil
 }

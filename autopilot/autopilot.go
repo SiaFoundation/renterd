@@ -51,7 +51,7 @@ type Bus interface {
 	Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.Host, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
-	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+	PruneHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime, maxTimeSinceLastAnnouncement time.Duration) (uint64, error)
 
 	// contracts
 	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
@@ -505,8 +505,6 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	// decode and validate the config
 	var cfg api.AutopilotConfig
 	if jc.Decode(&cfg) != nil {
-		return
-	} else if err := cfg.Validate(); jc.Check("invalid autopilot config", err) != nil {
 		return
 	}
 

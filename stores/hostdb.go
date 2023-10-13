@@ -33,15 +33,12 @@ const (
 	// database per batch. Empirically tested to verify that this is a value
 	// that performs reasonably well.
 	hostRetrievalBatchSize = 10000
-
-	// interactionInsertionBatchSize is the number of interactions we insert at
-	// once.
-	interactionInsertionBatchSize = 100
 )
 
 var (
-	ErrNegativeOffset      = errors.New("offset can not be negative")
-	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
+	ErrNegativeOffset                       = errors.New("offset can not be negative")
+	ErrNegativeMaxDowntime                  = errors.New("max downtime can not be negative")
+	ErrNegativeMaxTimeSinceLastAnnouncement = errors.New("max time since last announcement can not be negative")
 )
 
 type (
@@ -538,17 +535,40 @@ func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host
 	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
 }
 
-func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
-	// sanity check 'maxDowntime'
+// PruneHosts removes host that haven't reannounced in due time or that have
+// been offline for longer than the max allowed time and failed a number of
+// scans.
+func (ss *SQLStore) PruneHosts(ctx context.Context, minRecentFailures uint64, maxDowntime, maxTimeSinceLastAnnouncement time.Duration) (removed uint64, err error) {
+	// sanity check maxDownTime
 	if maxDowntime < 0 {
 		return 0, ErrNegativeMaxDowntime
+	}
+	// sanity check maxTimeSinceLastAnnouncement
+	if maxTimeSinceLastAnnouncement < 0 {
+		return 0, ErrNegativeMaxTimeSinceLastAnnouncement
+	}
+	// sanity check one of the two conditions is set
+	if maxDowntime == 0 && maxTimeSinceLastAnnouncement == 0 {
+		return 0, errors.New("maxDownTimeHours and maxTimeSinceLastAnnouncement can't both be zero")
+	}
+
+	// prune pruning conditional
+	var conds []string
+	var args []interface{}
+	if maxDowntime > 0 {
+		conds = append(conds, "(recent_downtime >= ? AND recent_scan_failures >= ?)")
+		args = append(args, maxDowntime, minRecentFailures)
+	}
+	if maxTimeSinceLastAnnouncement > 0 {
+		conds = append(conds, "last_announcement < ?")
+		args = append(args, time.Now().UTC().Add(-maxTimeSinceLastAnnouncement))
 	}
 
 	// fetch all hosts outside of the transaction
 	var hosts []dbHost
 	if err := ss.db.
 		Model(&dbHost{}).
-		Where("recent_downtime >= ? AND recent_scan_failures >= ?", maxDowntime, minRecentFailures).
+		Where(strings.Join(conds, " OR "), args...).
 		Find(&hosts).
 		Error; err != nil {
 		return 0, err

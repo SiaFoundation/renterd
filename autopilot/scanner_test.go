@@ -53,7 +53,7 @@ func (b *mockBus) HostsForScanning(ctx context.Context, opts api.HostsForScannin
 	return hostAddresses, nil
 }
 
-func (b *mockBus) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
+func (b *mockBus) PruneHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime, maxTimeSinceLastAnnouncement time.Duration) (uint64, error) {
 	return 0, nil
 }
 

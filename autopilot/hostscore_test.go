@@ -26,7 +26,8 @@ var cfg = api.AutopilotConfig{
 		Set: api.DefaultAutopilotID,
 	},
 	Hosts: api.HostsConfig{
-		MaxDowntimeHours: 24 * 7 * 2,
+		MaxDowntimeHours:                  24 * 7 * 2,
+		MaxTimeSinceLastAnnouncementHours: 24 * 7 * 52,
 	},
 	Wallet: api.WalletConfig{
 		DefragThreshold: 1000,

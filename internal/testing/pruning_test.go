@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -117,17 +116,6 @@ func TestHostPruning(t *testing.T) {
 	if len(hostss) != 0 {
 		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
 	}
-
-	// assert validation on MaxDowntimeHours
-	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
-	tt.OK(err)
-
-	ap.Config.Hosts.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
-	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}); !strings.Contains(err.Error(), api.ErrMaxDowntimeHoursTooHigh.Error()) {
-		t.Fatal(err)
-	}
-	ap.Config.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
-	tt.OK(b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}))
 }
 
 func TestSectorPruning(t *testing.T) {

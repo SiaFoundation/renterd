@@ -92,7 +92,7 @@ type (
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
-		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+		PruneHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime, maxTimeSinceLastAnnouncement time.Duration) (uint64, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -587,20 +587,20 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 	jc.Encode(hosts)
 }
 
-func (b *bus) hostsRemoveHandlerPOST(jc jape.Context) {
-	var hrr api.HostsRemoveRequest
+func (b *bus) pruneHostsHandlerPOST(jc jape.Context) {
+	var hrr api.PruneHostsRequest
 	if jc.Decode(&hrr) != nil {
 		return
 	}
-	if hrr.MaxDowntimeHours == 0 {
-		jc.Error(errors.New("maxDowntime must be non-zero"), http.StatusBadRequest)
+	if hrr.MaxDowntimeHours == 0 && hrr.MaxTimeSinceLastAnnouncementHours == 0 {
+		jc.Error(errors.New("maxDowntimeHours and maxTimeSinceLastAnnouncementHours can't both be zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hdb.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
-	if jc.Check("couldn't remove offline hosts", err) != nil {
+	pruned, err := b.hdb.PruneHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours), time.Duration(hrr.MaxTimeSinceLastAnnouncementHours))
+	if jc.Check("couldn't prune hosts", err) != nil {
 		return
 	}
-	jc.Encode(removed)
+	jc.Encode(pruned)
 }
 
 func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
@@ -2030,7 +2030,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
 		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
 		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
+		"POST   /hosts/prune":       b.pruneHostsHandlerPOST,
 		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
 		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,

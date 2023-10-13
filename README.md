@@ -96,6 +96,8 @@ The autopilot will not perform any tasks until it is configured. An example conf
 	},
 	"hosts": {
 		"ignoreRedundantIPs": false,
+		"maxDowntimeHours": 336, // 2w
+		"maxTimeSinceLastAnnouncementHours": 8736, // 1y
 		"scoreOverrides": {}
 	},
 	"contracts": {

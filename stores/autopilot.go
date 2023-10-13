@@ -68,9 +68,6 @@ func (s *SQLStore) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error 
 	if ap.ID == "" {
 		return errors.New("autopilot ID cannot be empty")
 	}
-	if err := ap.Config.Validate(); err != nil {
-		return err
-	}
 
 	// upsert
 	return s.db.Clauses(clause.OnConflict{

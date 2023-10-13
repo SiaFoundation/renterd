@@ -62,8 +62,9 @@ var (
 			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
-			MaxDowntimeHours:  10,
-			AllowRedundantIPs: true, // allow for integration tests by default
+			MaxDowntimeHours:                  10,
+			MaxTimeSinceLastAnnouncementHours: 10,
+			AllowRedundantIPs:                 true, // allow for integration tests by default
 		},
 	}
 
