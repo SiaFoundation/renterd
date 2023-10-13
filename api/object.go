@@ -128,63 +128,63 @@ func (o ObjectMetadata) ContentType() string {
 
 type (
 	AddObjectOptions struct {
-		MimeType string `json:"mimeType"`
-		ETag     string `json:"eTag"`
+		MimeType string
+		ETag     string
 	}
 
 	CopyObjectOptions struct {
-		MimeType string `json:"mimeType"`
+		MimeType string
 	}
 
 	DeleteObjectOptions struct {
-		Batch bool `json:"batch"`
+		Batch bool
 	}
 
 	DownloadObjectOptions struct {
-		Prefix string        `json:"prefix"`
-		Offset int           `json:"offset"`
-		Limit  int           `json:"limit"`
-		Range  DownloadRange `json:"range,omitempty"`
+		Prefix string
+		Offset int
+		Limit  int
+		Range  DownloadRange
 	}
 
 	ObjectEntriesOptions struct {
-		Prefix string `json:"prefix"`
-		Offset int    `json:"offset"`
-		Limit  int    `json:"limit"`
+		Prefix string
+		Offset int
+		Limit  int
 	}
 
 	GetObjectOptions struct {
-		Prefix      string `json:"prefix"`
-		Offset      int    `json:"offset"`
-		Limit       int    `json:"limit"`
-		IgnoreDelim bool   `json:"ignoreDelim"`
-		Marker      string `json:"marker"`
+		Prefix      string
+		Offset      int
+		Limit       int
+		IgnoreDelim bool
+		Marker      string
 	}
 
 	ListObjectOptions struct {
-		Prefix string `json:"prefix"`
-		Marker string `json:"marker"`
-		Limit  int    `json:"limit"`
+		Prefix string
+		Marker string
+		Limit  int
 	}
 
 	SearchObjectOptions struct {
-		Key    string `json:"key"`
-		Offset int    `json:"offset"`
-		Limit  int    `json:"limit"`
+		Key    string
+		Offset int
+		Limit  int
 	}
 
 	UploadObjectOptions struct {
-		Offset                       int    `json:"offset"`
-		MinShards                    int    `json:"minshards"`
-		TotalShards                  int    `json:"totalshards"`
-		ContractSet                  string `json:"contractset"`
-		MimeType                     string `json:"mimetype"`
-		DisablePreshardingEncryption bool   `json:"disablepreshardingencryption"`
+		Offset                       int
+		MinShards                    int
+		TotalShards                  int
+		ContractSet                  string
+		MimeType                     string
+		DisablePreshardingEncryption bool
 	}
 
 	UploadMultipartUploadPartOptions struct {
-		DisablePreshardingEncryption bool `json:"disablepreshardingencryption"`
-		EncryptionOffset             int  `json:"encryptionoffset"`
+		DisablePreshardingEncryption bool
+		EncryptionOffset             int
 	}
 )
 
