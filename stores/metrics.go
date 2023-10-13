@@ -16,8 +16,8 @@ type (
 
 		Time unixTimeMS `gorm:"index;NOT NULL"`
 
-		FCID fileContractID `gorm:"index;NOT NULL"`
-		Host publicKey      `gorm:"index;NOT NULL"`
+		FCID fileContractID `gorm:"index;size:32;NOT NULL"`
+		Host publicKey      `gorm:"index;size:32;NOT NULL"`
 
 		RemainingCollateralLo uint64 `gorm:"index;NOT NULL"`
 		RemainingCollateralHi uint64 `gorm:"index;NOT NULL"`
@@ -56,7 +56,7 @@ type (
 		Time unixTimeMS `gorm:"index;NOT NULL"`
 
 		Name      string         `gorm:"index;NOT NULL"`
-		FCID      fileContractID `gorm:"index;NOT NULL"`
+		FCID      fileContractID `gorm:"index;size:32;NOT NULL"`
 		Direction string         `gorm:"index;NOT NULL"` // "added" or "removed"
 		Reason    string         `gorm:"index;NOT NULL"`
 	}
@@ -69,7 +69,7 @@ type (
 		Time unixTimeMS `gorm:"index;NOT NULL"`
 
 		Action   string    `gorm:"index;NOT NULL"`
-		Host     publicKey `gorm:"index;NOT NULL"`
+		Host     publicKey `gorm:"index;size:32;NOT NULL"`
 		Reporter string    `gorm:"index;NOT NULL"`
 		Duration float64   `gorm:"index;NOT NULL"`
 	}
