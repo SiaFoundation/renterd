@@ -9,7 +9,7 @@ import (
 
 // Bucket returns information about a specific bucket.
 func (c *Client) Bucket(ctx context.Context, bucketName string) (resp api.Bucket, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/buckets/%s", bucketName), &resp)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/bucket/%s", bucketName), &resp)
 	return
 }
 
