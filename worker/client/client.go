@@ -83,6 +83,11 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 			return nil, err
 		}
 		r = &dr
+
+		// If a range is set, the size is the size extracted from the range
+		// since Content-Length will then only be the length of the returned
+		// range.
+		size = dr.Size
 	}
 	// Parse Last-Modified
 	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
