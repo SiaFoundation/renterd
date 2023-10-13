@@ -226,8 +226,8 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, err
 	}
 
-	// score all hosts
-	scoredHosts, unusableHosts, err := c.scoreHosts(ctx, hosts, usedHosts, hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
+	// fetch candidate hosts
+	candidates, unusableHosts, err := c.candidateHosts(ctx, hosts, usedHosts, hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
 		return false, err
 	}
@@ -235,7 +235,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.calculateMinScore(ctx, scoredHosts, state.cfg.Contracts.Amount)
+		minScore, err = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
 		if err != nil {
 			return false, fmt.Errorf("failed to determine min score for contract check: %w", err)
 		}
@@ -354,7 +354,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if uint64(len(updatedSet)) < threshold {
-		formed, err = c.runContractFormations(ctx, w, scoredHosts, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)
+		formed, err = c.runContractFormations(ctx, w, candidates, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)
 		if err != nil {
 			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
@@ -781,7 +781,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, scoredHosts map[types.PublicKey]scoredHost, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates []scoredHost, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -809,18 +809,18 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, scored
 		)
 	}()
 
-	// randomly select candidates
+	// select candidates
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	candidates := randSelectHosts(scoredHosts, wanted)
+	selected := scoredHosts(candidates).randSelectByScore(wanted)
 
 	// print warning if we couldn't find enough hosts were found
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
-	if len(candidates) < wanted {
+	if len(selected) < wanted {
 		msg := "no candidate hosts found"
-		if len(candidates) > 0 {
-			msg = fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(candidates), wanted)
+		if len(selected) > 0 {
+			msg = fmt.Sprintf("only found %d candidate host(s) out of the %d we wanted", len(selected), wanted)
 		}
-		if len(scoredHosts) >= wanted {
+		if len(candidates) >= wanted {
 			c.logger.Warnw(msg, unusableHosts.keysAndValues()...)
 		} else {
 			c.logger.Debugw(msg, unusableHosts.keysAndValues()...)
@@ -840,7 +840,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, scored
 	// prepare an IP filter that contains all used hosts
 	ipFilter := c.newIPFilter()
 	if shouldFilter {
-		for _, h := range scoredHosts {
+		for _, h := range candidates {
 			if _, used := usedHosts[h.host.PublicKey]; used {
 				_ = ipFilter.IsRedundantIP(h.host.NetAddress, h.host.PublicKey)
 			}
@@ -850,8 +850,8 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, scored
 	// calculate min/max contract funds
 	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(state.cfg)
 
-	for h := 0; missing > 0 && h < len(candidates); h++ {
-		host := candidates[h]
+	for h := 0; missing > 0 && h < len(selected); h++ {
+		host := selected[h].host
 
 		// break if the autopilot is stopped
 		if c.ap.isStopped() {
@@ -1201,10 +1201,10 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) calculateMinScore(ctx context.Context, scoredHosts map[types.PublicKey]scoredHost, numContracts uint64) (float64, error) {
+func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) (float64, error) {
 	// return early if there's no hosts
-	if len(scoredHosts) == 0 {
-		c.logger.Warn("min host score is set to the smallest non-zero float because there are no hosts that passed scoring")
+	if len(candidates) == 0 {
+		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
 		return math.SmallestNonzeroFloat64, nil
 	}
 
@@ -1212,9 +1212,9 @@ func (c *contractor) calculateMinScore(ctx context.Context, scoredHosts map[type
 	var lowestScores []float64
 	for r := 0; r < 5; r++ {
 		lowestScore := math.MaxFloat64
-		for _, host := range randSelectHosts(scoredHosts, int(numContracts)+50) { // buffer
-			if scoredHosts[host.PublicKey].score < lowestScore {
-				lowestScore = scoredHosts[host.PublicKey].score
+		for _, host := range scoredHosts(candidates).randSelectByScore(int(numContracts) + 50) { // buffer
+			if host.score < lowestScore {
+				lowestScore = host.score
 			}
 		}
 		lowestScores = append(lowestScores, lowestScore)
@@ -1233,7 +1233,7 @@ func (c *contractor) calculateMinScore(ctx context.Context, scoredHosts map[type
 	return minScore, nil
 }
 
-func (c *contractor) scoreHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) (map[types.PublicKey]scoredHost, unusableHostResult, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1271,7 +1271,7 @@ func (c *contractor) scoreHosts(ctx context.Context, hosts []hostdb.Host, usedHo
 	// score all unused hosts
 	var unusableHostResult unusableHostResult
 	var unusable, zeros int
-	scoredHosts := make(map[types.PublicKey]scoredHost)
+	var candidates []scoredHost
 	for _, h := range unused {
 		// NOTE: use the price table stored on the host for gouging checks when
 		// looking for candidate hosts, fetching the price table on the fly here
@@ -1284,7 +1284,7 @@ func (c *contractor) scoreHosts(ctx context.Context, hosts []hostdb.Host, usedHo
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
 		usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
 		if usable {
-			scoredHosts[h.PublicKey] = scoredHost{h, result.scoreBreakdown.Score()}
+			candidates = append(candidates, scoredHost{h, result.scoreBreakdown.Score()})
 			continue
 		}
 
@@ -1296,12 +1296,12 @@ func (c *contractor) scoreHosts(ctx context.Context, hosts []hostdb.Host, usedHo
 		unusable++
 	}
 
-	c.logger.Debugw(fmt.Sprintf("scored %d unused hosts out of %v, took %v", len(scoredHosts), len(unused), time.Since(start)),
+	c.logger.Debugw(fmt.Sprintf("scored %d unused hosts out of %v, took %v", len(candidates), len(unused), time.Since(start)),
 		"zeroscore", zeros,
 		"unusable", unusable,
 		"used", len(usedHosts))
 
-	return scoredHosts, unusableHostResult, nil
+	return candidates, unusableHostResult, nil
 }
 
 func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
@@ -1604,32 +1604,6 @@ func addLeeway(n uint64, pct float64) uint64 {
 
 func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-}
-
-func randSelectHosts(candidates map[types.PublicKey]scoredHost, wanted int) (selected []hostdb.Host) {
-	// turn map into slices
-	scores := make([]float64, 0, len(candidates))
-	scored := make([]hostdb.Host, 0, len(candidates))
-	for _, h := range candidates {
-		scored = append(scored, h.host)
-		scores = append(scores, h.score)
-	}
-
-	// select hosts
-	for len(selected) < wanted && len(scored) > 0 {
-		i := randSelectByWeight(scores)
-		selected = append(selected, scored[i])
-
-		// remove selected host
-		scored[i], scored = scored[len(scored)-1], scored[:len(scored)-1]
-		scores[i], scores = scores[len(scores)-1], scores[:len(scores)-1]
-	}
-
-	// sort by score
-	sort.Slice(selected, func(i, j int) bool {
-		return candidates[selected[i].PublicKey].score > candidates[selected[j].PublicKey].score
-	})
-	return
 }
 
 // renterFundsToExpectedStorage returns how much storage a renter is expected to

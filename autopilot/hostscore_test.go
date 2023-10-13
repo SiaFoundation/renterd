@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"lukechampine.com/frand"
 )
 
 var cfg = api.AutopilotConfig{
@@ -104,27 +103,6 @@ func TestHostScore(t *testing.T) {
 	h2.PriceTable.WriteBaseCost = types.Siacoins(1)
 	if hostScore(cfg, h1, 0, redundancy).Score() <= hostScore(cfg, h2, 0, redundancy).Score() {
 		t.Fatal("unexpected")
-	}
-}
-
-func TestRandSelectByWeight(t *testing.T) {
-	// assert min float is never selected
-	weights := []float64{.1, .2, math.SmallestNonzeroFloat64}
-	for i := 0; i < 100; i++ {
-		frand.Shuffle(len(weights), func(i, j int) { weights[i], weights[j] = weights[j], weights[i] })
-		if weights[randSelectByWeight(weights)] == math.SmallestNonzeroFloat64 {
-			t.Fatal("unexpected")
-		}
-	}
-
-	// assert select is random on equal inputs
-	counts := make([]int, 2)
-	weights = []float64{.1, .1}
-	for i := 0; i < 100; i++ {
-		counts[randSelectByWeight(weights)]++
-	}
-	if diff := absDiffInt(counts[0], counts[1]); diff > 40 {
-		t.Fatal("unexpected", counts[0], counts[1], diff)
 	}
 }
 
