@@ -391,6 +391,12 @@ func main() {
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.Database,
 		)
+		busCfg.DBMetricsDialector = stores.NewMySQLConnection(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.MetricsDatabase,
+		)
 	}
 
 	var level logger.LogLevel

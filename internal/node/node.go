@@ -32,10 +32,11 @@ import (
 
 type BusConfig struct {
 	config.Bus
-	Network        *consensus.Network
-	Miner          *Miner
-	DBLoggerConfig stores.LoggerConfig
-	DBDialector    gorm.Dialector
+	Network            *consensus.Network
+	Miner              *Miner
+	DBLoggerConfig     stores.LoggerConfig
+	DBDialector        gorm.Dialector
+	DBMetricsDialector gorm.Dialector
 }
 
 type AutopilotConfig struct {
@@ -92,12 +93,20 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
+	dbMetricsConn := cfg.DBMetricsDialector
+	if dbMetricsConn == nil {
+		dbDir := filepath.Join(dir, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return nil, nil, err
+		}
+		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
+	}
 
 	alertsMgr := alerts.NewManager()
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, dbMetricsConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	}

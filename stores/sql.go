@@ -38,9 +38,10 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts alerts.Alerter
-		db     *gorm.DB
-		logger *zap.SugaredLogger
+		alerts    alerts.Alerter
+		db        *gorm.DB
+		dbMetrics *gorm.DB
+		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
 
@@ -111,6 +112,13 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL", path))
 }
 
+// NewMetricsSQLiteConnection opens a sqlite db at the given path similarly to
+// NewSQLiteConnection but with weaker consistency guarantees since it's
+// optimised for recording metrics.
+func NewMetricsSQLiteConnection(path string) gorm.Dialector {
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
+}
+
 // NewMySQLConnection creates a connection to a MySQL database.
 func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", user, password, addr, dbName))
@@ -127,7 +135,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
@@ -135,7 +143,13 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 		Logger: gormLogger, // custom logger
 	})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
+	}
+	dbMetrics, err := gorm.Open(conn, &gorm.Config{
+		Logger: gormLogger, // custom logger
+	})
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open metrics db")
 	}
 	l := logger.Named("sql")
 
@@ -143,6 +157,9 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	if migrate {
 		if err := performMigrations(db, l); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
+		}
+		if err := performMetricsMigrations(dbMetrics, l); err != nil {
+			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
 
@@ -191,6 +208,7 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	ss := &SQLStore{
 		alerts:             alerts,
 		db:                 db,
+		dbMetrics:          dbMetrics,
 		logger:             l,
 		knownContracts:     isOurContract,
 		lastSave:           time.Now(),

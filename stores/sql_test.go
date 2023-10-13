@@ -62,9 +62,10 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		dbMetricsName = hex.EncodeToString(frand.Bytes(32)) // random name for metrics db
 	}
 	conn := NewEphemeralSQLiteConnection(dbName)
+	connMetrics := NewEphemeralSQLiteConnection(dbMetricsName)
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, !cfg.skipMigrate, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(conn, connMetrics, alerts, dir, !cfg.skipMigrate, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
