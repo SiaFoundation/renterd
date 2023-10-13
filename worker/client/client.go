@@ -242,7 +242,7 @@ func New(addr, password string) *Client {
 func (c *Client) object(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (_ io.ReadCloser, _ http.Header, err error) {
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
-	opts.Apply(values)
+	opts.ApplyValues(values)
 	path += "?" + values.Encode()
 
 	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
@@ -251,7 +251,7 @@ func (c *Client) object(ctx context.Context, bucket, path string, opts api.Downl
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	opts.SetHeaders(req.Header)
+	opts.ApplyHeaders(req.Header)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

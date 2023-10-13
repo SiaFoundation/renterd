@@ -218,7 +218,7 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	}
 }
 
-func (opts DownloadObjectOptions) Apply(values url.Values) {
+func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
 	if opts.Prefix != "" {
 		values.Set("prefix", opts.Prefix)
 	}
@@ -230,7 +230,7 @@ func (opts DownloadObjectOptions) Apply(values url.Values) {
 	}
 }
 
-func (opts DownloadObjectOptions) SetHeaders(h http.Header) {
+func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 	if opts.Range != (DownloadRange{}) {
 		if opts.Range.Length == -1 {
 			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
