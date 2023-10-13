@@ -878,6 +878,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	}
 
 	var diff []fileContractID
+	var nContractsAfter int
 	err := s.retryTransaction(func(tx *gorm.DB) error {
 		// fetch current contracts
 		var dbCurrentContracts []fileContractID
@@ -902,6 +903,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		if err != nil {
 			return err
 		}
+		nContractsAfter = len(dbNewContracts)
 
 		// create contract set
 		var contractset dbContractSet
@@ -947,6 +949,12 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	err = s.invalidateSlabHealthByFCID(ctx, diff)
 	if err != nil {
 		return fmt.Errorf("failed to invalidate slab health: %w", err)
+	}
+
+	// Record the update.
+	err = s.RecordContractSetMetric(ctx, time.Now(), name, nContractsAfter)
+	if err != nil {
+		return fmt.Errorf("failed to record contract set metric: %w", err)
 	}
 	return nil
 }
@@ -2239,11 +2247,11 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		limit++
 	}
 
-	prefixExpr := gorm.Expr("TRUE")
+	prefixExpr := exprTRUE
 	if prefix != "" {
 		prefixExpr = gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
 	}
-	markerExpr := gorm.Expr("TRUE")
+	markerExpr := exprTRUE
 	if marker != "" {
 		markerExpr = gorm.Expr("o.object_id > ?", marker)
 	}
