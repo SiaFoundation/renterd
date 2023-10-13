@@ -245,7 +245,7 @@ func (dt datetime) Value() (driver.Value, error) {
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (unixTimeMS) GormDataType() string {
-	return "int"
+	return "int64"
 }
 
 // Scan scan value into balance, implements sql.Scanner interface.
