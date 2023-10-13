@@ -210,6 +210,13 @@ func (err *refillError) Is(target error) bool {
 	return errors.Is(err.err, target)
 }
 
+func (err *refillError) Error() string {
+	if err.err == nil {
+		return ""
+	}
+	return err.err.Error()
+}
+
 func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter, w Worker, workerID string, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
 	wrapErr := func(err error, keysAndValues ...interface{}) *refillError {
 		if err == nil {
