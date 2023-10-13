@@ -287,6 +287,7 @@ func (b *bus) bucketsHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) bucketsHandlerPolicyPUT(jc jape.Context) {
+	fmt.Printf("DEBUG PJ: bucketsHandlerPolicyPUT bucket %v\n", jc.PathParam("name"))
 	var req api.BucketUpdatePolicyRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -299,6 +300,7 @@ func (b *bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 }
 
 func (b *bus) bucketHandlerDELETE(jc jape.Context) {
+	fmt.Printf("DEBUG PJ: bucketHandlerDELETE bucket %v\n", jc.PathParam("name"))
 	var name string
 	if jc.DecodeParam("name", &name) != nil {
 		return
@@ -311,6 +313,7 @@ func (b *bus) bucketHandlerDELETE(jc jape.Context) {
 }
 
 func (b *bus) bucketHandlerGET(jc jape.Context) {
+	fmt.Printf("DEBUG PJ: bucketHandlerGET bucket %v\n", jc.PathParam("name"))
 	var name string
 	if jc.DecodeParam("name", &name) != nil {
 		return
