@@ -6,25 +6,25 @@ type (
 	dbContractMetric struct {
 		Model
 
-		FCID fileContractID
-		Host publicKey
+		FCID fileContractID `gorm:"index;NOT NULL"`
+		Host publicKey      `gorm:"index;NOT NULL"`
 
-		RemainingCollateralLo uint64
-		RemainingCollateralHi uint64
-		RemainingFundsLo      uint64
-		RemainingFundsHi      uint64
-		RevisionNumber        uint64
+		RemainingCollateralLo uint64 `gorm:"index;NOT NULL"`
+		RemainingCollateralHi uint64 `gorm:"index;NOT NULL"`
+		RemainingFundsLo      uint64 `gorm:"index;NOT NULL"`
+		RemainingFundsHi      uint64 `gorm:"index;NOT NULL"`
+		RevisionNumber        uint64 `gorm:"index;NOT NULL"`
 
-		UploadSpendingLo      uint64
-		UploadSpendingHi      uint64
-		DownloadSpendingLo    uint64
-		DownloadSpendingHi    uint64
-		FundAccountSpendingLo uint64
-		FundAccountSpendingHi uint64
-		DeleteSpendingLo      uint64
-		DeleteSpendingHi      uint64
-		ListSpendingLo        uint64
-		ListSpendingHi        uint64
+		UploadSpendingLo      uint64 `gorm:"index;NOT NULL"`
+		UploadSpendingHi      uint64 `gorm:"index;NOT NULL"`
+		DownloadSpendingLo    uint64 `gorm:"index;NOT NULL"`
+		DownloadSpendingHi    uint64 `gorm:"index;NOT NULL"`
+		FundAccountSpendingLo uint64 `gorm:"index;NOT NULL"`
+		FundAccountSpendingHi uint64 `gorm:"index;NOT NULL"`
+		DeleteSpendingLo      uint64 `gorm:"index;NOT NULL"`
+		DeleteSpendingHi      uint64 `gorm:"index;NOT NULL"`
+		ListSpendingLo        uint64 `gorm:"index;NOT NULL"`
+		ListSpendingHi        uint64 `gorm:"index;NOT NULL"`
 	}
 
 	// dbContractSetMetric tracks information about a specific contract set.
@@ -33,8 +33,8 @@ type (
 	dbContractSetMetric struct {
 		Model
 
-		Name      string
-		Contracts int
+		Name      string `gorm:"index;NOT NULL"`
+		Contracts int    `gorm:"index;NOT NULL"`
 	}
 
 	// dbContractSetChurnMetric contains information about contracts being added
@@ -43,10 +43,10 @@ type (
 	dbContractSetChurnMetric struct {
 		Model
 
-		Name      string
-		FCID      fileContractID
-		Direction string // "added" or "removed"
-		Reason    string
+		Name      string         `gorm:"index;NOT NULL"`
+		FCID      fileContractID `gorm:"index;NOT NULL"`
+		Direction string         `gorm:"index;NOT NULL"` // "added" or "removed"
+		Reason    string         `gorm:"index;NOT NULL"`
 	}
 
 	// dbPerformanceMetric is a generic metric used to track the performance of
@@ -55,10 +55,10 @@ type (
 	dbPerformanceMetric struct {
 		Model
 
-		Action   string
-		Host     publicKey
-		Reporter string
-		Duration float64
+		Action   string    `gorm:"index;NOT NULL"`
+		Host     publicKey `gorm:"index;NOT NULL"`
+		Reporter string    `gorm:"index;NOT NULL"`
+		Duration float64   `gorm:"index;NOT NULL"`
 	}
 )
 
