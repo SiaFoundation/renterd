@@ -135,10 +135,13 @@ func (r *ipResolver) lookup(hostIP string) ([]string, error) {
 
 	// lookup IP addresses
 	addrs, err := r.resolver.LookupIPAddr(ctx, host)
-	if err != nil && (isErr(err, errIOTimeout) || isErr(err, errServerMisbehaving)) {
-		if entry, found := r.cache[hostIP]; found && time.Since(entry.created) < ipCacheEntryValidity {
-			r.logger.Debugf("using cached IP addresses for %v, err: %v", hostIP, err)
-			return entry.subnets, nil
+	if err != nil {
+		// check the cache if it's an i/o timeout or server misbehaving error
+		if isErr(err, errIOTimeout) || isErr(err, errServerMisbehaving) {
+			if entry, found := r.cache[hostIP]; found && time.Since(entry.created) < ipCacheEntryValidity {
+				r.logger.Debugf("using cached IP addresses for %v, err: %v", hostIP, err)
+				return entry.subnets, nil
+			}
 		}
 		return nil, err
 	}
@@ -152,9 +155,11 @@ func (r *ipResolver) lookup(hostIP string) ([]string, error) {
 	subnets := parseSubnets(addrs)
 
 	// add to cache
-	r.cache[hostIP] = ipCacheEntry{
-		created: time.Now(),
-		subnets: subnets,
+	if len(subnets) > 0 {
+		r.cache[hostIP] = ipCacheEntry{
+			created: time.Now(),
+			subnets: subnets,
+		}
 	}
 
 	return subnets, nil
