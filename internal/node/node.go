@@ -99,7 +99,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
 			return nil, nil, err
 		}
-		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
+		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
 	}
 
 	alertsMgr := alerts.NewManager()
