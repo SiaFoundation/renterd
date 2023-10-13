@@ -206,6 +206,13 @@ type refillError struct {
 	keysAndValues []interface{}
 }
 
+func (err *refillError) Error() string {
+	if err.err == nil {
+		return ""
+	}
+	return err.err.Error()
+}
+
 func (err *refillError) Is(target error) bool {
 	return errors.Is(err.err, target)
 }
