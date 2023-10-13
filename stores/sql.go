@@ -289,8 +289,16 @@ func (s *SQLStore) Close() error {
 	if err != nil {
 		return err
 	}
+	dbMetrics, err := s.dbMetrics.DB()
+	if err != nil {
+		return err
+	}
 
 	err = db.Close()
+	if err != nil {
+		return err
+	}
+	err = dbMetrics.Close()
 	if err != nil {
 		return err
 	}
