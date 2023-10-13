@@ -18,20 +18,17 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	dir := t.TempDir()
-	db, _, _, err := newTestSQLStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
 
 	// create 30 hosts
-	hks, err := db.addTestHosts(30)
+	hks, err := ss.addTestHosts(30)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// create one contract for each host.
-	fcids, _, err := db.addTestContracts(hks)
+	fcids, _, err := ss.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,18 +47,18 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	totalSize := int64(nParts * partSize)
 
 	// Upload parts until we have enough data for 2 buffers.
-	resp, err := db.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType)
+	resp, err := ss.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var parts []api.MultipartCompletedPart
 	for i := 1; i <= nParts; i++ {
-		partialSlabs, _, err := db.AddPartialSlab(ctx, frand.Bytes(partSize), minShards, totalShards, testContractSet)
+		partialSlabs, _, err := ss.AddPartialSlab(ctx, frand.Bytes(partSize), minShards, totalShards, testContractSet)
 		if err != nil {
 			t.Fatal(err)
 		}
 		etag := hex.EncodeToString(frand.Bytes(16))
-		err = db.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs, usedContracts)
+		err = ss.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs, usedContracts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,20 +71,20 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	// Complete the upload. Check that the number of slices stays the same.
 	var nSlicesBefore int64
 	var nSlicesAfter int64
-	if err := db.db.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
+	if err := ss.db.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
 		t.Fatal(err)
 	} else if nSlicesBefore == 0 {
 		t.Fatal("expected some slices")
-	} else if _, err = db.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts); err != nil {
+	} else if _, err = ss.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts); err != nil {
 		t.Fatal(err)
-	} else if err := db.db.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
+	} else if err := ss.db.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
 		t.Fatal(err)
 	} else if nSlicesBefore != nSlicesAfter {
 		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
 	}
 
 	// Fetch the object.
-	obj, err := db.Object(ctx, api.DefaultBucketName, objName)
+	obj, err := ss.Object(ctx, api.DefaultBucketName, objName)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Size != int64(totalSize) {
@@ -118,7 +115,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		}
 		return ups
 	}
-	packedSlabs, err := db.PackedSlabsForUpload(ctx, time.Hour, minShards, totalShards, testContractSet, 2)
+	packedSlabs, err := ss.PackedSlabsForUpload(ctx, time.Hour, minShards, totalShards, testContractSet, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +123,12 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	for _, ps := range packedSlabs {
 		uploadedPackedSlabs = append(uploadedPackedSlabs, upload(ps))
 	}
-	if err := db.MarkPackedSlabsUploaded(ctx, uploadedPackedSlabs, usedContracts); err != nil {
+	if err := ss.MarkPackedSlabsUploaded(ctx, uploadedPackedSlabs, usedContracts); err != nil {
 		t.Fatal(err)
 	}
 
 	// Fetch the object again.
-	obj, err = db.Object(ctx, api.DefaultBucketName, objName)
+	obj, err = ss.Object(ctx, api.DefaultBucketName, objName)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Size != int64(totalSize) {
