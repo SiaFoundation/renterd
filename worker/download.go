@@ -387,7 +387,7 @@ outer:
 	return nil
 }
 
-func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, error) {
+func (mgr *downloadManager) DownloadMissingShards(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata, missing []bool) ([][]byte, error) {
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
 
@@ -441,12 +441,17 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 
 	// decrypt and recover
 	slice.Decrypt(resp.shards)
-	err := slice.Reconstruct(resp.shards)
+	err := slice.ReconstructSome(resp.shards, missing)
 	if err != nil {
 		return nil, err
 	}
-
-	return resp.shards, err
+	missingShards := make([][]byte, 0, len(resp.shards))
+	for i, shard := range resp.shards {
+		if missing[i] {
+			missingShards = append(missingShards, shard)
+		}
+	}
+	return missingShards, nil
 }
 
 func (mgr *downloadManager) Stats() downloadManagerStats {
