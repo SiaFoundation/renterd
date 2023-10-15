@@ -125,7 +125,9 @@ func mustLoadAPIPassword() {
 		return
 	}
 
-	fmt.Print("Enter API password: ")
+	fmt.Println("Please choose a password to unlock the UI and API.")
+	fmt.Println("(The password must be at least 4 characters.)")
+	fmt.Print("Enter password: ")
 	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	if err != nil {
@@ -138,7 +140,8 @@ func getSeed() types.PrivateKey {
 	if seed == nil {
 		phrase := cfg.Seed
 		if phrase == "" {
-			fmt.Print("Enter seed: ")
+			fmt.Println("Type in your 12-word seed phrase and press enter. If you do not have a seed phrase yet, type 'seed' to generate one")
+			fmt.Print("Enter seed phrase:")
 			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			check("Could not read seed phrase:", err)
 			fmt.Println()
@@ -151,6 +154,23 @@ func getSeed() types.PrivateKey {
 		seed = key
 	}
 	return seed
+}
+
+func comparePhrase(newPhrase string) {
+	fmt.Println("Please type your seed phrase to confirm and press enter to continue")
+	fmt.Println("Enter seed phrase:")
+	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+	check("Could not read seed phrase:", err)
+	fmt.Println()
+	phrase := string(pw)
+
+	if newPhrase != phrase {
+		fmt.Println("Seed phrases do not match!")
+		fmt.Println("You entered:", phrase)
+		fmt.Println("Actual phrase:", newPhrase)
+		comparePhrase(newPhrase)
+	}
+	fmt.Println("Seed phrases match")
 }
 
 func mustParseWorkers(workers, password string) {
@@ -321,8 +341,14 @@ func main() {
 		log.Println("Build Date:", builddate)
 		return
 	} else if flag.Arg(0) == "seed" {
-		log.Println("Seed phrase:")
-		fmt.Println(wallet.NewSeedPhrase())
+		fmt.Println("A new seed phrase has been generated below. Write it down and keep it safe.")
+		fmt.Println("Your seed phrase is the only way to recover your Siacoin. If you lose your seed phrase, you will also lose your Siacoin.")
+		fmt.Println("You will need to re-enter this seed phrase every time you start renterd.")
+
+		newPhrase := wallet.NewSeedPhrase()
+		fmt.Println("Seed phrase:", newPhrase)
+		comparePhrase(newPhrase)
+
 		return
 	}
 
