@@ -347,6 +347,7 @@ func main() {
 
 		newPhrase := wallet.NewSeedPhrase()
 		fmt.Println("Seed phrase:", newPhrase)
+
 		comparePhrase(newPhrase)
 
 		return
