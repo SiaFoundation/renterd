@@ -341,6 +341,8 @@ func main() {
 		log.Println("Build Date:", builddate)
 		return
 	} else if flag.Arg(0) == "seed" {
+		var seed [32]byte
+
 		fmt.Println("A new seed phrase has been generated below. Write it down and keep it safe.")
 		fmt.Println("Your seed phrase is the only way to recover your Siacoin. If you lose your seed phrase, you will also lose your Siacoin.")
 		fmt.Println("You will need to re-enter this seed phrase every time you start renterd.")
@@ -348,6 +350,13 @@ func main() {
 		newPhrase := wallet.NewSeedPhrase()
 		fmt.Println("Seed phrase:", newPhrase)
 
+		if err := wallet.SeedFromPhrase(&seed, newPhrase); err != nil {
+			panic(err)
+		}
+
+		privKey := wallet.KeyFromSeed(&seed, 0)
+		address := privKey.PublicKey().StandardAddress()
+		fmt.Println("Wallet", address)
 		comparePhrase(newPhrase)
 
 		return

@@ -48,6 +48,28 @@ func KeyFromPhrase(phrase string) (types.PrivateKey, error) {
 	return key, nil
 }
 
+func SeedFromPhrase(seed *[32]byte, phrase string) error {
+	entropy, err := decodeBIP39Phrase(phrase)
+	if err != nil {
+		return err
+	}
+	h := blake2b.Sum256(entropy[:])
+	memclr(entropy[:])
+	copy(seed[:], h[:])
+	memclr(h[:])
+	return nil
+}
+
+func KeyFromSeed(seed *[32]byte, index uint64) types.PrivateKey {
+	buf := make([]byte, 32+8)
+	copy(buf[:32], seed[:])
+	binary.LittleEndian.PutUint64(buf[32:], index)
+	h := blake2b.Sum256(buf)
+	key := types.NewPrivateKeyFromSeed(h[:])
+	memclr(h[:])
+	return key
+}
+
 func bip39checksum(entropy *[16]byte) uint64 {
 	hash := sha256.Sum256(entropy[:])
 	return uint64((hash[0] & 0xF0) >> 4)
