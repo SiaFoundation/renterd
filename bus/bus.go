@@ -71,12 +71,11 @@ type (
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
+		Close() error
 		RecommendedFee() types.Currency
 		Subscribe(subscriber modules.TransactionPoolSubscriber)
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
-
-		Close() error
 	}
 
 	// A Wallet can spend and receive siacoins.

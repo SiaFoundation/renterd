@@ -79,8 +79,8 @@ func (m *chainManager) Synced() bool {
 // BlockAtHeight returns the block at the given height.
 func (m *chainManager) BlockAtHeight(height uint64) (types.Block, bool) {
 	sb, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
-	var c types.V1Block
-	convertToCore(sb, &c)
+	var c types.Block
+	convertToCore(sb, (*types.V1Block)(&c))
 	return types.Block(c), ok
 }
 
