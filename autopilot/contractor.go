@@ -781,7 +781,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates []scoredHost, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) ([]types.FileContractID, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
 	defer span.End()
 
@@ -811,7 +811,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, candid
 
 	// select candidates
 	wanted := int(addLeeway(missing, leewayPctCandidateHosts))
-	selected := scoredHosts(candidates).randSelectByScore(wanted)
+	selected := candidates.randSelectByScore(wanted)
 
 	// print warning if we couldn't find enough hosts were found
 	c.logger.Debugf("looking for %d candidate hosts", wanted)
