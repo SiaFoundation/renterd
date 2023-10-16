@@ -154,16 +154,16 @@ func TestPerformanceMetrics(t *testing.T) {
 	// Create metrics to query.
 	actions := []string{"download", "upload"}
 	hosts := []types.PublicKey{types.GeneratePrivateKey().PublicKey(), types.GeneratePrivateKey().PublicKey()}
-	reporters := []string{"worker1", "worker2"}
+	origins := []string{"worker1", "worker2"}
 	durations := []time.Duration{time.Second, time.Hour}
 	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
 	var i byte
 	for _, action := range actions {
 		for _, host := range hosts {
-			for _, reporter := range reporters {
+			for _, origin := range origins {
 				for _, duration := range durations {
 					for _, recordedTime := range times {
-						if err := ss.RecordPerformanceMetric(context.Background(), action, recordedTime, duration, host, reporter); err != nil {
+						if err := ss.RecordPerformanceMetric(context.Background(), action, recordedTime, duration, host, origin); err != nil {
 							t.Fatal(err)
 						}
 						i++
@@ -209,9 +209,9 @@ func TestPerformanceMetrics(t *testing.T) {
 	})
 
 	// Filter by reporters.
-	assertMetrics(api.PerformanceMetricsQueryOpts{Reporter: reporters[0]}, 24, func(m api.PerformanceMetric) {
-		if m.Reporter != reporters[0] {
-			t.Fatalf("expected reporter to be %v, got %v", reporters[0], m.Reporter)
+	assertMetrics(api.PerformanceMetricsQueryOpts{Origin: origins[0]}, 24, func(m api.PerformanceMetric) {
+		if m.Origin != origins[0] {
+			t.Fatalf("expected origin to be %v, got %v", origins[0], m.Origin)
 		}
 	})
 

@@ -72,7 +72,7 @@ type (
 
 		Action   string        `gorm:"index;NOT NULL"`
 		Host     publicKey     `gorm:"index;size:32;NOT NULL"`
-		Reporter string        `gorm:"index;NOT NULL"`
+		Origin   string        `gorm:"index;NOT NULL"`
 		Duration time.Duration `gorm:"index;NOT NULL"`
 	}
 )
@@ -194,8 +194,8 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 	if opts.Host != (types.PublicKey{}) {
 		tx = tx.Where("host", publicKey(opts.Host))
 	}
-	if opts.Reporter != "" {
-		tx = tx.Where("reporter", opts.Reporter)
+	if opts.Origin != "" {
+		tx = tx.Where("reporter", opts.Origin)
 	}
 	if opts.Duration != 0 {
 		tx = tx.Where("duration", opts.Duration)
@@ -224,7 +224,7 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceM
 		resp[i] = api.PerformanceMetric{
 			Action:   metrics[i].Action,
 			Host:     types.PublicKey(metrics[i].Host),
-			Reporter: metrics[i].Reporter,
+			Origin:   metrics[i].Origin,
 			Duration: metrics[i].Duration,
 			Time:     time.Time(metrics[i].Timestamp).UTC(),
 		}
@@ -232,12 +232,12 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceM
 	return resp, nil
 }
 
-func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, action string, t time.Time, duration time.Duration, host types.PublicKey, reporter string) error {
+func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, action string, t time.Time, duration time.Duration, host types.PublicKey, origin string) error {
 	return s.dbMetrics.Create(&dbPerformanceMetric{
 		Action:    action,
 		Duration:  duration,
 		Host:      publicKey(host),
-		Reporter:  reporter,
+		Origin:    origin,
 		Timestamp: unixTimeMS(t),
 	}).Error
 }
