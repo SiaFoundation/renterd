@@ -919,7 +919,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 		convertToCore(sb, &b)
 
 		// Process announcements, but only if they are not too old.
-		if b.Timestamp.After(time.Now().UTC().Add(-ss.announcementMaxAge)) {
+		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
 			hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
 				newAnnouncements = append(newAnnouncements, announcement{
 					hostKey:      publicKey(hostKey),
