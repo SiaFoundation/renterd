@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
