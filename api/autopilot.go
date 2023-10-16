@@ -69,13 +69,6 @@ type (
 )
 
 type (
-	// An Action is an autopilot operation.
-	Action struct {
-		Timestamp time.Time
-		Type      string
-		Action    interface{ isAction() }
-	}
-
 	// AutopilotTriggerRequest is the request object used by the /debug/trigger
 	// endpoint
 	AutopilotTriggerRequest struct {
@@ -101,6 +94,14 @@ type (
 		StartTime time.Time `json:"startTime"`
 		BuildState
 	}
+)
+
+type (
+	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
+	HostHandlerResponse struct {
+		Host   hostdb.Host                `json:"host"`
+		Checks *HostHandlerResponseChecks `json:"checks,omitempty"`
+	}
 
 	HostHandlerResponseChecks struct {
 		Gouging          bool                 `json:"gouging"`
@@ -109,12 +110,6 @@ type (
 		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
 		Usable           bool                 `json:"usable"`
 		UnusableReasons  []string             `json:"unusableReasons"`
-	}
-
-	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
-	HostHandlerResponse struct {
-		Host   hostdb.Host                `json:"host"`
-		Checks *HostHandlerResponseChecks `json:"checks,omitempty"`
 	}
 
 	HostGougingBreakdown struct {

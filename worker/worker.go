@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/worker/client"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -53,6 +54,17 @@ const (
 	lockingPriorityBackgroundUpload = 5
 )
 
+// re-export the client
+type Client struct {
+	*client.Client
+}
+
+func NewClient(address, password string) *Client {
+	return &Client{
+		Client: client.New(address, password),
+	}
+}
+
 var privateSubnets []*net.IPNet
 
 func init() {
@@ -68,36 +80,6 @@ func init() {
 		}
 		privateSubnets = append(privateSubnets, subnet)
 	}
-}
-
-// rangedResponseWriter is a wrapper around http.ResponseWriter. The difference
-// to the standard http.ResponseWriter is that it allows for overriding the
-// default status code that is sent upon the first call to Write with a custom
-// one.
-type rangedResponseWriter struct {
-	rw                http.ResponseWriter
-	defaultStatusCode int
-	headerWritten     bool
-}
-
-func (rw *rangedResponseWriter) Write(p []byte) (int, error) {
-	if !rw.headerWritten {
-		contentType := rw.Header().Get("Content-Type")
-		if contentType == "" {
-			rw.Header().Set("Content-Type", http.DetectContentType(p))
-		}
-		rw.WriteHeader(rw.defaultStatusCode)
-	}
-	return rw.rw.Write(p)
-}
-
-func (rw *rangedResponseWriter) Header() http.Header {
-	return rw.rw.Header()
-}
-
-func (rw *rangedResponseWriter) WriteHeader(statusCode int) {
-	rw.headerWritten = true
-	rw.rw.WriteHeader(statusCode)
 }
 
 type AccountStore interface {

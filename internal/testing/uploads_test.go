@@ -9,6 +9,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
 )
 
@@ -63,7 +64,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	// upload an object using our custom reader
 	br := newBlockedReader(data)
 	go func() {
-		_, err := w.UploadObject(context.Background(), br, t.Name())
+		_, err := w.UploadObject(context.Background(), br, api.DefaultBucketName, t.Name(), api.UploadObjectOptions{})
 		if err != nil {
 			t.Error(err)
 		}

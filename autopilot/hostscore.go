@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
-	"lukechampine.com/frand"
 )
 
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
@@ -247,31 +246,6 @@ func versionScore(settings rhpv2.HostSettings) float64 {
 		}
 	}
 	return weight
-}
-
-func randSelectByWeight(weights []float64) int {
-	// deep copy the input
-	weights = append([]float64{}, weights...)
-
-	// normalize
-	var total float64
-	for _, w := range weights {
-		total += w
-	}
-	for i, w := range weights {
-		weights[i] = w / total
-	}
-
-	// select
-	r := frand.Float64()
-	var sum float64
-	for i, w := range weights {
-		sum += w
-		if r < sum {
-			return i
-		}
-	}
-	return len(weights) - 1
 }
 
 // contractPriceForScore returns the contract price of the host used for

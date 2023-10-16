@@ -9,6 +9,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
@@ -41,12 +42,12 @@ func TestGouging(t *testing.T) {
 	tt.OKAll(frand.Read(data))
 
 	// upload the data
-	name := fmt.Sprintf("data_%v", len(data))
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 	// download the data
 	var buffer bytes.Buffer
-	tt.OK(w.DownloadObject(context.Background(), &buffer, name))
+	tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 	if !bytes.Equal(data, buffer.Bytes()) {
 		t.Fatal("unexpected data")
 	}
@@ -69,7 +70,7 @@ func TestGouging(t *testing.T) {
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// upload some data - should fail
-	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), name))
+	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 	// update all host settings so they're gouging
 	for _, h := range cluster.hosts {
@@ -86,7 +87,7 @@ func TestGouging(t *testing.T) {
 
 	// download the data - should fail
 	buffer.Reset()
-	if err := w.DownloadObject(context.Background(), &buffer, name); err == nil {
+	if err := w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil {
 		t.Fatal("expected download to fail")
 	}
 }
