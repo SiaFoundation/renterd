@@ -182,7 +182,7 @@ func TestPerformanceMetrics(t *testing.T) {
 		if len(metrics) != expected {
 			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
 		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
-			return time.Time(metrics[i].Time).Before(time.Time(metrics[j].Time))
+			return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
 		}) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
@@ -226,8 +226,8 @@ func TestPerformanceMetrics(t *testing.T) {
 	after := time.UnixMilli(2)  // 'after' is exclusive
 	before := time.UnixMilli(3) // 'before' is inclusive
 	assertMetrics(api.PerformanceMetricsQueryOpts{After: after, Before: before}, 16, func(m api.PerformanceMetric) {
-		if !m.Time.Equal(before) {
-			t.Fatalf("expected time to be %v, got %v", before, m.Time)
+		if !m.Timestamp.Equal(before) {
+			t.Fatalf("expected time to be %v, got %v", before, m.Timestamp)
 		}
 	})
 }

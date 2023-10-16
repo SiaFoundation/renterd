@@ -195,7 +195,7 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 		tx = tx.Where("host", publicKey(opts.Host))
 	}
 	if opts.Origin != "" {
-		tx = tx.Where("reporter", opts.Origin)
+		tx = tx.Where("origin", opts.Origin)
 	}
 	if opts.Duration != 0 {
 		tx = tx.Where("duration", opts.Duration)
@@ -222,11 +222,11 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceM
 	resp := make([]api.PerformanceMetric, len(metrics))
 	for i := range resp {
 		resp[i] = api.PerformanceMetric{
-			Action:   metrics[i].Action,
-			Host:     types.PublicKey(metrics[i].Host),
-			Origin:   metrics[i].Origin,
-			Duration: metrics[i].Duration,
-			Time:     time.Time(metrics[i].Timestamp).UTC(),
+			Action:    metrics[i].Action,
+			Host:      types.PublicKey(metrics[i].Host),
+			Origin:    metrics[i].Origin,
+			Duration:  metrics[i].Duration,
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil

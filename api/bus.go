@@ -602,11 +602,11 @@ type (
 	}
 
 	PerformanceMetric struct {
-		Action   string          `json:"action"`
-		Host     types.PublicKey `json:"host"`
-		Origin   string          `json:"origin"`
-		Duration time.Duration   `json:"duration"`
-		Time     time.Time       `json:"time"`
+		Action    string          `json:"action"`
+		Host      types.PublicKey `json:"host"`
+		Origin    string          `json:"origin"`
+		Duration  time.Duration   `json:"duration"`
+		Timestamp time.Time       `json:"time"`
 	}
 
 	PerformanceMetricsQueryOpts struct {
