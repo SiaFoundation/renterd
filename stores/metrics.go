@@ -80,20 +80,6 @@ func (dbContractSetMetric) TableName() string      { return "contract_sets" }
 func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn" }
 func (dbPerformanceMetric) TableName() string      { return "performance" }
 
-func (s *SQLStore) RecordContractSetMetric(ctx context.Context, t time.Time, set string, contracts int) error {
-	return s.dbMetrics.Create(&dbContractSetMetric{
-		Contracts: contracts,
-		Name:      set,
-		Time:      unixTimeMS(t),
-	}).Error
-}
-
-type ContractSetMetricsQueryOpts struct {
-	Name   *string
-	After  *time.Time
-	Before *time.Time
-}
-
 func scopeTimeRange(tx *gorm.DB, after, before *time.Time) *gorm.DB {
 	if after != nil {
 		tx = tx.Where("time > ?", unixTimeMS(*after))
@@ -103,6 +89,20 @@ func scopeTimeRange(tx *gorm.DB, after, before *time.Time) *gorm.DB {
 	}
 	return tx
 }
+
+type (
+	ContractSetMetric struct {
+		Contracts int       `json:"contracts"`
+		Name      string    `json:"name"`
+		Time      time.Time `json:"time"`
+	}
+
+	ContractSetMetricsQueryOpts struct {
+		Name   *string
+		After  *time.Time
+		Before *time.Time
+	}
+)
 
 func (s *SQLStore) contractSetMetrics(ctx context.Context, opts ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
 	tx := s.dbMetrics
@@ -120,4 +120,28 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, opts ContractSetMetri
 		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
 	return metrics, nil
+}
+
+func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts ContractSetMetricsQueryOpts) ([]ContractSetMetric, error) {
+	metrics, err := s.contractSetMetrics(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]ContractSetMetric, len(metrics))
+	for i := range resp {
+		resp[i] = ContractSetMetric{
+			Contracts: metrics[i].Contracts,
+			Name:      metrics[i].Name,
+			Time:      time.Time(metrics[i].Time).UTC(),
+		}
+	}
+	return resp, nil
+}
+
+func (s *SQLStore) RecordContractSetMetric(ctx context.Context, t time.Time, set string, contracts int) error {
+	return s.dbMetrics.Create(&dbContractSetMetric{
+		Contracts: contracts,
+		Name:      set,
+		Time:      unixTimeMS(t),
+	}).Error
 }
