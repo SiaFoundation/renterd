@@ -95,78 +95,139 @@ func TestContractChurnSetMetrics(t *testing.T) {
 		}
 	}
 
-	// Query without any filters.
-	metrics, err := ss.contractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 24 {
-		t.Fatalf("expected 24 metrics, got %v", len(metrics))
-	} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
-		return time.Time(metrics[i].Time).Before(time.Time(metrics[j].Time))
-	}) {
-		t.Fatal("expected metrics to be sorted by time")
+	assertMetrics := func(opts api.ContractSetChurnMetricsQueryOpts, expected int, cmp func(api.ContractSetChurnMetric)) {
+		t.Helper()
+		metrics, err := ss.ContractSetChurnMetrics(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(metrics) != expected {
+			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
+		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
+			return time.Time(metrics[i].Time).Before(time.Time(metrics[j].Time))
+		}) {
+			t.Fatal("expected metrics to be sorted by time")
+		}
+		for _, m := range metrics {
+			cmp(m)
+		}
 	}
 
+	// Query without any filters.
+	assertMetrics(api.ContractSetChurnMetricsQueryOpts{}, 24, func(m api.ContractSetChurnMetric) {})
+
 	// Query by set name.
-	metrics, err = ss.contractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{
-		Name: sets[0],
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 12 {
-		t.Fatalf("expected 12 metrics, got %v", len(metrics))
-	}
-	for _, m := range metrics {
+	assertMetrics(api.ContractSetChurnMetricsQueryOpts{Name: sets[0]}, 12, func(m api.ContractSetChurnMetric) {
 		if m.Name != sets[0] {
 			t.Fatalf("expected name to be %v, got %v", sets[0], m.Name)
 		}
-	}
+	})
 
 	// Query by time.
 	after := time.UnixMilli(2)  // 'after' is exclusive
 	before := time.UnixMilli(3) // 'before' is inclusive
-	metrics, err = ss.contractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{
-		After:  after,
-		Before: before,
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 8 {
-		t.Fatalf("expected 8 metrics, got %v", len(metrics))
-	}
-	for _, m := range metrics {
-		if m.Time != unixTimeMS(before) {
+	assertMetrics(api.ContractSetChurnMetricsQueryOpts{After: after, Before: before}, 8, func(m api.ContractSetChurnMetric) {
+		if !m.Time.Equal(before) {
 			t.Fatalf("expected time to be %v, got %v", before, time.Time(m.Time).UnixMilli())
 		}
-	}
+	})
 
 	// Query by direction.
-	metrics, err = ss.contractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{
-		Direction: directions[1],
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 12 {
-		t.Fatalf("expected 12 metrics, got %v", len(metrics))
-	}
-	for _, m := range metrics {
-		if m.Direction != directions[1] {
+	assertMetrics(api.ContractSetChurnMetricsQueryOpts{Direction: directions[0]}, 12, func(m api.ContractSetChurnMetric) {
+		if m.Direction != directions[0] {
 			t.Fatalf("expected direction to be %v, got %v", directions[1], m.Direction)
+		}
+	})
+
+	// Query by reason.
+	assertMetrics(api.ContractSetChurnMetricsQueryOpts{Reason: reasons[0]}, 12, func(m api.ContractSetChurnMetric) {
+		if m.Reason != reasons[0] {
+			t.Fatalf("expected reason to be %v, got %v", reasons[0], m.Reason)
+		}
+	})
+}
+
+func TestPerformanceMetrics(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// Create metrics to query.
+	actions := []string{"download", "upload"}
+	hosts := []types.PublicKey{types.GeneratePrivateKey().PublicKey(), types.GeneratePrivateKey().PublicKey()}
+	reporters := []string{"worker1", "worker2"}
+	durations := []time.Duration{time.Second, time.Hour}
+	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
+	var i byte
+	for _, action := range actions {
+		for _, host := range hosts {
+			for _, reporter := range reporters {
+				for _, duration := range durations {
+					for _, recordedTime := range times {
+						if err := ss.RecordPerformanceMetric(context.Background(), action, recordedTime, duration, host, reporter); err != nil {
+							t.Fatal(err)
+						}
+						i++
+					}
+				}
+			}
 		}
 	}
 
-	// Query by reason.
-	metrics, err = ss.contractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{
-		Reason: reasons[1],
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 12 {
-		t.Fatalf("expected 12 metrics, got %v", len(metrics))
-	}
-	for _, m := range metrics {
-		if m.Reason != reasons[1] {
-			t.Fatalf("expected reason to be %v, got %v", reasons[1], m.Reason)
+	assertMetrics := func(opts api.PerformanceMetricsQueryOpts, expected int, cmp func(api.PerformanceMetric)) {
+		t.Helper()
+		metrics, err := ss.PerformanceMetrics(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(metrics) != expected {
+			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
+		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
+			return time.Time(metrics[i].Time).Before(time.Time(metrics[j].Time))
+		}) {
+			t.Fatal("expected metrics to be sorted by time")
+		}
+		for _, m := range metrics {
+			cmp(m)
 		}
 	}
+
+	// Query without any filters.
+	assertMetrics(api.PerformanceMetricsQueryOpts{}, 48, func(m api.PerformanceMetric) {})
+
+	// Filter by actions.
+	assertMetrics(api.PerformanceMetricsQueryOpts{Action: actions[0]}, 24, func(m api.PerformanceMetric) {
+		if m.Action != actions[0] {
+			t.Fatalf("expected action to be %v, got %v", actions[0], m.Action)
+		}
+	})
+
+	// Filter by hosts.
+	assertMetrics(api.PerformanceMetricsQueryOpts{Host: hosts[0]}, 24, func(m api.PerformanceMetric) {
+		if m.Host != hosts[0] {
+			t.Fatalf("expected hosts to be %v, got %v", hosts[0], m.Host)
+		}
+	})
+
+	// Filter by reporters.
+	assertMetrics(api.PerformanceMetricsQueryOpts{Reporter: reporters[0]}, 24, func(m api.PerformanceMetric) {
+		if m.Reporter != reporters[0] {
+			t.Fatalf("expected reporter to be %v, got %v", reporters[0], m.Reporter)
+		}
+	})
+
+	// Filter by duration.
+	assertMetrics(api.PerformanceMetricsQueryOpts{Duration: durations[0]}, 24, func(m api.PerformanceMetric) {
+		if m.Duration != durations[0] {
+			t.Fatalf("expected duration to be %v, got %v", durations[0], m.Duration)
+		}
+	})
+
+	// Filter by time.
+	after := time.UnixMilli(2)  // 'after' is exclusive
+	before := time.UnixMilli(3) // 'before' is inclusive
+	assertMetrics(api.PerformanceMetricsQueryOpts{After: after, Before: before}, 16, func(m api.PerformanceMetric) {
+		if !m.Time.Equal(before) {
+			t.Fatalf("expected time to be %v, got %v", before, m.Time)
+		}
+	})
 }
