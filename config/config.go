@@ -110,7 +110,6 @@ type (
 		RevisionSubmissionBuffer       uint64        `yaml:"revisionSubmissionBuffer"`
 		ScannerInterval                time.Duration `yaml:"scannerInterval"`
 		ScannerBatchSize               uint64        `yaml:"scannerBatchSize"`
-		ScannerMinRecentFailures       uint64        `yaml:"scannerMinRecentFailures"`
 		ScannerNumThreads              uint64        `yaml:"scannerNumThreads"`
 		MigratorParallelSlabsPerWorker uint64        `yaml:"migratorParallelSlabsPerWorker"`
 	}

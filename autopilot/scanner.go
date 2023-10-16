@@ -41,10 +41,9 @@ type (
 		logger  *zap.SugaredLogger
 		ap      *Autopilot
 
-		scanBatchSize         uint64
-		scanThreads           uint64
-		scanMinInterval       time.Duration
-		scanMinRecentFailures uint64
+		scanBatchSize   uint64
+		scanThreads     uint64
+		scanMinInterval time.Duration
 
 		timeoutMinInterval time.Duration
 		timeoutMinTimeout  time.Duration
@@ -119,7 +118,7 @@ func (t *tracker) timeout() time.Duration {
 	return time.Duration(percentile) * time.Millisecond
 }
 
-func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
+func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")
 	}
@@ -137,10 +136,9 @@ func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads
 		logger: ap.logger.Named("scanner"),
 		ap:     ap,
 
-		scanBatchSize:         scanBatchSize,
-		scanThreads:           scanThreads,
-		scanMinInterval:       scanMinInterval,
-		scanMinRecentFailures: scanMinRecentFailures,
+		scanBatchSize:   scanBatchSize,
+		scanThreads:     scanThreads,
+		scanMinInterval: scanMinInterval,
 
 		timeoutMinInterval: timeoutMinInterval,
 		timeoutMinTimeout:  timeoutMinTimeout,
@@ -169,7 +167,12 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	s.scanning = true
 	s.mu.Unlock()
 
-	maxDowntimeHours := s.ap.State().cfg.Hosts.MaxDowntimeHours
+	hostCfg := s.ap.State().cfg.Hosts
+	maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
+	minRecentScanFailures := hostCfg.MinRecentScanFailures
+	if maxDowntime == 0 || minRecentScanFailures == 0 {
+		s.logger.Warn("host pruning is disabled, please set maxDowntimeHours and minRecentScanFailures in the host config")
+	}
 
 	go func() {
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
@@ -181,10 +184,9 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 			}
 		}
 
-		if !s.ap.isStopped() && maxDowntimeHours > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v hours", maxDowntimeHours)
-			maxDowntime := time.Hour * time.Duration(maxDowntimeHours)
-			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)
+		if !s.ap.isStopped() && maxDowntime > 0 && minRecentScanFailures > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v and failed %d consecutive scans", maxDowntime, minRecentScanFailures)
+			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
 			if removed > 0 {
 				s.logger.Infof("removed %v offline hosts", removed)
 			}
