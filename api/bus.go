@@ -618,4 +618,29 @@ type (
 		Reporter string
 		Duration time.Duration
 	}
+
+	ContractMetric struct {
+		Time time.Time `json:"time"`
+
+		FCID types.FileContractID `json:"fcid"`
+		Host types.PublicKey      `json:"host"`
+
+		RemainingCollateral types.Currency `json:"remainingCollateral"`
+		RemainingFunds      types.Currency `json:"remainingFunds"`
+		RevisionNumber      uint64         `json:"revisionNumber"`
+
+		UploadSpending      types.Currency `json:"uploadSpending"`
+		DownloadSpending    types.Currency `json:"downloadSpending"`
+		FundAccountSpending types.Currency `json:"fundAccountSpending"`
+		DeleteSpending      types.Currency `json:"deleteSpending"`
+		ListSpending        types.Currency `json:"listSpending"`
+	}
+
+	ContractMetricsQueryOpts struct {
+		After  time.Time `json:"after"`
+		Before time.Time `json:"before"`
+
+		FCID types.FileContractID `json:"fcid"`
+		Host types.PublicKey      `json:"host"`
+	}
 )

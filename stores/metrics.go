@@ -18,25 +18,25 @@ type (
 
 		Time unixTimeMS `gorm:"index;NOT NULL"`
 
-		FCID fileContractID `gorm:"index;size:32;NOT NULL"`
+		FCID fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
 		Host publicKey      `gorm:"index;size:32;NOT NULL"`
 
-		RemainingCollateralLo uint64 `gorm:"index;NOT NULL"`
-		RemainingCollateralHi uint64 `gorm:"index;NOT NULL"`
-		RemainingFundsLo      uint64 `gorm:"index;NOT NULL"`
-		RemainingFundsHi      uint64 `gorm:"index;NOT NULL"`
-		RevisionNumber        uint64 `gorm:"index;NOT NULL"`
+		RemainingCollateralLo unsigned64 `gorm:"index;NOT NULL"`
+		RemainingCollateralHi unsigned64 `gorm:"index;NOT NULL"`
+		RemainingFundsLo      unsigned64 `gorm:"index;NOT NULL"`
+		RemainingFundsHi      unsigned64 `gorm:"index;NOT NULL"`
+		RevisionNumber        unsigned64 `gorm:"index;NOT NULL"`
 
-		UploadSpendingLo      uint64 `gorm:"index;NOT NULL"`
-		UploadSpendingHi      uint64 `gorm:"index;NOT NULL"`
-		DownloadSpendingLo    uint64 `gorm:"index;NOT NULL"`
-		DownloadSpendingHi    uint64 `gorm:"index;NOT NULL"`
-		FundAccountSpendingLo uint64 `gorm:"index;NOT NULL"`
-		FundAccountSpendingHi uint64 `gorm:"index;NOT NULL"`
-		DeleteSpendingLo      uint64 `gorm:"index;NOT NULL"`
-		DeleteSpendingHi      uint64 `gorm:"index;NOT NULL"`
-		ListSpendingLo        uint64 `gorm:"index;NOT NULL"`
-		ListSpendingHi        uint64 `gorm:"index;NOT NULL"`
+		UploadSpendingLo      unsigned64 `gorm:"index;NOT NULL"`
+		UploadSpendingHi      unsigned64 `gorm:"index;NOT NULL"`
+		DownloadSpendingLo    unsigned64 `gorm:"index;NOT NULL"`
+		DownloadSpendingHi    unsigned64 `gorm:"index;NOT NULL"`
+		FundAccountSpendingLo unsigned64 `gorm:"index;NOT NULL"`
+		FundAccountSpendingHi unsigned64 `gorm:"index;NOT NULL"`
+		DeleteSpendingLo      unsigned64 `gorm:"index;NOT NULL"`
+		DeleteSpendingHi      unsigned64 `gorm:"index;NOT NULL"`
+		ListSpendingLo        unsigned64 `gorm:"index;NOT NULL"`
+		ListSpendingHi        unsigned64 `gorm:"index;NOT NULL"`
 	}
 
 	// dbContractSetMetric tracks information about a specific contract set.
@@ -126,11 +126,11 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts api.ContractSetM
 	return resp, nil
 }
 
-func (s *SQLStore) RecordContractSetMetric(ctx context.Context, t time.Time, set string, contracts int) error {
+func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metric api.ContractSetMetric) error {
 	return s.dbMetrics.Create(&dbContractSetMetric{
-		Contracts: contracts,
-		Name:      set,
-		Time:      unixTimeMS(t),
+		Contracts: metric.Contracts,
+		Name:      metric.Name,
+		Time:      unixTimeMS(metric.Time),
 	}).Error
 }
 
@@ -176,13 +176,13 @@ func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, opts api.Contrac
 	return resp, nil
 }
 
-func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, t time.Time, set, direction, reason string, fcid types.FileContractID) error {
+func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metric api.ContractSetChurnMetric) error {
 	return s.dbMetrics.Create(&dbContractSetChurnMetric{
-		Direction: string(direction),
-		FCID:      fileContractID(fcid),
-		Name:      set,
-		Reason:    reason,
-		Time:      unixTimeMS(t),
+		Direction: string(metric.Direction),
+		FCID:      fileContractID(metric.FCID),
+		Name:      metric.Name,
+		Reason:    metric.Reason,
+		Time:      unixTimeMS(metric.Time),
 	}).Error
 }
 
@@ -232,12 +232,84 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceM
 	return resp, nil
 }
 
-func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, action string, t time.Time, duration time.Duration, host types.PublicKey, reporter string) error {
+func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metric api.PerformanceMetric) error {
 	return s.dbMetrics.Create(&dbPerformanceMetric{
-		Action:   action,
-		Duration: duration,
-		Host:     publicKey(host),
-		Reporter: reporter,
-		Time:     unixTimeMS(t),
+		Action:   metric.Action,
+		Duration: metric.Duration,
+		Host:     publicKey(metric.Host),
+		Reporter: metric.Reporter,
+		Time:     unixTimeMS(metric.Time),
+	}).Error
+}
+
+func (s *SQLStore) contractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]dbContractMetric, error) {
+	tx := s.dbMetrics
+	if opts.FCID != (types.FileContractID{}) {
+		tx = tx.Where("fcid", fileContractID(opts.FCID))
+	}
+	if opts.Host != (types.PublicKey{}) {
+		tx = tx.Where("host", publicKey(opts.Host))
+	}
+
+	var metrics []dbContractMetric
+	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
+		return scopeTimeRange(tx, opts.After, opts.Before)
+	}).
+		Order("time ASC").
+		Find(&metrics).
+		Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
+	}
+	return metrics, nil
+}
+
+func (s *SQLStore) ContractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
+	metrics, err := s.contractMetrics(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]api.ContractMetric, len(metrics))
+	toCurr := func(lo, hi unsigned64) types.Currency {
+		return types.NewCurrency(uint64(lo), uint64(hi))
+	}
+	for i := range resp {
+		resp[i] = api.ContractMetric{
+			Time:                time.Time(metrics[i].Time).UTC(),
+			FCID:                types.FileContractID(metrics[i].FCID),
+			Host:                types.PublicKey(metrics[i].Host),
+			RemainingCollateral: toCurr(metrics[i].RemainingCollateralLo, metrics[i].RemainingCollateralHi),
+			RemainingFunds:      toCurr(metrics[i].RemainingFundsLo, metrics[i].RemainingFundsHi),
+			RevisionNumber:      uint64(metrics[i].RevisionNumber),
+			UploadSpending:      toCurr(metrics[i].UploadSpendingLo, metrics[i].UploadSpendingHi),
+			DownloadSpending:    toCurr(metrics[i].DownloadSpendingLo, metrics[i].DownloadSpendingHi),
+			FundAccountSpending: toCurr(metrics[i].FundAccountSpendingLo, metrics[i].FundAccountSpendingHi),
+			DeleteSpending:      toCurr(metrics[i].DeleteSpendingLo, metrics[i].DeleteSpendingHi),
+			ListSpending:        toCurr(metrics[i].ListSpendingLo, metrics[i].ListSpendingHi),
+		}
+	}
+	return resp, nil
+}
+
+func (s *SQLStore) RecordContractMetric(ctx context.Context, metric api.ContractMetric) error {
+	return s.dbMetrics.Create(&dbContractMetric{
+		Time:                  unixTimeMS(metric.Time),
+		FCID:                  fileContractID(metric.FCID),
+		Host:                  publicKey(metric.Host),
+		RemainingCollateralLo: unsigned64(metric.RemainingCollateral.Lo),
+		RemainingCollateralHi: unsigned64(metric.RemainingCollateral.Hi),
+		RemainingFundsLo:      unsigned64(metric.RemainingFunds.Lo),
+		RemainingFundsHi:      unsigned64(metric.RemainingFunds.Hi),
+		RevisionNumber:        unsigned64(metric.RevisionNumber),
+		UploadSpendingLo:      unsigned64(metric.UploadSpending.Lo),
+		UploadSpendingHi:      unsigned64(metric.UploadSpending.Hi),
+		DownloadSpendingLo:    unsigned64(metric.DownloadSpending.Lo),
+		DownloadSpendingHi:    unsigned64(metric.DownloadSpending.Hi),
+		FundAccountSpendingLo: unsigned64(metric.FundAccountSpending.Lo),
+		FundAccountSpendingHi: unsigned64(metric.FundAccountSpending.Hi),
+		DeleteSpendingLo:      unsigned64(metric.DeleteSpending.Lo),
+		DeleteSpendingHi:      unsigned64(metric.DeleteSpending.Hi),
+		ListSpendingLo:        unsigned64(metric.ListSpending.Lo),
+		ListSpendingHi:        unsigned64(metric.ListSpending.Hi),
 	}).Error
 }
