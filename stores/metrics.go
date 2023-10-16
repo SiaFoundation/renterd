@@ -70,10 +70,10 @@ type (
 		Model
 		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
-		Action   string    `gorm:"index;NOT NULL"`
-		Host     publicKey `gorm:"index;size:32;NOT NULL"`
-		Reporter string    `gorm:"index;NOT NULL"`
-		Duration float64   `gorm:"index;NOT NULL"`
+		Action   string        `gorm:"index;NOT NULL"`
+		Host     publicKey     `gorm:"index;size:32;NOT NULL"`
+		Reporter string        `gorm:"index;NOT NULL"`
+		Duration time.Duration `gorm:"index;NOT NULL"`
 	}
 )
 
@@ -153,7 +153,7 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.Contrac
 		Find(&metrics).
 		Error
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
+		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
 	}
 	return metrics, nil
 }
@@ -182,6 +182,62 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, t time.Time
 		FCID:      fileContractID(fcid),
 		Name:      set,
 		Reason:    reason,
+		Timestamp: unixTimeMS(t),
+	}).Error
+}
+
+func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceMetricsQueryOpts) ([]dbPerformanceMetric, error) {
+	tx := s.dbMetrics
+	if opts.Action != "" {
+		tx = tx.Where("action", opts.Action)
+	}
+	if opts.Host != (types.PublicKey{}) {
+		tx = tx.Where("host", publicKey(opts.Host))
+	}
+	if opts.Reporter != "" {
+		tx = tx.Where("reporter", opts.Reporter)
+	}
+	if opts.Duration != 0 {
+		tx = tx.Where("duration", opts.Duration)
+	}
+
+	var metrics []dbPerformanceMetric
+	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
+		return scopeTimeRange(tx, opts.After, opts.Before)
+	}).
+		Order("time ASC").
+		Find(&metrics).
+		Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch performance metrics: %w", err)
+	}
+	return metrics, nil
+}
+
+func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
+	metrics, err := s.performanceMetrics(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]api.PerformanceMetric, len(metrics))
+	for i := range resp {
+		resp[i] = api.PerformanceMetric{
+			Action:   metrics[i].Action,
+			Host:     types.PublicKey(metrics[i].Host),
+			Reporter: metrics[i].Reporter,
+			Duration: metrics[i].Duration,
+			Time:     time.Time(metrics[i].Timestamp).UTC(),
+		}
+	}
+	return resp, nil
+}
+
+func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, action string, t time.Time, duration time.Duration, host types.PublicKey, reporter string) error {
+	return s.dbMetrics.Create(&dbPerformanceMetric{
+		Action:    action,
+		Duration:  duration,
+		Host:      publicKey(host),
+		Reporter:  reporter,
 		Timestamp: unixTimeMS(t),
 	}).Error
 }

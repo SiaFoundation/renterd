@@ -578,9 +578,10 @@ type (
 	}
 
 	ContractSetMetricsQueryOpts struct {
-		Name   string
 		After  time.Time
 		Before time.Time
+
+		Name string
 	}
 
 	ContractSetChurnMetric struct {
@@ -592,10 +593,29 @@ type (
 	}
 
 	ContractSetChurnMetricsQueryOpts struct {
+		After  time.Time
+		Before time.Time
+
 		Name      string
-		After     time.Time
-		Before    time.Time
 		Direction string
 		Reason    string
+	}
+
+	PerformanceMetric struct {
+		Action   string          `json:"action"`
+		Host     types.PublicKey `json:"host"`
+		Reporter string          `json:"reporter"`
+		Duration time.Duration   `json:"duration"`
+		Time     time.Time       `json:"time"`
+	}
+
+	PerformanceMetricsQueryOpts struct {
+		After  time.Time
+		Before time.Time
+
+		Action   string
+		Host     types.PublicKey
+		Reporter string
+		Duration time.Duration
 	}
 )
