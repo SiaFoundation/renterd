@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -39,49 +38,34 @@ func TestContractSetMetrics(t *testing.T) {
 		}
 	}
 
-	// Check that we have 4 metrics now.
-	metrics, err = ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 4 {
-		t.Fatalf("expected 4 metrics, got %v", len(metrics))
-	} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
-		return time.Time(metrics[i].Time).Before(time.Time(metrics[j].Time))
-	}) {
-		for _, m := range metrics {
-			fmt.Println(time.Time(m.Time).UnixMilli())
+	assertMetrics := func(opts api.ContractSetMetricsQueryOpts, expected int, contracts []int) {
+		t.Helper()
+		metrics, err := ss.ContractSetMetrics(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
 		}
-		t.Fatal("expected metrics to be sorted by time")
+		if len(metrics) != expected {
+			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
+		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
+			return time.Time(metrics[i].Time).Before(time.Time(metrics[j].Time))
+		}) {
+			t.Fatal("expected metrics to be sorted by time")
+		}
+		for i, m := range metrics {
+			if m.Contracts != contracts[i] {
+				t.Fatalf("expected %v contracts, got %v", contracts[i], m.Contracts)
+			}
+		}
 	}
 
+	// Check that we have 4 metrics now.
+	assertMetrics(api.ContractSetMetricsQueryOpts{}, 4, []int{2, 3, 1, 0})
+
 	// Query all metrics by contract set.
-	metrics, err = ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{
-		Name: &cs,
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 3 {
-		t.Fatalf("expected 3 metrics, got %v", len(metrics))
-	} else if metrics[0].Contracts != 2 {
-		t.Fatalf("expected 2 contracts, got %v", metrics[0].Contracts)
-	} else if metrics[1].Contracts != 3 {
-		t.Fatalf("expected 3 contracts, got %v", metrics[1].Contracts)
-	} else if metrics[2].Contracts != 1 {
-		t.Fatalf("expected 1 contracts, got %v", metrics[2].Contracts)
-	}
+	assertMetrics(api.ContractSetMetricsQueryOpts{Name: cs}, 3, []int{2, 3, 1})
 
 	// Query the metric in the middle of the 3 we added.
 	after := time.UnixMilli(1)  // 'after' is exclusive
 	before := time.UnixMilli(2) // 'before' is inclusive
-	metrics, err = ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{
-		After:  &after,
-		Before: &before,
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 1 {
-		t.Fatalf("expected 1 metrics, got %v", len(metrics))
-	} else if metrics[0].Contracts != 3 {
-		t.Fatalf("expected 3 contracts, got %v", metrics[1].Contracts)
-	}
+	assertMetrics(api.ContractSetMetricsQueryOpts{After: after, Before: before}, 1, []int{3})
 }

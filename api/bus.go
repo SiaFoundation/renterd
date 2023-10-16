@@ -573,8 +573,8 @@ type (
 	}
 
 	ContractSetMetricsQueryOpts struct {
-		Name   *string
-		After  *time.Time
-		Before *time.Time
+		Name   string
+		After  time.Time
+		Before time.Time
 	}
 )

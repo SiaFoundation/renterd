@@ -81,20 +81,20 @@ func (dbContractSetMetric) TableName() string      { return "contract_sets" }
 func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn" }
 func (dbPerformanceMetric) TableName() string      { return "performance" }
 
-func scopeTimeRange(tx *gorm.DB, after, before *time.Time) *gorm.DB {
-	if after != nil {
-		tx = tx.Where("time > ?", unixTimeMS(*after))
+func scopeTimeRange(tx *gorm.DB, after, before time.Time) *gorm.DB {
+	if after != (time.Time{}) {
+		tx = tx.Where("time > ?", unixTimeMS(after))
 	}
-	if before != nil {
-		tx = tx.Where("time <= ?", unixTimeMS(*before))
+	if before != (time.Time{}) {
+		tx = tx.Where("time <= ?", unixTimeMS(before))
 	}
 	return tx
 }
 
 func (s *SQLStore) contractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
 	tx := s.dbMetrics
-	if opts.Name != nil {
-		tx = tx.Where("name = ?", *opts.Name)
+	if opts.Name != "" {
+		tx = tx.Where("name = ?", opts.Name)
 	}
 	var metrics []dbContractSetMetric
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
