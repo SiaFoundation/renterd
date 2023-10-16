@@ -94,12 +94,11 @@ func (c *Client) WalletPrepareForm(ctx context.Context, renterAddress types.Addr
 }
 
 // WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, hostKey types.PublicKey, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error) {
+func (c *Client) WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error) {
 	req := api.WalletPrepareRenewRequest{
 		Revision:      revision,
 		EndHeight:     endHeight,
 		HostAddress:   hostAddress,
-		HostKey:       hostKey,
 		PriceTable:    pt,
 		NewCollateral: newCollateral,
 		RenterAddress: renterAddress,

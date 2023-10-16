@@ -1,18 +1,16 @@
 package testing
 
 import (
-	"bytes"
-	"errors"
+	"context"
 	"fmt"
 	"net"
 	"path/filepath"
 	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
+	"go.sia.tech/core/consensus"
 	crhpv2 "go.sia.tech/core/rhp/v2"
 	crhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/hostd/chain"
 	"go.sia.tech/hostd/host/accounts"
 	"go.sia.tech/hostd/host/alerts"
 	"go.sia.tech/hostd/host/contracts"
@@ -20,14 +18,16 @@ import (
 	"go.sia.tech/hostd/host/settings"
 	"go.sia.tech/hostd/host/storage"
 	"go.sia.tech/hostd/persist/sqlite"
+	"go.sia.tech/hostd/rhp"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.sia.tech/hostd/wallet"
+	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
-	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +35,12 @@ const blocksPerMonth = 144 * 30
 
 type stubMetricReporter struct{}
 
-func (stubMetricReporter) Report(any) (_ error) { return }
+func (stubMetricReporter) StartSession(conn *rhp.Conn, proto string, version int) (rhp.UID, func()) {
+	return rhp.UID{}, func() {}
+}
+func (stubMetricReporter) StartRPC(rhp.UID, types.Specifier) (rhp.UID, func(contracts.Usage, error)) {
+	return rhp.UID{}, func(contracts.Usage, error) {}
+}
 
 type stubDataMonitor struct{}
 
@@ -49,7 +54,7 @@ type Host struct {
 
 	g  modules.Gateway
 	cs modules.ConsensusSet
-	tp *TXPool
+	tp bus.TransactionPool
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
@@ -87,88 +92,6 @@ var defaultHostSettings = settings.Settings{
 	MaxRegistryEntries: 1e3,
 }
 
-func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	core.EncodeTo(e)
-	e.Flush()
-	if err := siad.UnmarshalSia(&buf); err != nil {
-		panic(err)
-	}
-}
-
-func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
-	var buf bytes.Buffer
-	siad.MarshalSia(&buf)
-	d := types.NewBufDecoder(buf.Bytes())
-	core.DecodeFrom(d)
-	if d.Err() != nil {
-		panic(d.Err())
-	}
-}
-
-// TXPool wraps a siad transaction pool with core types.
-type TXPool struct {
-	tp modules.TransactionPool
-}
-
-// RecommendedFee returns the recommended fee for a transaction.
-func (tp TXPool) RecommendedFee() (fee types.Currency) {
-	_, max := tp.tp.FeeEstimation()
-	convertToCore(&max, &fee)
-	return
-}
-
-// Transactions returns all transactions in the pool.
-func (tp TXPool) Transactions() []types.Transaction {
-	stxns := tp.tp.Transactions()
-	txns := make([]types.Transaction, len(stxns))
-	for i := range txns {
-		convertToCore(&stxns[i], &txns[i])
-	}
-	return txns
-}
-
-// AcceptTransactionSet adds a transaction set to the pool.
-func (tp TXPool) AcceptTransactionSet(txns []types.Transaction) error {
-	stxns := make([]stypes.Transaction, len(txns))
-	for i := range stxns {
-		convertToSiad(&txns[i], &stxns[i])
-	}
-	err := tp.tp.AcceptTransactionSet(stxns)
-	if errors.Is(err, modules.ErrDuplicateTransactionSet) {
-		err = nil
-	}
-	return err
-}
-
-// UnconfirmedParents returns the parents of a transaction in the pool.
-func (tp TXPool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
-	pool := tp.Transactions()
-	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
-	for i, txn := range pool {
-		for j := range txn.SiacoinOutputs {
-			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
-		}
-	}
-	var parents []types.Transaction
-	seen := make(map[types.TransactionID]bool)
-	for _, sci := range txn.SiacoinInputs {
-		if parent, ok := outputToParent[sci.ParentID]; ok {
-			if txid := parent.ID(); !seen[txid] {
-				seen[txid] = true
-				parents = append(parents, *parent)
-			}
-		}
-	}
-	return parents, nil
-}
-
-// Subscribe subscribes to the transaction pool.
-func (tp TXPool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
-	tp.tp.TransactionPoolSubscribe(subscriber)
-}
-
 // Close shutsdown the host
 func (h *Host) Close() error {
 	h.rhpv2.Close()
@@ -178,7 +101,7 @@ func (h *Host) Close() error {
 	h.contracts.Close()
 	h.storage.Close()
 	h.store.Close()
-	h.tp.tp.Close()
+	h.tp.Close()
 	h.cs.Close()
 	h.g.Close()
 	return nil
@@ -195,9 +118,9 @@ func (h *Host) RHPv3Addr() string {
 }
 
 // AddVolume adds a new volume to the host
-func (h *Host) AddVolume(path string, size uint64) error {
+func (h *Host) AddVolume(ctx context.Context, path string, size uint64) error {
 	result := make(chan error)
-	_, err := h.storage.AddVolume(path, size, result)
+	_, err := h.storage.AddVolume(ctx, path, size, result)
 	if err != nil {
 		return err
 	}
@@ -240,7 +163,7 @@ func (h *Host) GatewayAddr() string {
 }
 
 // NewHost initializes a new test host
-func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, error) {
+func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, debugLogging bool) (*Host, error) {
 	g, err := gateway.New("localhost:0", false, filepath.Join(dir, "gateway"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gateway: %w", err)
@@ -249,15 +172,16 @@ func NewHost(privKey types.PrivateKey, dir string, debugLogging bool) (*Host, er
 	if err := <-errCh; err != nil {
 		return nil, fmt.Errorf("failed to create consensus set: %w", err)
 	}
-	cm, err := chain.NewManager(cs)
+	cm, err := node.NewChainManager(cs, network)
 	if err != nil {
 		return nil, err
 	}
+
 	tpool, err := transactionpool.New(cs, g, filepath.Join(dir, "transactionpool"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transaction pool: %w", err)
 	}
-	tp := &TXPool{tpool}
+	tp := node.NewTransactionPool(tpool)
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
