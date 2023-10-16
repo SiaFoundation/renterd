@@ -2979,7 +2979,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Restart it. The buffer should still be there.
 	conn := NewEphemeralSQLiteConnection(dbName)
-	db2, _, err := NewSQLStore(conn, alerts.NewManager(), dir, false, time.Hour, types.Address{}, 0, zap.NewNop().Sugar(), newTestLogger())
+	db2, _, err := NewSQLStore(conn, alerts.NewManager(), dir, false, time.Hour, time.Hour, types.Address{}, 0, zap.NewNop().Sugar(), newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}

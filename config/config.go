@@ -49,6 +49,7 @@ type (
 
 	// Bus contains the configuration for a bus.
 	Bus struct {
+		AnnouncementMaxAgeHours       uint64        `yaml:"announcementMaxAgeHours"`
 		Bootstrap                     bool          `yaml:"bootstrap"`
 		GatewayAddr                   string        `yaml:"gatewayAddr"`
 		RemoteAddr                    string        `yaml:"remoteAddr"`
