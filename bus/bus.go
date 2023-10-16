@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -381,7 +380,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	txn := wfr.Transaction
 	if len(txn.MinerFees) == 0 {
 		// if no fees are specified, we add some
-		fee := b.tp.RecommendedFee().Mul64(uint64(encodedLen(txn)))
+		fee := b.tp.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
 		txn.MinerFees = []types.Currency{fee}
 	}
 	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
@@ -467,7 +466,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(encodedLen(txn)))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
 	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -2140,28 +2139,4 @@ func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) e
 		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
 	}
 	return nil
-}
-
-func encodedLen(v interface{}) int {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	if et, ok := v.(types.EncoderTo); ok {
-		et.EncodeTo(e)
-	} else {
-		switch v := v.(type) {
-		case bool:
-			e.WriteBool(v)
-		case uint64:
-			e.WriteUint64(v)
-		case time.Time:
-			e.WriteTime(v)
-		case []byte:
-			e.WritePrefix(len(v))
-			e.Write(v)
-		default:
-			panic(fmt.Sprintf("cannot encode type %T", v))
-		}
-	}
-	_ = e.Flush() // no error possible
-	return buf.Len()
 }
