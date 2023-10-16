@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"go.sia.tech/renterd/api"
 )
 
 func TestContractSetMetrics(t *testing.T) {
@@ -13,7 +15,7 @@ func TestContractSetMetrics(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	metrics, err := ss.contractSetMetrics(context.Background(), ContractSetMetricsQueryOpts{})
+	metrics, err := ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(metrics) != 1 {
@@ -38,7 +40,7 @@ func TestContractSetMetrics(t *testing.T) {
 	}
 
 	// Check that we have 4 metrics now.
-	metrics, err = ss.contractSetMetrics(context.Background(), ContractSetMetricsQueryOpts{})
+	metrics, err = ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(metrics) != 4 {
@@ -53,7 +55,7 @@ func TestContractSetMetrics(t *testing.T) {
 	}
 
 	// Query all metrics by contract set.
-	metrics, err = ss.contractSetMetrics(context.Background(), ContractSetMetricsQueryOpts{
+	metrics, err = ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{
 		Name: &cs,
 	})
 	if err != nil {
@@ -71,7 +73,7 @@ func TestContractSetMetrics(t *testing.T) {
 	// Query the metric in the middle of the 3 we added.
 	after := time.UnixMilli(1)  // 'after' is exclusive
 	before := time.UnixMilli(2) // 'before' is inclusive
-	metrics, err = ss.contractSetMetrics(context.Background(), ContractSetMetricsQueryOpts{
+	metrics, err = ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{
 		After:  &after,
 		Before: &before,
 	})

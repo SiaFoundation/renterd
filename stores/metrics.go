@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.sia.tech/renterd/api"
 	"gorm.io/gorm"
 )
 
@@ -90,21 +91,7 @@ func scopeTimeRange(tx *gorm.DB, after, before *time.Time) *gorm.DB {
 	return tx
 }
 
-type (
-	ContractSetMetric struct {
-		Contracts int       `json:"contracts"`
-		Name      string    `json:"name"`
-		Time      time.Time `json:"time"`
-	}
-
-	ContractSetMetricsQueryOpts struct {
-		Name   *string
-		After  *time.Time
-		Before *time.Time
-	}
-)
-
-func (s *SQLStore) contractSetMetrics(ctx context.Context, opts ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
+func (s *SQLStore) contractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
 	tx := s.dbMetrics
 	if opts.Name != nil {
 		tx = tx.Where("name = ?", *opts.Name)
@@ -122,14 +109,14 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, opts ContractSetMetri
 	return metrics, nil
 }
 
-func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts ContractSetMetricsQueryOpts) ([]ContractSetMetric, error) {
+func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
 	metrics, err := s.contractSetMetrics(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	resp := make([]ContractSetMetric, len(metrics))
+	resp := make([]api.ContractSetMetric, len(metrics))
 	for i := range resp {
-		resp[i] = ContractSetMetric{
+		resp[i] = api.ContractSetMetric{
 			Contracts: metrics[i].Contracts,
 			Name:      metrics[i].Name,
 			Time:      time.Time(metrics[i].Time).UTC(),
