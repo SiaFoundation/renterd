@@ -233,15 +233,15 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "range request from end not supported")
 	}
 
-	var opts []api.DownloadObjectOption
+	opts := api.DownloadObjectOptions{}
 	if rangeRequest != nil {
 		length := int64(-1)
 		if rangeRequest.End >= 0 {
 			length = rangeRequest.End - rangeRequest.Start + 1
 		}
-		opts = append(opts, api.DownloadWithRange(rangeRequest.Start, length))
+		opts.Range = api.DownloadRange{Offset: rangeRequest.Start, Length: length}
 	}
-	res, err := s.w.GetObject(ctx, bucketName, objectName, opts...)
+	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return nil, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
@@ -252,7 +252,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	var objectRange *gofakes3.ObjectRange
 	if res.Range != nil {
 		objectRange = &gofakes3.ObjectRange{
-			Start:  res.Range.Start,
+			Start:  res.Range.Offset,
 			Length: res.Range.Length,
 		}
 	}
@@ -337,11 +337,11 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	opts := []api.UploadOption{api.UploadWithBucket(bucketName)}
+	opts := api.UploadObjectOptions{}
 	if ct, ok := meta["Content-Type"]; ok {
-		opts = append(opts, api.UploadWithMimeType(ct))
+		opts.MimeType = ct
 	}
-	ur, err := s.w.UploadObject(ctx, input, key, opts...)
+	ur, err := s.w.UploadObject(ctx, input, bucketName, key, opts)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
@@ -401,12 +401,9 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 }
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
-	opts := []api.UploadOption{
-		api.UploadWithBucket(bucket),
-		api.UploadWithDisabledPreshardingEncryption(),
-	}
-
-	res, err := s.w.UploadMultipartUploadPart(ctx, input, object, string(id), partNumber, opts...)
+	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
+		DisablePreshardingEncryption: true,
+	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

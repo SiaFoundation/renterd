@@ -55,7 +55,7 @@ func TestMigrations(t *testing.T) {
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), "foo"))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
 
 	// assert amount of hosts used
 	used := usedHosts("foo")

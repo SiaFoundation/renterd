@@ -382,20 +382,20 @@ type GougingParams struct {
 // Option types.
 type (
 	GetHostsOptions struct {
-		Offset int `json:"offset"`
-		Limit  int `json:"limit"`
+		Offset int
+		Limit  int
 	}
 	HostsForScanningOptions struct {
-		MaxLastScan time.Time `json:"maxLastScan"`
-		Limit       int       `json:"limit"`
-		Offset      int       `json:"offset"`
+		MaxLastScan time.Time
+		Limit       int
+		Offset      int
 	}
 	SearchHostOptions struct {
-		AddressContains string            `json:"addressContains"`
-		FilterMode      string            `json:"filterMode"`
-		KeyIn           []types.PublicKey `json:"keyIn"`
-		Limit           int               `json:"limit"`
-		Offset          int               `json:"offset"`
+		AddressContains string
+		FilterMode      string
+		KeyIn           []types.PublicKey
+		Limit           int
+		Offset          int
 	}
 )
 
@@ -430,8 +430,8 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 // Types related to multipart uploads.
 type (
 	CreateMultipartOptions struct {
-		Key      object.EncryptionKey `json:"key"`
-		MimeType string               `json:"mimeType"`
+		Key      object.EncryptionKey
+		MimeType string
 	}
 	MultipartCreateRequest struct {
 		Bucket   string               `json:"bucket"`
@@ -540,7 +540,7 @@ type (
 	}
 
 	CreateBucketOptions struct {
-		Policy BucketPolicy `json:"policy"`
+		Policy BucketPolicy
 	}
 )
 
