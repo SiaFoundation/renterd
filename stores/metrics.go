@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"gorm.io/gorm"
 )
@@ -94,7 +95,7 @@ func scopeTimeRange(tx *gorm.DB, after, before time.Time) *gorm.DB {
 func (s *SQLStore) contractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
 	tx := s.dbMetrics
 	if opts.Name != "" {
-		tx = tx.Where("name = ?", opts.Name)
+		tx = tx.Where("name", opts.Name)
 	}
 	var metrics []dbContractSetMetric
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
@@ -129,6 +130,58 @@ func (s *SQLStore) RecordContractSetMetric(ctx context.Context, t time.Time, set
 	return s.dbMetrics.Create(&dbContractSetMetric{
 		Contracts: contracts,
 		Name:      set,
+		Time:      unixTimeMS(t),
+	}).Error
+}
+
+func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]dbContractSetChurnMetric, error) {
+	tx := s.dbMetrics
+	if opts.Name != "" {
+		tx = tx.Where("name", opts.Name)
+	}
+	if opts.Direction != "" {
+		tx = tx.Where("direction", opts.Direction)
+	}
+	if opts.Reason != "" {
+		tx = tx.Where("reason", opts.Reason)
+	}
+	var metrics []dbContractSetChurnMetric
+	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
+		return scopeTimeRange(tx, opts.After, opts.Before)
+	}).
+		Order("time ASC").
+		Find(&metrics).
+		Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
+	}
+	return metrics, nil
+}
+
+func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
+	metrics, err := s.contractSetChurnMetrics(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]api.ContractSetChurnMetric, len(metrics))
+	for i := range resp {
+		resp[i] = api.ContractSetChurnMetric{
+			Direction: metrics[i].Direction,
+			FCID:      types.FileContractID(metrics[i].FCID),
+			Name:      metrics[i].Name,
+			Reason:    metrics[i].Reason,
+			Time:      time.Time(metrics[i].Time).UTC(),
+		}
+	}
+	return resp, nil
+}
+
+func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, t time.Time, set, direction, reason string, fcid types.FileContractID) error {
+	return s.dbMetrics.Create(&dbContractSetChurnMetric{
+		Direction: string(direction),
+		FCID:      fileContractID(fcid),
+		Name:      set,
+		Reason:    reason,
 		Time:      unixTimeMS(t),
 	}).Error
 }
