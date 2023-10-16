@@ -152,14 +152,15 @@ type TestCluster struct {
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
 
-	miner  *node.Miner
-	apID   string
-	dbName string
-	dir    string
-	logger *zap.Logger
-	tt     *TT
-	wk     types.PrivateKey
-	wg     sync.WaitGroup
+	network *consensus.Network
+	miner   *node.Miner
+	apID    string
+	dbName  string
+	dir     string
+	logger  *zap.Logger
+	tt      *TT
+	wk      types.PrivateKey
+	wg      sync.WaitGroup
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -450,13 +451,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
 
 	cluster := &TestCluster{
-		apID:   apCfg.ID,
-		dir:    dir,
-		dbName: dbName,
-		logger: logger,
-		miner:  busCfg.Miner,
-		tt:     tt,
-		wk:     wk,
+		apID:    apCfg.ID,
+		dir:     dir,
+		dbName:  dbName,
+		logger:  logger,
+		network: busCfg.Network,
+		miner:   busCfg.Miner,
+		tt:      tt,
+		wk:      wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,
@@ -551,14 +553,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
-func addStorageFolderToHost(hosts []*Host) error {
+func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 	for _, host := range hosts {
 		sectors := uint64(10)
 		volumeDir := filepath.Join(host.dir, "volumes")
 		if err := os.MkdirAll(volumeDir, 0777); err != nil {
 			return err
 		}
-		if err := host.AddVolume(filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
+		if err := host.AddVolume(ctx, filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
 			return err
 		}
 	}
@@ -712,7 +714,7 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, false)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, false)
 	c.tt.OK(err)
 
 	// Connect gateways.
@@ -747,7 +749,9 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.sync(hosts)
 
 	// Announce hosts.
-	c.tt.OK(addStorageFolderToHost(hosts))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	c.tt.OK(addStorageFolderToHost(ctx, hosts))
 	c.tt.OK(announceHosts(hosts))
 
 	// Mine a few blocks. The host should show up eventually.
@@ -909,8 +913,12 @@ func testNetwork() *consensus.Network {
 	n.HardforkASIC.OakTarget = types.BlockID{255, 255}
 
 	n.HardforkFoundation.Height = 50
-	n.HardforkFoundation.PrimaryAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
-	n.HardforkFoundation.FailsafeAddress = types.GeneratePrivateKey().PublicKey().StandardAddress()
+	n.HardforkFoundation.PrimaryAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
+	n.HardforkFoundation.FailsafeAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
+
+	// make it difficult to reach v2 in most tests
+	n.HardforkV2.AllowHeight = 1000
+	n.HardforkV2.RequireHeight = 1020
 
 	return n
 }

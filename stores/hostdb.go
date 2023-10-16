@@ -916,16 +916,15 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 	var newAnnouncements []announcement
 	for _, sb := range cc.AppliedBlocks {
 		var b types.Block
-		convertToCore(sb, &b)
+		convertToCore(sb, (*types.V1Block)(&b))
 
 		// Process announcements, but only if they are not too old.
 		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+			hostdb.ForEachAnnouncement(types.Block(b), height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
 				newAnnouncements = append(newAnnouncements, announcement{
 					hostKey:      publicKey(hostKey),
 					announcement: ha,
 				})
-				ss.unappliedHostKeys[hostKey] = struct{}{}
 			})
 		}
 

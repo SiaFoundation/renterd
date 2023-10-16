@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,9 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
@@ -27,7 +24,6 @@ import (
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
 	"go.sia.tech/siad/sync"
-	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
@@ -51,137 +47,6 @@ type (
 	RunFn      = func() error
 	ShutdownFn = func(context.Context) error
 )
-
-func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	core.EncodeTo(e)
-	e.Flush()
-	if err := siad.UnmarshalSia(&buf); err != nil {
-		panic(err)
-	}
-}
-
-func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
-	var buf bytes.Buffer
-	siad.MarshalSia(&buf)
-	d := types.NewBufDecoder(buf.Bytes())
-	core.DecodeFrom(d)
-	if d.Err() != nil {
-		panic(d.Err())
-	}
-}
-
-type chainManager struct {
-	cs      modules.ConsensusSet
-	network *consensus.Network
-}
-
-func (cm chainManager) AcceptBlock(ctx context.Context, b types.Block) error {
-	var sb stypes.Block
-	convertToSiad(b, &sb)
-	return cm.cs.AcceptBlock(sb)
-}
-
-func (cm chainManager) LastBlockTime() time.Time {
-	return time.Unix(int64(cm.cs.CurrentBlock().Timestamp), 0)
-}
-
-func (cm chainManager) Synced(ctx context.Context) bool {
-	return cm.cs.Synced()
-}
-
-func (cm chainManager) TipState(ctx context.Context) consensus.State {
-	return consensus.State{
-		Network: cm.network,
-		Index: types.ChainIndex{
-			Height: uint64(cm.cs.Height()),
-			ID:     types.BlockID(cm.cs.CurrentBlock().ID()),
-		},
-	}
-}
-
-type syncer struct {
-	g  modules.Gateway
-	tp modules.TransactionPool
-}
-
-func (s syncer) Addr() string {
-	return string(s.g.Address())
-}
-
-func (s syncer) Peers() []string {
-	var peers []string
-	for _, p := range s.g.Peers() {
-		peers = append(peers, string(p.NetAddress))
-	}
-	return peers
-}
-
-func (s syncer) Connect(addr string) error {
-	return s.g.Connect(modules.NetAddress(addr))
-}
-
-func (s syncer) BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction) {
-	txnSet := make([]stypes.Transaction, len(dependsOn)+1)
-	for i, txn := range dependsOn {
-		convertToSiad(txn, &txnSet[i])
-	}
-	convertToSiad(txn, &txnSet[len(txnSet)-1])
-	s.tp.Broadcast(txnSet)
-}
-
-func (s syncer) SyncerAddress(ctx context.Context) (string, error) {
-	return string(s.g.Address()), nil
-}
-
-type txpool struct {
-	tp modules.TransactionPool
-}
-
-func (tp txpool) RecommendedFee() (fee types.Currency) {
-	_, max := tp.tp.FeeEstimation()
-	convertToCore(&max, &fee)
-	return
-}
-
-func (tp txpool) Transactions() []types.Transaction {
-	stxns := tp.tp.Transactions()
-	txns := make([]types.Transaction, len(stxns))
-	for i := range txns {
-		convertToCore(&stxns[i], &txns[i])
-	}
-	return txns
-}
-
-func (tp txpool) AddTransactionSet(txns []types.Transaction) error {
-	stxns := make([]stypes.Transaction, len(txns))
-	for i := range stxns {
-		convertToSiad(&txns[i], &stxns[i])
-	}
-	return tp.tp.AcceptTransactionSet(stxns)
-}
-
-func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
-	pool := tp.Transactions()
-	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
-	for i, txn := range pool {
-		for j := range txn.SiacoinOutputs {
-			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
-		}
-	}
-	var parents []types.Transaction
-	seen := make(map[types.TransactionID]bool)
-	for _, sci := range txn.SiacoinInputs {
-		if parent, ok := outputToParent[sci.ParentID]; ok {
-			if txid := parent.ID(); !seen[txid] {
-				seen[txid] = true
-				parents = append(parents, *parent)
-			}
-		}
-	}
-	return parents, nil
-}
 
 func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
@@ -273,7 +138,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, chainManager{cs: cs, network: cfg.Network}, txpool{tp}, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	cm, err := NewChainManager(cs, cfg.Network)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}
