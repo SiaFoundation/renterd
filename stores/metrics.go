@@ -21,22 +21,22 @@ type (
 		FCID fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
 		Host publicKey      `gorm:"index;size:32;NOT NULL"`
 
-		RemainingCollateralLo unsigned64 `gorm:"index;NOT NULL"`
-		RemainingCollateralHi unsigned64 `gorm:"index;NOT NULL"`
-		RemainingFundsLo      unsigned64 `gorm:"index;NOT NULL"`
-		RemainingFundsHi      unsigned64 `gorm:"index;NOT NULL"`
+		RemainingCollateralLo unsigned64 `gorm:"index:idx_remaining_collateral;NOT NULL"`
+		RemainingCollateralHi unsigned64 `gorm:"index:idx_remaining_collateral;NOT NULL"`
+		RemainingFundsLo      unsigned64 `gorm:"index:idx_remaining_funds;NOT NULL"`
+		RemainingFundsHi      unsigned64 `gorm:"index:idx_remaining_funds;NOT NULL"`
 		RevisionNumber        unsigned64 `gorm:"index;NOT NULL"`
 
-		UploadSpendingLo      unsigned64 `gorm:"index;NOT NULL"`
-		UploadSpendingHi      unsigned64 `gorm:"index;NOT NULL"`
-		DownloadSpendingLo    unsigned64 `gorm:"index;NOT NULL"`
-		DownloadSpendingHi    unsigned64 `gorm:"index;NOT NULL"`
-		FundAccountSpendingLo unsigned64 `gorm:"index;NOT NULL"`
-		FundAccountSpendingHi unsigned64 `gorm:"index;NOT NULL"`
-		DeleteSpendingLo      unsigned64 `gorm:"index;NOT NULL"`
-		DeleteSpendingHi      unsigned64 `gorm:"index;NOT NULL"`
-		ListSpendingLo        unsigned64 `gorm:"index;NOT NULL"`
-		ListSpendingHi        unsigned64 `gorm:"index;NOT NULL"`
+		UploadSpendingLo      unsigned64 `gorm:"index:idx_upload_spending;NOT NULL"`
+		UploadSpendingHi      unsigned64 `gorm:"index:idx_upload_spending;NOT NULL"`
+		DownloadSpendingLo    unsigned64 `gorm:"index:idx_download_spending;NOT NULL"`
+		DownloadSpendingHi    unsigned64 `gorm:"index:idx_download_spending;NOT NULL"`
+		FundAccountSpendingLo unsigned64 `gorm:"index:idx_fund_account_spending;NOT NULL"`
+		FundAccountSpendingHi unsigned64 `gorm:"index:idx_fund_account_spending;NOT NULL"`
+		DeleteSpendingLo      unsigned64 `gorm:"index:idx_delete_spending;NOT NULL"`
+		DeleteSpendingHi      unsigned64 `gorm:"index:idx_delete_spending;NOT NULL"`
+		ListSpendingLo        unsigned64 `gorm:"index:idx_list_spending;NOT NULL"`
+		ListSpendingHi        unsigned64 `gorm:"index:idx_list_spending;NOT NULL"`
 	}
 
 	// dbContractSetMetric tracks information about a specific contract set.
