@@ -1943,3 +1943,27 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
 	}
 }
+
+func TestRecordContractSetChurnMetric(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+
+	// Add 1 host.
+	cluster.AddHostsBlocking(1)
+
+	// Get churn metrics. Should have 1 for the new contract.
+	metrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{})
+	cluster.tt.OK(err)
+
+	if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
+	} else if m := metrics[0]; m.Direction != api.ChurnDirAdded {
+		t.Fatalf("expected added churn, got %v", m.Direction)
+	} else if m.FCID == (types.FileContractID{}) {
+		t.Fatal("expected non-zero FCID")
+	} else if m.Name != testContractSet {
+		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+	} else if m.Time == (time.Time{}) {
+		t.Fatal("expected non-zero time")
+	}
+}

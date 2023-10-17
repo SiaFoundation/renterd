@@ -392,10 +392,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// return whether the maintenance changed the contract set
-	return c.computeContractSetChanged(currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
+	return c.computeContractSetChanged(ctx, currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
 }
 
-func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
+func (c *contractor) computeContractSetChanged(ctx context.Context, oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
 	// build some maps for easier lookups
 	previous := make(map[types.FileContractID]struct{})
 	for _, c := range oldSet {
@@ -450,6 +450,32 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 	logFn := c.logger.Debugw
 	if len(newSet) < int(c.ap.State().rs.TotalShards) {
 		logFn = c.logger.Warnw
+	}
+
+	// record churn metrics
+	now := time.Now()
+	var metrics []api.ContractSetChurnMetric
+	for _, fcid := range added {
+		metrics = append(metrics, api.ContractSetChurnMetric{
+			Name:      c.ap.state.cfg.Contracts.Set,
+			FCID:      fcid,
+			Direction: api.ChurnDirAdded,
+			Time:      now,
+		})
+	}
+	for _, fcid := range removed {
+		metrics = append(metrics, api.ContractSetChurnMetric{
+			Name:      c.ap.state.cfg.Contracts.Set,
+			FCID:      fcid,
+			Direction: api.ChurnDirAdded,
+			Reason:    removedReasons[fcid.String()],
+			Time:      now,
+		})
+	}
+	if len(metrics) > 0 {
+		if err := c.ap.bus.RecordContractSetChurnMetric(ctx, metrics...); err != nil {
+			c.logger.Error("failed to record contract set churn metric:", err)
+		}
 	}
 
 	// log the contract set after maintenance
