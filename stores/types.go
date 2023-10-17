@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -246,15 +247,21 @@ func (dt datetime) Value() (driver.Value, error) {
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (unixTimeMS) GormDataType() string {
-	return "int"
+	return "BIGINT"
 }
 
 // Scan scan value into balance, implements sql.Scanner interface.
 func (u *unixTimeMS) Scan(value interface{}) error {
 	var msec int64
+	var err error
 	switch value := value.(type) {
 	case int64:
 		msec = value
+	case []uint8:
+		msec, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+		}
 	default:
 		return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
 	}
@@ -271,7 +278,7 @@ func (u unixTimeMS) Value() (driver.Value, error) {
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (unsigned64) GormDataType() string {
-	return "int"
+	return "BIGINT"
 }
 
 // Scan scan value into balance, implements sql.Scanner interface.
