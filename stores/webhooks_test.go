@@ -8,10 +8,8 @@ import (
 )
 
 func TestWebhooks(t *testing.T) {
-	db, _, _, err := newTestSQLStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
 
 	wh1 := webhooks.Webhook{
 		Module: "foo",
@@ -25,10 +23,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Add hook.
-	if err := db.AddWebhook(wh1); err != nil {
+	if err := ss.AddWebhook(wh1); err != nil {
 		t.Fatal(err)
 	}
-	whs, err := db.Webhooks()
+	whs, err := ss.Webhooks()
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 1 {
@@ -38,10 +36,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Add it again. Should be a no-op.
-	if err := db.AddWebhook(wh1); err != nil {
+	if err := ss.AddWebhook(wh1); err != nil {
 		t.Fatal(err)
 	}
-	whs, err = db.Webhooks()
+	whs, err = ss.Webhooks()
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 1 {
@@ -51,10 +49,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Add another.
-	if err := db.AddWebhook(wh2); err != nil {
+	if err := ss.AddWebhook(wh2); err != nil {
 		t.Fatal(err)
 	}
-	whs, err = db.Webhooks()
+	whs, err = ss.Webhooks()
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 2 {
@@ -66,10 +64,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Remove one.
-	if err := db.DeleteWebhook(wh1); err != nil {
+	if err := ss.DeleteWebhook(wh1); err != nil {
 		t.Fatal(err)
 	}
-	whs, err = db.Webhooks()
+	whs, err = ss.Webhooks()
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 1 {
