@@ -192,6 +192,11 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 		SetUncleanShutdown() error
 	}
+
+	MetricsStore interface {
+		ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
+		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+	}
 )
 
 type bus struct {
@@ -205,6 +210,7 @@ type bus struct {
 	hdb      HostDB
 	as       AutopilotStore
 	ms       MetadataStore
+	mtrcs    MetricsStore
 	ss       SettingStore
 
 	eas EphemeralAccountStore
@@ -1781,8 +1787,56 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	}
 }
 
+func (b *bus) metricsHandlerPUT(jc jape.Context) {
+	key := jc.PathParam("key")
+	switch key {
+	case api.MetricContractSetChurn:
+		var req api.ContractSetChurnMetricRequestPUT
+		if jc.Decode(&req) != nil {
+			return
+		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
+			return
+		}
+	default:
+		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		return
+	}
+}
+
+func (b *bus) metricsHandlerGET(jc jape.Context) {
+	key := jc.PathParam("key")
+	var err error
+	switch key {
+	case api.MetricContractSetChurn:
+		var metrics []api.ContractSetChurnMetric
+		var opts api.ContractSetChurnMetricsQueryOpts
+		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
+			return
+		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
+			return
+		} else if jc.DecodeForm("name", &opts.Name) != nil {
+			return
+		} else if jc.DecodeForm("direction", &opts.Direction) != nil {
+			return
+		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
+			return
+		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
+			return
+		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
+	default:
+		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		return
+	}
+}
+
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
@@ -1794,6 +1848,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		hdb:              hdb,
 		as:               as,
 		ms:               ms,
+		mtrcs:            mtrcs,
 		ss:               ss,
 		eas:              eas,
 		contractLocks:    newContractLocks(),
@@ -2046,6 +2101,9 @@ func (b *bus) Handler() http.Handler {
 		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
 		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
 		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
+
+		"PUT /metrics/:key": b.metricsHandlerPUT,
+		"GET /metrics/:key": b.metricsHandlerGET,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
