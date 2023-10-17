@@ -194,6 +194,7 @@ type (
 	}
 
 	MetricsStore interface {
+		ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 		ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	}
@@ -1807,6 +1808,24 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
 	var err error
 	switch key {
+	case api.MetricContractSet:
+		var metrics []api.ContractSetMetric
+		var opts api.ContractSetMetricsQueryOpts
+		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
+			return
+		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
+			return
+		} else if jc.DecodeForm("name", &opts.Name) != nil {
+			return
+		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
+			return
+		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
 	case api.MetricContractSetChurn:
 		var metrics []api.ContractSetChurnMetric
 		var opts api.ContractSetChurnMetricsQueryOpts

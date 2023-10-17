@@ -569,6 +569,7 @@ const (
 	ChurnDirAdded   = "added"
 	ChurnDirRemoved = "removed"
 
+	MetricContractSet      = "contractset"
 	MetricContractSetChurn = "churn"
 )
 
