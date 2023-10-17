@@ -925,6 +925,7 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 					hostKey:      publicKey(hostKey),
 					announcement: ha,
 				})
+				ss.unappliedHostKeys[hostKey] = struct{}{}
 			})
 		}
 
