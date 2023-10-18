@@ -1993,8 +1993,16 @@ func TestBusRecordedMetrics(t *testing.T) {
 	}
 
 	// Get contract metrics.
-	cMetrics, err := cluster.Bus.ContractMetrics(context.Background(), api.ContractMetricsQueryOpts{})
-	cluster.tt.OK(err)
+	var cMetrics []api.ContractMetric
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		// Retry fetching metrics since they are buffered.
+		cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), api.ContractMetricsQueryOpts{})
+		cluster.tt.OK(err)
+		if len(cMetrics) != 1 {
+			return fmt.Errorf("expected 1 metric, got %v", len(cMetrics))
+		}
+		return nil
+	})
 
 	if len(cMetrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
