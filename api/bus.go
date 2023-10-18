@@ -574,7 +574,7 @@ type (
 	ContractSetMetric struct {
 		Contracts int       `json:"contracts"`
 		Name      string    `json:"name"`
-		Time      time.Time `json:"time"`
+		Timestamp time.Time `json:"timestamp"`
 	}
 
 	ContractSetMetricsQueryOpts struct {
@@ -588,7 +588,7 @@ type (
 		FCID      types.FileContractID `json:"fcid"`
 		Name      string               `json:"name"`
 		Reason    string               `json:"reason"`
-		Time      time.Time            `json:"time"`
+		Timestamp time.Time            `json:"timestamp"`
 	}
 
 	ContractSetChurnMetricsQueryOpts struct {

@@ -120,7 +120,7 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts api.ContractSetM
 		resp[i] = api.ContractSetMetric{
 			Contracts: metrics[i].Contracts,
 			Name:      metrics[i].Name,
-			Time:      time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil
@@ -149,7 +149,7 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.Contrac
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
 		return scopeTimeRange(tx, opts.After, opts.Before)
 	}).
-		Order("time ASC").
+		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -170,7 +170,7 @@ func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, opts api.Contrac
 			FCID:      types.FileContractID(metrics[i].FCID),
 			Name:      metrics[i].Name,
 			Reason:    metrics[i].Reason,
-			Time:      time.Time(metrics[i].Time).UTC(),
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil
@@ -182,6 +182,6 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, t time.Time
 		FCID:      fileContractID(fcid),
 		Name:      set,
 		Reason:    reason,
-		Time:      unixTimeMS(t),
+		Timestamp: unixTimeMS(t),
 	}).Error
 }
