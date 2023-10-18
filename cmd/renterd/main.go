@@ -352,8 +352,8 @@ func main() {
 			panic(err)
 		}
 
-		address := privKey.PublicKey().StandardAddress()
-		fmt.Println("Wallet", address)
+		address := privKey.PublicKey().StandardAddress().String()
+		fmt.Println("Wallet funding address:", address[5:])
 		comparePhrase(newPhrase)
 
 		return
