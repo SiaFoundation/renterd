@@ -1944,14 +1944,13 @@ func TestMultipartUploads(t *testing.T) {
 	}
 }
 
-func TestRecordContractSetAndChurnMetric(t *testing.T) {
+func TestBusRecordedMetrics(t *testing.T) {
 	startTime := time.Now()
 
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: 1,
+	})
 	defer cluster.Shutdown()
-
-	// Add 1 host.
-	cluster.AddHostsBlocking(1)
 
 	// Get contract set metrics.
 	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
@@ -1991,5 +1990,35 @@ func TestRecordContractSetAndChurnMetric(t *testing.T) {
 		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
 	} else if !m.Time.After(startTime) {
 		t.Fatal("expected time to be after start time")
+	}
+
+	// Get contract metrics.
+	cMetrics, err := cluster.Bus.ContractMetrics(context.Background(), api.ContractMetricsQueryOpts{})
+	cluster.tt.OK(err)
+
+	if len(cMetrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
+	} else if m := cMetrics[0]; !startTime.Before(m.Time) {
+		t.Fatalf("expected time to be after start time, got %v", m.Time)
+	} else if m.FCID == (types.FileContractID{}) {
+		t.Fatal("expected non-zero FCID")
+	} else if m.Host == (types.PublicKey{}) {
+		t.Fatal("expected non-zero Host")
+	} else if m.RemainingCollateral == (types.Currency{}) {
+		t.Fatal("expected non-zero RemainingCollateral")
+	} else if m.RemainingFunds == (types.Currency{}) {
+		t.Fatal("expected non-zero RemainingFunds")
+	} else if m.RevisionNumber == 0 {
+		t.Fatal("expected non-zero RevisionNumber")
+	} else if !m.UploadSpending.IsZero() {
+		t.Fatal("expected zero UploadSpending")
+	} else if !m.DownloadSpending.IsZero() {
+		t.Fatal("expected zero DownloadSpending")
+	} else if m.FundAccountSpending == (types.Currency{}) {
+		t.Fatal("expected non-zero FundAccountSpending")
+	} else if !m.DeleteSpending.IsZero() {
+		t.Fatal("expected zero DeleteSpending")
+	} else if !m.ListSpending.IsZero() {
+		t.Fatal("expected zero ListSpending")
 	}
 }
