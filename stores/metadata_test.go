@@ -673,6 +673,7 @@ func TestRenewedContract(t *testing.T) {
 		ContractCommon: ContractCommon{
 			FCID: fileContractID(fcid1),
 
+			ContractPrice:  currency(oldContractPrice),
 			TotalCost:      currency(oldContractTotal),
 			ProofHeight:    0,
 			RevisionHeight: 0,
