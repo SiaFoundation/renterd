@@ -53,6 +53,9 @@ type (
 		ContractID     types.FileContractID `json:"contractID"`
 		RevisionNumber uint64               `json:"revisionNumber"`
 		Size           uint64               `json:"size"`
+
+		MissedHostPayout  types.Currency `json:"missedHostPayout"`
+		ValidRenterPayout types.Currency `json:"validRenterPayout"`
 	}
 
 	// An ArchivedContract contains all information about a contract with a host

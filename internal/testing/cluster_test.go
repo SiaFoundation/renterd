@@ -1238,11 +1238,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	// form 2 more contracts with the same host
 	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	tt.OK(err)
-	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight)
+	c2, err := cluster.Bus.AddContract(context.Background(), rev2, types.ZeroCurrency, c.TotalCost, c.StartHeight)
 	tt.OK(err)
 	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	tt.OK(err)
-	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight)
+	c3, err := cluster.Bus.AddContract(context.Background(), rev3, types.ZeroCurrency, c.TotalCost, c.StartHeight)
 	tt.OK(err)
 
 	// create a contract set with all 3 contracts

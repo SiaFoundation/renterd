@@ -48,6 +48,7 @@ type (
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
+		ContractPrice  currency
 		TotalCost      currency
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
@@ -624,10 +625,10 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 	return buffers, nil
 }
 
-func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
+func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
 	var added dbContract
 	if err = s.retryTransaction(func(tx *gorm.DB) error {
-		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
+		added, err = addContract(tx, c, contractPrice, totalCost, startHeight, types.FileContractID{})
 		return err
 	}); err != nil {
 		return
@@ -659,7 +660,7 @@ func (s *SQLStore) Contracts(ctx context.Context) ([]api.ContractMetadata, error
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
 	var renewed dbContract
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
@@ -681,7 +682,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, contractPrice, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
 		newContract.Model = oldContract.Model
 		newContract.CreatedAt = time.Now()
 		err = tx.Save(&newContract).Error
@@ -1139,49 +1140,82 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	defer s.spendingMu.Unlock()
 
 	squashedRecords := make(map[types.FileContractID]api.ContractSpending)
-	latestRevision := make(map[types.FileContractID]uint64)
-	latestSize := make(map[types.FileContractID]uint64)
+	latestValues := make(map[types.FileContractID]struct {
+		revision          uint64
+		size              uint64
+		missedHostPayout  types.Currency
+		validRenterPayout types.Currency
+	})
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
-		if r.RevisionNumber > latestRevision[r.ContractID] {
-			latestRevision[r.ContractID] = r.RevisionNumber
-			latestSize[r.ContractID] = r.Size
+		v := latestValues[r.ContractID]
+		if r.RevisionNumber > latestValues[r.ContractID].revision {
+			v.revision = r.RevisionNumber
+			v.size = r.Size
+			v.missedHostPayout = r.MissedHostPayout
+			v.validRenterPayout = r.ValidRenterPayout
+			latestValues[r.ContractID] = v
 		}
 	}
+	metrics := make([]api.ContractMetric, 0, len(squashedRecords))
 	for fcid, newSpending := range squashedRecords {
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			var contract dbContract
 			err := tx.Model(&dbContract{}).
 				Where("fcid = ?", fileContractID(fcid)).
+				Joins("Host").
 				Take(&contract).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil // contract not found, continue with next one
 			} else if err != nil {
 				return err
 			}
+
+			remainingCollateral := types.ZeroCurrency
+			if mhp := latestValues[fcid].missedHostPayout; types.Currency(contract.ContractPrice).Cmp(mhp) <= 0 {
+				remainingCollateral = types.Currency(contract.ContractPrice).Sub(mhp)
+			}
+			m := api.ContractMetric{
+				Time:                time.Now(),
+				FCID:                fcid,
+				Host:                types.PublicKey(contract.Host.PublicKey),
+				RemainingCollateral: remainingCollateral,
+				RemainingFunds:      latestValues[fcid].validRenterPayout,
+				RevisionNumber:      latestValues[fcid].revision,
+				UploadSpending:      types.Currency(contract.UploadSpending).Add(newSpending.Uploads),
+				DownloadSpending:    types.Currency(contract.DownloadSpending).Add(newSpending.Downloads),
+				FundAccountSpending: types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount),
+				DeleteSpending:      types.Currency(contract.DeleteSpending).Add(newSpending.Deletions),
+				ListSpending:        types.Currency(contract.ListSpending).Add(newSpending.SectorRoots),
+			}
+			metrics = append(metrics, m)
+
 			updates := make(map[string]interface{})
 			if !newSpending.Uploads.IsZero() {
-				updates["upload_spending"] = currency(types.Currency(contract.UploadSpending).Add(newSpending.Uploads))
+				updates["upload_spending"] = currency(m.UploadSpending)
 			}
 			if !newSpending.Downloads.IsZero() {
-				updates["download_spending"] = currency(types.Currency(contract.DownloadSpending).Add(newSpending.Downloads))
+				updates["download_spending"] = currency(m.DownloadSpending)
 			}
 			if !newSpending.FundAccount.IsZero() {
-				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
+				updates["fund_account_spending"] = currency(m.FundAccountSpending)
 			}
 			if !newSpending.Deletions.IsZero() {
-				updates["delete_spending"] = currency(types.Currency(contract.DeleteSpending).Add(newSpending.Deletions))
+				updates["delete_spending"] = currency(m.DeleteSpending)
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates["list_spending"] = currency(types.Currency(contract.ListSpending).Add(newSpending.SectorRoots))
+				updates["list_spending"] = currency(m.ListSpending)
 			}
-			updates["revision_number"] = latestRevision[fcid]
-			updates["size"] = latestSize[fcid]
+			updates["revision_number"] = latestValues[fcid].revision
+			updates["size"] = latestValues[fcid].size
 			return tx.Model(&contract).Updates(updates).Error
 		})
 		if err != nil {
 			return err
 		}
+	}
+	if err := s.RecordContractMetric(ctx, metrics...); err != nil {
+		s.logger.Errorw("failed to record contract metrics", "err", err)
 	}
 	return nil
 }
@@ -2056,7 +2090,7 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
-func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64) dbContract {
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, contractPrice, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64) dbContract {
 	return dbContract{
 		HostID: hostID,
 
@@ -2064,6 +2098,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 			FCID:        fileContractID(fcid),
 			RenewedFrom: fileContractID(renewedFrom),
 
+			ContractPrice:  currency(contractPrice),
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
 			Size:           size,
@@ -2081,7 +2116,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 }
 
 // addContract adds a contract to the store.
-func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
+func addContract(tx *gorm.DB, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
 	fcid := c.ID()
 
 	// Find host.
@@ -2093,7 +2128,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
+	contract := newContract(host.ID, fcid, renewedFrom, contractPrice, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error

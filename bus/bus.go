@@ -108,8 +108,8 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
+		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -914,7 +914,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
+	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
@@ -935,7 +935,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
@@ -1795,13 +1795,6 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 func (b *bus) metricsHandlerPUT(jc jape.Context) {
 	key := jc.PathParam("key")
 	switch key {
-	case api.MetricContract:
-		var req api.ContractMetricRequestPUT
-		if jc.Decode(&req) != nil {
-			return
-		} else if jc.Check("failed to record contract metric", b.mtrcs.RecordContractMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
 	case api.MetricContractSetChurn:
 		var req api.ContractSetChurnMetricRequestPUT
 		if jc.Decode(&req) != nil {

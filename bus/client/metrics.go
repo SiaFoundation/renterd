@@ -99,9 +99,3 @@ func (c *Client) ContractMetrics(ctx context.Context, opts api.ContractMetricsQu
 	}
 	return resp, nil
 }
-
-func (c *Client) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
-	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/metrics/%s", api.MetricContract), api.ContractMetricRequestPUT{
-		Metrics: metrics,
-	})
-}
