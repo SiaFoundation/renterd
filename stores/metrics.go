@@ -15,7 +15,7 @@ type (
 	dbContractMetric struct {
 		Model
 
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		FCID fileContractID `gorm:"index;size:32;NOT NULL"`
 		Host publicKey      `gorm:"index;size:32;NOT NULL"`
@@ -43,7 +43,7 @@ type (
 	// the bus every time the set is updated.
 	dbContractSetMetric struct {
 		Model
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		Name      string `gorm:"index;NOT NULL"`
 		Contracts int    `gorm:"index;NOT NULL"`
@@ -54,7 +54,7 @@ type (
 	// updating the set. e.g. the autopilot.
 	dbContractSetChurnMetric struct {
 		Model
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		Name      string         `gorm:"index;NOT NULL"`
 		FCID      fileContractID `gorm:"index;size:32;NOT NULL"`
@@ -67,7 +67,7 @@ type (
 	// reported by workers.
 	dbPerformanceMetric struct {
 		Model
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		Action   string    `gorm:"index;NOT NULL"`
 		Host     publicKey `gorm:"index;size:32;NOT NULL"`
@@ -119,7 +119,7 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts api.ContractSetM
 		resp[i] = api.ContractSetMetric{
 			Contracts: metrics[i].Contracts,
 			Name:      metrics[i].Name,
-			Time:      time.Time(metrics[i].Time).UTC(),
+			Time:      time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil
@@ -129,6 +129,6 @@ func (s *SQLStore) RecordContractSetMetric(ctx context.Context, t time.Time, set
 	return s.dbMetrics.Create(&dbContractSetMetric{
 		Contracts: contracts,
 		Name:      set,
-		Time:      unixTimeMS(t),
+		Timestamp: unixTimeMS(t),
 	}).Error
 }
