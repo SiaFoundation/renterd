@@ -166,8 +166,6 @@ func comparePhrase(newPhrase string) {
 
 	if newPhrase != phrase {
 		fmt.Println("Seed phrases do not match!")
-		fmt.Println("You entered:", phrase)
-		fmt.Println("Actual phrase:", newPhrase)
 		comparePhrase(newPhrase)
 	}
 	fmt.Println("Seed phrases match")
@@ -341,7 +339,6 @@ func main() {
 		log.Println("Build Date:", builddate)
 		return
 	} else if flag.Arg(0) == "seed" {
-		var seed [32]byte
 
 		fmt.Println("A new seed phrase has been generated below. Write it down and keep it safe.")
 		fmt.Println("Your seed phrase is the only way to recover your Siacoin. If you lose your seed phrase, you will also lose your Siacoin.")
@@ -350,11 +347,11 @@ func main() {
 		newPhrase := wallet.NewSeedPhrase()
 		fmt.Println("Seed phrase:", newPhrase)
 
-		if err := wallet.SeedFromPhrase(&seed, newPhrase); err != nil {
+		privKey, err := wallet.KeyFromPhrase(newPhrase)
+		if err != nil {
 			panic(err)
 		}
 
-		privKey := wallet.KeyFromSeed(&seed, 0)
 		address := privKey.PublicKey().StandardAddress()
 		fmt.Println("Wallet", address)
 		comparePhrase(newPhrase)
