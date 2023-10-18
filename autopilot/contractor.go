@@ -23,12 +23,6 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
-)
-
-var (
-	alertLowBalanceID    = frand.Entropy256() // constant until restarted
-	alertRenewalFailedID = frand.Entropy256() // constant until restarted
 )
 
 const (
@@ -392,10 +386,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// return whether the maintenance changed the contract set
-	return c.computeContractSetChanged(currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
+	return c.computeContractSetChanged(state.cfg.Contracts.Set, currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
 }
 
-func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
+func (c *contractor) computeContractSetChanged(name string, oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
 	// build some maps for easier lookups
 	previous := make(map[types.FileContractID]struct{})
 	for _, c := range oldSet {
@@ -464,19 +458,7 @@ func (c *contractor) computeContractSetChanged(oldSet []api.ContractMetadata, ne
 	)
 	hasChanged := len(added)+len(removed) > 0
 	if hasChanged {
-		err := c.ap.alerts.RegisterAlert(context.Background(), alerts.Alert{
-			ID:       frand.Entropy256(),
-			Severity: alerts.SeverityInfo,
-			Message:  fmt.Sprintf("The contract set has changed: %v contracts added and %v removed", len(added), len(removed)),
-			Data: map[string]any{
-				"additions": added,
-				"removals":  removedReasons,
-			},
-			Timestamp: time.Now(),
-		})
-		if err != nil {
-			logFn("failed to register alert", "error", err)
-		}
+		c.ap.RegisterAlert(context.Background(), newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
 	}
 	return hasChanged
 }
@@ -536,20 +518,9 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		} else if bh+renewWindow >= endHeight(cfg, period) {
 			severity = alerts.SeverityWarning
 		}
-
-		err = c.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-			ID:       alertLowBalanceID,
-			Severity: severity,
-			Message:  "wallet is low on funds",
-			Data: map[string]any{
-				"address": state.address,
-				"balance": balance,
-			},
-			Timestamp: time.Now(),
-		})
-		if err != nil {
-			l.Errorf("failed to register alert: err %v", err)
-		}
+		c.ap.RegisterAlert(ctx, newAccountLowBalanceAlert(state.address, balance, severity))
+	} else {
+		c.ap.DismissAlert(ctx, alertLowBalanceID)
 	}
 
 	// pending maintenance transaction - nothing to do
@@ -1002,28 +973,20 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 		}
 
 		// renew and add if it succeeds or if its usable
+		contract := toRenew[i].contract.ContractMetadata
 		renewed, proceed, err := c.renewContract(ctx, w, toRenew[i], budget)
-		if err == nil {
-			renewals = append(renewals, renewal{from: toRenew[i].contract.ID, to: renewed.ID, ci: toRenew[i]})
-		} else if toRenew[i].usable {
-			toKeep = append(toKeep, toRenew[i])
+		if err != nil {
+			c.ap.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
+			if toRenew[i].usable {
+				toKeep = append(toKeep, toRenew[i])
+			}
+		} else {
+			c.ap.DismissAlert(ctx, alertIDForContract(alertRenewalFailedID, contract))
+			renewals = append(renewals, renewal{from: contract.ID, to: renewed.ID, ci: toRenew[i]})
 		}
 
 		// break if we don't want to proceed
 		if !proceed {
-			rerr := c.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-				ID:       alertRenewalFailedID,
-				Severity: alerts.SeverityCritical,
-				Message:  fmt.Sprintf("Contract renewals were interrupted due to latest error: %v", err),
-				Data: map[string]interface{}{
-					"contractID": toRenew[i].contract.ID.String(),
-					"hostKey":    toRenew[i].contract.HostKey.String(),
-				},
-				Timestamp: time.Now(),
-			})
-			if rerr != nil {
-				c.logger.Errorf("failed to register alert: err %v", rerr)
-			}
 			break
 		}
 	}

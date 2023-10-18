@@ -16,14 +16,11 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 var errMaxDriftExceeded = errors.New("drift on account is too large")
 
 var (
-	alertAccountRefillID = frand.Entropy256() // constant across restarts
-
 	minBalance  = types.Siacoins(1).Div64(2).Big()
 	maxBalance  = types.Siacoins(1)
 	maxNegDrift = new(big.Int).Neg(types.Siacoins(10).Big())
@@ -158,44 +155,29 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata, inSet bool) {
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer cancel()
 				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, a.ap.bus, w, workerID, contract)
-				shouldLog := rerr != nil && (inSet || rerr.Is(errMaxDriftExceeded))
-				if shouldLog {
-					a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
-				} else if err == nil && refilled {
-					a.l.Infow("Successfully funded account",
-						"account", accountID,
-						"host", contract.HostKey,
-						"balance", maxBalance,
-					)
+				if rerr != nil {
+					// register the alert on failure
+					a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
+					if inSet || rerr.Is(errMaxDriftExceeded) {
+						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+					}
+				} else {
+					// dismiss alerts on success
+					a.ap.DismissAlert(ctx, alertIDForAccount(alertAccountRefillID, accountID))
+
+					// log success
+					if refilled {
+						a.l.Infow("Successfully funded account",
+							"account", accountID,
+							"host", contract.HostKey,
+							"balance", maxBalance,
+						)
+					}
 				}
 
-				// handle registering alert.
-				alertID := types.HashBytes(append(alertAccountRefillID[:], accountID[:]...))
-				if shouldLog {
-					data := map[string]interface{}{
-						"accountID":  accountID.String(),
-						"contractID": contract.ID.String(),
-						"hostKey":    contract.HostKey.String(),
-					}
-					for i := 0; i < len(rerr.keysAndValues); i += 2 {
-						data[fmt.Sprint(rerr.keysAndValues[i])] = rerr.keysAndValues[i+1]
-					}
-					err := a.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-						ID:        alertID,
-						Severity:  alerts.SeverityError,
-						Message:   fmt.Sprintf("failed to refill account: %v", rerr),
-						Data:      data,
-						Timestamp: time.Now(),
-					})
-					if err != nil {
-						a.ap.logger.Errorf("failed to register alert: %v", err)
-					}
-				} else if err := a.ap.alerts.DismissAlerts(ctx, alertID); err != nil {
-					a.ap.logger.Errorf("failed to dismiss alert: %v", err)
-				}
 				a.markRefillDone(workerID, contract.HostKey)
-				cancel()
 			}(c, inSet)
 		}
 	}
@@ -262,8 +244,8 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter,
 	// expected.
 	if account.Drift.Cmp(maxNegDrift) < 0 {
 		rerr = wrapErr(fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded),
-			"account", account.ID,
-			"host", contract.HostKey,
+			"accountID", account.ID,
+			"hostKey", contract.HostKey,
 			"balance", account.Balance,
 			"drift", account.Drift,
 		)
@@ -276,8 +258,8 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter,
 		err = w.RHPSync(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr)
 		if err != nil {
 			rerr = wrapErr(fmt.Errorf("failed to sync account's balance: %w", err),
-				"account", account.ID,
-				"host", contract.HostKey,
+				"accountID", account.ID,
+				"hostKey", contract.HostKey,
 			)
 			return
 		}
@@ -300,8 +282,8 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, am alerts.Alerter,
 	err = w.RHPFund(ctx, contract.ID, contract.HostKey, contract.HostIP, contract.SiamuxAddr, maxBalance)
 	if err != nil {
 		rerr = wrapErr(fmt.Errorf("failed to fund account: %w", err),
-			"account", account.ID,
-			"host", contract.HostKey,
+			"accountID", account.ID,
+			"hostKey", contract.HostKey,
 			"balance", account.Balance,
 			"expected", maxBalance,
 		)
