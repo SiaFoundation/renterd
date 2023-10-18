@@ -28,6 +28,10 @@ const (
 	maxSQLVars = 32000
 )
 
+var (
+	exprTRUE = gorm.Expr("TRUE")
+)
+
 type (
 	// Model defines the common fields of every table. Same as Model
 	// but excludes soft deletion since it breaks cascading deletes.
@@ -145,7 +149,7 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
 	}
-	dbMetrics, err := gorm.Open(conn, &gorm.Config{
+	dbMetrics, err := gorm.Open(connMetrics, &gorm.Config{
 		Logger: gormLogger, // custom logger
 	})
 	if err != nil {

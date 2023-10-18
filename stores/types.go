@@ -17,6 +17,7 @@ import (
 var zeroCurrency = currency(types.ZeroCurrency)
 
 type (
+	unixTimeMS     time.Time
 	datetime       time.Time
 	currency       types.Currency
 	fileContractID types.FileContractID
@@ -240,4 +241,29 @@ func (dt *datetime) Scan(value interface{}) error {
 // Value returns a datetime value, implements driver.Valuer interface.
 func (dt datetime) Value() (driver.Value, error) {
 	return (time.Time)(dt).Format(SQLiteTimestampFormats[0]), nil
+}
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (unixTimeMS) GormDataType() string {
+	return "BIGINT"
+}
+
+// Scan scan value into balance, implements sql.Scanner interface.
+func (u *unixTimeMS) Scan(value interface{}) error {
+	var msec int64
+	switch value := value.(type) {
+	case int64:
+		msec = value
+	default:
+		return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+	}
+
+	*u = unixTimeMS(time.UnixMilli(msec))
+	return nil
+}
+
+// Value returns a int64 value representing a unix timestamp in milliseconds,
+// implements driver.Valuer interface.
+func (u unixTimeMS) Value() (driver.Value, error) {
+	return time.Time(u).UnixMilli(), nil
 }

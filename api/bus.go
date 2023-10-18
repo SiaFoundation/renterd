@@ -564,3 +564,17 @@ func FormatETag(ETag string) string {
 func ObjectPathEscape(path string) string {
 	return url.PathEscape(strings.TrimPrefix(path, "/"))
 }
+
+type (
+	ContractSetMetric struct {
+		Contracts int       `json:"contracts"`
+		Name      string    `json:"name"`
+		Time      time.Time `json:"time"`
+	}
+
+	ContractSetMetricsQueryOpts struct {
+		Name   string
+		After  time.Time
+		Before time.Time
+	}
+)
