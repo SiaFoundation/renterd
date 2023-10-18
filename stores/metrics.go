@@ -83,10 +83,10 @@ func (dbPerformanceMetric) TableName() string      { return "performance" }
 
 func scopeTimeRange(tx *gorm.DB, after, before time.Time) *gorm.DB {
 	if after != (time.Time{}) {
-		tx = tx.Where("time > ?", unixTimeMS(after))
+		tx = tx.Where("timestamp > ?", unixTimeMS(after))
 	}
 	if before != (time.Time{}) {
-		tx = tx.Where("time <= ?", unixTimeMS(before))
+		tx = tx.Where("timestamp <= ?", unixTimeMS(before))
 	}
 	return tx
 }
