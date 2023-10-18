@@ -195,6 +195,10 @@ type (
 
 	MetricsStore interface {
 		ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
+
+		ContractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
+
 		ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	}
@@ -1791,6 +1795,13 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 func (b *bus) metricsHandlerPUT(jc jape.Context) {
 	key := jc.PathParam("key")
 	switch key {
+	case api.MetricContract:
+		var req api.ContractMetricRequestPUT
+		if jc.Decode(&req) != nil {
+			return
+		} else if jc.Check("failed to record contract metric", b.mtrcs.RecordContractMetric(jc.Request.Context(), req.Metrics...)) != nil {
+			return
+		}
 	case api.MetricContractSetChurn:
 		var req api.ContractSetChurnMetricRequestPUT
 		if jc.Decode(&req) != nil {
@@ -1808,6 +1819,26 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
 	var err error
 	switch key {
+	case api.MetricContract:
+		var metrics []api.ContractMetric
+		var opts api.ContractMetricsQueryOpts
+		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
+			return
+		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
+			return
+		} else if jc.DecodeForm("fcid", &opts.FCID) != nil {
+			return
+		} else if jc.DecodeForm("host", &opts.Host) != nil {
+			return
+		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
+			return
+		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
 	case api.MetricContractSet:
 		var metrics []api.ContractSetMetric
 		var opts api.ContractSetMetricsQueryOpts

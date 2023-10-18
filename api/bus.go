@@ -571,11 +571,15 @@ const (
 
 	MetricContractSet      = "contractset"
 	MetricContractSetChurn = "churn"
+	MetricContract         = "contract"
 )
 
 type (
 	ContractSetChurnMetricRequestPUT struct {
 		Metrics []ContractSetChurnMetric `json:"metrics"`
+	}
+	ContractMetricRequestPUT struct {
+		Metrics []ContractMetric `json:"metrics"`
 	}
 )
 
