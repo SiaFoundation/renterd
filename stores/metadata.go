@@ -1173,7 +1173,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 
 			remainingCollateral := types.ZeroCurrency
 			if mhp := latestValues[fcid].missedHostPayout; types.Currency(contract.ContractPrice).Cmp(mhp) <= 0 {
-				remainingCollateral = types.Currency(contract.ContractPrice).Sub(mhp)
+				remainingCollateral = mhp.Sub(types.Currency(contract.ContractPrice))
 			}
 			m := api.ContractMetric{
 				Time:                time.Now(),
