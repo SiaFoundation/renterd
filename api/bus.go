@@ -565,16 +565,37 @@ func ObjectPathEscape(path string) string {
 	return url.PathEscape(strings.TrimPrefix(path, "/"))
 }
 
+const (
+	ChurnDirAdded   = "added"
+	ChurnDirRemoved = "removed"
+)
+
 type (
 	ContractSetMetric struct {
 		Contracts int       `json:"contracts"`
 		Name      string    `json:"name"`
-		Time      time.Time `json:"time"`
+		Timestamp time.Time `json:"timestamp"`
 	}
 
 	ContractSetMetricsQueryOpts struct {
 		Name   string
 		After  time.Time
 		Before time.Time
+	}
+
+	ContractSetChurnMetric struct {
+		Direction string               `json:"direction"`
+		FCID      types.FileContractID `json:"fcid"`
+		Name      string               `json:"name"`
+		Reason    string               `json:"reason"`
+		Timestamp time.Time            `json:"timestamp"`
+	}
+
+	ContractSetChurnMetricsQueryOpts struct {
+		Name      string
+		After     time.Time
+		Before    time.Time
+		Direction string
+		Reason    string
 	}
 )
