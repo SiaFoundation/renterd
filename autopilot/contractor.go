@@ -16,7 +16,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/tracing"
@@ -499,7 +498,6 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		l.Warnf("wallet maintenance skipped, fetching consensus state failed with err: %v", err)
 		return err
 	}
-	bh := cs.BlockHeight
 
 	// fetch wallet balance
 	wallet, err := b.Wallet(ctx)
@@ -511,14 +509,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 
 	// register an alert if balance is low
 	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
-		// increase severity as we progress through renew window
-		severity := alerts.SeverityInfo
-		if bh+renewWindow/2 >= endHeight(cfg, period) {
-			severity = alerts.SeverityCritical
-		} else if bh+renewWindow >= endHeight(cfg, period) {
-			severity = alerts.SeverityWarning
-		}
-		c.ap.RegisterAlert(ctx, newAccountLowBalanceAlert(state.address, balance, severity))
+		c.ap.RegisterAlert(ctx, newAccountLowBalanceAlert(state.address, balance, cs.BlockHeight, renewWindow, endHeight(cfg, period)))
 	} else {
 		c.ap.DismissAlert(ctx, alertLowBalanceID)
 	}

@@ -48,7 +48,14 @@ func (ap *Autopilot) DismissAlert(ctx context.Context, id types.Hash256) {
 	}
 }
 
-func newAccountLowBalanceAlert(address types.Address, balance types.Currency, severity alerts.Severity) alerts.Alert {
+func newAccountLowBalanceAlert(address types.Address, balance types.Currency, bh, renewWindow, endHeight uint64) alerts.Alert {
+	severity := alerts.SeverityInfo
+	if bh+renewWindow/2 >= endHeight {
+		severity = alerts.SeverityCritical
+	} else if bh+renewWindow >= endHeight {
+		severity = alerts.SeverityWarning
+	}
+
 	return alerts.Alert{
 		ID:       alertLowBalanceID,
 		Severity: severity,
@@ -82,9 +89,14 @@ func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err 
 }
 
 func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bool, err error) alerts.Alert {
+	severity := alerts.SeverityWarning
+	if interrupted {
+		severity = alerts.SeverityCritical
+	}
+
 	return alerts.Alert{
 		ID:       alertIDForContract(alertRenewalFailedID, contract),
-		Severity: alerts.SeverityCritical,
+		Severity: severity,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
 			"error":               err,
@@ -141,7 +153,7 @@ func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) al
 
 func newRefreshHealthFailedAlert(err error) alerts.Alert {
 	return alerts.Alert{
-		ID:       randomAlertID(), // TODO: could be constant between runs
+		ID:       randomAlertID(),
 		Severity: alerts.SeverityCritical,
 		Message:  "Health refresh failed",
 		Data: map[string]interface{}{
