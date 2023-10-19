@@ -48,7 +48,7 @@ func (ap *Autopilot) DismissAlert(ctx context.Context, id types.Hash256) {
 	}
 }
 
-func newAccountLowBalanceAlert(address types.Address, balance types.Currency, bh, renewWindow, endHeight uint64) alerts.Alert {
+func newAccountLowBalanceAlert(address types.Address, balance, allowance types.Currency, bh, renewWindow, endHeight uint64) alerts.Alert {
 	severity := alerts.SeverityInfo
 	if bh+renewWindow/2 >= endHeight {
 		severity = alerts.SeverityCritical
@@ -61,8 +61,10 @@ func newAccountLowBalanceAlert(address types.Address, balance types.Currency, bh
 		Severity: severity,
 		Message:  "Wallet is low on funds",
 		Data: map[string]any{
-			"address": address,
-			"balance": balance,
+			"address":   address,
+			"balance":   balance,
+			"allowance": allowance,
+			"hint":      fmt.Sprintf("The current wallet balance of %v is less than the configured allowance of %v. Ideally, a wallet holds at least one allowance worth of funds to make sure it can renew all its contracts.", balance, allowance),
 		},
 		Timestamp: time.Now(),
 	}
@@ -118,6 +120,7 @@ func newContractSetChangeAlert(name string, added, removed int, removedReasons m
 			"added":    added,
 			"removed":  removed,
 			"removals": removedReasons,
+			"hint":     "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set.",
 		},
 		Timestamp: time.Now(),
 	}
@@ -146,6 +149,7 @@ func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) al
 			"error":   err,
 			"health":  health,
 			"slabKey": slab.Key.String(),
+			"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
 		},
 		Timestamp: time.Now(),
 	}

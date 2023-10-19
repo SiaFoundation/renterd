@@ -509,7 +509,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 
 	// register an alert if balance is low
 	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
-		c.ap.RegisterAlert(ctx, newAccountLowBalanceAlert(state.address, balance, cs.BlockHeight, renewWindow, endHeight(cfg, period)))
+		c.ap.RegisterAlert(ctx, newAccountLowBalanceAlert(state.address, balance, cfg.Contracts.Allowance, cs.BlockHeight, renewWindow, endHeight(cfg, period)))
 	} else {
 		c.ap.DismissAlert(ctx, alertLowBalanceID)
 	}
