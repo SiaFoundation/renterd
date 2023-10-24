@@ -1098,7 +1098,7 @@ func (s *slabDownload) finish() ([][]byte, error) {
 				unused++
 			}
 		}
-		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d unused=%d errors=%w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), unused, s.errs)
+		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d unused=%d errors=%d %w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), unused, len(s.errs), s.errs)
 	}
 	return s.sectors, nil
 }

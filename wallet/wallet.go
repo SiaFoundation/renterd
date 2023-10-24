@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/siad/modules"
-	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -273,16 +272,6 @@ func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
 
 // SignTransaction adds a signature to each of the specified inputs.
 func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
-	// NOTE: siad uses different hardfork heights when -tags=testing is set,
-	// so we have to alter cs accordingly.
-	// TODO: remove this
-	switch {
-	case cs.Index.Height >= uint64(stypes.FoundationHardforkHeight):
-		cs.Index.Height = 298000
-	case cs.Index.Height >= uint64(stypes.ASICHardforkHeight):
-		cs.Index.Height = 179000
-	}
-
 	for _, id := range toSign {
 		ts := types.TransactionSignature{
 			ParentID:       id,

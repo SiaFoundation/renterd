@@ -33,10 +33,6 @@ const (
 	// database per batch. Empirically tested to verify that this is a value
 	// that performs reasonably well.
 	hostRetrievalBatchSize = 10000
-
-	// interactionInsertionBatchSize is the number of interactions we insert at
-	// once.
-	interactionInsertionBatchSize = 100
 )
 
 var (
@@ -919,16 +915,20 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 
 	var newAnnouncements []announcement
 	for _, sb := range cc.AppliedBlocks {
-		// Fetch announcements and add them to the queue.
 		var b types.Block
-		convertToCore(sb, &b)
-		hostdb.ForEachAnnouncement(b, height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
-			newAnnouncements = append(newAnnouncements, announcement{
-				hostKey:      publicKey(hostKey),
-				announcement: ha,
+		convertToCore(sb, (*types.V1Block)(&b))
+
+		// Process announcements, but only if they are not too old.
+		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
+			hostdb.ForEachAnnouncement(types.Block(b), height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+				newAnnouncements = append(newAnnouncements, announcement{
+					hostKey:      publicKey(hostKey),
+					announcement: ha,
+				})
+				ss.unappliedHostKeys[hostKey] = struct{}{}
 			})
-			ss.unappliedHostKeys[hostKey] = struct{}{}
-		})
+		}
+
 		// Update RevisionHeight and RevisionNumber for our contracts.
 		for _, txn := range sb.Transactions {
 			for _, rev := range txn.FileContractRevisions {

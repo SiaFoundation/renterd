@@ -506,8 +506,8 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		}
 
 		// check funds
-		cost := rhpv2.RPCSectorRootsCost(settings, n)
-		if rev.RenterFunds().Cmp(cost) < 0 {
+		price, _ := settings.RPCSectorRootsCost(offset, n).Total()
+		if rev.RenterFunds().Cmp(price) < 0 {
 			return nil, ErrInsufficientFunds
 		}
 
@@ -518,7 +518,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		rev.Revision.RevisionNumber++
 
 		// update the revision outputs
-		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
+		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, price, types.ZeroCurrency)
 		if err != nil {
 			return nil, err
 		}
@@ -563,7 +563,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		offset += n
 
 		// record spending
-		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: cost})
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: price})
 	}
 	return
 }
