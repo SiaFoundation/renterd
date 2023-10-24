@@ -205,7 +205,7 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
 		return scopeTimeRange(tx, opts.After, opts.Before)
 	}).
-		Order("time ASC").
+		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
