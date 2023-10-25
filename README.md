@@ -45,8 +45,16 @@ with more configuration options.
 From within the root of the repo run the following command to build an image of
 `renterd` tagged `renterd`.
 
-```bash
-docker build -t renterd .
+### Production
+
+```sh
+docker build -t renterd:latest -f ./docker/Dockerfile .
+```
+
+### Testnet
+
+```sh
+docker build -t renterd:latest-testnet -f ./docker/Dockerfile.testnet .
 ```
 
 ### Run Container
@@ -54,8 +62,16 @@ docker build -t renterd .
 Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
 
+### Production
+
 ```bash
 docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp <IMAGE_ID>
+```
+
+### Testnet
+
+```bash
+docker run -d --name renterd-testnet -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9880:9880/tcp -p :9881:9881/tcp renterd:latest-testnet
 ```
 
 ## Usage Guidelines
