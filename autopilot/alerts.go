@@ -72,7 +72,7 @@ func newAccountLowBalanceAlert(address types.Address, balance, allowance types.C
 
 func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err refillError) alerts.Alert {
 	data := map[string]interface{}{
-		"error":      err,
+		"error":      err.Error(),
 		"accountID":  id.String(),
 		"contractID": contract.ID.String(),
 		"hostKey":    contract.HostKey.String(),
@@ -101,7 +101,7 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 		Severity: severity,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
-			"error":               err,
+			"error":               err.Error(),
 			"renewalsInterrupted": interrupted,
 			"contractID":          contract.ID.String(),
 			"hostKey":             contract.HostKey.String(),
@@ -146,7 +146,7 @@ func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) al
 		Severity: severity,
 		Message:  "Slab migration failed",
 		Data: map[string]interface{}{
-			"error":   err,
+			"error":   err.Error(),
 			"health":  health,
 			"slabKey": slab.Key.String(),
 			"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
@@ -162,7 +162,7 @@ func newRefreshHealthFailedAlert(err error) alerts.Alert {
 		Message:  "Health refresh failed",
 		Data: map[string]interface{}{
 			"migrationsInterrupted": true,
-			"error":                 err,
+			"error":                 err.Error(),
 		},
 		Timestamp: time.Now(),
 	}

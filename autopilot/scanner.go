@@ -16,11 +16,9 @@ import (
 )
 
 const (
-	// TODO: make these configurable
 	scannerTimeoutInterval   = 10 * time.Minute
 	scannerTimeoutMinTimeout = time.Second * 5
 
-	// TODO: make these configurable
 	trackerMinDataPoints     = 25
 	trackerNumDataPoints     = 1000
 	trackerTimeoutPercentile = 99
@@ -40,6 +38,7 @@ type (
 		tracker *tracker
 		logger  *zap.SugaredLogger
 		ap      *Autopilot
+		wg      sync.WaitGroup
 
 		scanBatchSize         uint64
 		scanThreads           uint64
@@ -54,6 +53,7 @@ type (
 		scanningLastStart time.Time
 		timeout           time.Duration
 		timeoutLastUpdate time.Time
+		interruptScanChan chan struct{}
 	}
 	scanWorker interface {
 		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -137,6 +137,7 @@ func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads
 		logger: ap.logger.Named("scanner"),
 		ap:     ap,
 
+		interruptScanChan:     make(chan struct{}),
 		scanBatchSize:         scanBatchSize,
 		scanThreads:           scanThreads,
 		scanMinInterval:       scanMinInterval,
@@ -153,27 +154,54 @@ func (s *scanner) Status() (bool, time.Time) {
 	return s.scanning, s.scanningLastStart
 }
 
+func (s *scanner) isInterrupted() bool {
+	select {
+	case <-s.interruptScanChan:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) bool {
 	if s.ap.isStopped() {
 		return false
 	}
 
+	scanType := "host scan"
+	if force {
+		scanType = "forced scan"
+	}
+
 	s.mu.Lock()
-	if !force && (s.scanning || !s.isScanRequired()) {
+	if force {
+		close(s.interruptScanChan)
+		s.mu.Unlock()
+
+		s.logger.Infof("waiting for ongoing scan to complete")
+		s.wg.Wait()
+
+		s.mu.Lock()
+		s.interruptScanChan = make(chan struct{})
+	} else if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
 		return false
 	}
-
-	s.logger.Info("host scan started")
 	s.scanningLastStart = time.Now()
 	s.scanning = true
 	s.mu.Unlock()
 
-	maxDowntimeHours := s.ap.State().cfg.Hosts.MaxDowntimeHours
+	s.logger.Infof("%s started", scanType)
+	maxDowntime := time.Duration(s.ap.State().cfg.Hosts.MaxDowntimeHours) * time.Hour
 
-	go func() {
+	s.wg.Add(1)
+	go func(st string) {
+		defer s.wg.Done()
+
+		var interrupted bool
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
-			if s.ap.isStopped() {
+			if s.ap.s.isInterrupted() || s.ap.isStopped() {
+				interrupted = true
 				break
 			}
 			if resp.err != nil && !strings.Contains(resp.err.Error(), "connection refused") {
@@ -181,23 +209,21 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 			}
 		}
 
-		if !s.ap.isStopped() && maxDowntimeHours > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v hours", maxDowntimeHours)
-			maxDowntime := time.Hour * time.Duration(maxDowntimeHours)
+		if !interrupted && maxDowntime > 0 {
+			s.logger.Debugf("removing hosts that have been offline for more than %v", maxDowntime)
 			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)
-			if removed > 0 {
-				s.logger.Infof("removed %v offline hosts", removed)
-			}
 			if err != nil {
 				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
+			} else if removed > 0 {
+				s.logger.Infof("removed %v offline hosts", removed)
 			}
 		}
 
 		s.mu.Lock()
 		s.scanning = false
-		s.logger.Debugf("host scan finished after %v", time.Since(s.scanningLastStart))
+		s.logger.Debugf("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
-	}()
+	}(scanType)
 	return true
 }
 
@@ -284,9 +310,11 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				if err != nil {
 					break // abort
+				} else if !isErr(errors.New(scan.ScanError), errIOTimeout) && scan.Ping > 0 {
+					s.tracker.addDataPoint(time.Duration(scan.Ping))
 				}
+
 				respChan <- scanResp{req.hostKey, scan.Settings, err}
-				s.tracker.addDataPoint(time.Duration(scan.Ping))
 			}
 
 			if atomic.AddUint64(&liveThreads, ^uint64(0)) == 0 {
