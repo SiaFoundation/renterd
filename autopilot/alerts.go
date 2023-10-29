@@ -111,6 +111,11 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 }
 
 func newContractSetChangeAlert(name string, added, removed int, removedReasons map[string]string) alerts.Alert {
+	var hint string
+	if removed > 0 {
+		hint = "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set."
+	}
+
 	return alerts.Alert{
 		ID:       randomAlertID(),
 		Severity: alerts.SeverityInfo,
@@ -120,7 +125,7 @@ func newContractSetChangeAlert(name string, added, removed int, removedReasons m
 			"added":    added,
 			"removed":  removed,
 			"removals": removedReasons,
-			"hint":     "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set.",
+			"hint":     hint,
 		},
 		Timestamp: time.Now(),
 	}
