@@ -137,7 +137,8 @@ func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads
 		logger: ap.logger.Named("scanner"),
 		ap:     ap,
 
-		interruptScanChan:     make(chan struct{}),
+		interruptScanChan: make(chan struct{}),
+
 		scanBatchSize:         scanBatchSize,
 		scanThreads:           scanThreads,
 		scanMinInterval:       scanMinInterval,
@@ -200,7 +201,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 
 		var interrupted bool
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
-			if s.ap.s.isInterrupted() || s.ap.isStopped() {
+			if s.isInterrupted() || s.ap.isStopped() {
 				interrupted = true
 				break
 			}
