@@ -46,7 +46,7 @@ From within the root of the repo run the following command to build an image of
 `renterd` tagged `renterd`.
 
 ```bash
-docker build -t renterd .
+docker build -t renterd . -f docker/Dockerfile
 ```
 
 ### Run Container
