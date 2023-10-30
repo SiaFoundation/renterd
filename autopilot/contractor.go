@@ -168,6 +168,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, nil
 	}
 
+	// no maintenance if wallet is completely empty
+	wallet, err := c.ap.bus.Wallet(ctx)
+	if err != nil {
+		c.logger.Warnf("contract maintenance skipped, fetching wallet balance failed with err: %v", err)
+		return false, err
+	} else if wallet.Confirmed.IsZero() {
+		c.logger.Warnf("wallet maintenance skipped, wallet has insufficient balance %v", wallet.Confirmed)
+		return false, nil
+	}
+
 	// fetch current contract set
 	currentSet, err := c.ap.bus.ContractSetContracts(ctx, state.cfg.Contracts.Set)
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {

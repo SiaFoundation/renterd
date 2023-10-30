@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -33,7 +32,6 @@ func TestHostPruning(t *testing.T) {
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		autopilotCfg: &apCfg,
-		logger:       newTestLoggerCustom(zapcore.DebugLevel),
 	})
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -61,7 +59,7 @@ func TestHostPruning(t *testing.T) {
 	waitForAutopilotLoop := func() {
 		t.Helper()
 		var nTriggered int
-		tt.Retry(60, 500*time.Millisecond, func() error {
+		tt.Retry(10, 500*time.Millisecond, func() error {
 			triggered, err := a.Trigger(true)
 			tt.OK(err)
 			if triggered {
@@ -89,12 +87,10 @@ func TestHostPruning(t *testing.T) {
 	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.PublicKey().String()}, nil, false))
 
 	// remove it from the cluster manually
-	cluster.hosts = cluster.hosts[1:]
-	tt.OK(hosts[0].Close())
+	cluster.RemoveHost(h1)
 
 	// shut down the worker manually, this will flush any interactions
-	tt.OK(cluster.workerShutdownFns[1](context.Background()))
-	cluster.workerShutdownFns = cluster.workerShutdownFns[:1]
+	cluster.ShutdownWorker(context.Background())
 
 	// record 9 failed interactions, right before the pruning threshold, and
 	// wait for the autopilot loop to finish at least once

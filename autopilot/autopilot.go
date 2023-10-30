@@ -295,7 +295,6 @@ func (ap *Autopilot) Run() error {
 			// migration
 			ap.m.tryPerformMigrations(ctx, ap.workers)
 		})
-
 		select {
 		case <-ap.stopChan:
 			return nil
@@ -389,8 +388,10 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 }
 
 func (ap *Autopilot) blockUntilOnline() (online bool) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+
+	var once sync.Once
 
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -400,13 +401,15 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 
 		if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
+		} else if !online {
+			once.Do(func() { ap.logger.Info("autopilot is waiting to come online...") })
 		}
+
 		if err != nil || !online {
 			select {
 			case <-ap.stopChan:
 				return
 			case <-ticker.C:
-				ap.logger.Info("autopilot is waiting to come online")
 				continue
 			}
 		}
@@ -418,6 +421,8 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	var once sync.Once
+
 	for {
 		// try and fetch consensus
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -428,7 +433,10 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		// if an error occurred, or if we're not synced, we continue
 		if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
+		} else if !synced {
+			once.Do(func() { ap.logger.Info("autopilot is waiting for consensus to sync...") })
 		}
+
 		if err != nil || !synced {
 			blocked = true
 			select {
