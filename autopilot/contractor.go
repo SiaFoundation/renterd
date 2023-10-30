@@ -460,7 +460,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 		metrics = append(metrics, api.ContractSetChurnMetric{
 			Name:      c.ap.state.cfg.Contracts.Set,
 			FCID:      fcid,
-			Direction: api.ChurnDirAdded,
+			Direction: api.ChurnDirRemoved,
 			Reason:    removedReasons[fcid.String()],
 			Timestamp: now,
 		})

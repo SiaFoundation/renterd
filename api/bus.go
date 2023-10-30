@@ -592,8 +592,8 @@ type (
 
 		Name string
 
-		Offset int `json:"offset"`
-		Limit  int `json:"limit"`
+		Offset int
+		Limit  int
 	}
 
 	ContractSetChurnMetric struct {
@@ -612,8 +612,8 @@ type (
 		Direction string
 		Reason    string
 
-		Offset int `json:"offset"`
-		Limit  int `json:"limit"`
+		Offset int
+		Limit  int
 	}
 
 	PerformanceMetric struct {
@@ -633,8 +633,8 @@ type (
 		Origin   string
 		Duration time.Duration
 
-		Offset int `json:"offset"`
-		Limit  int `json:"limit"`
+		Offset int
+		Limit  int
 	}
 
 	ContractMetric struct {
