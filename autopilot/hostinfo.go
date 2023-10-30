@@ -6,6 +6,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 )
 
@@ -66,15 +67,45 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
+func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.Host) (hi hostInfo, found bool) {
+	// grab host details from cache
+	c.mu.Lock()
+	hi, found = c.cachedHostInfo[host.PublicKey]
+	storedData := c.cachedDataStored[host.PublicKey]
+	minScore := c.cachedMinScore
+	c.mu.Unlock()
+
+	// return early if the host info is not cached
+	if !found {
+		return
+	}
+
+	// try and refresh the host info if it got scanned in the mean time, this
+	// inconsistency would resolve itself but tyring to update it here improves
+	// first time user experience
+	if host.Scanned && hi.UnusableResult.notcompletingscan == 1 {
+		cs, err := c.ap.bus.ConsensusState(ctx)
+		if err != nil {
+			c.logger.Error("failed to fetch consensus state from bus: %v", err)
+		} else {
+			state := c.ap.State()
+			gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, storedData)
+			hi = hostInfo{
+				Usable:         isUsable,
+				UnusableResult: unusableResult,
+			}
+		}
+	}
+
+	return
+}
+
 func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerResponse, error) {
 	// declare helper to decide whether to keep a host.
 	if !isValidUsabilityFilterMode(usabilityMode) {
 		return nil, fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
 	}
-
-	c.mu.Lock()
-	hostInfo := c.cachedHostInfo
-	c.mu.Unlock()
 
 	keep := func(usable bool) bool {
 		switch usabilityMode {
@@ -115,7 +146,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 		// decide how many of the returned hosts to keep.
 		var keptHosts int
 		for _, host := range hosts {
-			hi, cached := hostInfo[host.PublicKey]
+			hi, cached := c.hostInfoFromCache(ctx, host)
 			if !cached {
 				// when the filterMode is "all" we include uncached hosts and
 				// set IsChecked = false.
