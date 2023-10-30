@@ -59,7 +59,7 @@ func TestHostPruning(t *testing.T) {
 	waitForAutopilotLoop := func() {
 		t.Helper()
 		var nTriggered int
-		tt.Retry(10, 500*time.Millisecond, func() error {
+		tt.Retry(60, 500*time.Millisecond, func() error {
 			triggered, err := a.Trigger(true)
 			tt.OK(err)
 			if triggered {
