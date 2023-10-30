@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -32,6 +33,7 @@ func TestHostPruning(t *testing.T) {
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		autopilotCfg: &apCfg,
+		logger:       newTestLoggerCustom(zapcore.DebugLevel),
 	})
 	defer cluster.Shutdown()
 	b := cluster.Bus
