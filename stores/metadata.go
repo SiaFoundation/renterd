@@ -952,7 +952,11 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	}
 
 	// Record the update.
-	err = s.RecordContractSetMetric(ctx, time.Now(), name, nContractsAfter)
+	err = s.RecordContractSetMetric(ctx, api.ContractSetMetric{
+		Name:      name,
+		Contracts: nContractsAfter,
+		Timestamp: time.Now(),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to record contract set metric: %w", err)
 	}

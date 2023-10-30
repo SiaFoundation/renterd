@@ -602,11 +602,11 @@ type (
 	}
 
 	PerformanceMetric struct {
-		Action   string          `json:"action"`
-		Host     types.PublicKey `json:"host"`
-		Reporter string          `json:"reporter"`
-		Duration time.Duration   `json:"duration"`
-		Time     time.Time       `json:"time"`
+		Action    string          `json:"action"`
+		Host      types.PublicKey `json:"host"`
+		Origin    string          `json:"origin"`
+		Duration  time.Duration   `json:"duration"`
+		Timestamp time.Time       `json:"timestamp"`
 	}
 
 	PerformanceMetricsQueryOpts struct {
@@ -615,7 +615,32 @@ type (
 
 		Action   string
 		Host     types.PublicKey
-		Reporter string
+		Origin   string
 		Duration time.Duration
+	}
+
+	ContractMetric struct {
+		Timestamp time.Time `json:"timestamp"`
+
+		FCID types.FileContractID `json:"fcid"`
+		Host types.PublicKey      `json:"host"`
+
+		RemainingCollateral types.Currency `json:"remainingCollateral"`
+		RemainingFunds      types.Currency `json:"remainingFunds"`
+		RevisionNumber      uint64         `json:"revisionNumber"`
+
+		UploadSpending      types.Currency `json:"uploadSpending"`
+		DownloadSpending    types.Currency `json:"downloadSpending"`
+		FundAccountSpending types.Currency `json:"fundAccountSpending"`
+		DeleteSpending      types.Currency `json:"deleteSpending"`
+		ListSpending        types.Currency `json:"listSpending"`
+	}
+
+	ContractMetricsQueryOpts struct {
+		After  time.Time
+		Before time.Time
+
+		FCID types.FileContractID
+		Host types.PublicKey
 	}
 )
