@@ -188,7 +188,7 @@ func (ap *Autopilot) Run() error {
 	}
 	ap.startTime = time.Now()
 	ap.stopChan = make(chan struct{})
-	ap.triggerChan = make(chan bool)
+	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	ap.wg.Add(1)
@@ -295,6 +295,7 @@ func (ap *Autopilot) Run() error {
 			// migration
 			ap.m.tryPerformMigrations(ctx, ap.workers)
 		})
+
 		select {
 		case <-ap.stopChan:
 			return nil
