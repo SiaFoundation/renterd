@@ -2,23 +2,15 @@ package autopilot
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
-	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
-)
-
-var (
-	alertMigrationID = frand.Entropy256() // constant until restarted
 )
 
 const (
@@ -127,21 +119,11 @@ func (m *migrator) performMigrations(p *workerPool) {
 						}
 						res, err := w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
 						if err != nil {
-							errMsg := fmt.Sprintf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
-							rerr := m.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-								ID:       types.HashBytes([]byte(slab.Key.String())),
-								Severity: alerts.SeverityCritical,
-								Message:  errMsg,
-								Data: map[string]interface{}{
-									"slabKey": slab.Key.String(),
-								},
-								Timestamp: time.Now(),
-							})
-							if rerr != nil {
-								m.logger.Errorf("failed to register alert: err %v", rerr)
-							}
-							m.logger.Errorf(errMsg)
+							m.ap.RegisterAlert(ctx, newSlabMigrationFailedAlert(slab, j.Health, err))
+							m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
 							continue
+						} else {
+							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, slab))
 						}
 						m.logger.Debugf("%v: successfully migrated slab (health: %v migrated shards: %d) %d/%d", id, j.Health, res.NumShardsMigrated, j.slabIdx+1, j.batchSize)
 					}
@@ -169,12 +151,7 @@ OUTER:
 		// recompute health.
 		start := time.Now()
 		if err := b.RefreshHealth(ctx); err != nil {
-			rerr := m.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-				ID:        frand.Entropy256(),
-				Severity:  alerts.SeverityCritical,
-				Message:   fmt.Sprintf("migrations interrupted - failed to refresh cached slab health: %v", err),
-				Timestamp: time.Now(),
-			})
+			rerr := m.ap.alerts.RegisterAlert(ctx, newRefreshHealthFailedAlert(err))
 			if rerr != nil {
 				m.logger.Errorf("failed to register alert: err %v", rerr)
 			}
@@ -227,14 +204,11 @@ OUTER:
 		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
 
 		// register an alert to notify users about ongoing migrations.
-		err = m.ap.alerts.RegisterAlert(ctx, alerts.Alert{
-			ID:        alertMigrationID,
-			Severity:  alerts.SeverityInfo,
-			Message:   fmt.Sprintf("Migrating %d slabs", len(toMigrate)),
-			Timestamp: time.Now(),
-		})
-		if err != nil {
-			m.logger.Errorf("failed to register alert: err %v", err)
+		if len(toMigrate) > 0 {
+			err = m.ap.alerts.RegisterAlert(ctx, newOngoingMigrationsAlert(len(toMigrate)))
+			if err != nil {
+				m.logger.Errorf("failed to register alert: err %v", err)
+			}
 		}
 
 		// return if there are no slabs to migrate

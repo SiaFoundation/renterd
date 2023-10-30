@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
@@ -106,7 +107,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, dbMetricsConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
+	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, dbMetricsConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, announcementMaxAge, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	}
