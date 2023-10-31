@@ -170,10 +170,10 @@ func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /debug/trigger": ap.triggerHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
+		"POST   /trigger":       ap.triggerHandlerPOST,
 	}))
 }
 

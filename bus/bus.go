@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 )
 
@@ -49,10 +50,13 @@ func NewClient(addr, password string) *Client {
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
-		AcceptBlock(context.Context, types.Block) error
+		AcceptBlock(types.Block) error
+		BlockAtHeight(height uint64) (types.Block, bool)
+		IndexAtHeight(height uint64) (types.ChainIndex, error)
 		LastBlockTime() time.Time
-		Synced(ctx context.Context) bool
-		TipState(ctx context.Context) consensus.State
+		Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error
+		Synced() bool
+		TipState() consensus.State
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -65,9 +69,11 @@ type (
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
+		AcceptTransactionSet(txns []types.Transaction) error
+		Close() error
 		RecommendedFee() types.Currency
+		Subscribe(subscriber modules.TransactionPoolSubscriber)
 		Transactions() []types.Transaction
-		AddTransactionSet(txns []types.Transaction) error
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
@@ -216,7 +222,7 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	if jc.Decode(&block) != nil {
 		return
 	}
-	if jc.Check("failed to accept block", b.cm.AcceptBlock(jc.Request.Context(), block)) != nil {
+	if jc.Check("failed to accept block", b.cm.AcceptBlock(block)) != nil {
 		return
 	}
 }
@@ -241,12 +247,12 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
-	jc.Encode(b.consensusState(jc.Request.Context()))
+	jc.Encode(b.consensusState())
 }
 
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
 	jc.Encode(api.ConsensusNetwork{
-		Name: b.cm.TipState(jc.Request.Context()).Network.Name,
+		Name: b.cm.TipState().Network.Name,
 	})
 }
 
@@ -262,7 +268,7 @@ func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Decode(&txnSet) == nil {
-		jc.Check("couldn't broadcast transaction set", b.tp.AddTransactionSet(txnSet))
+		jc.Check("couldn't broadcast transaction set", b.tp.AcceptTransactionSet(txnSet))
 	}
 }
 
@@ -374,10 +380,10 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	txn := wfr.Transaction
 	if len(txn.MinerFees) == 0 {
 		// if no fees are specified, we add some
-		fee := b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))
+		fee := b.tp.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
 		txn.MinerFees = []types.Currency{fee}
 	}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(jc.Request.Context()), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
@@ -398,7 +404,7 @@ func (b *bus) walletSignHandler(jc jape.Context) {
 	if jc.Decode(&wsr) != nil {
 		return
 	}
-	err := b.w.SignTransaction(b.cm.TipState(jc.Request.Context()), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
+	err := b.w.SignTransaction(b.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
 	if jc.Check("couldn't sign transaction", err) == nil {
 		jc.Encode(wsr.Transaction)
 	}
@@ -414,7 +420,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	cs := b.cm.TipState(jc.Request.Context())
+	cs := b.cm.TipState()
 	txn, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
 	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 		return
@@ -425,7 +431,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	if jc.Check("couldn't broadcast the transaction", b.tp.AddTransactionSet([]types.Transaction{txn})) != nil {
+	if jc.Check("couldn't broadcast the transaction", b.tp.AcceptTransactionSet([]types.Transaction{txn})) != nil {
 		b.w.ReleaseInputs(txn)
 		return
 	}
@@ -441,7 +447,6 @@ func (b *bus) walletDiscardHandler(jc jape.Context) {
 }
 
 func (b *bus) walletPrepareFormHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
 	var wpfr api.WalletPrepareFormRequest
 	if jc.Decode(&wpfr) != nil {
 		return
@@ -454,14 +459,14 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
-	cs := b.cm.TipState(ctx)
+	cs := b.cm.TipState()
 
 	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
 	cost := rhpv2.ContractFormationCost(cs, fc, wpfr.HostSettings.ContractPrice)
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(uint64(types.EncodedLen(txn)))}
+	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
 	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
@@ -485,15 +490,11 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if jc.Decode(&wprr) != nil {
 		return
 	}
-	if wprr.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
-		return
-	}
 	if wprr.RenterKey == nil {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
-	cs := b.cm.TipState(jc.Request.Context())
+	cs := b.cm.TipState()
 
 	// Create the final revision from the provided revision.
 	finalRevision := wprr.Revision
@@ -503,7 +504,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	finalRevision.RevisionNumber = math.MaxUint64
 
 	// Prepare the new contract.
-	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.NewCollateral, wprr.HostKey, wprr.PriceTable, wprr.EndHeight)
+	fc, basePrice := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.NewCollateral, wprr.PriceTable, wprr.EndHeight)
 
 	// Create the transaction containing both the final revision and new
 	// contract.
@@ -1446,17 +1447,17 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 
 	jc.Encode(api.UploadParams{
 		ContractSet:   contractSet,
-		CurrentHeight: b.cm.TipState(jc.Request.Context()).Index.Height,
+		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
 		UploadPacking: uploadPacking,
 	})
 }
 
-func (b *bus) consensusState(ctx context.Context) api.ConsensusState {
+func (b *bus) consensusState() api.ConsensusState {
 	return api.ConsensusState{
-		BlockHeight:   b.cm.TipState(ctx).Index.Height,
+		BlockHeight:   b.cm.TipState().Index.Height,
 		LastBlockTime: b.cm.LastBlockTime(),
-		Synced:        b.cm.Synced(ctx),
+		Synced:        b.cm.Synced(),
 	}
 }
 
@@ -1483,7 +1484,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
-	cs := b.consensusState(ctx)
+	cs := b.consensusState()
 
 	return api.GougingParams{
 		ConsensusState:     cs,
@@ -1695,7 +1696,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
 		return
 	}
-	cs := b.cm.TipState(jc.Request.Context())
+	cs := b.cm.TipState()
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
@@ -1990,56 +1991,33 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /alerts":                    b.handleGETAlerts,
-		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
-		"POST   /alerts/register":           b.handlePOSTAlertsRegister,
-		"GET    /accounts":                  b.accountsHandlerGET,
-		"POST   /accounts/:id":              b.accountHandlerGET,
-		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"GET    /accounts":                 b.accountsHandlerGET,
+		"POST   /account/:id":              b.accountHandlerGET,
+		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
+		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
+		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
+		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
+		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
 
-		"GET    /autopilots":     b.autopilotsListHandlerGET,
-		"GET    /autopilots/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilots/:id": b.autopilotsHandlerPUT,
+		"GET    /alerts":          b.handleGETAlerts,
+		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
+		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /syncer/address": b.syncerAddrHandler,
-		"GET    /syncer/peers":   b.syncerPeersHandler,
-		"POST   /syncer/connect": b.syncerConnectHandler,
+		"GET    /autopilots":    b.autopilotsListHandlerGET,
+		"GET    /autopilot/:id": b.autopilotsHandlerGET,
+		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
+
+		"GET    /buckets":             b.bucketsHandlerGET,
+		"POST   /buckets":             b.bucketsHandlerPOST,
+		"PUT    /bucket/:name/policy": b.bucketsHandlerPolicyPUT,
+		"DELETE /bucket/:name":        b.bucketHandlerDELETE,
+		"GET    /bucket/:name":        b.bucketHandlerGET,
 
 		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
-		"GET    /consensus/state":              b.consensusStateHandler,
 		"GET    /consensus/network":            b.consensusNetworkHandler,
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
-
-		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
-		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
-		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
-
-		"GET    /wallet":               b.walletHandler,
-		"GET    /wallet/transactions":  b.walletTransactionsHandler,
-		"GET    /wallet/outputs":       b.walletOutputsHandler,
-		"POST   /wallet/fund":          b.walletFundHandler,
-		"POST   /wallet/sign":          b.walletSignHandler,
-		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
-		"POST   /wallet/discard":       b.walletDiscardHandler,
-		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
-		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
-		"GET    /wallet/pending":       b.walletPendingHandler,
-
-		"GET    /hosts":             b.hostsHandlerGET,
-		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
-		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
-		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
-		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":   b.hostsBlocklistHandlerPUT,
-		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
+		"GET    /consensus/state":              b.consensusStateHandler,
 
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
@@ -2053,59 +2031,25 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
-		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
-		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
-		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
-		"GET    /buckets":              b.bucketsHandlerGET,
-		"POST   /buckets":              b.bucketsHandlerPOST,
-		"PUT    /buckets/:name/policy": b.bucketsHandlerPolicyPUT,
-		"DELETE /buckets/:name":        b.bucketHandlerDELETE,
-		"GET    /buckets/:name":        b.bucketHandlerGET,
-
-		"GET    /objects/*path":  b.objectsHandlerGET,
-		"PUT    /objects/*path":  b.objectsHandlerPUT,
-		"DELETE /objects/*path":  b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
-		"POST   /objects/list":   b.objectsListHandlerPOST,
-
-		"GET    /params/upload":  b.paramsHandlerUploadGET,
-		"GET    /params/gouging": b.paramsHandlerGougingGET,
-
-		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
-		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
-
-		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
-
-		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
-		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
-		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
-		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
-		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
-
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
-		"GET    /search/objects": b.searchObjectsHandlerGET,
-
-		"GET    /settings":     b.settingsHandlerGET,
-		"GET    /setting/:key": b.settingKeyHandlerGET,
-		"PUT    /setting/:key": b.settingKeyHandlerPUT,
-		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
-
-		"GET    /state":         b.stateHandlerGET,
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
-		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
-		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
-		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+		"GET    /hosts":             b.hostsHandlerGET,
+		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":   b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
+		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
+		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
+		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
@@ -2115,10 +2059,82 @@ func (b *bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
+		"GET    /objects/*path":  b.objectsHandlerGET,
+		"PUT    /objects/*path":  b.objectsHandlerPUT,
+		"DELETE /objects/*path":  b.objectsHandlerDELETE,
+		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
+		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+		"POST   /objects/list":   b.objectsListHandlerPOST,
+
+		"GET    /params/gouging": b.paramsHandlerGougingGET,
+		"GET    /params/upload":  b.paramsHandlerUploadGET,
+
+		"GET    /syncer/address": b.syncerAddrHandler,
+		"POST   /syncer/connect": b.syncerConnectHandler,
+		"GET    /syncer/peers":   b.syncerPeersHandler,
+
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
+		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
+
+		"GET    /wallet":               b.walletHandler,
+		"POST   /wallet/discard":       b.walletDiscardHandler,
+		"POST   /wallet/fund":          b.walletFundHandler,
+		"GET    /wallet/outputs":       b.walletOutputsHandler,
+		"GET    /wallet/pending":       b.walletPendingHandler,
+		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
+		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
+		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
+		"POST   /wallet/sign":          b.walletSignHandler,
+		"GET    /wallet/transactions":  b.walletTransactionsHandler,
+
+		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
+
+		"POST   /search/hosts":   b.searchHostsHandlerPOST,
+		"GET    /search/objects": b.searchObjectsHandlerGET,
+
+		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
+
+		"GET    /settings":     b.settingsHandlerGET,
+		"GET    /setting/:key": b.settingKeyHandlerGET,
+		"PUT    /setting/:key": b.settingKeyHandlerPUT,
+		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+
+		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
+		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
+		"GET    /slab/:key":           b.slabHandlerGET,
+		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
+		"PUT    /slab":                b.slabHandlerPUT,
+
+		"GET    /state":         b.stateHandlerGET,
+		"GET    /stats/objects": b.objectsStatshandlerGET,
+
+		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
+		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
+
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
 		"POST   /webhook/delete":  b.webhookHandlerDelete,
+
+		// TODO: remove these deprecated routes
+		"POST   /accounts/:id":              b.accountHandlerGET,
+		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
+		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
+		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
+		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
+		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"GET    /autopilots/:id":            b.autopilotsHandlerGET,
+		"PUT    /autopilots/:id":            b.autopilotsHandlerPUT,
+		"PUT    /buckets/:name/policy":      b.bucketsHandlerPolicyPUT,
+		"DELETE /buckets/:name":             b.bucketHandlerDELETE,
+		"GET    /buckets/:name":             b.bucketHandlerGET,
 	}))
 }
 

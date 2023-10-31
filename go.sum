@@ -305,12 +305,12 @@ go.opentelemetry.io/otel/trace v1.16.0 h1:8JRpaObFoW0pxuVPapkgH8UhHQj+bJW8jJsCZE
 go.opentelemetry.io/otel/trace v1.16.0/go.mod h1:Yt9vYq1SdNz3xdjZZK7wcXv1qv2pwLkqr2QVwea0ef0=
 go.opentelemetry.io/proto/otlp v1.0.0 h1:T0TX0tmXU8a3CbNXzEKGeU5mIVOdf0oykP+u2lIVU/I=
 go.opentelemetry.io/proto/otlp v1.0.0/go.mod h1:Sy6pihPLfYHkr3NkUbEhGHFhINUSI/v80hjKIs5JXpM=
-go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be h1:fKfwYsCF5ua3Z/NNdLU+4sS9MM6M4EetMA0V4Y8zPKg=
-go.sia.tech/core v0.1.12-0.20230529164041-6347a98003be/go.mod h1:D17UWSn99SEfQnEaR9G9n6Kz9+BwqMoUgZ6Cl424LsQ=
+go.sia.tech/core v0.1.12-0.20231011172826-6ca0ac7b3b6b h1:gHnhRiY1SMWCEFu+1Xo0a967RVzHg+g+0grMbHNuLfE=
+go.sia.tech/core v0.1.12-0.20231011172826-6ca0ac7b3b6b/go.mod h1:3EoY+rR78w1/uGoXXVqcYdwSjSJKuEMI5bL7WROA27Q=
 go.sia.tech/gofakes3 v0.0.0-20231003090232-776c144c0a19 h1:qCJHxn1RgRdmltGl3jehgbJcpTSTaWhzdDuOiWkjvm0=
 go.sia.tech/gofakes3 v0.0.0-20231003090232-776c144c0a19/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
-go.sia.tech/hostd v0.1.4 h1:r6PSo8ed0hmxjf4pvFQfRCfGk/DVRd/R/T9K9B0JhJ4=
-go.sia.tech/hostd v0.1.4/go.mod h1:o+Z9ZGJZRY31MvRNXyyAlmBHjjiTE/3TgAB4pCHgr2c=
+go.sia.tech/hostd v0.2.1-0.20231013174940-920057ff41c8 h1:0kVIAauXG2+C5EZWlnJDVtf6TrLLgB+EcObuCJyDNfY=
+go.sia.tech/hostd v0.2.1-0.20231013174940-920057ff41c8/go.mod h1:B+jY+eJ2jlcowcXwYOb28N/A6/cy2dblX/WUec9pFM8=
 go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb h1:yLDEqkqC19E/HgBoq2Uhw9oH3SMNRyeRjZ7Ep4dPKR8=
 go.sia.tech/jape v0.9.1-0.20230525021720-ecf031ecbffb/go.mod h1:4QqmBB+t3W7cNplXPj++ZqpoUb2PeiS66RLpXmEGap4=
 go.sia.tech/mux v1.2.0 h1:ofa1Us9mdymBbGMY2XH/lSpY8itFsKIo/Aq8zwe+GHU=
@@ -319,8 +319,8 @@ go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca h1:aZMg2AKevn7jKx+wlusWQf
 go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca/go.mod h1:h/1afFwpxzff6/gG5i1XdAgPK7dEY6FaibhK7N5F86Y=
 go.sia.tech/web v0.0.0-20230817201630-c3d9328334b1 h1:qzS1HFVPuQlOyh17zqO4Qkz63Q0YwADGMt9YAiL9mrk=
 go.sia.tech/web v0.0.0-20230817201630-c3d9328334b1/go.mod h1:RKODSdOmR3VtObPAcGwQqm4qnqntDVFylbvOBbWYYBU=
-go.sia.tech/web/renterd v0.29.0 h1:6bSfKJeENXYDtMhLxsxZJFjp7JOL5o8AaQ5hXNn+e/w=
-go.sia.tech/web/renterd v0.29.0/go.mod h1:FgXrdmAnu591a3h96RB/15pMZ74xO9457g902uE06BM=
+go.sia.tech/web/renterd v0.31.0 h1:bJ1nELQFBBZ/PnYckpUZLf7+cuRiapg0m5NfBdiqvBo=
+go.sia.tech/web/renterd v0.31.0/go.mod h1:FgXrdmAnu591a3h96RB/15pMZ74xO9457g902uE06BM=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/goleak v1.2.0 h1:xqgm/S+aQvhWFTtR0XK3Jvg7z8kGV8P4X14IzwN3Eqk=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=

@@ -72,6 +72,7 @@ var (
 			Level: "warn",
 		},
 		Bus: config.Bus{
+			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     true,
 			GatewayAddr:                   build.DefaultGatewayAddress,
 			PersistInterval:               time.Minute,
@@ -275,6 +276,7 @@ func main() {
 	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "slow threshold for logger - can be overwritten using RENTERD_DB_LOGGER_SLOW_THRESHOLD environment variable")
 
 	// bus
+	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "announcements older than this are ignored")
 	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "bootstrap the gateway and consensus modules")
 	flag.StringVar(&cfg.Bus.GatewayAddr, "bus.gatewayAddr", cfg.Bus.GatewayAddr, "address to listen on for Sia peer connections - can be overwritten using RENTERD_BUS_GATEWAY_ADDR environment variable")
 	flag.DurationVar(&cfg.Bus.PersistInterval, "bus.persistInterval", cfg.Bus.PersistInterval, "interval at which to persist the consensus updates")

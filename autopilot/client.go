@@ -57,6 +57,6 @@ func (c *Client) State() (state api.AutopilotStateResponse, err error) {
 
 func (c *Client) Trigger(forceScan bool) (_ bool, err error) {
 	var resp api.AutopilotTriggerResponse
-	err = c.c.POST("/debug/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)
+	err = c.c.POST("/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)
 	return resp.Triggered, err
 }
