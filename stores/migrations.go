@@ -261,6 +261,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00020_missingIndices(tx, logger)
 			},
 		},
+		{
+			ID: "00021_multipoartUploadsBucketCascade",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -936,5 +942,32 @@ func performMigration00020_missingIndices(txn *gorm.DB, logger *zap.SugaredLogge
 		return fmt.Errorf("failed to create missing indices: %w", err)
 	}
 	logger.Info("migration 00020_missingIndices complete")
+	return nil
+}
+
+func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00021_multipoartUploadsBucketCascade")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Add cascade constraint.
+	if err := txn.Migrator().AutoMigrate(&dbMultipartUpload{}); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
 	return nil
 }

@@ -518,7 +518,7 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 		if res.Error != nil {
 			return res.Error
 		}
-		return nil
+		return pruneSlabs(tx)
 	})
 }
 
