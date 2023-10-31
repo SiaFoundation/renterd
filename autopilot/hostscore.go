@@ -31,7 +31,7 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h),
-		Collateral:       collateralScore(cfg, hostPeriodCost, h.Settings, expectedRedundancy, allocationPerHost),
+		Collateral:       collateralScore(cfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
 		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
 		StorageRemaining: storageRemainingScore(cfg, h.Settings, storedData, expectedRedundancy, allocationPerHost),
@@ -123,21 +123,24 @@ func ageScore(h hostdb.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, hostCostPerPeriod types.Currency, s rhpv2.HostSettings, expectedRedundancy, allocationPerHost float64) float64 {
+func collateralScore(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, allocationPerHost uint64) float64 {
 	// Ignore hosts which have set their max collateral to 0.
-	if s.MaxCollateral.IsZero() || s.Collateral.IsZero() {
+	if pt.MaxCollateral.IsZero() || pt.CollateralCost.IsZero() {
 		return 0
 	}
 
 	// convenience variables
-	duration := cfg.Contracts.Period
 	ratioNum := uint64(3)
 	ratioDenom := uint64(2)
 
+	// compute the cost of storing
+	numSectors := bytesToSectors(allocationPerHost)
+	storageCost := pt.AppendSectorCost(cfg.Contracts.Period).Storage.Mul64(numSectors)
+
 	// calculate the expected collateral for the host allocation.
-	expectedCollateral := s.Collateral.Mul64(uint64(allocationPerHost)).Mul64(duration)
-	if expectedCollateral.Cmp(s.MaxCollateral) > 0 {
-		expectedCollateral = s.MaxCollateral
+	expectedCollateral := pt.CollateralCost.Mul64(allocationPerHost).Mul64(cfg.Contracts.Period)
+	if expectedCollateral.Cmp(pt.MaxCollateral) > 0 {
+		expectedCollateral = pt.MaxCollateral
 	}
 
 	// avoid division by zero
@@ -145,15 +148,15 @@ func collateralScore(cfg api.AutopilotConfig, hostCostPerPeriod types.Currency, 
 		expectedCollateral = types.NewCurrency64(1)
 	}
 
-	// determine a cutoff at 150% of the budgeted per-host funds. Meaning that a
-	// host should be willing to put in at least 1.5x the amount of money the
-	// renter expects to spend in a period on that host.
-	cutoff := hostCostPerPeriod.Mul64(ratioNum).Div64(ratioDenom)
+	// determine a cutoff at 150% of the storage cost. Meaning that a host
+	// should be willing to put in at least 1.5x the amount of money the renter
+	// expects to spend on storage on that host.
+	cutoff := storageCost.Mul64(ratioNum).Div64(ratioDenom)
 
 	// the score is a linear function between 0 and 1 where the upper limit is
-	// 10 times the cutoff. Beyond that, we don't care if a host puts in more
+	// 4 times the cutoff. Beyond that, we don't care if a host puts in more
 	// collateral.
-	cutoffMultiplier := uint64(10)
+	cutoffMultiplier := uint64(4)
 
 	if expectedCollateral.Cmp(cutoff) < 0 {
 		return 0 // expectedCollateral <= cutoff -> score is 0
@@ -161,12 +164,15 @@ func collateralScore(cfg api.AutopilotConfig, hostCostPerPeriod types.Currency, 
 		return 1 // expectedCollateral is 10x cutoff -> score is 1
 	} else {
 		// Perform linear interpolation for all other values.
-		slope := new(big.Rat).SetFrac(new(big.Int).SetInt64(1), cutoff.Mul64(cutoffMultiplier-1).Big())
+		slope := new(big.Rat).SetFrac(new(big.Int).SetInt64(1), cutoff.Mul64(cutoffMultiplier).Big())
 		intercept := new(big.Rat).Mul(slope, new(big.Rat).SetInt(cutoff.Big())).Neg(slope)
 		score := new(big.Rat).SetInt(expectedCollateral.Big())
 		score = score.Mul(score, slope)
 		score = score.Add(score, intercept)
 		fScore, _ := score.Float64()
+		if fScore > 1 {
+			return 1.0
+		}
 		return fScore
 	}
 }
