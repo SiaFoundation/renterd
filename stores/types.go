@@ -291,7 +291,7 @@ func (u *unsigned64) Scan(value interface{}) error {
 	case []uint8:
 		n, err = strconv.ParseInt(string(value), 10, 64)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+			return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
 		}
 	default:
 		return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)

@@ -27,7 +27,7 @@ func (c *Client) ContractSetMetrics(ctx context.Context, opts api.ContractSetMet
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 	var resp []api.ContractSetMetric
-	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metrics/%s?"+values.Encode(), api.MetricContractSet), &resp)
+	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?"+values.Encode(), api.MetricContractSet), &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -58,15 +58,15 @@ func (c *Client) ContractSetChurnMetrics(ctx context.Context, opts api.ContractS
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 	var resp []api.ContractSetChurnMetric
-	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metrics/%s?"+values.Encode(), api.MetricContractSetChurn), &resp)
+	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?"+values.Encode(), api.MetricContractSetChurn), &resp)
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *Client) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
-	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/metrics/%s", api.MetricContractSetChurn), api.ContractSetChurnMetricRequestPUT{
+func (c *Client) RecordContractSetChurnMetrics(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
+	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/metric/%s", api.MetricContractSetChurn), api.ContractSetChurnMetricRequestPUT{
 		Metrics: metrics,
 	})
 }

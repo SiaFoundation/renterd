@@ -82,7 +82,7 @@ type Bus interface {
 	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
 
 	// metrics
-	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+	RecordContractSetChurnMetrics(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 }
 
 type Worker interface {

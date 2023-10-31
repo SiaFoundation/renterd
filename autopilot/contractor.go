@@ -466,7 +466,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 		})
 	}
 	if len(metrics) > 0 {
-		if err := c.ap.bus.RecordContractSetChurnMetric(ctx, metrics...); err != nil {
+		if err := c.ap.bus.RecordContractSetChurnMetrics(ctx, metrics...); err != nil {
 			c.logger.Error("failed to record contract set churn metric:", err)
 		}
 	}

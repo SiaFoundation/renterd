@@ -196,7 +196,7 @@ type (
 	MetricsStore interface {
 		ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 		ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
-		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+		RecordContractSetChurnMetrics(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	}
 )
 
@@ -1795,7 +1795,7 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 		var req api.ContractSetChurnMetricRequestPUT
 		if jc.Decode(&req) != nil {
 			return
-		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
+		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetrics(jc.Request.Context(), req.Metrics...)) != nil {
 			return
 		}
 	default:
@@ -1821,7 +1821,7 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract set metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)
@@ -1843,13 +1843,13 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract set metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)
 		return
 	default:
-		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
 }
@@ -2121,8 +2121,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
 		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
 
-		"PUT /metrics/:key": b.metricsHandlerPUT,
-		"GET /metrics/:key": b.metricsHandlerGET,
+		"PUT /metric/:key": b.metricsHandlerPUT,
+		"GET /metric/:key": b.metricsHandlerGET,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
