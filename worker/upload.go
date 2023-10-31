@@ -1418,6 +1418,11 @@ func (s *slabUpload) launch(req *sectorUploadReq) (overdriving bool, err error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// nothing to do
+	if req == nil {
+		return false, nil
+	}
+
 	// launch the req
 	err = s.mgr.launch(req)
 	if err != nil {
@@ -1487,10 +1492,7 @@ func (s *slabUpload) overdrive(ctx context.Context, respChan chan sectorUploadRe
 				return
 			case <-timer.C:
 				if canOverdrive() {
-					req := s.nextRequest(respChan)
-					if req != nil {
-						_, _ = s.launch(req) // ignore error
-					}
+					_, _ = s.launch(s.nextRequest(respChan)) // ignore result
 				}
 				resetTimer()
 			}
