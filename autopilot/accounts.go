@@ -159,8 +159,9 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 				defer cancel()
 				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, workerID, contract)
 				if rerr != nil {
-					// register the alert on failure
 					if inSet || rerr.Is(errMaxDriftExceeded) {
+						// register the alert on failure if the contract is in
+						// the set or the error is errMaxDriftExceeded
 						a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
 						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
 					}

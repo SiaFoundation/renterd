@@ -9,7 +9,7 @@ import (
 
 // Autopilot returns the autopilot with the given ID.
 func (c *Client) Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/autopilots/%s", id), &autopilot)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/autopilot/%s", id), &autopilot)
 	return
 }
 
@@ -21,6 +21,6 @@ func (c *Client) Autopilots(ctx context.Context) (autopilots []api.Autopilot, er
 
 // UpdateAutopilot updates the given autopilot in the store.
 func (c *Client) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilots/%s", autopilot.ID), autopilot)
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s", autopilot.ID), autopilot)
 	return
 }
