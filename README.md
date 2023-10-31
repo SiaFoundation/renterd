@@ -48,13 +48,13 @@ From within the root of the repo run the following command to build an image of
 ### Production
 
 ```sh
-docker build -t renterd:latest -f ./docker/Dockerfile .
+docker build --build-arg BUILD_TAGS='netgo' -t renterd:latest -f ./docker/Dockerfile .
 ```
 
 ### Testnet
 
 ```sh
-docker build -t renterd:latest-testnet -f ./docker/Dockerfile.testnet .
+docker build --build-arg BUILD_TAGS='netgo testnet' -t renterd-testnet:latest -f ./docker/Dockerfile .
 ```
 
 ### Run Container
