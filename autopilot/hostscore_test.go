@@ -94,7 +94,7 @@ func TestHostScore(t *testing.T) {
 
 	// assert MaxCollateral affects the score.
 	h2 = newHost(newTestHostSettings()) // reset
-	h2.Settings.MaxCollateral = types.ZeroCurrency
+	h2.PriceTable.MaxCollateral = types.ZeroCurrency
 	if hostScore(cfg, h1, 0, redundancy).Score() <= hostScore(cfg, h2, 0, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
