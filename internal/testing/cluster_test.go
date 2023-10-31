@@ -1943,3 +1943,53 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
 	}
 }
+
+func TestRecordContractSetAndChurnMetric(t *testing.T) {
+	startTime := time.Now()
+
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+
+	// Add 1 host.
+	cluster.AddHostsBlocking(1)
+
+	// Get contract set metrics.
+	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
+	cluster.tt.OK(err)
+
+	for i := 0; i < len(csMetrics); i++ {
+		// Remove metrics from before contract was formed.
+		if csMetrics[i].Contracts > 0 {
+			csMetrics = csMetrics[i:]
+			break
+		}
+	}
+	if len(csMetrics) == 0 {
+		t.Fatal("expected at least 1 metric with contracts")
+	}
+	for _, m := range csMetrics {
+		if m.Contracts != 1 {
+			t.Fatalf("expected 1 contract, got %v", m.Contracts)
+		} else if m.Name != testContractSet {
+			t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+		} else if !m.Timestamp.After(startTime) {
+			t.Fatal("expected time to be after start time")
+		}
+	}
+
+	// Get churn metrics. Should have 1 for the new contract.
+	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{})
+	cluster.tt.OK(err)
+
+	if len(cscMetrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
+	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
+		t.Fatalf("expected added churn, got %v", m.Direction)
+	} else if m.FCID == (types.FileContractID{}) {
+		t.Fatal("expected non-zero FCID")
+	} else if m.Name != testContractSet {
+		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+	} else if !m.Timestamp.After(startTime) {
+		t.Fatal("expected time to be after start time")
+	}
+}

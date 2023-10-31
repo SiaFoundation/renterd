@@ -568,6 +568,15 @@ func ObjectPathEscape(path string) string {
 const (
 	ChurnDirAdded   = "added"
 	ChurnDirRemoved = "removed"
+
+	MetricContractSet      = "contractset"
+	MetricContractSetChurn = "churn"
+)
+
+type (
+	ContractSetChurnMetricRequestPUT struct {
+		Metrics []ContractSetChurnMetric `json:"metrics"`
+	}
 )
 
 type (
@@ -582,13 +591,16 @@ type (
 		Before time.Time
 
 		Name string
+
+		Offset int
+		Limit  int
 	}
 
 	ContractSetChurnMetric struct {
 		Direction string               `json:"direction"`
 		FCID      types.FileContractID `json:"fcid"`
 		Name      string               `json:"name"`
-		Reason    string               `json:"reason"`
+		Reason    string               `json:"reason,omitempty"`
 		Timestamp time.Time            `json:"timestamp"`
 	}
 
@@ -599,6 +611,9 @@ type (
 		Name      string
 		Direction string
 		Reason    string
+
+		Offset int
+		Limit  int
 	}
 
 	PerformanceMetric struct {
@@ -617,6 +632,9 @@ type (
 		Host     types.PublicKey
 		Origin   string
 		Duration time.Duration
+
+		Offset int
+		Limit  int
 	}
 
 	ContractMetric struct {
@@ -642,5 +660,8 @@ type (
 
 		FCID types.FileContractID
 		Host types.PublicKey
+
+		Offset int
+		Limit  int
 	}
 )

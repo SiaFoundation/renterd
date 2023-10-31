@@ -80,6 +80,9 @@ type Bus interface {
 	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
+
+	// metrics
+	RecordContractSetChurnMetrics(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 }
 
 type Worker interface {
