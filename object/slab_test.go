@@ -34,35 +34,12 @@ func TestReedSolomon(t *testing.T) {
 		partialShards[i] = nil
 	}
 	// reconstruct
-	required := make([]bool, len(partialShards))
-	for i := range required {
-		required[i] = partialShards[i] == nil
-	}
-	if err := s.ReconstructSome(partialShards, required); err != nil {
+	if err := s.Reconstruct(partialShards); err != nil {
 		t.Fatal(err)
 	}
 	for i := range shards {
 		if !bytes.Equal(shards[i], partialShards[i]) {
 			t.Error("failed to reconstruct shards")
-			break
-		}
-	}
-	// reconstruct one-by-one
-	for _, i := range frand.Perm(len(partialShards))[:7] {
-		partialShards[i] = nil
-	}
-	for i := 0; i < len(partialShards); i++ {
-		required := make([]bool, len(partialShards))
-		required[i] = true
-		if err := s.ReconstructSome(partialShards, required); err != nil {
-			t.Fatal(err)
-		} else if len(partialShards[i]) == 0 {
-			t.Error("failed to reconstruct shard", i)
-		}
-	}
-	for i := range shards {
-		if !bytes.Equal(shards[i], partialShards[i]) {
-			t.Fatal("failed to reconstruct shards")
 			break
 		}
 	}
@@ -132,7 +109,6 @@ func BenchmarkReedSolomon(b *testing.B) {
 	benchReconstruct := func(m, n, r uint8) func(*testing.B) {
 		s, data, shards := makeSlab(m, n)
 		s.Encode(data, shards)
-		required := make([]bool, len(shards))
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(shards[0])) * int64(r))
@@ -140,10 +116,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 				for j := range shards[:r] {
 					shards[j] = shards[j][:0]
 				}
-				for j := range required {
-					required[j] = len(shards[j]) == 0
-				}
-				if err := s.ReconstructSome(shards, required); err != nil {
+				if err := s.Reconstruct(shards); err != nil {
 					b.Fatal(err)
 				}
 			}
