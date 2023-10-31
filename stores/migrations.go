@@ -955,7 +955,9 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 	}
 
 	// Add cascade constraint.
-	if err := txn.Migrator().AutoMigrate(&dbMultipartUpload{}); err != nil {
+	if err := txn.Migrator().DropConstraint(&dbMultipartUpload{}, "DBBucket"); err != nil {
+		return err
+	} else if err := txn.Migrator().CreateConstraint(&dbMultipartUpload{}, "DBBucket"); err != nil {
 		return err
 	}
 
