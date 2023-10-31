@@ -1403,7 +1403,7 @@ func (s *slabUpload) finish() ([]object.Sector, error) {
 
 	remaining := len(s.remaining)
 	if remaining > 0 {
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, launched=%d uploaders=%d errors=%w", remaining, s.numInflight, s.numLaunched, s.mgr.numUploaders(), s.errs)
+		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, launched=%d uploaders=%d errors=%d %w", remaining, s.numInflight, s.numLaunched, s.mgr.numUploaders(), len(s.errs), s.errs)
 	}
 	return s.sectors, nil
 }
