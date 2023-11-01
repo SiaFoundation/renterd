@@ -815,7 +815,7 @@ func (d *downloader) execute(req *sectorDownloadReq) (err error) {
 	}()
 
 	// download the sector
-	buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
+	buf := bytes.NewBuffer(make([]byte, 0, req.length))
 	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
 	if err != nil {
 		req.fail(err)
