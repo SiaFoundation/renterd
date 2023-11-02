@@ -1406,11 +1406,8 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
 	}
-	var minStartHeight int
+	var minStartHeight uint64
 	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
-		return
-	} else if minStartHeight < 0 {
-		jc.Error(errors.New("minStartHeight must be non-negative"), http.StatusBadRequest)
 		return
 	}
 	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
