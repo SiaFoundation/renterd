@@ -22,9 +22,9 @@ type (
 		Model
 
 		Key        []byte
-		UploadID   string `gorm:"uniqueIndex;NOT NULL;size:64"`
-		ObjectID   string `gorm:"index;NOT NULL"`
-		DBBucket   dbBucket
+		UploadID   string            `gorm:"uniqueIndex;NOT NULL;size:64"`
+		ObjectID   string            `gorm:"index;NOT NULL"`
+		DBBucket   dbBucket          `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
 		DBBucketID uint              `gorm:"index;NOT NULL"`
 		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
 		MimeType   string            `gorm:"index"`
@@ -186,7 +186,7 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 		err := tx.
 			Model(&dbMultipartUpload{}).
 			Joins("DBBucket").
-			Where("? AND ? AND ?", prefixExpr, keyMarkerExpr, uploadIDMarkerExpr).
+			Where("? AND ? AND ? AND DBBucket.name = ?", prefixExpr, keyMarkerExpr, uploadIDMarkerExpr, bucket).
 			Limit(limit).
 			Find(&dbUploads).
 			Error

@@ -311,7 +311,7 @@ func (b *bus) bucketHandlerDELETE(jc jape.Context) {
 	} else if name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
+	} else if jc.Check("failed to delete bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
 		return
 	}
 }

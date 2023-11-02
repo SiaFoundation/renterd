@@ -262,9 +262,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00021_defaultMinRecentScanFailures",
+			ID: "00021_multipoartUploadsBucketCascade",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00021_defaultMinRecentScanFailures(tx, logger)
+				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
+			},
+		},
+		{
+			ID: "00022_defaultMinRecentScanFailures",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00022_defaultMinRecentScanFailures(tx, logger)
 			},
 		},
 	}
@@ -945,8 +951,37 @@ func performMigration00020_missingIndices(txn *gorm.DB, logger *zap.SugaredLogge
 	return nil
 }
 
-func performMigration00021_defaultMinRecentScanFailures(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00021_defaultMinRecentScanFailures")
+func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00021_multipoartUploadsBucketCascade")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Add cascade constraint.
+	if err := txn.Migrator().DropConstraint(&dbMultipartUpload{}, "DBBucket"); err != nil {
+		return err
+	} else if err := txn.Migrator().CreateConstraint(&dbMultipartUpload{}, "DBBucket"); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
+	return nil
+}
+
+func performMigration00022_defaultMinRecentScanFailures(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_defaultMinRecentScanFailures")
 
 	var autopilots []dbAutopilot
 	if err := txn.Model(&dbAutopilot{}).Find(&autopilots).Error; err != nil {
@@ -964,6 +999,6 @@ func performMigration00021_defaultMinRecentScanFailures(txn *gorm.DB, logger *za
 		}
 	}
 
-	logger.Info("migration 00021_defaultMinRecentScanFailures complete")
+	logger.Info("migration 00022_defaultMinRecentScanFailures complete")
 	return nil
 }
