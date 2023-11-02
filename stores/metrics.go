@@ -203,7 +203,7 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...
 			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
-	return s.dbMetrics.Create(dbMetrics).Error
+	return s.dbMetrics.Create(&dbMetrics).Error
 }
 
 func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceMetricsQueryOpts) ([]dbPerformanceMetric, error) {
@@ -331,7 +331,7 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 	dbMetrics := make([]dbContractMetric, len(metrics))
 	for i, metric := range metrics {
 		dbMetrics[i] = dbContractMetric{
-			Timestamp:             unixTimeMS(metric.Time),
+			Timestamp:             unixTimeMS(metric.Timestamp),
 			FCID:                  fileContractID(metric.FCID),
 			Host:                  publicKey(metric.Host),
 			RemainingCollateralLo: unsigned64(metric.RemainingCollateral.Lo),

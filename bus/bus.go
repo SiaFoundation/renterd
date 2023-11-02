@@ -1845,7 +1845,7 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract set metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)
@@ -1873,7 +1873,7 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 		jc.Encode(metrics)
 		return
 	default:
-		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
 }
