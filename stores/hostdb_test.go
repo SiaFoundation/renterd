@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,10 +10,12 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"gitlab.com/NebulousLabs/encoding"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
@@ -1039,6 +1042,39 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 	}
 }
 
+// TestAnnouncementMaxAge verifies old announcements are ignored.
+func TestAnnouncementMaxAge(t *testing.T) {
+	db := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer db.Close()
+
+	if len(db.unappliedAnnouncements) != 0 {
+		t.Fatal("expected 0 announcements")
+	}
+
+	db.processConsensusChangeHostDB(
+		modules.ConsensusChange{
+			ID:          modules.ConsensusChangeID{1},
+			BlockHeight: 1,
+			AppliedBlocks: []stypes.Block{
+				{
+					Timestamp:    stypes.Timestamp(time.Now().Add(-time.Hour).Add(-time.Minute).Unix()),
+					Transactions: []stypes.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1000"))},
+				},
+				{
+					Timestamp:    stypes.Timestamp(time.Now().Add(-time.Hour).Add(time.Minute).Unix()),
+					Transactions: []stypes.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1001"))},
+				},
+			},
+		},
+	)
+
+	if len(db.unappliedAnnouncements) != 1 {
+		t.Fatal("expected 1 announcement")
+	} else if db.unappliedAnnouncements[0].announcement.NetAddress != "foo.com:1001" {
+		t.Fatal("unexpected announcement")
+	}
+}
+
 // addTestHosts adds 'n' hosts to the db and returns their keys.
 func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 	cnt, err := s.contractsCount()
@@ -1097,4 +1133,29 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 		Timestamp: scanTime,
 		Settings:  settings,
 	}
+}
+
+func newTestPK() (stypes.SiaPublicKey, types.PrivateKey) {
+	sk := types.GeneratePrivateKey()
+	pk := sk.PublicKey()
+	return stypes.SiaPublicKey{
+		Algorithm: stypes.SignatureEd25519,
+		Key:       pk[:],
+	}, sk
+}
+
+func newTestHostAnnouncement(na modules.NetAddress) (modules.HostAnnouncement, types.PrivateKey) {
+	spk, sk := newTestPK()
+	return modules.HostAnnouncement{
+		Specifier:  modules.PrefixHostAnnouncement,
+		NetAddress: na,
+		PublicKey:  spk,
+	}, sk
+}
+
+func newTestTransaction(ha modules.HostAnnouncement, sk types.PrivateKey) stypes.Transaction {
+	var buf bytes.Buffer
+	buf.Write(encoding.Marshal(ha))
+	buf.Write(encoding.Marshal(sk.SignHash(types.Hash256(crypto.HashObject(ha)))))
+	return stypes.Transaction{ArbitraryData: [][]byte{buf.Bytes()}}
 }

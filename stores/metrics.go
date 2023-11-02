@@ -16,7 +16,7 @@ type (
 	dbContractMetric struct {
 		Model
 
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		FCID fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
 		Host publicKey      `gorm:"index;size:32;NOT NULL"`
@@ -44,7 +44,7 @@ type (
 	// the bus every time the set is updated.
 	dbContractSetMetric struct {
 		Model
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		Name      string `gorm:"index;NOT NULL"`
 		Contracts int    `gorm:"index;NOT NULL"`
@@ -55,7 +55,7 @@ type (
 	// updating the set. e.g. the autopilot.
 	dbContractSetChurnMetric struct {
 		Model
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		Name      string         `gorm:"index;NOT NULL"`
 		FCID      fileContractID `gorm:"index;size:32;NOT NULL"`
@@ -68,11 +68,11 @@ type (
 	// reported by workers.
 	dbPerformanceMetric struct {
 		Model
-		Time unixTimeMS `gorm:"index;NOT NULL"`
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
 		Action   string        `gorm:"index;NOT NULL"`
 		Host     publicKey     `gorm:"index;size:32;NOT NULL"`
-		Reporter string        `gorm:"index;NOT NULL"`
+		Origin   string        `gorm:"index;NOT NULL"`
 		Duration time.Duration `gorm:"index;NOT NULL"`
 	}
 )
@@ -84,10 +84,10 @@ func (dbPerformanceMetric) TableName() string      { return "performance" }
 
 func scopeTimeRange(tx *gorm.DB, after, before time.Time) *gorm.DB {
 	if after != (time.Time{}) {
-		tx = tx.Where("time > ?", unixTimeMS(after))
+		tx = tx.Where("timestamp > ?", unixTimeMS(after))
 	}
 	if before != (time.Time{}) {
-		tx = tx.Where("time <= ?", unixTimeMS(before))
+		tx = tx.Where("timestamp <= ?", unixTimeMS(before))
 	}
 	return tx
 }
@@ -107,7 +107,7 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, opts api.ContractSetM
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
 		return scopeTimeRange(tx, opts.After, opts.Before)
 	}).
-		Order("time ASC").
+		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts api.ContractSetM
 		resp[i] = api.ContractSetMetric{
 			Contracts: metrics[i].Contracts,
 			Name:      metrics[i].Name,
-			Time:      time.Time(metrics[i].Time).UTC(),
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil
@@ -138,7 +138,7 @@ func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.C
 		dbMetrics[i] = dbContractSetMetric{
 			Contracts: metric.Contracts,
 			Name:      metric.Name,
-			Time:      unixTimeMS(metric.Time),
+			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
 	return s.dbMetrics.Create(&dbMetrics).Error
@@ -165,7 +165,7 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.Contrac
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
 		return scopeTimeRange(tx, opts.After, opts.Before)
 	}).
-		Order("time ASC").
+		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -186,7 +186,7 @@ func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, opts api.Contrac
 			FCID:      types.FileContractID(metrics[i].FCID),
 			Name:      metrics[i].Name,
 			Reason:    metrics[i].Reason,
-			Time:      time.Time(metrics[i].Time).UTC(),
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil
@@ -200,7 +200,7 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...
 			FCID:      fileContractID(metric.FCID),
 			Name:      metric.Name,
 			Reason:    metric.Reason,
-			Time:      unixTimeMS(metric.Time),
+			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
 	return s.dbMetrics.Create(dbMetrics).Error
@@ -214,8 +214,8 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 	if opts.Host != (types.PublicKey{}) {
 		tx = tx.Where("host", publicKey(opts.Host))
 	}
-	if opts.Reporter != "" {
-		tx = tx.Where("reporter", opts.Reporter)
+	if opts.Origin != "" {
+		tx = tx.Where("origin", opts.Origin)
 	}
 	if opts.Duration != 0 {
 		tx = tx.Where("duration", opts.Duration)
@@ -231,7 +231,7 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
 		return scopeTimeRange(tx, opts.After, opts.Before)
 	}).
-		Order("time ASC").
+		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -248,11 +248,11 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceM
 	resp := make([]api.PerformanceMetric, len(metrics))
 	for i := range resp {
 		resp[i] = api.PerformanceMetric{
-			Action:   metrics[i].Action,
-			Host:     types.PublicKey(metrics[i].Host),
-			Reporter: metrics[i].Reporter,
-			Duration: metrics[i].Duration,
-			Time:     time.Time(metrics[i].Time).UTC(),
+			Action:    metrics[i].Action,
+			Host:      types.PublicKey(metrics[i].Host),
+			Origin:    metrics[i].Origin,
+			Duration:  metrics[i].Duration,
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
 		}
 	}
 	return resp, nil
@@ -262,11 +262,11 @@ func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.P
 	dbMetrics := make([]dbPerformanceMetric, len(metrics))
 	for i, metric := range metrics {
 		dbMetrics[i] = dbPerformanceMetric{
-			Action:   metric.Action,
-			Duration: metric.Duration,
-			Host:     publicKey(metric.Host),
-			Reporter: metric.Reporter,
-			Time:     unixTimeMS(metric.Time),
+			Action:    metric.Action,
+			Duration:  metric.Duration,
+			Host:      publicKey(metric.Host),
+			Origin:    metric.Origin,
+			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
 	return s.dbMetrics.Create(dbMetrics).Error
@@ -291,7 +291,7 @@ func (s *SQLStore) contractMetrics(ctx context.Context, opts api.ContractMetrics
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
 		return scopeTimeRange(tx, opts.After, opts.Before)
 	}).
-		Order("time ASC").
+		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -311,7 +311,7 @@ func (s *SQLStore) ContractMetrics(ctx context.Context, opts api.ContractMetrics
 	}
 	for i := range resp {
 		resp[i] = api.ContractMetric{
-			Time:                time.Time(metrics[i].Time).UTC(),
+			Timestamp:           time.Time(metrics[i].Timestamp).UTC(),
 			FCID:                types.FileContractID(metrics[i].FCID),
 			Host:                types.PublicKey(metrics[i].Host),
 			RemainingCollateral: toCurr(metrics[i].RemainingCollateralLo, metrics[i].RemainingCollateralHi),
@@ -331,7 +331,7 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 	dbMetrics := make([]dbContractMetric, len(metrics))
 	for i, metric := range metrics {
 		dbMetrics[i] = dbContractMetric{
-			Time:                  unixTimeMS(metric.Time),
+			Timestamp:             unixTimeMS(metric.Time),
 			FCID:                  fileContractID(metric.FCID),
 			Host:                  publicKey(metric.Host),
 			RemainingCollateralLo: unsigned64(metric.RemainingCollateral.Lo),

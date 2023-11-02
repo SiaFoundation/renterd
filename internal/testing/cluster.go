@@ -929,10 +929,11 @@ func testNetwork() *consensus.Network {
 func testBusCfg() node.BusConfig {
 	return node.BusConfig{
 		Bus: config.Bus{
-			Bootstrap:       false,
-			GatewayAddr:     "127.0.0.1:0",
-			PersistInterval: testPersistInterval,
-			UsedUTXOExpiry:  time.Minute,
+			AnnouncementMaxAgeHours: 24 * 7 * 52, // 1 year
+			Bootstrap:               false,
+			GatewayAddr:             "127.0.0.1:0",
+			PersistInterval:         testPersistInterval,
+			UsedUTXOExpiry:          time.Minute,
 		},
 		Network: testNetwork(),
 	}

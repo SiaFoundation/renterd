@@ -330,7 +330,7 @@ type UpdateBlocklistRequest struct {
 	Clear  bool     `json:"clear"`
 }
 
-// AccountsUpdateBalanceRequest is the request type for /accounts/:id/update
+// AccountsUpdateBalanceRequest is the request type for /account/:id/update
 // endpoint.
 type AccountsUpdateBalanceRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
@@ -338,12 +338,12 @@ type AccountsUpdateBalanceRequest struct {
 }
 
 // AccountsRequiresSyncRequest is the request type for
-// /accounts/:id/requiressync endpoint.
+// /account/:id/requiressync endpoint.
 type AccountsRequiresSyncRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
 }
 
-// AccountsAddBalanceRequest is the request type for /accounts/:id/add
+// AccountsAddBalanceRequest is the request type for /account/:id/add
 // endpoint.
 type AccountsAddBalanceRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
@@ -589,7 +589,7 @@ type (
 	ContractSetMetric struct {
 		Contracts int       `json:"contracts"`
 		Name      string    `json:"name"`
-		Time      time.Time `json:"time"`
+		Timestamp time.Time `json:"timestamp"`
 	}
 
 	ContractSetMetricsQueryOpts struct {
@@ -607,7 +607,7 @@ type (
 		FCID      types.FileContractID `json:"fcid"`
 		Name      string               `json:"name"`
 		Reason    string               `json:"reason,omitempty"`
-		Time      time.Time            `json:"time"`
+		Timestamp time.Time            `json:"timestamp"`
 	}
 
 	ContractSetChurnMetricsQueryOpts struct {
@@ -623,11 +623,11 @@ type (
 	}
 
 	PerformanceMetric struct {
-		Action   string          `json:"action"`
-		Host     types.PublicKey `json:"host"`
-		Reporter string          `json:"reporter"`
-		Duration time.Duration   `json:"duration"`
-		Time     time.Time       `json:"time"`
+		Action    string          `json:"action"`
+		Host      types.PublicKey `json:"host"`
+		Origin    string          `json:"origin"`
+		Duration  time.Duration   `json:"duration"`
+		Timestamp time.Time       `json:"timestamp"`
 	}
 
 	PerformanceMetricsQueryOpts struct {
@@ -636,7 +636,7 @@ type (
 
 		Action   string
 		Host     types.PublicKey
-		Reporter string
+		Origin   string
 		Duration time.Duration
 
 		Offset int `json:"offset"`
@@ -644,7 +644,8 @@ type (
 	}
 
 	ContractMetric struct {
-		Time time.Time `json:"time"`
+		Time      time.Time `json:"time"`
+		Timestamp time.Time `json:"timestamp"`
 
 		FCID types.FileContractID `json:"fcid"`
 		Host types.PublicKey      `json:"host"`
@@ -661,13 +662,13 @@ type (
 	}
 
 	ContractMetricsQueryOpts struct {
-		After  time.Time `json:"after"`
-		Before time.Time `json:"before"`
+		After  time.Time
+		Before time.Time
 
-		FCID types.FileContractID `json:"fcid"`
-		Host types.PublicKey      `json:"host"`
+		FCID types.FileContractID
+		Host types.PublicKey
 
-		Offset int `json:"offset"`
-		Limit  int `json:"limit"`
+		Offset int
+		Limit  int
 	}
 )

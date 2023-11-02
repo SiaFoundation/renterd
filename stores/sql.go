@@ -61,6 +61,9 @@ type (
 		unappliedOutputChanges []outputChange
 		unappliedTxnChanges    []txnChange
 
+		// HostDB related fields
+		announcementMaxAge time.Duration
+
 		// SettingsDB related fields.
 		settingsMu sync.Mutex
 		settings   map[string]string
@@ -139,7 +142,12 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, announcementMaxAge, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+	// Sanity check announcement max age.
+	if announcementMaxAge == 0 {
+		return nil, modules.ConsensusChangeID{}, errors.New("announcementMaxAge must be non-zero")
+	}
+
 	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
@@ -223,6 +231,8 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
 		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:    make(map[types.FileContractID]uint64),
+
+		announcementMaxAge: announcementMaxAge,
 
 		walletAddress: walletAddress,
 		chainIndex: types.ChainIndex{

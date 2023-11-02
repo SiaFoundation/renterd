@@ -270,7 +270,8 @@ func (u *unixTimeMS) Scan(value interface{}) error {
 	return nil
 }
 
-// Value returns a datetime value, implements driver.Valuer interface.
+// Value returns a int64 value representing a unix timestamp in milliseconds,
+// implements driver.Valuer interface.
 func (u unixTimeMS) Value() (driver.Value, error) {
 	return time.Time(u).UnixMilli(), nil
 }
@@ -283,15 +284,9 @@ func (unsigned64) GormDataType() string {
 // Scan scan value into balance, implements sql.Scanner interface.
 func (u *unsigned64) Scan(value interface{}) error {
 	var n int64
-	var err error
 	switch value := value.(type) {
 	case int64:
 		n = value
-	case []uint8:
-		n, err = strconv.ParseInt(string(value), 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
-		}
 	default:
 		return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
 	}

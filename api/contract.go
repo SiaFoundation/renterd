@@ -34,9 +34,10 @@ type (
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
 
-		RenewedFrom types.FileContractID `json:"renewedFrom"`
-		Spending    ContractSpending     `json:"spending"`
-		TotalCost   types.Currency       `json:"totalCost"`
+		ContractPrice types.Currency       `json:"contractPrice"`
+		RenewedFrom   types.FileContractID `json:"renewedFrom"`
+		Spending      ContractSpending     `json:"spending"`
+		TotalCost     types.Currency       `json:"totalCost"`
 	}
 
 	// ContractSpending contains all spending details for a contract.

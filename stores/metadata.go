@@ -261,10 +261,11 @@ func (c dbContract) convert() api.ContractMetadata {
 	var revisionNumber uint64
 	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ContractMetadata{
-		ID:         types.FileContractID(c.FCID),
-		HostIP:     c.Host.NetAddress,
-		HostKey:    types.PublicKey(c.Host.PublicKey),
-		SiamuxAddr: c.Host.Settings.convert().SiamuxAddr(),
+		ContractPrice: types.Currency(c.ContractPrice),
+		ID:            types.FileContractID(c.FCID),
+		HostIP:        c.Host.NetAddress,
+		HostKey:       types.PublicKey(c.Host.PublicKey),
+		SiamuxAddr:    c.Host.Settings.convert().SiamuxAddr(),
 
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
@@ -956,7 +957,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	err = s.RecordContractSetMetric(ctx, api.ContractSetMetric{
 		Name:      name,
 		Contracts: nContractsAfter,
-		Time:      time.Now(),
+		Timestamp: time.Now(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to record contract set metric: %w", err)

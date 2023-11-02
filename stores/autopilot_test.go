@@ -88,24 +88,3 @@ func TestAutopilotStore(t *testing.T) {
 		t.Fatal("expected amount to be 99")
 	}
 }
-
-// testAutopilotConfig is the autopilot used for testing unless a different
-// one is explicitly set.
-var testAutopilotConfig = api.AutopilotConfig{
-	Contracts: api.ContractsConfig{
-		Allowance:   types.Siacoins(1).Mul64(1e3),
-		Amount:      3,
-		Period:      144,
-		RenewWindow: 72,
-
-		Download: rhpv2.SectorSize * 500,
-		Upload:   rhpv2.SectorSize * 500,
-		Storage:  rhpv2.SectorSize * 5e3,
-
-		Set: testContractSet,
-	},
-	Hosts: api.HostsConfig{
-		MaxDowntimeHours:  10,
-		AllowRedundantIPs: true, // allow for integration tests by default
-	},
-}

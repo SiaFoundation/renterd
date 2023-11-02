@@ -99,6 +99,8 @@ func TestNewTestCluster(t *testing.T) {
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	if contract.EndHeight() != expectedEndHeight || contract.Revision.EndHeight() != expectedEndHeight {
 		t.Fatal("wrong endHeight", contract.EndHeight(), contract.Revision.EndHeight())
+	} else if contract.TotalCost.IsZero() || contract.ContractPrice.IsZero() {
+		t.Fatal("TotalCost and ContractPrice shouldn't be zero")
 	}
 
 	// Mine blocks until contracts start renewing.
@@ -118,6 +120,9 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		if contracts[0].ProofHeight != 0 {
 			return errors.New("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
+		}
+		if contracts[0].ContractPrice.IsZero() {
+			return errors.New("contract price shouldn't be zero")
 		}
 		return nil
 	})
@@ -1971,7 +1976,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 			t.Fatalf("expected 1 contract, got %v", m.Contracts)
 		} else if m.Name != testContractSet {
 			t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
-		} else if !m.Time.After(startTime) {
+		} else if !m.Timestamp.After(startTime) {
 			t.Fatal("expected time to be after start time")
 		}
 	}
@@ -1988,7 +1993,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected non-zero FCID")
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
-	} else if !m.Time.After(startTime) {
+	} else if !m.Timestamp.After(startTime) {
 		t.Fatal("expected time to be after start time")
 	}
 
