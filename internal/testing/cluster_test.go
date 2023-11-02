@@ -155,6 +155,13 @@ func TestNewTestCluster(t *testing.T) {
 		if ac.ProofHeight != 0 {
 			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
+		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, math.MaxUint64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(archivedContracts) != 0 {
+			return fmt.Errorf("should have 0 archived contracts but got %v", len(archivedContracts))
+		}
 		return nil
 	})
 	tt.OK(err)
