@@ -1406,11 +1406,14 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
 	}
-	var minStartHeight uint64
-	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
+	var minStartHeight int
+	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
+		return
+	} else if minStartHeight < 0 {
+		jc.Error(errors.New("minStartHeight must be non-negative"), http.StatusBadRequest)
 		return
 	}
-	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, minStartHeight)
+	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
