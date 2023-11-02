@@ -69,6 +69,16 @@ func (he HostError) Unwrap() error {
 // A HostErrorSet is a collection of errors from various hosts.
 type HostErrorSet []*HostError
 
+// NumGouging returns numbers of host that errored out due to price gouging.
+func (hes HostErrorSet) NumGouging() (n int) {
+	for _, he := range hes {
+		if errors.Is(he.Err, errPriceTableGouging) {
+			n++
+		}
+	}
+	return
+}
+
 // Error implements error.
 func (hes HostErrorSet) Error() string {
 	strs := make([]string, len(hes))

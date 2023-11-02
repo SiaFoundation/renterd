@@ -28,8 +28,8 @@ func alertIDForContract(alertID [32]byte, contract api.ContractMetadata) types.H
 	return types.HashBytes(append(alertID[:], contract.ID[:]...))
 }
 
-func alertIDForSlab(alertID [32]byte, slab object.Slab) types.Hash256 {
-	return types.HashBytes(append(alertID[:], []byte(slab.Key.String())...))
+func alertIDForSlab(alertID [32]byte, slabKey object.EncryptionKey) types.Hash256 {
+	return types.HashBytes(append(alertID[:], []byte(slabKey.String())...))
 }
 
 func randomAlertID() types.Hash256 {
@@ -135,21 +135,26 @@ func newOngoingMigrationsAlert(n int) alerts.Alert {
 	}
 }
 
-func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) alerts.Alert {
+func newSlabMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
 	severity := alerts.SeverityWarning
 	if health < 0.5 {
 		severity = alerts.SeverityCritical
 	}
 
+	hint := "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously."
+	if isErr(err, api.ErrGougingPreventedDownload) {
+		hint += " In this particular case, one or more hosts were considered to be price gouging. It might be necessary to adjust your price gouging settings."
+	}
+
 	return alerts.Alert{
-		ID:       alertIDForSlab(alertMigrationID, slab),
+		ID:       alertIDForSlab(alertMigrationID, slabKey),
 		Severity: severity,
 		Message:  "Slab migration failed",
 		Data: map[string]interface{}{
 			"error":   err,
 			"health":  health,
-			"slabKey": slab.Key.String(),
-			"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
+			"slabKey": slabKey.String(),
+			"hint":    hint,
 		},
 		Timestamp: time.Now(),
 	}

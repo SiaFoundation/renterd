@@ -1093,7 +1093,12 @@ func (s *slabDownload) finish() ([][]byte, error) {
 				unused++
 			}
 		}
-		return nil, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d unused=%d errors=%d %w", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), unused, len(s.errs), s.errs)
+
+		err := fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.mgr.numDownloaders(), unused, len(s.errs), s.errs)
+		if s.numCompleted+s.errs.NumGouging() >= s.minShards {
+			err = fmt.Errorf("%w; %v", api.ErrGougingPreventedDownload, err)
+		}
+		return nil, err
 	}
 	return s.sectors, nil
 }

@@ -65,6 +65,9 @@ var (
 	// valid.
 	errPriceTableExpired = errors.New("price table requested is expired")
 
+	// errPriceTableGouging is returned when the host is price gouging.
+	errPriceTableGouging = errors.New("host price table gouging")
+
 	// errPriceTableNotFound is returned by the host when it can not find a
 	// price table that corresponds with the id we sent it.
 	errPriceTableNotFound = errors.New("price table not found")
@@ -85,7 +88,6 @@ func isClosedStream(err error) bool {
 	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
 }
 func isInsufficientFunds(err error) bool  { return isError(err, ErrInsufficientFunds) }
-func isMaxRevisionReached(err error) bool { return isError(err, errMaxRevisionReached) }
 func isPriceTableExpired(err error) bool  { return isError(err, errPriceTableExpired) }
 func isPriceTableNotFound(err error) bool { return isError(err, errPriceTableNotFound) }
 func isSectorNotFound(err error) bool {
@@ -593,7 +595,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 		return rhpv3.HostPriceTable{}, err
 	}
 	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("host price table gouging: %v", breakdown)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
 	}
 	return pt.HostPriceTable, nil
 }
@@ -603,6 +605,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	if err != nil {
 		return err
 	}
+
 	// return errBalanceInsufficient if balance insufficient
 	defer func() {
 		if isBalanceInsufficient(err) {
