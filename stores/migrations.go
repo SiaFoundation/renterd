@@ -267,6 +267,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00020_missingIndices(tx, logger)
 			},
 		},
+		{
+			ID: "00021_contractPrice",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00021_contractPrice(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -968,5 +974,17 @@ func performMigration00020_missingIndices(txn *gorm.DB, logger *zap.SugaredLogge
 		return fmt.Errorf("failed to create missing indices: %w", err)
 	}
 	logger.Info("migration 00020_missingIndices complete")
+	return nil
+}
+
+func performMigration00021_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00021_contractPrice")
+	if err := txn.Migrator().AutoMigrate(&dbArchivedContract{}); err != nil {
+		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'archived_contracts': %w", err)
+	}
+	if err := txn.Migrator().AutoMigrate(&dbContract{}); err != nil {
+		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'contracts': %w", err)
+	}
+	logger.Info("migration 00021_contractPrice complete")
 	return nil
 }

@@ -466,7 +466,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 		})
 	}
 	if len(metrics) > 0 {
-		if err := c.ap.bus.RecordContractSetChurnMetrics(ctx, metrics...); err != nil {
+		if err := c.ap.bus.RecordContractSetChurnMetric(ctx, metrics...); err != nil {
 			c.logger.Error("failed to record contract set churn metric:", err)
 		}
 	}
@@ -1352,7 +1352,8 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, fcid)
+	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
+	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, fcid)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1440,7 +1441,8 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, contract.ID)
+	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, contract.ID)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1512,7 +1514,8 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	*budget = budget.Sub(renterFunds)
 
 	// persist contract in store
-	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, cs.BlockHeight)
+	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
+	formedContract, err := c.ap.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, true, err

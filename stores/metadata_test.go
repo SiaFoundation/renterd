@@ -229,9 +229,10 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Insert it.
+	contractPrice := types.NewCurrency64(1)
 	totalCost := types.NewCurrency64(456)
 	startHeight := uint64(100)
-	returned, err := ss.AddContract(ctx, c, totalCost, startHeight)
+	returned, err := ss.AddContract(ctx, c, contractPrice, totalCost, startHeight)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,8 +249,9 @@ func TestSQLContractStore(t *testing.T) {
 			Downloads:   types.ZeroCurrency,
 			FundAccount: types.ZeroCurrency,
 		},
-		TotalCost: totalCost,
-		Size:      c.Revision.Filesize,
+		ContractPrice: types.NewCurrency64(1),
+		TotalCost:     totalCost,
+		Size:          c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
 		t.Fatal("contract mismatch")
@@ -482,10 +484,11 @@ func TestRenewedContract(t *testing.T) {
 			},
 		},
 	}
+	oldContractPrice := types.NewCurrency64(1)
 	oldContractTotal := types.NewCurrency64(111)
 	oldContractStartHeight := uint64(100)
 	ctx := context.Background()
-	added, err := ss.AddContract(ctx, c, oldContractTotal, oldContractStartHeight)
+	added, err := ss.AddContract(ctx, c, oldContractPrice, oldContractTotal, oldContractStartHeight)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +502,7 @@ func TestRenewedContract(t *testing.T) {
 	c2 := c
 	c2.Revision.ParentID = fcid2
 	c2.Revision.UnlockConditions = uc2
-	_, err = ss.AddContract(ctx, c2, oldContractTotal, oldContractStartHeight)
+	_, err = ss.AddContract(ctx, c2, oldContractPrice, oldContractTotal, oldContractStartHeight)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,9 +589,10 @@ func TestRenewedContract(t *testing.T) {
 			},
 		},
 	}
+	newContractPrice := types.NewCurrency64(2)
 	newContractTotal := types.NewCurrency64(222)
 	newContractStartHeight := uint64(200)
-	if _, err := ss.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1); err != nil {
+	if _, err := ss.AddRenewedContract(ctx, rev, newContractPrice, newContractTotal, newContractStartHeight, fcid1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -645,7 +649,8 @@ func TestRenewedContract(t *testing.T) {
 			Downloads:   types.ZeroCurrency,
 			FundAccount: types.ZeroCurrency,
 		},
-		TotalCost: newContractTotal,
+		ContractPrice: types.NewCurrency64(2),
+		TotalCost:     newContractTotal,
 	}
 	if !reflect.DeepEqual(newContract, expected) {
 		t.Fatal("mismatch")
@@ -670,6 +675,7 @@ func TestRenewedContract(t *testing.T) {
 		ContractCommon: ContractCommon{
 			FCID: fileContractID(fcid1),
 
+			ContractPrice:  currency(oldContractPrice),
 			TotalCost:      currency(oldContractTotal),
 			ProofHeight:    0,
 			RevisionHeight: 0,
@@ -702,11 +708,12 @@ func TestRenewedContract(t *testing.T) {
 			},
 		},
 	}
+	newContractPrice = types.NewCurrency64(3)
 	newContractTotal = types.NewCurrency64(333)
 	newContractStartHeight = uint64(300)
 
 	// Assert the renewed contract is returned
-	renewedContract, err := ss.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1Renewed)
+	renewedContract, err := ss.AddRenewedContract(ctx, rev, newContractPrice, newContractTotal, newContractStartHeight, fcid1Renewed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -835,12 +842,12 @@ func (s *SQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileC
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
-	return s.AddContract(context.Background(), rev, types.ZeroCurrency, 0)
+	return s.AddContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, 0)
 }
 
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
-	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, startHeight, renewedFrom)
+	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, startHeight, renewedFrom)
 }
 
 func (s *SQLStore) contractsCount() (cnt int64, err error) {
@@ -3485,7 +3492,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 			},
 		},
 	}
-	_, err = ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), 100, fcid)
+	_, err = ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), types.NewCurrency64(1), 100, fcid)
 	if err != nil {
 		t.Fatal(err)
 	}

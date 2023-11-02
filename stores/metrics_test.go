@@ -93,7 +93,7 @@ func TestContractChurnSetMetrics(t *testing.T) {
 			for _, reason := range reasons {
 				for _, recordedTime := range times {
 					fcid := types.FileContractID{i}
-					if err := ss.RecordContractSetChurnMetrics(context.Background(), api.ContractSetChurnMetric{
+					if err := ss.RecordContractSetChurnMetric(context.Background(), api.ContractSetChurnMetric{
 						Timestamp: recordedTime,
 						Name:      set,
 						Direction: dir,

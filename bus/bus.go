@@ -108,8 +108,8 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
+		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -195,8 +195,12 @@ type (
 
 	MetricsStore interface {
 		ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
+
+		ContractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
+
 		ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
-		RecordContractSetChurnMetrics(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	}
 )
 
@@ -910,7 +914,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
+	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
@@ -931,7 +935,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
@@ -1795,7 +1799,7 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 		var req api.ContractSetChurnMetricRequestPUT
 		if jc.Decode(&req) != nil {
 			return
-		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetrics(jc.Request.Context(), req.Metrics...)) != nil {
+		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
 			return
 		}
 	default:
@@ -1808,6 +1812,26 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
 	var err error
 	switch key {
+	case api.MetricContract:
+		var metrics []api.ContractMetric
+		var opts api.ContractMetricsQueryOpts
+		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
+			return
+		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
+			return
+		} else if jc.DecodeForm("fcid", &opts.FCID) != nil {
+			return
+		} else if jc.DecodeForm("host", &opts.Host) != nil {
+			return
+		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
+			return
+		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
 	case api.MetricContractSet:
 		var metrics []api.ContractSetMetric
 		var opts api.ContractSetMetricsQueryOpts
@@ -1843,7 +1867,7 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract set metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)

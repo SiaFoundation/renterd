@@ -192,7 +192,7 @@ func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, opts api.Contrac
 	return resp, nil
 }
 
-func (s *SQLStore) RecordContractSetChurnMetrics(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
+func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
 	dbMetrics := make([]dbContractSetChurnMetric, len(metrics))
 	for i, metric := range metrics {
 		dbMetrics[i] = dbContractSetChurnMetric{
