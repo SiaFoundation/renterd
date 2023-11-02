@@ -80,10 +80,10 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.Host) (h
 		return
 	}
 
-	// try and refresh the host info if it got scanned in the mean time, this
-	// inconsistency would resolve itself but tyring to update it here improves
+	// try and refresh the host info if it got scanned in the meantime, this
+	// inconsistency would resolve itself but trying to update it here improves
 	// first time user experience
-	if host.Scanned && hi.UnusableResult.notcompletingscan == 1 {
+	if host.Scanned && hi.UnusableResult.notcompletingscan > 0 {
 		cs, err := c.ap.bus.ConsensusState(ctx)
 		if err != nil {
 			c.logger.Error("failed to fetch consensus state from bus: %v", err)
@@ -95,6 +95,11 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.Host) (h
 				Usable:         isUsable,
 				UnusableResult: unusableResult,
 			}
+
+			// update cache
+			c.mu.Lock()
+			c.cachedHostInfo[host.PublicKey] = hi
+			c.mu.Unlock()
 		}
 	}
 
