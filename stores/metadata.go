@@ -1177,7 +1177,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				remainingCollateral = mhp.Sub(types.Currency(contract.ContractPrice))
 			}
 			m := api.ContractMetric{
-				Time:                time.Now(),
+				Timestamp:           time.Now(),
 				FCID:                fcid,
 				Host:                types.PublicKey(contract.Host.PublicKey),
 				RemainingCollateral: remainingCollateral,

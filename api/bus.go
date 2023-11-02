@@ -644,7 +644,6 @@ type (
 	}
 
 	ContractMetric struct {
-		Time      time.Time `json:"time"`
 		Timestamp time.Time `json:"timestamp"`
 
 		FCID types.FileContractID `json:"fcid"`
