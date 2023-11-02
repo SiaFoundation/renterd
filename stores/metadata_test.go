@@ -2116,8 +2116,8 @@ func TestContractSectors(t *testing.T) {
 	}
 }
 
-// TestPutSlab verifies the functionality of PutSlab.
-func TestPutSlab(t *testing.T) {
+// TestUpdateSlab verifies the functionality of UpdateSlab.
+func TestUpdateSlab(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -2289,11 +2289,10 @@ func TestPutSlab(t *testing.T) {
 		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].ID, updated.ID)
 	}
 
-	// update the slab to change its contract set and total shards.
+	// update the slab to change its contract set.
 	if err := ss.SetContractSet(ctx, "other", nil); err != nil {
 		t.Fatal(err)
 	}
-	slab.Shards = nil // remove all shards
 	err = ss.UpdateSlab(ctx, slab, "other", map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk3: fcid3,
@@ -2311,10 +2310,6 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if s.DBContractSet.Name != "other" {
 		t.Fatal("contract set was not updated")
-	} else if s.TotalShards != 0 {
-		t.Fatal("total shards was not updated")
-	} else if len(s.Shards) != 0 {
-		t.Fatal("shards were not deleted")
 	}
 }
 
@@ -3672,7 +3667,7 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 }
 
-func TestUpdateSlab(t *testing.T) {
+func TestUpdateSlabSanityChecks(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 
 	// create hosts and contracts.
