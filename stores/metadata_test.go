@@ -249,8 +249,9 @@ func TestSQLContractStore(t *testing.T) {
 			Downloads:   types.ZeroCurrency,
 			FundAccount: types.ZeroCurrency,
 		},
-		TotalCost: totalCost,
-		Size:      c.Revision.Filesize,
+		ContractPrice: types.NewCurrency64(1),
+		TotalCost:     totalCost,
+		Size:          c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
 		t.Fatal("contract mismatch")
@@ -648,7 +649,8 @@ func TestRenewedContract(t *testing.T) {
 			Downloads:   types.ZeroCurrency,
 			FundAccount: types.ZeroCurrency,
 		},
-		TotalCost: newContractTotal,
+		ContractPrice: types.NewCurrency64(2),
+		TotalCost:     newContractTotal,
 	}
 	if !reflect.DeepEqual(newContract, expected) {
 		t.Fatal("mismatch")
