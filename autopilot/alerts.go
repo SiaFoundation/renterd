@@ -141,9 +141,11 @@ func newOngoingMigrationsAlert(n int) alerts.Alert {
 }
 
 func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) alerts.Alert {
-	severity := alerts.SeverityWarning
-	if health < 0.5 {
+	severity := alerts.SeverityError
+	if health < 0.25 {
 		severity = alerts.SeverityCritical
+	} else if health < 0.5 {
+		severity = alerts.SeverityWarning
 	}
 
 	return alerts.Alert{
