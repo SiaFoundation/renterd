@@ -145,7 +145,7 @@ type (
 		Model
 
 		DBSlabID uint `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
-		Index    int  `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
+		Idx      int  `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
 
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
@@ -186,9 +186,9 @@ type (
 		SlabMinShards uint8
 
 		// sector
-		SectorID   uint
-		SectorRoot []byte
-		SectorHost publicKey
+		SectorIndex uint
+		SectorRoot  []byte
+		SectorHost  publicKey
 	}
 
 	// rawObjectMetadata is used for hydrating object metadata.
@@ -370,7 +370,7 @@ func (raw rawObject) convert() (api.Object, error) {
 
 		curr := filtered[0]
 		for j, sector := range filtered {
-			if sector.SectorID == 0 {
+			if sector.SectorIndex == 0 {
 				return api.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.SlabID != curr.SlabID ||
@@ -1604,7 +1604,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			// ensure the sector exists
 			sector := dbSector{
 				DBSlabID:   slab.ID,
-				Index:      i + 1,
+				Idx:        i + 1,
 				LatestHost: publicKey(shard.Host),
 				Root:       shard.Root[:],
 			}
@@ -1771,7 +1771,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		for j, shard := range ss.Shards {
 			sector := dbSector{
 				DBSlabID:   slab.ID,
-				Index:      j + 1,
+				Idx:        j + 1,
 				LatestHost: publicKey(shard.Host),
 				Root:       shard.Root[:],
 			}
@@ -1833,7 +1833,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.idx as SectorIndex, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -1843,7 +1843,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
 		Order("sli.id ASC").
-		Order("sec.index ASC").
+		Order("sec.idx ASC").
 		Scan(&rows)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
 		return nil, api.ErrObjectNotFound
@@ -2000,7 +2000,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 	for i := range slab.Shards {
 		sector := dbSector{
 			DBSlabID:   sla.ID,
-			Index:      i + 1,
+			Idx:        i + 1,
 			LatestHost: publicKey(slab.Shards[i].Host),
 			Root:       slab.Shards[i].Root[:],
 		}
