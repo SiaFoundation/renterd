@@ -144,7 +144,9 @@ type (
 	dbSector struct {
 		Model
 
-		DBSlabID   uint      `gorm:"index"`
+		DBSlabID uint `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
+		Index    int  `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
+
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
@@ -1598,17 +1600,19 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 
 		// loop updated shards
-		for _, shard := range s.Shards {
+		for i, shard := range s.Shards {
 			// ensure the sector exists
-			var sector dbSector
-			if err := tx.
-				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{
-					DBSlabID:   slab.ID,
-					LatestHost: publicKey(shard.Host)},
-				).
-				FirstOrCreate(&sector).
-				Error; err != nil {
+			sector := dbSector{
+				DBSlabID:   slab.ID,
+				Index:      i + 1,
+				LatestHost: publicKey(shard.Host),
+				Root:       shard.Root[:],
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				DoUpdates: clause.Assignments(map[string]interface{}{
+					"latest_host": sector.LatestHost,
+				}),
+			}).Create(&sector).Error; err != nil {
 				return err
 			}
 
@@ -1765,16 +1769,15 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		}
 
 		for j, shard := range ss.Shards {
-			// Create sector if it doesn't exist yet.
-			var sector dbSector
-			err := tx.
-				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{
-					DBSlabID:   slab.ID,
-					LatestHost: publicKey(shard.Host),
-				}).
-				FirstOrCreate(&sector).
-				Error
+			sector := dbSector{
+				DBSlabID:   slab.ID,
+				Index:      j + 1,
+				LatestHost: publicKey(shard.Host),
+				Root:       shard.Root[:],
+			}
+			err := tx.Clauses(clause.OnConflict{
+				DoNothing: true,
+			}).Create(&sector).Error
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 			}
@@ -1840,7 +1843,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
 		Order("sli.id ASC").
-		Order("sec.id ASC").
+		Order("sec.index ASC").
 		Scan(&rows)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
 		return nil, api.ErrObjectNotFound
@@ -1997,6 +2000,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 	for i := range slab.Shards {
 		sector := dbSector{
 			DBSlabID:   sla.ID,
+			Index:      i + 1,
 			LatestHost: publicKey(slab.Shards[i].Host),
 			Root:       slab.Shards[i].Root[:],
 		}
