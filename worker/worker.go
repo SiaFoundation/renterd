@@ -215,7 +215,7 @@ type hostV2 interface {
 type hostV3 interface {
 	hostV2
 
-	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
 	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
@@ -523,7 +523,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		// just used it to dial the host we know it's valid
 		hostSettings.NetAddress = hostIP
 
-		gc, err := GougingCheckerFromContext(ctx)
+		gc, err := GougingCheckerFromContext(ctx, false)
 		if err != nil {
 			return err
 		}

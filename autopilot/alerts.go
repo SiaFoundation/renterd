@@ -141,11 +141,6 @@ func newSlabMigrationFailedAlert(slabKey object.EncryptionKey, health float64, e
 		severity = alerts.SeverityCritical
 	}
 
-	hint := "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously."
-	if isErr(err, api.ErrGougingPreventedDownload) {
-		hint += " In this particular case, one or more hosts were considered to be price gouging. It might be necessary to adjust your price gouging settings."
-	}
-
 	return alerts.Alert{
 		ID:       alertIDForSlab(alertMigrationID, slabKey),
 		Severity: severity,
@@ -154,7 +149,7 @@ func newSlabMigrationFailedAlert(slabKey object.EncryptionKey, health float64, e
 			"error":   err,
 			"health":  health,
 			"slabKey": slabKey.String(),
-			"hint":    hint,
+			"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
 		},
 		Timestamp: time.Now(),
 	}

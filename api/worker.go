@@ -21,10 +21,6 @@ var (
 	// ErrContractSetNotSpecified is returned by the worker API by endpoints that
 	// need a contract set to be able to upload data.
 	ErrContractSetNotSpecified = errors.New("contract set is not specified")
-
-	// ErrGougingPreventedDownload is returned by the worker API when a download
-	// failed because a critical number of hosts were price gouging.
-	ErrGougingPreventedDownload = errors.New("gouging settings prevented download from succeeding")
 )
 
 type (

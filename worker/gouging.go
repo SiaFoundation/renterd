@@ -33,7 +33,7 @@ const (
 
 type (
 	GougingChecker interface {
-		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		Check(_ *rhpv2.HostSettings, _ *rhpv3.HostPriceTable) api.HostGougingBreakdown
 	}
 
 	gougingChecker struct {
@@ -50,20 +50,25 @@ type (
 
 var _ GougingChecker = gougingChecker{}
 
-func GougingCheckerFromContext(ctx context.Context) (GougingChecker, error) {
-	gc, ok := ctx.Value(keyGougingChecker).(func() (GougingChecker, error))
+func GougingCheckerFromContext(ctx context.Context, applyMigrationSurchargeMultiplier bool) (GougingChecker, error) {
+	gc, ok := ctx.Value(keyGougingChecker).(func(applyMigrationSurchargeMultiplier bool) (GougingChecker, error))
 	if !ok {
 		panic("no gouging checker attached to the context") // developer error
 	}
-	return gc()
+	return gc(applyMigrationSurchargeMultiplier)
 }
 
 func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
-	return context.WithValue(ctx, keyGougingChecker, func() (GougingChecker, error) {
+	return context.WithValue(ctx, keyGougingChecker, func(applyMigrationSurchargeMultiplier bool) (GougingChecker, error) {
 		consensusState, err := cs.ConsensusState(ctx)
 		if err != nil {
 			return gougingChecker{}, fmt.Errorf("failed to get consensus state: %w", err)
 		}
+
+		if applyMigrationSurchargeMultiplier && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
+			gp.GougingSettings.MaxDownloadPrice = gp.GougingSettings.MaxDownloadPrice.Mul64(gp.GougingSettings.MigrationSurchargeMultiplier)
+		}
+
 		return gougingChecker{
 			consensusState: consensusState,
 			settings:       gp.GougingSettings,

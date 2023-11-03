@@ -79,6 +79,16 @@ func (hes HostErrorSet) NumGouging() (n int) {
 	return
 }
 
+// Remove removes all errors for the given host.
+func (hes HostErrorSet) Remove(hk types.PublicKey) {
+	for i := 0; i < len(hes); i++ {
+		if hes[i].HostKey == hk {
+			hes = append(hes[:i], hes[i+1:]...)
+			i--
+		}
+	}
+}
+
 // Error implements error.
 func (hes HostErrorSet) Error() string {
 	strs := make([]string, len(hes))

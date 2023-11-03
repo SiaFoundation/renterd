@@ -139,6 +139,10 @@ func (sb HostScoreBreakdown) String() string {
 	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
 }
 
+func (hgb HostGougingBreakdown) DownloadGouging() bool {
+	return hgb.V3.DownloadErr != ""
+}
+
 func (hgb HostGougingBreakdown) Gouging() bool {
 	return hgb.V2.Gouging() || hgb.V3.Gouging()
 }

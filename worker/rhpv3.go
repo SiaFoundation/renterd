@@ -89,6 +89,7 @@ func isClosedStream(err error) bool {
 }
 func isInsufficientFunds(err error) bool  { return isError(err, ErrInsufficientFunds) }
 func isPriceTableExpired(err error) bool  { return isError(err, errPriceTableExpired) }
+func isPriceTableGouging(err error) bool  { return isError(err, errPriceTableGouging) }
 func isPriceTableNotFound(err error) bool { return isError(err, errPriceTableNotFound) }
 func isSectorNotFound(err error) bool {
 	return isError(err, errSectorNotFound) || isError(err, errSectorNotFoundOld)
@@ -590,7 +591,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	if err != nil {
 		return rhpv3.HostPriceTable{}, err
 	}
-	gc, err := GougingCheckerFromContext(ctx)
+	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, err
 	}
@@ -600,10 +601,20 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	return pt.HostPriceTable, nil
 }
 
-func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
-	pt, err := h.priceTable(ctx, nil)
+func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
+	pt, err := h.priceTables.fetch(ctx, h.HostKey(), nil)
 	if err != nil {
 		return err
+	}
+	hpt := pt.HostPriceTable
+
+	// check for download gouging specifically
+	gc, err := GougingCheckerFromContext(ctx, overpay)
+	if err != nil {
+		return err
+	}
+	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadGouging() {
+		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
 	}
 
 	// return errBalanceInsufficient if balance insufficient
@@ -615,14 +626,14 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 
 	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			cost, err := readSectorCost(pt, uint64(length))
+			cost, err := readSectorCost(hpt, uint64(length))
 			if err != nil {
 				return err
 			}
 
 			var refund types.Currency
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-			cost, refund, err = RPCReadSector(ctx, t, w, pt, &payment, offset, length, root)
+			cost, refund, err = RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
 			amount = cost.Sub(refund)
 			return err
 		})
@@ -1368,7 +1379,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	}
 
 	// Perform gouging checks.
-	gc, err := GougingCheckerFromContext(ctx)
+	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to get gouging checker: %w", err)
 	}
