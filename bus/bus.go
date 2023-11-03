@@ -1407,10 +1407,10 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	var minStartHeight uint64
-	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
+	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
 		return
 	}
-	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, minStartHeight)
+	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
