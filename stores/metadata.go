@@ -1602,17 +1602,18 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// loop updated shards
 		for i, shard := range s.Shards {
 			// ensure the sector exists
-			sector := dbSector{
-				DBSlabID:   slab.ID,
-				Idx:        i + 1,
-				LatestHost: publicKey(shard.Host),
-				Root:       shard.Root[:],
-			}
-			if err := tx.Clauses(clause.OnConflict{
-				DoUpdates: clause.Assignments(map[string]interface{}{
-					"latest_host": sector.LatestHost,
-				}),
-			}).Create(&sector).Error; err != nil {
+			var sector dbSector
+			if err := tx.
+				Where(dbSector{Root: shard.Root[:]}).
+				Assign(dbSector{
+					DBSlabID:   slab.ID,
+					Idx:        i + 1,
+					LatestHost: publicKey(shard.Host),
+					Root:       shard.Root[:],
+				},
+				).
+				FirstOrCreate(&sector).
+				Error; err != nil {
 				return err
 			}
 
