@@ -1769,15 +1769,16 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		}
 
 		for j, shard := range ss.Shards {
-			sector := dbSector{
-				DBSlabID:   slab.ID,
-				Idx:        j + 1,
-				LatestHost: publicKey(shard.Host),
-				Root:       shard.Root[:],
-			}
-			err := tx.Clauses(clause.OnConflict{
-				DoNothing: true,
-			}).Create(&sector).Error
+			var sector dbSector
+			err := tx.
+				Where(dbSector{Root: shard.Root[:]}).
+				Assign(dbSector{
+					DBSlabID:   slab.ID,
+					Idx:        j + 1,
+					LatestHost: publicKey(shard.Host),
+				}).
+				FirstOrCreate(&sector).
+				Error
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 			}
