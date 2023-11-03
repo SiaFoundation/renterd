@@ -431,6 +431,8 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 	abortRetry := func(err error) bool {
 		if err == nil ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
+			errors.Is(err, errInvalidNumberOfShards) ||
+			errors.Is(err, errShardRootChanged) ||
 			errors.Is(err, api.ErrContractNotFound) ||
 			errors.Is(err, api.ErrObjectNotFound) ||
 			errors.Is(err, api.ErrObjectCorrupted) ||

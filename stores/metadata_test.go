@@ -2116,8 +2116,8 @@ func TestContractSectors(t *testing.T) {
 	}
 }
 
-// TestPutSlab verifies the functionality of PutSlab.
-func TestPutSlab(t *testing.T) {
+// TestUpdateSlab verifies the functionality of UpdateSlab.
+func TestUpdateSlab(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -2289,11 +2289,10 @@ func TestPutSlab(t *testing.T) {
 		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].ID, updated.ID)
 	}
 
-	// update the slab to change its contract set and total shards.
+	// update the slab to change its contract set.
 	if err := ss.SetContractSet(ctx, "other", nil); err != nil {
 		t.Fatal(err)
 	}
-	slab.Shards = nil // remove all shards
 	err = ss.UpdateSlab(ctx, slab, "other", map[types.PublicKey]types.FileContractID{
 		hk1: fcid1,
 		hk3: fcid3,
@@ -2311,10 +2310,6 @@ func TestPutSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if s.DBContractSet.Name != "other" {
 		t.Fatal("contract set was not updated")
-	} else if s.TotalShards != 0 {
-		t.Fatal("total shards was not updated")
-	} else if len(s.Shards) != 0 {
-		t.Fatal("shards were not deleted")
 	}
 }
 
@@ -3669,5 +3664,75 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal("expected health to be invalid")
 	} else if s.Shards[0].LatestHost != publicKey(hk2) {
 		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
+	}
+}
+
+func TestUpdateSlabSanityChecks(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+
+	// create hosts and contracts.
+	hks, err := ss.addTestHosts(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, contracts, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usedContracts := make(map[types.PublicKey]types.FileContractID)
+	for _, c := range contracts {
+		usedContracts[c.HostKey] = c.ID
+	}
+
+	// prepare a slab.
+	var shards []object.Sector
+	for i := 0; i < 5; i++ {
+		shards = append(shards, object.Sector{
+			Host: hks[i],
+			Root: types.Hash256{byte(i + 1)},
+		})
+	}
+	slab := object.Slab{
+		Key:    object.GenerateEncryptionKey(),
+		Shards: shards,
+	}
+
+	// set slab.
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, object.Object{
+		Key:   object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{{Slab: slab}},
+	}, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// verify slab.
+	rSlab, err := ss.Slab(context.Background(), slab.Key)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(slab, rSlab) {
+		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab))
+	}
+
+	// change the length to fail the update.
+	if err := ss.UpdateSlab(context.Background(), object.Slab{
+		Key:    slab.Key,
+		Shards: shards[:len(shards)-1],
+	}, testContractSet, usedContracts); !errors.Is(err, errInvalidNumberOfShards) {
+		t.Fatal(err)
+	}
+
+	// reverse the order of the shards to fail the update.
+	reversedShards := append([]object.Sector{}, shards...)
+	for i := 0; i < len(reversedShards)/2; i++ {
+		j := len(reversedShards) - i - 1
+		reversedShards[i], reversedShards[j] = reversedShards[j], reversedShards[i]
+	}
+	reversedSlab := object.Slab{
+		Key:    slab.Key,
+		Shards: reversedShards,
+	}
+	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet, usedContracts); !errors.Is(err, errShardRootChanged) {
+		t.Fatal(err)
 	}
 }
