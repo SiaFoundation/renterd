@@ -973,3 +973,84 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
 	return nil
 }
+
+func foo(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration migration 00022_sectorsIndex")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	if !isSQLite(txn) {
+		// MySQL
+		if err := txn.Migrator().AddColumn(&dbSector{}, "Idx"); err != nil {
+			return err
+		}
+		// Update objects to belong to default bucket
+		if err := txn.Exec(`
+			UPDATE sectors
+			JOIN (
+			    SELECT
+			        id,
+			        ROW_NUMBER() OVER (PARTITION BY db_slab_id ORDER BY id) AS new_index
+			    FROM
+			        sectors
+			) AS RowNumbered ON sectors.id = RowNumbered.id
+			SET
+			    sectors.idx = RowNumbered.new_index;
+		`).Error; err != nil {
+			return err
+		}
+	} else {
+		// SQLite
+		if txn.Migrator().HasTable("sectors_temp") {
+			if err := txn.Migrator().DropTable("sectors_temp"); err != nil {
+				return err
+			}
+		}
+		// Since SQLite doesn't support altering columns, we have to create
+		// a new temporary sectors table, copy the sectors over with the
+		// default bucket id and then delete the old table and rename the
+		// temporary one to 'sectors'.
+		if err := txn.Table("sectors_temp").Migrator().CreateTable(&dbSector{}); err != nil {
+			return fmt.Errorf("failed to create temporary table: %w", err)
+		} else if err := txn.Exec(`
+			INSERT INTO sectors_temp (id, created_at, db_slab_id, idx, latest_host, root)
+			SELECT sectors.id, sectors.created_at, db_slab_id, 0, latest_host, root
+			FROM sectors
+			`).Error; err != nil {
+			return fmt.Errorf("failed to copy old table over to new one: %w", err)
+		} else if err := txn.Exec(`
+		UPDATE sectors_temp
+		SET idx = (
+            SELECT
+				COUNT(*) + 1
+            FROM
+				sectors_temp AS s2
+            WHERE
+                s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors.id
+);
+`); err != nil {
+		} else if err := txn.Migrator().DropTable("sectors"); err != nil {
+			return fmt.Errorf("failed to drop objects table: %w", err)
+		} else if err := txn.Migrator().RenameTable("sectors_temp", "sectors"); err != nil {
+			return fmt.Errorf("failed to rename temporary table: %w", err)
+		} else if err := txn.Migrator().AutoMigrate(&dbSector{}); err != nil {
+			return fmt.Errorf("failed to auto-migrate sectors table: %w", err)
+		}
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00022_sectorsIndex complete")
+	return nil
+}
