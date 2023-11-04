@@ -303,7 +303,7 @@ func initSchema(tx *gorm.DB) error {
 
 	// Change the collation of columns that we need to be case sensitive.
 	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(767) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -311,7 +311,7 @@ func initSchema(tx *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(767) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
