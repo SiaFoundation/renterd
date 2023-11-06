@@ -82,6 +82,11 @@ func (dbContractSetMetric) TableName() string      { return "contract_sets" }
 func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn" }
 func (dbPerformanceMetric) TableName() string      { return "performance" }
 
+// scopePeriods is the core of all methods retrieving metrics. By using integer
+// division rounding combined with a GROUP BY operation, all rows of a table are
+// split into intervals and the row with the lowest timestamp for each interval
+// is returned. The result is then joined with the original table to retrieve
+// only the metrics we want.
 func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, interval time.Duration) *gorm.DB {
 	end := start.Add(time.Duration(n) * interval)
 	inner := db.Table(table).
