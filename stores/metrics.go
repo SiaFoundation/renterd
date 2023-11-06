@@ -94,9 +94,8 @@ func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, inte
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	return tx.Table(table).
-		Joins(fmt.Sprintf("INNER JOIN (?) periods ON periods.min_time = %s.timestamp", table), inner).
-		Group("timestamp").
-		Order("timestamp ASC")
+		Joins(fmt.Sprintf("INNER JOIN (?) periods ON %s.id IN (SELECT id FROM %s WHERE timestamp = periods.min_time ORDER BY id ASC LIMIT 1)", table, table), inner).
+		Group("timestamp")
 }
 
 func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
