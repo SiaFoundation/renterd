@@ -267,6 +267,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
 			},
 		},
+		{
+			ID: "00022_extendObjectID",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00022_extendObjectID(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -971,5 +977,21 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 		}
 	}
 	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
+	return nil
+}
+
+func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_extendObjectID")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = txn.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+	}
+	logger.Info("migration 00022_extendObjectID complete")
 	return nil
 }
