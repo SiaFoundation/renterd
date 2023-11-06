@@ -194,12 +194,12 @@ type (
 	}
 
 	MetricsStore interface {
-		ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
+		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		ContractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
-		ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
+		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	}
 )
@@ -1810,24 +1810,30 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 
 func (b *bus) metricsHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
+
+	// parse mandatory query parameters
 	var err error
+	var start time.Time
+	var n uint64
+	var interval time.Duration
+	if jc.DecodeForm("start", (*api.TimeRFC3339)(&start)) != nil {
+		return
+	} else if jc.DecodeForm("n", &n) != nil {
+		return
+	} else if jc.DecodeForm("interval", (*api.DurationMS)(&interval)) != nil {
+		return
+	}
+
+	// parse optional query parameters
 	switch key {
 	case api.MetricContract:
 		var metrics []api.ContractMetric
 		var opts api.ContractMetricsQueryOpts
-		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
-			return
-		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
-			return
-		} else if jc.DecodeForm("fcid", &opts.FCID) != nil {
+		if jc.DecodeForm("fcid", &opts.FCID) != nil {
 			return
 		} else if jc.DecodeForm("host", &opts.Host) != nil {
 			return
-		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
-			return
-		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
-			return
-		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)
@@ -1835,17 +1841,9 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	case api.MetricContractSet:
 		var metrics []api.ContractSetMetric
 		var opts api.ContractSetMetricsQueryOpts
-		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
+		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
-		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
-			return
-		} else if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
-			return
-		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
-			return
-		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract set metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)
@@ -1853,21 +1851,13 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	case api.MetricContractSetChurn:
 		var metrics []api.ContractSetChurnMetric
 		var opts api.ContractSetChurnMetricsQueryOpts
-		if jc.DecodeForm("after", (*api.TimeRFC3339)(&opts.After)) != nil {
-			return
-		} else if jc.DecodeForm("before", (*api.TimeRFC3339)(&opts.Before)) != nil {
-			return
-		} else if jc.DecodeForm("name", &opts.Name) != nil {
+		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
 		} else if jc.DecodeForm("direction", &opts.Direction) != nil {
 			return
 		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
 			return
-		} else if jc.DecodeForm("offset", &opts.Offset) != nil {
-			return
-		} else if jc.DecodeForm("limit", &opts.Limit) != nil {
-			return
-		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), opts); jc.Check("failed to get contract churn metrics", err) != nil {
+		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
 			return
 		}
 		jc.Encode(metrics)

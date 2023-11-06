@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"lukechampine.com/frand"
 )
@@ -39,6 +40,8 @@ type testSQLStore struct {
 type testSQLStoreConfig struct {
 	dbName          string
 	dbMetricsName   string
+	dbConn          gorm.Dialector
+	dbMetricsConn   gorm.Dialector
 	dir             string
 	skipMigrate     bool
 	skipContractSet bool
@@ -61,8 +64,17 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	if dbMetricsName == "" {
 		dbMetricsName = hex.EncodeToString(frand.Bytes(32)) // random name for metrics db
 	}
-	conn := NewEphemeralSQLiteConnection(dbName)
-	connMetrics := NewEphemeralSQLiteConnection(dbMetricsName)
+	var conn, connMetrics gorm.Dialector
+	if cfg.dbConn != nil {
+		conn = cfg.dbConn
+	} else {
+		conn = NewEphemeralSQLiteConnection(dbName)
+	}
+	if cfg.dbMetricsConn != nil {
+		connMetrics = cfg.dbMetricsConn
+	} else {
+		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
+	}
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
 	sqlStore, ccid, err := NewSQLStore(conn, connMetrics, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())

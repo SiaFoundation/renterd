@@ -82,32 +82,27 @@ func (dbContractSetMetric) TableName() string      { return "contract_sets" }
 func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn" }
 func (dbPerformanceMetric) TableName() string      { return "performance" }
 
-func scopeTimeRange(tx *gorm.DB, after, before time.Time) *gorm.DB {
-	if after != (time.Time{}) {
-		tx = tx.Where("timestamp > ?", unixTimeMS(after))
-	}
-	if before != (time.Time{}) {
-		tx = tx.Where("timestamp <= ?", unixTimeMS(before))
-	}
-	return tx
+func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, interval time.Duration) *gorm.DB {
+	end := start.Add(time.Duration(n) * interval)
+	inner := db.Table(table).
+		Select("id, MIN(timestamp), (timestamp - ?) / ? * ? AS period", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
+		Group("period")
+	return tx.Table(table).
+		Joins(fmt.Sprintf("INNER JOIN (?) periods ON periods.id = %s.id", table), inner).
+		Order("timestamp ASC")
 }
 
-func (s *SQLStore) contractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
+func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
 	tx := s.dbMetrics
 	if opts.Name != "" {
 		tx = tx.Where("name", opts.Name)
 	}
-	if opts.Offset != 0 {
-		tx = tx.Offset(opts.Offset)
-	}
-	if opts.Limit != 0 {
-		tx = tx.Limit(opts.Limit)
-	}
+
 	var metrics []dbContractSetMetric
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopeTimeRange(tx, opts.After, opts.Before)
+		return scopePeriods(s.dbMetrics, tx, dbContractSetMetric{}.TableName(), start, n, interval)
 	}).
-		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -116,8 +111,8 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, opts api.ContractSetM
 	return metrics, nil
 }
 
-func (s *SQLStore) ContractSetMetrics(ctx context.Context, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
-	metrics, err := s.contractSetMetrics(ctx, opts)
+func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
+	metrics, err := s.contractSetMetrics(ctx, start, n, interval, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +139,7 @@ func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.C
 	return s.dbMetrics.Create(&dbMetrics).Error
 }
 
-func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]dbContractSetChurnMetric, error) {
+func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]dbContractSetChurnMetric, error) {
 	tx := s.dbMetrics
 	if opts.Name != "" {
 		tx = tx.Where("name", opts.Name)
@@ -155,17 +150,10 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.Contrac
 	if opts.Reason != "" {
 		tx = tx.Where("reason", opts.Reason)
 	}
-	if opts.Offset != 0 {
-		tx = tx.Offset(opts.Offset)
-	}
-	if opts.Limit != 0 {
-		tx = tx.Limit(opts.Limit)
-	}
 	var metrics []dbContractSetChurnMetric
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopeTimeRange(tx, opts.After, opts.Before)
+		return scopePeriods(s.dbMetrics, tx, dbContractSetChurnMetric{}.TableName(), start, n, interval)
 	}).
-		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -174,8 +162,8 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, opts api.Contrac
 	return metrics, nil
 }
 
-func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	metrics, err := s.contractSetChurnMetrics(ctx, opts)
+func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
+	metrics, err := s.contractSetChurnMetrics(ctx, start, n, interval, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +194,7 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...
 	return s.dbMetrics.Create(&dbMetrics).Error
 }
 
-func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceMetricsQueryOpts) ([]dbPerformanceMetric, error) {
+func (s *SQLStore) performanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]dbPerformanceMetric, error) {
 	tx := s.dbMetrics
 	if opts.Action != "" {
 		tx = tx.Where("action", opts.Action)
@@ -217,21 +205,11 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 	if opts.Origin != "" {
 		tx = tx.Where("origin", opts.Origin)
 	}
-	if opts.Duration != 0 {
-		tx = tx.Where("duration", opts.Duration)
-	}
-	if opts.Offset != 0 {
-		tx = tx.Offset(opts.Offset)
-	}
-	if opts.Limit != 0 {
-		tx = tx.Limit(opts.Limit)
-	}
 
 	var metrics []dbPerformanceMetric
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopeTimeRange(tx, opts.After, opts.Before)
+		return scopePeriods(s.dbMetrics, tx, dbPerformanceMetric{}.TableName(), start, n, interval)
 	}).
-		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -240,8 +218,8 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, opts api.PerformanceM
 	return metrics, nil
 }
 
-func (s *SQLStore) PerformanceMetrics(ctx context.Context, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
-	metrics, err := s.performanceMetrics(ctx, opts)
+func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
+	metrics, err := s.performanceMetrics(ctx, start, n, interval, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +250,7 @@ func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.P
 	return s.dbMetrics.Create(dbMetrics).Error
 }
 
-func (s *SQLStore) contractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]dbContractMetric, error) {
+func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]dbContractMetric, error) {
 	tx := s.dbMetrics
 	if opts.FCID != (types.FileContractID{}) {
 		tx = tx.Where("fcid", fileContractID(opts.FCID))
@@ -280,18 +258,11 @@ func (s *SQLStore) contractMetrics(ctx context.Context, opts api.ContractMetrics
 	if opts.Host != (types.PublicKey{}) {
 		tx = tx.Where("host", publicKey(opts.Host))
 	}
-	if opts.Offset != 0 {
-		tx = tx.Offset(opts.Offset)
-	}
-	if opts.Limit != 0 {
-		tx = tx.Limit(opts.Limit)
-	}
 
 	var metrics []dbContractMetric
 	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopeTimeRange(tx, opts.After, opts.Before)
+		return scopePeriods(s.dbMetrics, tx, dbContractMetric{}.TableName(), start, n, interval)
 	}).
-		Order("timestamp ASC").
 		Find(&metrics).
 		Error
 	if err != nil {
@@ -300,8 +271,8 @@ func (s *SQLStore) contractMetrics(ctx context.Context, opts api.ContractMetrics
 	return metrics, nil
 }
 
-func (s *SQLStore) ContractMetrics(ctx context.Context, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
-	metrics, err := s.contractMetrics(ctx, opts)
+func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
+	metrics, err := s.contractMetrics(ctx, start, n, interval, opts)
 	if err != nil {
 		return nil, err
 	}

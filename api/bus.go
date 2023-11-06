@@ -593,13 +593,7 @@ type (
 	}
 
 	ContractSetMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
 		Name string
-
-		Offset int
-		Limit  int
 	}
 
 	ContractSetChurnMetric struct {
@@ -611,15 +605,9 @@ type (
 	}
 
 	ContractSetChurnMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
 		Name      string
 		Direction string
 		Reason    string
-
-		Offset int
-		Limit  int
 	}
 
 	PerformanceMetric struct {
@@ -631,16 +619,9 @@ type (
 	}
 
 	PerformanceMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
-		Action   string
-		Host     types.PublicKey
-		Origin   string
-		Duration time.Duration
-
-		Offset int
-		Limit  int
+		Action string
+		Host   types.PublicKey
+		Origin string
 	}
 
 	ContractMetric struct {
@@ -661,13 +642,7 @@ type (
 	}
 
 	ContractMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
 		FCID types.FileContractID
 		Host types.PublicKey
-
-		Offset int
-		Limit  int
 	}
 )
