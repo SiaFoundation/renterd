@@ -90,11 +90,11 @@ func (dbPerformanceMetric) TableName() string      { return "performance" }
 func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, interval time.Duration) *gorm.DB {
 	end := start.Add(time.Duration(n) * interval)
 	inner := db.Table(table).
-		Select("id, MIN(timestamp), (timestamp - ?) / ? * ? AS period", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		Select("MIN(timestamp) AS min_time, (timestamp - ?) / ? * ? AS period", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	return tx.Table(table).
-		Joins(fmt.Sprintf("INNER JOIN (?) periods ON periods.id = %s.id", table), inner).
+		Joins(fmt.Sprintf("INNER JOIN (?) periods ON periods.min_time = %s.timestamp", table), inner).
 		Order("timestamp ASC")
 }
 
