@@ -19,7 +19,7 @@ func (c *Client) ContractSetMetrics(ctx context.Context, start time.Time, n uint
 		values.Set("name", opts.Name)
 	}
 	var resp []api.ContractSetMetric
-	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?"+values.Encode(), api.MetricContractSet), &resp)
+	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?%s", api.MetricContractSet, values.Encode()), &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (c *Client) ContractSetChurnMetrics(ctx context.Context, start time.Time, n
 		values.Set("reason", string(opts.Reason))
 	}
 	var resp []api.ContractSetChurnMetric
-	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?"+values.Encode(), api.MetricContractSetChurn), &resp)
+	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?%s", api.MetricContractSetChurn, values.Encode()), &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 		values.Set("host", opts.Host.String())
 	}
 	var resp []api.ContractMetric
-	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?"+values.Encode(), api.MetricContract), &resp)
+	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?%s", api.MetricContract, values.Encode()), &resp)
 	if err != nil {
 		return nil, err
 	}
