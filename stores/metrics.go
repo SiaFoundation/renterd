@@ -95,6 +95,7 @@ func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, inte
 		Group("period")
 	return tx.Table(table).
 		Joins(fmt.Sprintf("INNER JOIN (?) periods ON periods.min_time = %s.timestamp", table), inner).
+		Group("timestamp").
 		Order("timestamp ASC")
 }
 
