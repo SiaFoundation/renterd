@@ -98,7 +98,7 @@ var (
 			AccountsRefillInterval:         defaultAccountRefillInterval,
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
-			RevisionBroadcastInterval:      24 * time.Hour,
+			RevisionBroadcastInterval:      7 * 24 * time.Hour,
 			ScannerBatchSize:               1000,
 			ScannerInterval:                24 * time.Hour,
 			ScannerMinRecentFailures:       10,

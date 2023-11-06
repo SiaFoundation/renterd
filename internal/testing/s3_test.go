@@ -373,9 +373,6 @@ func TestS3MultipartUploads(t *testing.T) {
 	core := cluster.S3Core
 	tt := cluster.tt
 
-	// delete default bucket before testing.
-	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
-
 	// Create bucket.
 	tt.OK(s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{}))
 
@@ -386,14 +383,22 @@ func TestS3MultipartUploads(t *testing.T) {
 		t.Fatal("expected non-empty upload ID")
 	}
 
+	// Start another one in the default bucket. This should not show up when
+	// listing the uploads in the 'multipart' bucket.
+	tt.OKAll(core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "foo", minio.PutObjectOptions{}))
+
 	// List uploads
 	lmu, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
 	tt.OK(err)
 	if len(lmu.Uploads) != 1 {
-		t.Fatal("expected 1 upload")
+		t.Fatal("expected 1 upload", len(lmu.Uploads))
 	} else if upload := lmu.Uploads[0]; upload.UploadID != uploadID || upload.Key != "foo" {
 		t.Fatal("unexpected upload:", upload.UploadID, upload.Key)
 	}
+
+	// delete default bucket for the remainder of the test. This makes sure we
+	// can delete the bucket even though it contains a multipart upload.
+	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
 
 	// Add 3 parts out of order to make sure the object is reconstructed
 	// correctly.

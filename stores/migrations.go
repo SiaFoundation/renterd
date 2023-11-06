@@ -268,9 +268,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00021_contractPrice",
+			ID: "00021_multipoartUploadsBucketCascade",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00021_contractPrice(tx, logger)
+				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
+			},
+		},
+		{
+			ID: "00022_contractPrice",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00022_contractPrice(tx, logger)
 			},
 		},
 	}
@@ -977,14 +983,43 @@ func performMigration00020_missingIndices(txn *gorm.DB, logger *zap.SugaredLogge
 	return nil
 }
 
-func performMigration00021_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00021_contractPrice")
+func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00021_multipoartUploadsBucketCascade")
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Add cascade constraint.
+	if err := txn.Migrator().DropConstraint(&dbMultipartUpload{}, "DBBucket"); err != nil {
+		return err
+	} else if err := txn.Migrator().CreateConstraint(&dbMultipartUpload{}, "DBBucket"); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
+	return nil
+}
+
+func performMigration00022_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_contractPrice")
 	if err := txn.Migrator().AutoMigrate(&dbArchivedContract{}); err != nil {
 		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'archived_contracts': %w", err)
 	}
 	if err := txn.Migrator().AutoMigrate(&dbContract{}); err != nil {
 		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'contracts': %w", err)
 	}
-	logger.Info("migration 00021_contractPrice complete")
+	logger.Info("migration 00022_contractPrice complete")
 	return nil
 }
