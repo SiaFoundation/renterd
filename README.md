@@ -82,28 +82,43 @@ step-by-step guide to achieving a functional renterd instance.
 
 ### Wallet
 
-Make sure the wallet is funded, it's a good rule of thumb to have at least twice the allowance in the wallet. Fetch the wallet's address and transfer some money. Verify the wallet's balance is not zero using the following endpoint:
+Make sure the wallet is funded, it's a good rule of thumb to have at least twice
+the allowance in the wallet. Fetch the wallet's address and transfer some money.
+Verify the wallet's balance is not zero using the following endpoint:
 
 - `GET /api/bus/wallet`
 
-The autopilot will automatically redistribute the wallet funds over a certain number of outputs that make sense with regards to the autopilot's configuration. Contract formation and renewals work best when the autopilot has a good amount of outputs at its disposal. It's definitely a good idea to verify whether this is the case because if not it means that it's likely the autopilot is misconfigured, in which case the logs should be of help.
+The autopilot will automatically redistribute the wallet funds over a certain
+number of outputs that make sense with regards to the autopilot's configuration.
+Contract formation and renewals work best when the autopilot has a good amount
+of outputs at its disposal. It's definitely a good idea to verify whether this
+is the case because if not it means that it's likely the autopilot is
+misconfigured, in which case the logs should be of help.
 
 - `GET /api/bus/wallet/outputs`
 
 ### Consensus
 
-In order for the contracts to get formed, your node has to be synced with the blockchain. If you are not bootstrapping your node this can take a while. Verify your node's consensus state using the following endpoint:
+In order for the contracts to get formed, your node has to be synced with the
+blockchain. If you are not bootstrapping your node this can take a while. Verify
+your node's consensus state using the following endpoint:
 
 - `GET /api/bus/consensus/state`
 
 ### Config
 
-The configuration can be updated through the UI or by using the following endpoints:
+The configuration can be updated through the UI or by using the following
+endpoints:
 
 - `GET /api/autopilot/config`
 - `PUT /api/autopilot/config`
 
-The autopilot will not perform any tasks until it is configured. An example configuration can be found below. Especially the `contracts` section is important, make sure the `amount` is set to the amount of hosts with which you want to form a contract. The `allowance` is the amount of money the autopilot can spend per period, make sure it is not set to zero or contracts won't get formed.
+The autopilot will not perform any tasks until it is configured. An example
+configuration can be found below. Especially the `contracts` section is
+important, make sure the `amount` is set to the amount of hosts with which you
+want to form a contract. The `allowance` is the amount of money the autopilot
+can spend per period, make sure it is not set to zero or contracts won't get
+formed.
 
 ```json
 {
@@ -165,7 +180,8 @@ endpoint in the worker API:
 
 ### Gouging
 
-The default gouging settings are listed below. The gouging settings can be updated using the settings API:
+The default gouging settings are listed below. The gouging settings can be
+updated using the settings API:
 
 - `GET /api/bus/setting/gouging`
 - `PUT /api/bus/setting/gouging`
@@ -187,12 +203,17 @@ The default gouging settings are listed below. The gouging settings can be updat
 
 ### Blocklist
 
-Unfortunately the Sia blockchain contains a large amount of hosts that announced themselves with faulty parameters and/or bad intentions, something which is unavoidable of course in a decentralized environment. To make sure the autopilot does not have to scan/loop through all ~80.000 hosts on every iteration of the loop, we added a blocklist.
+Unfortunately the Sia blockchain contains a large amount of hosts that announced
+themselves with faulty parameters and/or bad intentions, something which is
+unavoidable of course in a decentralized environment. To make sure the autopilot
+does not have to scan/loop through all ~80.000 hosts on every iteration of the
+loop, we added a blocklist.
 
 - `GET /api/bus/hosts/blocklist`
 - `PUT /api/bus/hosts/blocklist`
 
-The Sia Foundation does not ship `renterd` with a default blocklist, the following entries exclude a decent amount of bad/old/malicious hosts:
+The Sia Foundation does not ship `renterd` with a default blocklist, the
+following entries exclude a decent amount of bad/old/malicious hosts:
 
 - 45.148.30.56
 - 51.158.108.244
@@ -203,26 +224,43 @@ The Sia Foundation does not ship `renterd` with a default blocklist, the followi
 
 ### Logging
 
-`renterd` has both console and file logging, the logs are stored in `renterd.log` and contain logs from all of the components that are enabled, e.g. if only the `bus` and `worker` are enabled it will only contain the logs from those two components.
+`renterd` has both console and file logging, the logs are stored in
+`renterd.log` and contain logs from all of the components that are enabled, e.g.
+if only the `bus` and `worker` are enabled it will only contain the logs from
+those two components.
 
 ### Ephemeral Account Drift
 
-The Autopilot manages a collection of ephemeral accounts, each corresponding to a specific contract. These accounts facilitate quicker payments to hosts for various actions, offering advantages over contract payments in terms of speed and parallel execution. Account balances are periodically synchronized with hosts, and discrepancies, if any, are detected during this process. renterd incorporates built-in safeguards to deter host manipulation, discontinuing interactions with hosts that exhibit excessive account balance drift. In rare scenarios, issues may arise due to this drift; these can be rectified by resetting the drift via a specific endpoint:
+The Autopilot manages a collection of ephemeral accounts, each corresponding to
+a specific contract. These accounts facilitate quicker payments to hosts for
+various actions, offering advantages over contract payments in terms of speed
+and parallel execution. Account balances are periodically synchronized with
+hosts, and discrepancies, if any, are detected during this process. renterd
+incorporates built-in safeguards to deter host manipulation, discontinuing
+interactions with hosts that exhibit excessive account balance drift. In rare
+scenarios, issues may arise due to this drift; these can be rectified by
+resetting the drift via a specific endpoint:
 
 - `POST   /account/:id/resetdrift`
 
 ### Contract Set Contracts
 
-The autopilot forms and manages contracts in the contract set with name configured in the autopilot's configuration object, by default this is called the `autopilot` contract set. This contract set should contain the amount of contracts configured in the contracts section of the configuration.
+The autopilot forms and manages contracts in the contract set with name
+configured in the autopilot's configuration object, by default this is called
+the `autopilot` contract set. This contract set should contain the amount of
+contracts configured in the contracts section of the configuration.
 
-That means that, if everything is running smoothly, the following curl call should return that number
+That means that, if everything is running smoothly, the following curl call
+should return that number
 
 ```bash
 curl -u ":[YOUR_PASSWORD]"  [BASE_URL]/api/bus/contracts/set/autopilot | jq '.|length'
 ```
 
-### Autopilot Trigger
+### Autopilot Loop Trigger
 
-For debugging purposes, the autopilot allows triggering the main loop using the following endpoint:
+The autopilot allows triggering its loop using the following endpoint. The UI
+triggers this endpoint after the user updates the configuration, but it can be
+useful for debugging purposes too.
 
-- `POST /api/autopilot/debug/trigger`
+- `POST /api/autopilot/trigger`

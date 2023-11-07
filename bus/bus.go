@@ -311,7 +311,7 @@ func (b *bus) bucketHandlerDELETE(jc jape.Context) {
 	} else if name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
+	} else if jc.Check("failed to delete bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
 		return
 	}
 }
@@ -1407,10 +1407,10 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	var minStartHeight uint64
-	if jc.DecodeForm("startHeight", &minStartHeight) != nil {
+	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
 		return
 	}
-	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, minStartHeight)
+	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
@@ -1987,56 +1987,33 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /alerts":                    b.handleGETAlerts,
-		"POST   /alerts/dismiss":            b.handlePOSTAlertsDismiss,
-		"POST   /alerts/register":           b.handlePOSTAlertsRegister,
-		"GET    /accounts":                  b.accountsHandlerGET,
-		"POST   /accounts/:id":              b.accountHandlerGET,
-		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"GET    /accounts":                 b.accountsHandlerGET,
+		"POST   /account/:id":              b.accountHandlerGET,
+		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
+		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
+		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
+		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
+		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
 
-		"GET    /autopilots":     b.autopilotsListHandlerGET,
-		"GET    /autopilots/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilots/:id": b.autopilotsHandlerPUT,
+		"GET    /alerts":          b.handleGETAlerts,
+		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
+		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /syncer/address": b.syncerAddrHandler,
-		"GET    /syncer/peers":   b.syncerPeersHandler,
-		"POST   /syncer/connect": b.syncerConnectHandler,
+		"GET    /autopilots":    b.autopilotsListHandlerGET,
+		"GET    /autopilot/:id": b.autopilotsHandlerGET,
+		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
+
+		"GET    /buckets":             b.bucketsHandlerGET,
+		"POST   /buckets":             b.bucketsHandlerPOST,
+		"PUT    /bucket/:name/policy": b.bucketsHandlerPolicyPUT,
+		"DELETE /bucket/:name":        b.bucketHandlerDELETE,
+		"GET    /bucket/:name":        b.bucketHandlerGET,
 
 		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
-		"GET    /consensus/state":              b.consensusStateHandler,
 		"GET    /consensus/network":            b.consensusNetworkHandler,
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
-
-		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
-		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
-		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
-
-		"GET    /wallet":               b.walletHandler,
-		"GET    /wallet/transactions":  b.walletTransactionsHandler,
-		"GET    /wallet/outputs":       b.walletOutputsHandler,
-		"POST   /wallet/fund":          b.walletFundHandler,
-		"POST   /wallet/sign":          b.walletSignHandler,
-		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
-		"POST   /wallet/discard":       b.walletDiscardHandler,
-		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
-		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
-		"GET    /wallet/pending":       b.walletPendingHandler,
-
-		"GET    /hosts":             b.hostsHandlerGET,
-		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
-		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
-		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
-		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":   b.hostsBlocklistHandlerPUT,
-		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
+		"GET    /consensus/state":              b.consensusStateHandler,
 
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
@@ -2050,59 +2027,25 @@ func (b *bus) Handler() http.Handler {
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"POST   /contract/:id":           b.contractIDHandlerPOST,
-		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
-		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
-		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 
-		"GET    /buckets":              b.bucketsHandlerGET,
-		"POST   /buckets":              b.bucketsHandlerPOST,
-		"PUT    /buckets/:name/policy": b.bucketsHandlerPolicyPUT,
-		"DELETE /buckets/:name":        b.bucketHandlerDELETE,
-		"GET    /buckets/:name":        b.bucketHandlerGET,
-
-		"GET    /objects/*path":  b.objectsHandlerGET,
-		"PUT    /objects/*path":  b.objectsHandlerPUT,
-		"DELETE /objects/*path":  b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
-		"POST   /objects/list":   b.objectsListHandlerPOST,
-
-		"GET    /params/upload":  b.paramsHandlerUploadGET,
-		"GET    /params/gouging": b.paramsHandlerGougingGET,
-
-		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
-		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
-
-		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
-
-		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
-		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
-		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
-		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
-		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
-
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
-		"GET    /search/objects": b.searchObjectsHandlerGET,
-
-		"GET    /settings":     b.settingsHandlerGET,
-		"GET    /setting/:key": b.settingKeyHandlerGET,
-		"PUT    /setting/:key": b.settingKeyHandlerPUT,
-		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
-
-		"GET    /state":         b.stateHandlerGET,
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
-		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
-		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
-		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+		"GET    /hosts":             b.hostsHandlerGET,
+		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":   b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
+		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
+		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
+		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
@@ -2112,10 +2055,82 @@ func (b *bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
+		"GET    /objects/*path":  b.objectsHandlerGET,
+		"PUT    /objects/*path":  b.objectsHandlerPUT,
+		"DELETE /objects/*path":  b.objectsHandlerDELETE,
+		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
+		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+		"POST   /objects/list":   b.objectsListHandlerPOST,
+
+		"GET    /params/gouging": b.paramsHandlerGougingGET,
+		"GET    /params/upload":  b.paramsHandlerUploadGET,
+
+		"GET    /syncer/address": b.syncerAddrHandler,
+		"POST   /syncer/connect": b.syncerConnectHandler,
+		"GET    /syncer/peers":   b.syncerPeersHandler,
+
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
+		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
+
+		"GET    /wallet":               b.walletHandler,
+		"POST   /wallet/discard":       b.walletDiscardHandler,
+		"POST   /wallet/fund":          b.walletFundHandler,
+		"GET    /wallet/outputs":       b.walletOutputsHandler,
+		"GET    /wallet/pending":       b.walletPendingHandler,
+		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
+		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
+		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
+		"POST   /wallet/sign":          b.walletSignHandler,
+		"GET    /wallet/transactions":  b.walletTransactionsHandler,
+
+		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
+
+		"POST   /search/hosts":   b.searchHostsHandlerPOST,
+		"GET    /search/objects": b.searchObjectsHandlerGET,
+
+		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
+
+		"GET    /settings":     b.settingsHandlerGET,
+		"GET    /setting/:key": b.settingKeyHandlerGET,
+		"PUT    /setting/:key": b.settingKeyHandlerPUT,
+		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+
+		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
+		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
+		"GET    /slab/:key":           b.slabHandlerGET,
+		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
+		"PUT    /slab":                b.slabHandlerPUT,
+
+		"GET    /state":         b.stateHandlerGET,
+		"GET    /stats/objects": b.objectsStatshandlerGET,
+
+		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
+		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
+
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
 		"POST   /webhook/delete":  b.webhookHandlerDelete,
+
+		// TODO: remove these deprecated routes
+		"POST   /accounts/:id":              b.accountHandlerGET,
+		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
+		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
+		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
+		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
+		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"GET    /autopilots/:id":            b.autopilotsHandlerGET,
+		"PUT    /autopilots/:id":            b.autopilotsHandlerPUT,
+		"PUT    /buckets/:name/policy":      b.bucketsHandlerPolicyPUT,
+		"DELETE /buckets/:name":             b.bucketHandlerDELETE,
+		"GET    /buckets/:name":             b.bucketHandlerGET,
 	}))
 }
 

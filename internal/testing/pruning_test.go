@@ -21,18 +21,8 @@ func TestHostPruning(t *testing.T) {
 		t.SkipNow()
 	}
 
-	ctx := context.Background()
-
-	// update the min scan interval to ensure the scanner scans all hosts on
-	// every iteration of the autopilot loop, this ensures we try and remove
-	// offline hosts in every autopilot loop
-	apCfg := testApCfg()
-	apCfg.ScannerInterval = 0
-
 	// create a new test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		autopilotCfg: &apCfg,
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
@@ -55,23 +45,6 @@ func TestHostPruning(t *testing.T) {
 		tt.OK(b.RecordHostScans(context.Background(), his))
 	}
 
-	// create a helper function that waits for an autopilot loop to finish
-	waitForAutopilotLoop := func() {
-		t.Helper()
-		var nTriggered int
-		tt.Retry(10, 500*time.Millisecond, func() error {
-			triggered, err := a.Trigger(true)
-			tt.OK(err)
-			if triggered {
-				nTriggered++
-				if nTriggered > 1 {
-					return nil
-				}
-			}
-			return errors.New("autopilot loop has not finished")
-		})
-	}
-
 	// add a host
 	hosts := cluster.AddHosts(1)
 	h1 := hosts[0]
@@ -84,20 +57,32 @@ func TestHostPruning(t *testing.T) {
 	tt.OKAll(w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0))
 
 	// block the host
-	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.PublicKey().String()}, nil, false))
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1.PublicKey().String()}, nil, false))
 
 	// remove it from the cluster manually
-	cluster.hosts = cluster.hosts[1:]
-	tt.OK(hosts[0].Close())
+	cluster.RemoveHost(h1)
 
 	// shut down the worker manually, this will flush any interactions
-	tt.OK(cluster.workerShutdownFns[1](context.Background()))
-	cluster.workerShutdownFns = cluster.workerShutdownFns[:1]
+	cluster.ShutdownWorker(context.Background())
 
 	// record 9 failed interactions, right before the pruning threshold, and
 	// wait for the autopilot loop to finish at least once
 	recordFailedInteractions(9, h1.PublicKey())
-	waitForAutopilotLoop()
+
+	// assert the autopilot loop ran at least once by successfully triggering it twice
+	remaining := 2
+	tt.Retry(100, 50*time.Millisecond, func() error {
+		triggered, err := a.Trigger(true)
+		tt.OK(err)
+
+		if triggered {
+			remaining--
+		}
+		if remaining > 0 {
+			return errors.New("failed to trigger the autopilot loop")
+		}
+		return nil
+	})
 
 	// assert the host was not pruned
 	hostss, err := b.Hosts(context.Background(), api.GetHostsOptions{})
@@ -109,14 +94,16 @@ func TestHostPruning(t *testing.T) {
 	// record one more failed interaction, this should push the host over the
 	// pruning threshold
 	recordFailedInteractions(1, h1.PublicKey())
-	waitForAutopilotLoop()
 
-	// assert the host was not pruned
-	hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
-	tt.OK(err)
-	if len(hostss) != 0 {
-		t.Fatalf("host was not pruned, %+v", hostss[0].Interactions)
-	}
+	// assert the host was pruned
+	tt.Retry(10, time.Second, func() error {
+		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
+		tt.OK(err)
+		if len(hostss) != 0 {
+			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)
+		}
+		return nil
+	})
 
 	// assert validation on MaxDowntimeHours
 	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)

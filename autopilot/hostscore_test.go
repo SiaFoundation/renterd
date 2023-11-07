@@ -6,6 +6,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -93,7 +94,7 @@ func TestHostScore(t *testing.T) {
 
 	// assert MaxCollateral affects the score.
 	h2 = newHost(newTestHostSettings()) // reset
-	h2.Settings.MaxCollateral = types.ZeroCurrency
+	h2.PriceTable.MaxCollateral = types.ZeroCurrency
 	if hostScore(cfg, h1, 0, redundancy).Score() <= hostScore(cfg, h2, 0, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
@@ -170,64 +171,69 @@ func TestPriceAdjustmentScore(t *testing.T) {
 }
 
 func TestCollateralScore(t *testing.T) {
+	period := uint64(5)
+	storageCost := uint64(100)
 	score := func(collateral, maxCollateral uint64) float64 {
 		t.Helper()
 		cfg := api.AutopilotConfig{
 			Contracts: api.ContractsConfig{
-				Period:  5,
-				Storage: 5,
+				Period: period,
 			},
 		}
-		settings := rhpv2.HostSettings{
-			Collateral:    types.NewCurrency64(collateral),
-			MaxCollateral: types.NewCurrency64(maxCollateral),
+		pt := rhpv3.HostPriceTable{
+			CollateralCost: types.NewCurrency64(collateral),
+			MaxCollateral:  types.NewCurrency64(maxCollateral),
+			WriteStoreCost: types.NewCurrency64(storageCost),
 		}
-		return collateralScore(cfg, types.NewCurrency64(5000), settings, 2.0)
+		return collateralScore(cfg, pt, rhpv2.SectorSize)
 	}
 
-	// NOTE: with the above settings, the cutoff is at 1000H.
-
-	// Cost matches cutoff since MaxCollateral is 2000 and we divide by 2 for a
-	// buffer.
-	if s := score(math.MaxInt64, 2000); s != 0.5 {
-		t.Errorf("expected %v but got %v", 0.5, s)
-	}
-	if s := score(20, math.MaxInt64); s != 0.5 {
-		t.Errorf("expected %v but got %v", 0.5, s)
-	}
-
-	// Increase collateral. Score should approach 1.
-	if s := score(21, math.MaxInt64); s != 0.525 {
-		t.Errorf("expected %v but got %v", 0.525, s)
-	}
-	if s := score(25, math.MaxInt64); s != 0.625 {
-		t.Errorf("expected %v but got %v", 0.625, s)
-	}
-	if s := score(35, math.MaxInt64); s != 0.875 {
-		t.Errorf("expected %v but got %v", 0.875, s)
-	}
-	if s := score(50, math.MaxInt64); s != 1 {
-		t.Errorf("expected %v but got %v", 1, s)
-	}
-
-	// Decrease collateral. Score should approach 0.
 	round := func(f float64) float64 {
 		i := uint64(f * 100.0)
 		return float64(i) / 100.0
 	}
-	if s := round(score(19, math.MaxInt64)); s != 0.47 {
-		t.Errorf("expected %v but got %v", 0.47, s)
+
+	// NOTE: with the above settings, the cutoff is at 7500H.
+	cutoff := uint64(storageCost * rhpv2.SectorSize * period * 3 / 2)
+	cutoffCollateral := storageCost * 3 / 2
+
+	// Collateral is exactly at cutoff.
+	if s := round(score(math.MaxInt64, cutoff)); s != 0.24 {
+		t.Errorf("expected %v but got %v", 0.24, s)
 	}
-	if s := round(score(15, math.MaxInt64)); s != 0.34 {
-		t.Errorf("expected %v but got %v", 0.34, s)
+	if s := round(score(cutoffCollateral, math.MaxInt64)); s != 0.24 {
+		t.Errorf("expected %v but got %v", 0.24, s)
 	}
-	if s := round(score(10, math.MaxInt64)); s != 0.16 {
-		t.Errorf("expected %v but got %v", 0.16, s)
+
+	// Increase collateral with linear steps. Score should approach linearly as
+	// well.
+	// 1.5 times cutoff
+	if s := round(score(cutoffCollateral*3/2, math.MaxInt64)); s != 0.37 {
+		t.Errorf("expected %v but got %v", 0.37, s)
 	}
-	if s := round(score(5, math.MaxInt64)); s != 0.01 {
-		t.Errorf("expected %v but got %v", 0.01, s)
+	// 2 times cutoff
+	if s := round(score(2*cutoffCollateral, math.MaxInt64)); s != 0.49 {
+		t.Errorf("expected %v but got %v", 0.49, s)
 	}
-	if s := round(score(1, math.MaxInt64)); s != 00 {
+	// 2.5 times cutoff
+	if s := round(score(cutoffCollateral*5/2, math.MaxInt64)); s != 0.62 {
+		t.Errorf("expected %v but got %v", 0.62, s)
+	}
+	// 3 times cutoff
+	if s := round(score(3*cutoffCollateral, math.MaxInt64)); s != 0.74 {
+		t.Errorf("expected %v but got %v", 0.74, s)
+	}
+	// 3.5 times cutoff
+	if s := round(score(cutoffCollateral*7/2, math.MaxInt64)); s != 0.87 {
+		t.Errorf("expected %v but got %v", 0.87, s)
+	}
+	// 4 times cutoff
+	if s := round(score(4*cutoffCollateral, math.MaxInt64)); s != 1 {
+		t.Errorf("expected %v but got %v", 1, s)
+	}
+
+	// Going below the cutoff should result in a score of 0.
+	if s := round(score(cutoffCollateral-1, math.MaxInt64)); s != 0 {
 		t.Errorf("expected %v but got %v", 0, s)
 	}
 }

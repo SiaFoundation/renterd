@@ -24,6 +24,11 @@ const (
 	refreshHealthBatchSize = 10000
 )
 
+var (
+	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	errShardRootChanged      = errors.New("shard root changed")
+)
+
 type (
 	dbArchivedContract struct {
 		Model
@@ -518,7 +523,7 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 		if res.Error != nil {
 			return res.Error
 		}
-		return nil
+		return pruneSlabs(tx)
 	})
 }
 
@@ -1564,6 +1569,22 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return err
 		}
 
+		// make sure the number of shards doesn't change.
+		// NOTE: check both the slice as well as the TotalShards field to be
+		// safe.
+		if len(s.Shards) != int(slab.TotalShards) {
+			return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", errInvalidNumberOfShards, slab.TotalShards, len(s.Shards))
+		} else if len(s.Shards) != len(slab.Shards) {
+			return fmt.Errorf("%w: expected %v shards (Shards) but got %v", errInvalidNumberOfShards, len(slab.Shards), len(s.Shards))
+		}
+
+		// make sure the roots stay the same.
+		for i, shard := range s.Shards {
+			if shard.Root != types.Hash256(slab.Shards[i].Root) {
+				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root)
+			}
+		}
+
 		// update fields
 		if err := tx.Model(&slab).
 			Where(&slab).
@@ -1571,16 +1592,13 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 				"db_contract_set_id": cs.ID,
 				"health_valid":       false,
 				"health":             1,
-				"total_shards":       len(s.Shards),
 			}).
 			Error; err != nil {
 			return err
 		}
 
 		// loop updated shards
-		toKeep := make(map[types.Hash256]struct{})
 		for _, shard := range s.Shards {
-			toKeep[shard.Root] = struct{}{}
 			// ensure the sector exists
 			var sector dbSector
 			if err := tx.
@@ -1603,15 +1621,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 					Append(&contract); err != nil {
 					return err
 				}
-			}
-		}
-		for _, shard := range slab.Shards {
-			root := *(*types.Hash256)(shard.Root)
-			if _, found := toKeep[root]; found {
-				continue
-			}
-			if err := tx.Delete(shard).Error; err != nil {
-				return fmt.Errorf("failed to delete shard: %w", err)
 			}
 		}
 		return nil

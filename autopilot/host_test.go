@@ -110,6 +110,9 @@ func newTestHostPriceTable() rhpv3.HostPriceTable {
 		DownloadBandwidthCost: dlbwPrice,
 		UploadBandwidthCost:   ulbwPrice,
 
+		CollateralCost: types.Siacoins(1).Div64(1 << 40),
+		MaxCollateral:  types.Siacoins(10000),
+
 		ReadBaseCost:   types.NewCurrency64(1),
 		WriteBaseCost:  oneSC.Div64(1 << 40),
 		WriteStoreCost: oneSC.Div64(4032).Div64(1 << 40), // 1 SC / TiB / month

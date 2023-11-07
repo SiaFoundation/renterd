@@ -70,6 +70,9 @@ type Bus interface {
 	// consensus
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
+	// syncer
+	SyncerPeers(ctx context.Context) (resp []string, err error)
+
 	// objects
 	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
 	RefreshHealth(ctx context.Context) error
@@ -170,10 +173,10 @@ func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /debug/trigger": ap.triggerHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
+		"POST   /trigger":       ap.triggerHandlerPOST,
 	}))
 }
 
@@ -185,12 +188,18 @@ func (ap *Autopilot) Run() error {
 	}
 	ap.startTime = time.Now()
 	ap.stopChan = make(chan struct{})
-	ap.triggerChan = make(chan bool)
+	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
 	ap.wg.Add(1)
 	defer ap.wg.Done()
 	ap.startStopMu.Unlock()
+
+	// block until the autopilot is online
+	if online := ap.blockUntilOnline(); !online {
+		ap.logger.Error("autopilot stopped before it was able to come online")
+		return nil
+	}
 
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
@@ -209,6 +218,20 @@ func (ap *Autopilot) Run() error {
 			// reset forceScan
 			forceScan = false
 
+			// block until consensus is synced
+			if synced, blocked, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
+				if interrupted {
+					close(tickerFired)
+					return
+				}
+				ap.logger.Error("autopilot stopped before consensus was synced")
+				return
+			} else if blocked {
+				if scanning, _ := ap.s.Status(); !scanning {
+					ap.s.tryPerformHostScan(ctx, w, true)
+				}
+			}
+
 			// block until the autopilot is configured
 			if configured, interrupted := ap.blockUntilConfigured(ap.ticker.C); !configured {
 				if interrupted {
@@ -216,16 +239,6 @@ func (ap *Autopilot) Run() error {
 					return
 				}
 				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
-				return
-			}
-
-			// block until consensus is synced
-			if synced, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
-				if interrupted {
-					close(tickerFired)
-					return
-				}
-				ap.logger.Error("autopilot stopped before consensus was synced")
 				return
 			}
 
@@ -375,31 +388,69 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 	}
 }
 
-func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, interrupted bool) {
+func (ap *Autopilot) blockUntilOnline() (online bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+
+	var once sync.Once
+
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		peers, err := ap.bus.SyncerPeers(ctx)
+		online = len(peers) > 0
+		cancel()
+
+		if err != nil {
+			ap.logger.Errorf("failed to get peers, err: %v", err)
+		} else if !online {
+			once.Do(func() { ap.logger.Info("autopilot is waiting to come online...") })
+		}
+
+		if err != nil || !online {
+			select {
+			case <-ap.stopChan:
+				return
+			case <-ticker.C:
+				continue
+			}
+		}
+		return
+	}
+}
+
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, blocked, interrupted bool) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	var once sync.Once
 
 	for {
 		// try and fetch consensus
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
+		synced = cs.Synced
 		cancel()
 
 		// if an error occurred, or if we're not synced, we continue
 		if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
+		} else if !synced {
+			once.Do(func() { ap.logger.Info("autopilot is waiting for consensus to sync...") })
 		}
-		if err != nil || !cs.Synced {
+
+		if err != nil || !synced {
+			blocked = true
 			select {
 			case <-ap.stopChan:
-				return false, false
+				return
 			case <-interrupt:
-				return false, true
+				interrupted = true
+				return
 			case <-ticker.C:
 				continue
 			}
 		}
-		return true, false
+		return
 	}
 }
 

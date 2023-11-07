@@ -128,6 +128,8 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		span.SetStatus(codes.Error, "failed to fetch contracts")
 		a.l.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
 		return
+	} else if len(contracts) == 0 {
+		return
 	}
 
 	// fetch all contract set contracts
@@ -157,9 +159,10 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 				defer cancel()
 				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, workerID, contract)
 				if rerr != nil {
-					// register the alert on failure
-					a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
 					if inSet || rerr.Is(errMaxDriftExceeded) {
+						// register the alert on failure if the contract is in
+						// the set or the error is errMaxDriftExceeded
+						a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
 						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
 					}
 				} else {

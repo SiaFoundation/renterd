@@ -328,7 +328,7 @@ type UpdateBlocklistRequest struct {
 	Clear  bool     `json:"clear"`
 }
 
-// AccountsUpdateBalanceRequest is the request type for /accounts/:id/update
+// AccountsUpdateBalanceRequest is the request type for /account/:id/update
 // endpoint.
 type AccountsUpdateBalanceRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
@@ -336,12 +336,12 @@ type AccountsUpdateBalanceRequest struct {
 }
 
 // AccountsRequiresSyncRequest is the request type for
-// /accounts/:id/requiressync endpoint.
+// /account/:id/requiressync endpoint.
 type AccountsRequiresSyncRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`
 }
 
-// AccountsAddBalanceRequest is the request type for /accounts/:id/add
+// AccountsAddBalanceRequest is the request type for /account/:id/add
 // endpoint.
 type AccountsAddBalanceRequest struct {
 	HostKey types.PublicKey `json:"hostKey"`

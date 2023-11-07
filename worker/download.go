@@ -387,7 +387,7 @@ outer:
 	return nil
 }
 
-func (mgr *downloadManager) DownloadMissingShards(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata, missing []bool) ([][]byte, error) {
+func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, error) {
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
 
@@ -441,17 +441,12 @@ func (mgr *downloadManager) DownloadMissingShards(ctx context.Context, slab obje
 
 	// decrypt and recover
 	slice.Decrypt(resp.shards)
-	err := slice.ReconstructSome(resp.shards, missing)
+	err := slice.Reconstruct(resp.shards)
 	if err != nil {
 		return nil, err
 	}
-	missingShards := make([][]byte, 0, len(resp.shards))
-	for i, shard := range resp.shards {
-		if missing[i] {
-			missingShards = append(missingShards, shard)
-		}
-	}
-	return missingShards, nil
+
+	return resp.shards, err
 }
 
 func (mgr *downloadManager) Stats() downloadManagerStats {
@@ -820,7 +815,7 @@ func (d *downloader) execute(req *sectorDownloadReq) (err error) {
 	}()
 
 	// download the sector
-	buf := bytes.NewBuffer(make([]byte, 0, rhpv2.SectorSize))
+	buf := bytes.NewBuffer(make([]byte, 0, req.length))
 	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
 	if err != nil {
 		req.fail(err)
