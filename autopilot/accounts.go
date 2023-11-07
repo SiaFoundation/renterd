@@ -128,6 +128,8 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 		span.SetStatus(codes.Error, "failed to fetch contracts")
 		a.l.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
 		return
+	} else if len(contracts) == 0 {
+		return
 	}
 
 	// fetch all contract set contracts

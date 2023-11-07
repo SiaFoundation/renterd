@@ -267,6 +267,18 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
 			},
 		},
+		{
+			ID: "00022_extendObjectID",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00022_extendObjectID(tx, logger)
+			},
+		},
+		{
+			ID: "00023_slabIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00023_slabIndices(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -303,7 +315,7 @@ func initSchema(tx *gorm.DB) error {
 
 	// Change the collation of columns that we need to be case sensitive.
 	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -311,7 +323,7 @@ func initSchema(tx *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -974,8 +986,24 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 	return nil
 }
 
-func foo(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration migration 00022_sectorsIndex")
+func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_extendObjectID")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = txn.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+	}
+	logger.Info("migration 00022_extendObjectID complete")
+	return nil
+}
+
+func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration migration 00023_slabIndices")
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
 	if isSQLite(txn) {
 		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
@@ -983,27 +1011,7 @@ func foo(txn *gorm.DB, logger *zap.SugaredLogger) error {
 		}
 	}
 
-	if !isSQLite(txn) {
-		// MySQL
-		if err := txn.Migrator().AddColumn(&dbSector{}, "Idx"); err != nil {
-			return err
-		}
-		// Update objects to belong to default bucket
-		if err := txn.Exec(`
-			UPDATE sectors
-			JOIN (
-			    SELECT
-			        id,
-			        ROW_NUMBER() OVER (PARTITION BY db_slab_id ORDER BY id) AS new_index
-			    FROM
-			        sectors
-			) AS RowNumbered ON sectors.id = RowNumbered.id
-			SET
-			    sectors.idx = RowNumbered.new_index;
-		`).Error; err != nil {
-			return err
-		}
-	} else {
+	if isSQLite(txn) {
 		// SQLite
 		if txn.Migrator().HasTable("sectors_temp") {
 			if err := txn.Migrator().DropTable("sectors_temp"); err != nil {
@@ -1040,6 +1048,26 @@ func foo(txn *gorm.DB, logger *zap.SugaredLogger) error {
 		} else if err := txn.Migrator().AutoMigrate(&dbSector{}); err != nil {
 			return fmt.Errorf("failed to auto-migrate sectors table: %w", err)
 		}
+	} else {
+		// MySQL
+		if err := txn.Migrator().AddColumn(&dbSector{}, "Idx"); err != nil {
+			return err
+		}
+		// Update objects to belong to default bucket
+		if err := txn.Exec(`
+			UPDATE sectors
+			JOIN (
+			    SELECT
+			        id,
+			        ROW_NUMBER() OVER (PARTITION BY db_slab_id ORDER BY id) AS new_index
+			    FROM
+			        sectors
+			) AS RowNumbered ON sectors.id = RowNumbered.id
+			SET
+			    sectors.idx = RowNumbered.new_index;
+		`).Error; err != nil {
+			return err
+		}
 	}
 
 	// Enable foreign keys again.
@@ -1047,10 +1075,10 @@ func foo(txn *gorm.DB, logger *zap.SugaredLogger) error {
 		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
 			return err
 		}
-		if err := txn.Exec(`PRAGMA foreign_key_check(slices)`).Error; err != nil {
+		if err := txn.Exec(`PRAGMA foreign_key_check(sectors)`).Error; err != nil {
 			return err
 		}
 	}
-	logger.Info("migration 00022_sectorsIndex complete")
+	logger.Info("migration 00023_slabIndices complete")
 	return nil
 }
