@@ -1025,14 +1025,14 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		if err := txn.Table("sectors_temp").Migrator().CreateTable(&dbSector{}); err != nil {
 			return fmt.Errorf("failed to create temporary table: %w", err)
 		} else if err := txn.Exec(`
-			INSERT INTO sectors_temp (id, created_at, db_slab_id, idx, latest_host, root)
+			INSERT INTO sectors_temp (id, created_at, db_slab_id, slab_index, latest_host, root)
 			SELECT sectors.id, sectors.created_at, db_slab_id, 0, latest_host, root
 			FROM sectors
 			`).Error; err != nil {
 			return fmt.Errorf("failed to copy old table over to new one: %w", err)
 		} else if err := txn.Exec(`
 		UPDATE sectors_temp
-		SET idx = (
+		SET slab_index = (
             SELECT
 				COUNT(*) + 1
             FROM
@@ -1050,7 +1050,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		}
 	} else {
 		// MySQL
-		if err := txn.Migrator().AddColumn(&dbSector{}, "Idx"); err != nil {
+		if err := txn.Migrator().AddColumn(&dbSector{}, "SlabIndex"); err != nil {
 			return err
 		}
 
@@ -1065,7 +1065,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 			        sectors
 			) AS RowNumbered ON sectors.id = RowNumbered.id
 			SET
-			    sectors.idx = RowNumbered.new_index;
+			    sectors.slab_index = RowNumbered.new_index;
 		`).Error; err != nil {
 			return err
 		}
