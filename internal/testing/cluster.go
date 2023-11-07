@@ -255,13 +255,14 @@ func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.Autopil
 }
 
 type testClusterOptions struct {
-	dbName        string
-	dir           string
-	funding       *bool
-	hosts         int
-	logger        *zap.Logger
-	uploadPacking bool
-	walletKey     *types.PrivateKey
+	dbName               string
+	dir                  string
+	funding              *bool
+	hosts                int
+	logger               *zap.Logger
+	uploadPacking        bool
+	skipSettingAutopilot bool
+	walletKey            *types.PrivateKey
 
 	autopilotCfg      *node.AutopilotConfig
 	autopilotSettings *api.AutopilotConfig
@@ -504,10 +505,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{}))
 
 	// Update the autopilot to use test settings
-	tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
-		ID:     apCfg.ID,
-		Config: apSettings,
-	}))
+	if !opts.skipSettingAutopilot {
+		tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
+			ID:     apCfg.ID,
+			Config: apSettings,
+		}))
+	}
 
 	// Update the bus settings.
 	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings))

@@ -2030,16 +2030,20 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 
 func TestWalletFormUnconfirmed(t *testing.T) {
 	// New cluster with autopilot disabled
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cfg := clusterOptsDefault
+	cfg.skipSettingAutopilot = true
+	cluster := newTestCluster(t, cfg)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
 
-	wr, err := b.Wallet(context.Background())
-	tt.OK(err)
+	// Add a host.
+	cluster.AddHosts(1)
 
 	// Send the full balance back to the wallet to make sure it's all
 	// unconfirmed.
+	wr, err := b.Wallet(context.Background())
+	tt.OK(err)
 	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
 		{
 			Address: wr.Address,
@@ -2047,12 +2051,26 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 		},
 	}, false))
 
-	// Add a host.
-	cluster.AddHosts(1)
+	// There should be hardly any money in the wallet.
+	wr, err = b.Wallet(context.Background())
+	tt.OK(err)
+	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(types.Siacoins(1).Div64(100)) > 0 {
+		t.Fatal("wallet should have hardly any confirmed balance")
+	}
+
+	// There shouldn't be any contracts at this point.
+	contracts, err := b.Contracts(context.Background())
+	tt.OK(err)
+	if len(contracts) != 0 {
+		t.Fatal("expected 0 contracts", len(contracts))
+	}
+
+	// Enable autopilot by setting it.
+	cluster.UpdateAutopilotConfig(context.Background(), testAutopilotConfig)
 
 	// Wait for a contract to form.
-	contracts := cluster.WaitForContracts()
-	if len(contracts) != 1 {
+	contractsFormed := cluster.WaitForContracts()
+	if len(contractsFormed) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
 	}
 }
