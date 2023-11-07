@@ -1629,7 +1629,7 @@ func TestWallet(t *testing.T) {
 		},
 		MinerFees: []types.Currency{minerFee},
 	}
-	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value)
+	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value, false)
 	tt.OK(err)
 	err = b.WalletSign(context.Background(), &txn, toSign, types.CoveredFields{WholeTransaction: true})
 	tt.OK(err)

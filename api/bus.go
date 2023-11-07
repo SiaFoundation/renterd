@@ -195,8 +195,9 @@ type SlabBuffer struct {
 
 // WalletFundRequest is the request type for the /wallet/fund endpoint.
 type WalletFundRequest struct {
-	Transaction types.Transaction `json:"transaction"`
-	Amount      types.Currency    `json:"amount"`
+	Transaction        types.Transaction `json:"transaction"`
+	Amount             types.Currency    `json:"amount"`
+	UseUnconfirmedTxns bool              `json:"useUnconfirmedTxns"`
 }
 
 // WalletFundResponse is the response type for the /wallet/fund endpoint.
