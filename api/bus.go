@@ -44,6 +44,11 @@ var (
 	// database.
 	ErrBucketNotFound = errors.New("bucket not found")
 
+	// ErrWalletAlreadyRedistributed is returned by the wallet when we try and
+	// redistribute a wallet that is already redistributed into the desired
+	// number of outputs of a certain amount.
+	ErrWalletAlreadyRedistributed = errors.New("wallet already distributed")
+
 	// ErrRequiresSyncSetRecently indicates that an account can't be set to sync
 	// yet because it has been set too recently.
 	ErrRequiresSyncSetRecently = errors.New("account had 'requiresSync' flag set recently")

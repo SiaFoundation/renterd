@@ -12,6 +12,7 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -301,6 +302,34 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// build map of inputs currently in the tx pool
+	inPool := make(map[types.Hash256]bool)
+	for _, ptxn := range pool {
+		for _, in := range ptxn.SiacoinInputs {
+			inPool[types.Hash256(in.ParentID)] = true
+		}
+	}
+
+	// fetch unspent transaction outputs
+	utxos, err := w.store.UnspentSiacoinElements(false)
+	if err != nil {
+		return types.Transaction{}, nil, err
+	}
+
+	// check whether a redistribution is necessary, adjust number of desired
+	// outputs accordingly
+	for _, sce := range utxos {
+		inUse := w.isOutputUsed(sce.ID) || inPool[sce.ID]
+		matured := cs.Index.Height >= sce.MaturityHeight
+		sameValue := sce.Value.Equals(amount)
+		if !inUse && matured && sameValue {
+			outputs--
+		}
+	}
+	if outputs <= 0 {
+		return types.Transaction{}, nil, api.ErrWalletAlreadyRedistributed
+	}
+
 	// prepare all outputs
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
@@ -310,24 +339,10 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 		})
 	}
 
-	// fetch unspent transaction outputs
-	utxos, err := w.store.UnspentSiacoinElements(false)
-	if err != nil {
-		return types.Transaction{}, nil, err
-	}
-
 	// desc sort
 	sort.Slice(utxos, func(i, j int) bool {
 		return utxos[i].Value.Cmp(utxos[j].Value) > 0
 	})
-
-	// map used outputs
-	inPool := make(map[types.Hash256]bool)
-	for _, ptxn := range pool {
-		for _, in := range ptxn.SiacoinInputs {
-			inPool[types.Hash256(in.ParentID)] = true
-		}
-	}
 
 	// estimate the fees
 	outputFees := feePerByte.Mul64(uint64(len(encoding.Marshal(txn.SiacoinOutputs))))

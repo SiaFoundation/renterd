@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -112,7 +113,7 @@ func TestWalletRedistribute(t *testing.T) {
 
 	// split into 2 outputs of 9SC
 	amount = oneSC.Mul64(9)
-	if txn, _, err := w.Redistribute(cs, 2, oneSC.Mul64(9), types.NewCurrency64(1), nil); err != nil {
+	if txn, _, err := w.Redistribute(cs, 2, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
 	} else {
 		applyTxn(txn)
@@ -128,6 +129,37 @@ func TestWalletRedistribute(t *testing.T) {
 	// assert number of outputs that hold 9SC
 	if cnt := numOutputsWithValue(amount); cnt != 2 {
 		t.Fatalf("unexpected number of 9SC outputs, %v != 2", cnt)
+	}
+
+	// split into 5 outputs of 3SC
+	amount = oneSC.Mul64(3)
+	if txn, _, err := w.Redistribute(cs, 5, amount, types.NewCurrency64(1), nil); err != nil {
+		t.Fatal(err)
+	} else {
+		applyTxn(txn)
+	}
+
+	// assert number of outputs that hold 3SC
+	if cnt := numOutputsWithValue(amount); cnt != 5 {
+		t.Fatalf("unexpected number of 3SC outputs, %v != 5", cnt)
+	}
+
+	// split into 4 outputs of 3SC - this should result in an error that
+	// indicates the wallet is already has the desired number of outputs
+	if _, _, err := w.Redistribute(cs, 4, amount, types.NewCurrency64(1), nil); err != api.ErrWalletAlreadyRedistributed {
+		t.Fatal(err)
+	}
+
+	// split into 6 outputs of 3SC
+	if txn, _, err := w.Redistribute(cs, 6, amount, types.NewCurrency64(1), nil); err != nil {
+		t.Fatal(err)
+	} else {
+		applyTxn(txn)
+	}
+
+	// assert number of outputs that hold 3SC
+	if cnt := numOutputsWithValue(amount); cnt != 6 {
+		t.Fatalf("unexpected number of 3SC outputs, %v != 6", cnt)
 	}
 }
 

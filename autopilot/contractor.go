@@ -549,7 +549,10 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 
 	// redistribute outputs
 	id, err := b.WalletRedistribute(ctx, int(outputs), amount)
-	if err != nil {
+	if err != nil && isErr(err, api.ErrWalletAlreadyRedistributed) {
+		l.Debugf("wallet maintenance succeeded, no redistribution necessary, the wallet already has %d outputs of amount %v", outputs, amount)
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", outputs, amount, balance, err)
 	}
 
