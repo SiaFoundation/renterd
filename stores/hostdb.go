@@ -33,6 +33,10 @@ const (
 	// database per batch. Empirically tested to verify that this is a value
 	// that performs reasonably well.
 	hostRetrievalBatchSize = 10000
+
+	// number of blocks between a contract's 'startHeight' and the block we
+	// delete the contract if it hasn't appeared on-chain yet.
+	pendingContractPruneThreshold = 18
 )
 
 var (
@@ -928,25 +932,6 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 				ss.unappliedHostKeys[hostKey] = struct{}{}
 			})
 		}
-
-		// Update RevisionHeight and RevisionNumber for our contracts.
-		for _, txn := range sb.Transactions {
-			for _, rev := range txn.FileContractRevisions {
-				if ss.isKnownContract(types.FileContractID(rev.ParentID)) {
-					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
-						height: height,
-						number: rev.NewRevisionNumber,
-						size:   rev.NewFileSize,
-					}
-				}
-			}
-			// Get ProofHeight for our contracts.
-			for _, sp := range txn.StorageProofs {
-				if ss.isKnownContract(types.FileContractID(sp.ParentID)) {
-					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
-				}
-			}
-		}
 		height++
 	}
 
@@ -1041,6 +1026,32 @@ func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpd
 		"revision_number": fmt.Sprint(rev.number),
 		"size":            rev.size,
 	})
+}
+
+func updateContractState(db *gorm.DB, fcid types.FileContractID, chainState chainState) error {
+	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
+		"chain_state": chainState,
+	})
+}
+
+func prunePendingContracts(db *gorm.DB, height uint64) error {
+	var heightCutoff uint64
+	if height > pendingContractPruneThreshold {
+		heightCutoff = height - pendingContractPruneThreshold
+	}
+	var toArchive []dbContract
+	if err := db.Model(&dbContract{}).
+		Where("chain_state", chainStatePending).
+		Where("start_height < ?", heightCutoff).
+		Find(&toArchive).
+		Error; err != nil {
+		return fmt.Errorf("failed to fetch pending contracts for pruning: %w", err)
+	}
+	reasons := make(map[types.FileContractID]string)
+	for _, c := range toArchive {
+		reasons[types.FileContractID(c.FCID)] = "stale"
+	}
+	return archiveContracts(db, toArchive, reasons)
 }
 
 func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {

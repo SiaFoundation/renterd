@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -29,7 +30,15 @@ var (
 	errShardRootChanged      = errors.New("shard root changed")
 )
 
+const (
+	chainStateInvalid chainState = iota
+	chainStatePending
+	chainStateActive
+)
+
 type (
+	chainState uint8
+
 	dbArchivedContract struct {
 		Model
 
@@ -53,6 +62,7 @@ type (
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
+		ChainState     chainState `gorm:"index;NOT NULL"`
 		TotalCost      currency
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
@@ -2061,6 +2071,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 			FCID:        fileContractID(fcid),
 			RenewedFrom: fileContractID(renewedFrom),
 
+			ChainState:     chainStatePending,
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
 			Size:           size,
@@ -2292,4 +2303,56 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		NextMarker: nextMarker,
 		Objects:    objects,
 	}, nil
+}
+
+func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) {
+	height := uint64(cc.InitialHeight())
+	for _, sb := range cc.RevertedBlocks {
+		var b types.Block
+		convertToCore(sb, (*types.V1Block)(&b))
+
+		// revert contracts that got reorged to "pending".
+		for _, txn := range b.Transactions {
+			for i := range txn.FileContracts {
+				fcid := txn.FileContractID(i)
+				if ss.isKnownContract(fcid) {
+					ss.unappliedContractState[fcid] = chainStatePending
+				}
+			}
+		}
+		height--
+	}
+
+	for _, sb := range cc.AppliedBlocks {
+		var b types.Block
+		convertToCore(sb, (*types.V1Block)(&b))
+
+		// Update RevisionHeight and RevisionNumber for our contracts.
+		for _, txn := range b.Transactions {
+			// handle contracts
+			for i := range txn.FileContracts {
+				fcid := txn.FileContractID(i)
+				if ss.isKnownContract(fcid) {
+					ss.unappliedContractState[fcid] = chainStateActive
+				}
+			}
+			// handle contract revision
+			for _, rev := range txn.FileContractRevisions {
+				if ss.isKnownContract(rev.ParentID) {
+					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
+						height: height,
+						number: rev.RevisionNumber,
+						size:   rev.Filesize,
+					}
+				}
+			}
+			// handle storage proof
+			for _, sp := range txn.StorageProofs {
+				if ss.isKnownContract(sp.ParentID) {
+					ss.unappliedProofs[sp.ParentID] = height
+				}
+			}
+		}
+		height++
+	}
 }
