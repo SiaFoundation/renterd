@@ -94,7 +94,7 @@ func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, inte
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	return tx.Table(table).
-		Joins(fmt.Sprintf("INNER JOIN (?) periods ON %s.id IN (SELECT id FROM %s WHERE timestamp = periods.min_time ORDER BY id ASC LIMIT 1)", table, table), inner).
+		Joins(fmt.Sprintf("INNER JOIN (?) periods ON %s.timestamp = periods.min_time", table), inner).
 		Group("timestamp")
 }
 
