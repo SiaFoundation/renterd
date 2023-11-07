@@ -268,9 +268,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "000022_addMultipartUploadIndices",
+			ID: "00022_extendObjectID",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration000022_addMultipartUploadIndices(tx, logger)
+				return performMigration00022_extendObjectID(tx, logger)
+			},
+		},
+		{
+			ID: "000023_addMultipartUploadIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration000023_addMultipartUploadIndices(tx, logger)
 			},
 		},
 	}
@@ -309,7 +315,7 @@ func initSchema(tx *gorm.DB) error {
 
 	// Change the collation of columns that we need to be case sensitive.
 	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -317,7 +323,7 @@ func initSchema(tx *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -980,8 +986,24 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 	return nil
 }
 
-func performMigration000022_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration000022_addMultipartUploadIndices")
+func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_extendObjectID")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = txn.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+	}
+	logger.Info("migration 00022_extendObjectID complete")
+	return nil
+}
+
+func performMigration000023_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration000023_addMultipartUploadIndices")
 
 	m := txn.Migrator()
 	for _, column := range []string{"ObjectID", "DBBucketID", "MimeType"} {
@@ -992,6 +1014,6 @@ func performMigration000022_addMultipartUploadIndices(txn *gorm.DB, logger *zap.
 		}
 	}
 
-	logger.Info("migration migration000022_addMultipartUploadIndices complete")
+	logger.Info("migration migration000023_addMultipartUploadIndices complete")
 	return nil
 }
