@@ -267,6 +267,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
 			},
 		},
+		{
+			ID: "000022_addMultipartUploadIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration000022_addMultipartUploadIndices(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -971,5 +977,21 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 		}
 	}
 	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
+	return nil
+}
+
+func performMigration000022_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration000022_addMultipartUploadIndices")
+
+	m := txn.Migrator()
+	for _, column := range []string{"ObjectID", "DBBucketID", "MimeType"} {
+		if !m.HasIndex(dbMultipartUpload{}, column) {
+			if err := m.CreateIndex(dbMultipartUpload{}, column); err != nil {
+				return fmt.Errorf("failed to create index on column '%s' of table '%s': %w", column, dbMultipartUpload{}.TableName(), err)
+			}
+		}
+	}
+
+	logger.Info("migration migration000022_addMultipartUploadIndices complete")
 	return nil
 }
