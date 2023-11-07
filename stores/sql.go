@@ -50,7 +50,7 @@ type (
 		persistMu              sync.Mutex
 		persistTimer           *time.Timer
 		unappliedAnnouncements []announcement
-		unappliedContractState map[types.FileContractID]chainState
+		unappliedContractState map[types.FileContractID]contractState
 		unappliedHostKeys      map[types.PublicKey]struct{}
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
@@ -207,7 +207,7 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 		hasAllowlist:           allowlistCnt > 0,
 		hasBlocklist:           blocklistCnt > 0,
 		settings:               make(map[string]string),
-		unappliedContractState: make(map[types.FileContractID]chainState),
+		unappliedContractState: make(map[types.FileContractID]contractState),
 		unappliedHostKeys:      make(map[types.PublicKey]struct{}),
 		unappliedRevisions:     make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:        make(map[types.FileContractID]uint64),
@@ -423,13 +423,13 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 				return fmt.Errorf("%w; failed to update chain state", err)
 			}
 		}
-		if err := prunePendingContracts(tx, ss.chainIndex.Height); err != nil {
-			return fmt.Errorf("%w; failed to prune pending contracts", err)
+		if err := markFailedContracts(tx, ss.chainIndex.Height); err != nil {
+			return err
 		}
 		return updateCCID(tx, ss.ccid, ss.chainIndex)
 	})
 
-	ss.unappliedContractState = make(map[types.FileContractID]chainState)
+	ss.unappliedContractState = make(map[types.FileContractID]contractState)
 	ss.unappliedProofs = make(map[types.FileContractID]uint64)
 	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
 	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})

@@ -1028,30 +1028,19 @@ func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpd
 	})
 }
 
-func updateContractState(db *gorm.DB, fcid types.FileContractID, chainState chainState) error {
+func updateContractState(db *gorm.DB, fcid types.FileContractID, cs contractState) error {
 	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"chain_state": chainState,
+		"state": cs,
 	})
 }
 
-func prunePendingContracts(db *gorm.DB, height uint64) error {
-	var heightCutoff uint64
-	if height > pendingContractPruneThreshold {
-		heightCutoff = height - pendingContractPruneThreshold
-	}
-	var toArchive []dbContract
+func markFailedContracts(db *gorm.DB, height uint64) error {
 	if err := db.Model(&dbContract{}).
-		Where("chain_state", chainStatePending).
-		Where("start_height < ?", heightCutoff).
-		Find(&toArchive).
-		Error; err != nil {
-		return fmt.Errorf("failed to fetch pending contracts for pruning: %w", err)
+		Where("state = ? AND ? > window_end", contractStateActive, height).
+		Update("state", contractStateFailed).Error; err != nil {
+		return fmt.Errorf("failed to mark failed contracts: %w", err)
 	}
-	reasons := make(map[types.FileContractID]string)
-	for _, c := range toArchive {
-		reasons[types.FileContractID(c.FCID)] = "stale"
-	}
-	return archiveContracts(db, toArchive, reasons)
+	return nil
 }
 
 func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {

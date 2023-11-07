@@ -31,13 +31,15 @@ var (
 )
 
 const (
-	chainStateInvalid chainState = iota
-	chainStatePending
-	chainStateActive
+	contractStateInvalid contractState = iota
+	contractStatePending
+	contractStateActive
+	contractStateComplete
+	contractStateFailed
 )
 
 type (
-	chainState uint8
+	contractState uint8
 
 	dbArchivedContract struct {
 		Model
@@ -62,7 +64,7 @@ type (
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
-		ChainState     chainState `gorm:"index;NOT NULL"`
+		State          contractState `gorm:"index;NOT NULL"`
 		TotalCost      currency
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
@@ -210,6 +212,23 @@ type (
 	}
 )
 
+func (s contractState) String() string {
+	switch s {
+	case contractStateInvalid:
+		return api.ContractStateInvalid
+	case contractStatePending:
+		return api.ContractStatePending
+	case contractStateActive:
+		return api.ContractStateActive
+	case contractStateComplete:
+		return api.ContractStateComplete
+	case contractStateFailed:
+		return api.ContractStateFailed
+	default:
+		return api.ContractStateUnknown
+	}
+}
+
 // TableName implements the gorm.Tabler interface.
 func (dbArchivedContract) TableName() string { return "archived_contracts" }
 
@@ -257,6 +276,7 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 		RevisionNumber: revisionNumber,
 		Size:           c.Size,
 		StartHeight:    c.StartHeight,
+		State:          c.State.String(),
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 
@@ -294,6 +314,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		RevisionNumber: revisionNumber,
 		Size:           c.Size,
 		StartHeight:    c.StartHeight,
+		State:          c.State.String(),
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 	}
@@ -2071,7 +2092,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 			FCID:        fileContractID(fcid),
 			RenewedFrom: fileContractID(renewedFrom),
 
-			ChainState:     chainStatePending,
+			State:          contractStatePending,
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
 			Size:           size,
@@ -2316,7 +2337,7 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 			for i := range txn.FileContracts {
 				fcid := txn.FileContractID(i)
 				if ss.isKnownContract(fcid) {
-					ss.unappliedContractState[fcid] = chainStatePending
+					ss.unappliedContractState[fcid] = contractStatePending
 				}
 			}
 		}
@@ -2333,7 +2354,7 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 			for i := range txn.FileContracts {
 				fcid := txn.FileContractID(i)
 				if ss.isKnownContract(fcid) {
-					ss.unappliedContractState[fcid] = chainStateActive
+					ss.unappliedContractState[fcid] = contractStateActive
 				}
 			}
 			// handle contract revision
@@ -2350,6 +2371,7 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 			for _, sp := range txn.StorageProofs {
 				if ss.isKnownContract(sp.ParentID) {
 					ss.unappliedProofs[sp.ParentID] = height
+					ss.unappliedContractState[sp.ParentID] = contractStateComplete
 				}
 			}
 		}
