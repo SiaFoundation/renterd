@@ -739,7 +739,7 @@ func (c *TestCluster) AddHost(h *Host) {
 			Address: h.WalletAddress(),
 		})
 	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, false))
+	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
 
 	// Mine transaction.
 	c.MineBlocks(1)

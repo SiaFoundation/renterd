@@ -1969,14 +1969,13 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	}
 
 	// send the full balance back to the weallet
-	toSend := wr.Confirmed.Sub(types.Siacoins(1)) // leave some for the fee
-	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+	toSend := wr.Confirmed.Sub(types.Siacoins(1).Div64(100)) // leave some for the fee
+	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
 		{
 			Address: wr.Address,
 			Value:   toSend,
 		},
-	}, false)
-	tt.OK(err)
+	}, false))
 
 	// the unconfirmed balance should have changed to slightly more than toSend
 	// since we paid a fee
@@ -1998,13 +1997,12 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	tt.AssertIs(err, wallet.ErrInsufficientBalance)
 
 	// try again - this time using unconfirmed transactions
-	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
 		{
 			Address: wr.Address,
 			Value:   toSend,
 		},
-	}, true)
-	tt.OK(err)
+	}, true))
 
 	// the unconfirmed balance should be almost the same
 	wr, err = b.Wallet(context.Background())
@@ -2028,4 +2026,33 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestWalletFormUnconfirmed(t *testing.T) {
+	// New cluster with autopilot disabled
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	tt := cluster.tt
+
+	wr, err := b.Wallet(context.Background())
+	tt.OK(err)
+
+	// Send the full balance back to the wallet to make sure it's all
+	// unconfirmed.
+	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   wr.Confirmed.Sub(types.Siacoins(1).Div64(100)), // leave some for the fee
+		},
+	}, false))
+
+	// Add a host.
+	cluster.AddHosts(1)
+
+	// Wait for a contract to form.
+	contracts := cluster.WaitForContracts()
+	if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	}
 }
