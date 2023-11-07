@@ -1039,7 +1039,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 				sectors_temp AS s2
             WHERE
                 s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors.id
-);
+		);
 `); err != nil {
 		} else if err := txn.Migrator().DropTable("sectors"); err != nil {
 			return fmt.Errorf("failed to drop objects table: %w", err)
@@ -1053,6 +1053,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		if err := txn.Migrator().AddColumn(&dbSector{}, "Idx"); err != nil {
 			return err
 		}
+
 		// Update objects to belong to default bucket
 		if err := txn.Exec(`
 			UPDATE sectors
@@ -1066,6 +1067,11 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 			SET
 			    sectors.idx = RowNumbered.new_index;
 		`).Error; err != nil {
+			return err
+		}
+
+		// Create the unique index last
+		if err := txn.Migrator().CreateIndex(&dbSector{}, "Idx"); err != nil {
 			return err
 		}
 	}
