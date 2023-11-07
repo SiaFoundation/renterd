@@ -2334,10 +2334,17 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 
 		// revert contracts that got reorged to "pending".
 		for _, txn := range b.Transactions {
+			// handle contracts
 			for i := range txn.FileContracts {
 				fcid := txn.FileContractID(i)
 				if ss.isKnownContract(fcid) {
-					ss.unappliedContractState[fcid] = contractStatePending
+					ss.unappliedContractState[fcid] = contractStatePending // revert from 'active' to 'pending'
+				}
+			}
+			// handle storage proof
+			for _, sp := range txn.StorageProofs {
+				if ss.isKnownContract(sp.ParentID) {
+					ss.unappliedContractState[sp.ParentID] = contractStateActive // revert from 'complete' to 'active'
 				}
 			}
 		}
@@ -2354,7 +2361,7 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 			for i := range txn.FileContracts {
 				fcid := txn.FileContractID(i)
 				if ss.isKnownContract(fcid) {
-					ss.unappliedContractState[fcid] = contractStateActive
+					ss.unappliedContractState[fcid] = contractStateActive // 'pending' -> 'active'
 				}
 			}
 			// handle contract revision
@@ -2371,7 +2378,7 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 			for _, sp := range txn.StorageProofs {
 				if ss.isKnownContract(sp.ParentID) {
 					ss.unappliedProofs[sp.ParentID] = height
-					ss.unappliedContractState[sp.ParentID] = contractStateComplete
+					ss.unappliedContractState[sp.ParentID] = contractStateComplete // 'active' -> 'complete'
 				}
 			}
 		}
