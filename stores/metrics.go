@@ -87,15 +87,25 @@ func (dbPerformanceMetric) TableName() string      { return "performance" }
 // split into intervals and the row with the lowest timestamp for each interval
 // is returned. The result is then joined with the original table to retrieve
 // only the metrics we want.
-func scopePeriods(db, tx *gorm.DB, table string, start time.Time, n uint64, interval time.Duration) *gorm.DB {
+func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, table string, start time.Time, n uint64, interval time.Duration) error {
 	end := start.Add(time.Duration(n) * interval)
-	inner := db.Table(table).
+	// inner groups all metrics within the requested time range into periods of
+	// 'interval' length and gives us the min timestamp of each period.
+	inner := tx.Model(dst).
 		Select("MIN(timestamp) AS min_time, (timestamp - ?) / ? * ? AS period", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
-	return tx.Table(table).
+	// mid then joins the result with the original table. This might yield
+	// duplicates if multiple rows have the same timestamp so we attach a
+	// row number. We order the rows by id to make the result deterministic.
+	mid := s.dbMetrics.Model(dst).
 		Joins(fmt.Sprintf("INNER JOIN (?) periods ON %s.timestamp = periods.min_time", table), inner).
-		Group("timestamp")
+		Select(fmt.Sprintf("*, ROW_NUMBER() OVER (PARTITION BY periods.min_time ORDER BY %s.id) AS row_num", table))
+	// lastly we select all metrics with row number 1
+	return s.dbMetrics.Table("(?) numbered", mid).
+		Where("numbered.row_num = 1").
+		Find(dst).
+		Error
 }
 
 func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
@@ -105,14 +115,11 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n ui
 	}
 
 	var metrics []dbContractSetMetric
-	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopePeriods(s.dbMetrics, tx, dbContractSetMetric{}.TableName(), start, n, interval)
-	}).
-		Find(&metrics).
-		Error
+	err := s.findPeriods(tx, &metrics, dbContractSetMetric{}.TableName(), start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
+
 	return metrics, nil
 }
 
@@ -156,14 +163,11 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time,
 		tx = tx.Where("reason", opts.Reason)
 	}
 	var metrics []dbContractSetChurnMetric
-	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopePeriods(s.dbMetrics, tx, dbContractSetChurnMetric{}.TableName(), start, n, interval)
-	}).
-		Find(&metrics).
-		Error
+	err := s.findPeriods(tx, &metrics, dbContractSetChurnMetric{}.TableName(), start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
 	}
+
 	return metrics, nil
 }
 
@@ -212,14 +216,11 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, start time.Time, n ui
 	}
 
 	var metrics []dbPerformanceMetric
-	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopePeriods(s.dbMetrics, tx, dbPerformanceMetric{}.TableName(), start, n, interval)
-	}).
-		Find(&metrics).
-		Error
+	err := s.findPeriods(tx, &metrics, dbPerformanceMetric{}.TableName(), start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch performance metrics: %w", err)
 	}
+
 	return metrics, nil
 }
 
@@ -265,14 +266,11 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 
 	var metrics []dbContractMetric
-	err := tx.Scopes(func(tx *gorm.DB) *gorm.DB {
-		return scopePeriods(s.dbMetrics, tx, dbContractMetric{}.TableName(), start, n, interval)
-	}).
-		Find(&metrics).
-		Error
+	err := s.findPeriods(tx, &metrics, dbContractMetric{}.TableName(), start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
+
 	return metrics, nil
 }
 
