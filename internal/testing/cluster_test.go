@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -1949,4 +1950,82 @@ func TestMultipartUploads(t *testing.T) {
 	} else if expectedData := data1[:1]; !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
 	}
+}
+
+func TestWalletSendUnconfirmed(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	tt := cluster.tt
+
+	wr, err := b.Wallet(context.Background())
+	tt.OK(err)
+
+	// check balance
+	if !wr.Unconfirmed.IsZero() {
+		t.Fatal("wallet should not have unconfirmed balance")
+	} else if wr.Confirmed.IsZero() {
+		t.Fatal("wallet should have confirmed balance")
+	}
+
+	// send the full balance back to the weallet
+	toSend := wr.Confirmed.Sub(types.Siacoins(1)) // leave some for the fee
+	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   toSend,
+		},
+	}, false)
+	tt.OK(err)
+
+	// the unconfirmed balance should have changed to slightly more than toSend
+	// since we paid a fee
+	wr, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	if wr.Unconfirmed.Cmp(toSend) < 0 || wr.Unconfirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
+		t.Fatal("wallet should have unconfirmed balance")
+	}
+	fmt.Println(wr.Confirmed, wr.Unconfirmed)
+
+	// try again - this should fail
+	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   toSend,
+		},
+	}, false)
+	tt.AssertIs(err, wallet.ErrInsufficientBalance)
+
+	// try again - this time using unconfirmed transactions
+	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   toSend,
+		},
+	}, true)
+	tt.OK(err)
+
+	// the unconfirmed balance should be almost the same
+	wr, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	if wr.Unconfirmed.Cmp(toSend) < 0 || wr.Unconfirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
+		t.Fatal("wallet should have unconfirmed balance")
+	}
+	fmt.Println(wr.Confirmed, wr.Unconfirmed)
+
+	// mine a block, this should confirm the transactions
+	cluster.MineBlocks(1)
+	tt.Retry(100, time.Millisecond, func() error {
+		wr, err = b.Wallet(context.Background())
+		tt.OK(err)
+
+		if !wr.Unconfirmed.IsZero() {
+			return fmt.Errorf("wallet should not have unconfirmed balance")
+		} else if wr.Confirmed.Cmp(toSend) < 0 || wr.Confirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
+			return fmt.Errorf("wallet should have almost the same confirmed balance as in the beginning")
+		}
+		return nil
+	})
 }

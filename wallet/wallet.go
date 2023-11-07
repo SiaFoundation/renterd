@@ -168,7 +168,9 @@ func (w *SingleAddressWallet) Balance() (spendable, confirmed, unconfirmed types
 		confirmed = confirmed.Add(sce.Value)
 	}
 	for _, sco := range w.tpoolUtxos {
-		unconfirmed = unconfirmed.Add(sco.Value)
+		if !w.isOutputUsed(sco.ID) {
+			unconfirmed = unconfirmed.Add(sco.Value)
+		}
 	}
 	return
 }
