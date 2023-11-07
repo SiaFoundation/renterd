@@ -297,6 +297,9 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 		return
 	}
 
+	// set health
+	slab.Health = s.Health
+
 	// set shards
 	slab.MinShards = s.MinShards
 	slab.Shards = make([]object.Sector, len(s.Shards))
@@ -738,7 +741,7 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 
 	// archive them
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, cs, toArchive)
+		return archiveContracts(ctx, tx, cs, toArchive)
 	}); err != nil {
 		return err
 	}
@@ -1778,7 +1781,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 			}
-
 			// Add contract and host to join tables.
 			contract, contractFound := contracts[shard.Host]
 			if contractFound {
@@ -2106,14 +2108,14 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 // archival reason
 //
 // NOTE: this function archives the contracts without setting a renewed ID
-func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
+func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
 	var toInvalidate []fileContractID
 	for _, contract := range contracts {
 		toInvalidate = append(toInvalidate, contract.FCID)
 	}
 	// Invalidate the health on the slabs before deleting the contracts to avoid
 	// breaking the relations beforehand.
-	if err := invalidateSlabHealthByFCID(tx, toInvalidate); err != nil {
+	if err := invalidateSlabHealthByFCID(ctx, tx, toInvalidate); err != nil {
 		return fmt.Errorf("invalidating slab health failed: %w", err)
 	}
 	for _, contract := range contracts {
@@ -2176,54 +2178,40 @@ func deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _
 	return numDeleted, nil
 }
 
-func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
-	return tx.Exec(`
-	UPDATE slabs SET health_valid = 0 WHERE id in (
-	       SELECT *
-	       FROM (
-	               SELECT slabs.id
-	               FROM slabs
-	               LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-	               LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-	               LEFT JOIN contracts c ON c.id = cs.db_contract_id
-	               WHERE health_valid = 1 AND c.fcid IN (?)
-	       ) slab_ids
-	)
-	               `, fcids).Error
-}
-
-func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
+func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileContractID) error {
 	for {
-		var rowsAffected int64
-		err := s.retryTransaction(func(tx *gorm.DB) error {
-			resp := tx.Exec(`
-UPDATE slabs SET health_valid = 0 WHERE id in (
-	SELECT *
-	FROM (
-		SELECT slabs.id
-		FROM slabs
-		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-		LEFT JOIN contracts c ON c.id = cs.db_contract_id
-		WHERE health_valid = 1 AND c.fcid IN (?)
-		LIMIT ?
-	) slab_ids
-)
-		`, fcids, refreshHealthBatchSize)
-			rowsAffected = resp.RowsAffected
-			return resp.Error
-		})
-		if err != nil {
-			return fmt.Errorf("failed to invalidate slab health: %w", err)
-		} else if rowsAffected < refreshHealthBatchSize {
-			return nil // done
+		if resp := tx.Exec(`
+		UPDATE slabs SET health_valid = 0 WHERE id in (
+			   SELECT *
+			   FROM (
+					   SELECT slabs.id
+					   FROM slabs
+					   LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+					   LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+					   LEFT JOIN contracts c ON c.id = cs.db_contract_id
+					   WHERE health_valid = 1 AND c.fcid IN (?)
+					   LIMIT ?
+			   ) slab_ids
+		)
+					   `, fcids, refreshHealthBatchSize); resp.Error != nil {
+			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
+		} else if resp.RowsAffected < refreshHealthBatchSize {
+			break // done
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(time.Second):
 		}
 	}
+	return nil
+}
+
+func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return invalidateSlabHealthByFCID(ctx, tx, fcids)
+	})
 }
 
 func sqlConcat(db *gorm.DB, a, b string) string {

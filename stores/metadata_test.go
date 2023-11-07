@@ -1913,7 +1913,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
+	err = invalidateSlabHealthByFCID(context.Background(), ss.db, []fileContractID{fileContractID(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3608,7 +3608,7 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// get all contracts
 	var dbContracts []dbContract
-	if err := ss.db.Find(&dbContracts).Error; err != nil {
+	if err := ss.db.Model(&dbContract{}).Preload("Host").Find(&dbContracts).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -3664,6 +3664,16 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal("expected health to be invalid")
 	} else if s.Shards[0].LatestHost != publicKey(hk2) {
 		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
+	}
+
+	// Fetch the sector and assert the contracts association.
+	var sectors []dbSector
+	if err := ss.db.Model(&dbSector{}).Preload("Contracts").Find(&sectors).Preload("Contracts").Error; err != nil {
+		t.Fatal(err)
+	} else if len(sectors) != 1 {
+		t.Fatal("expected 1 sector", len(sectors))
+	} else if sector := sectors[0]; len(sector.Contracts) != 2 {
+		t.Fatal("expected 2 contracts", len(sector.Contracts))
 	}
 }
 
