@@ -153,6 +153,8 @@ func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 			trackerTimeoutPercentile,
 		),
 
+		interruptScanChan: make(chan struct{}),
+
 		scanBatchSize:   40,
 		scanThreads:     3,
 		scanMinInterval: time.Minute,
