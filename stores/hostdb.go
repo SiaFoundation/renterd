@@ -33,10 +33,6 @@ const (
 	// database per batch. Empirically tested to verify that this is a value
 	// that performs reasonably well.
 	hostRetrievalBatchSize = 10000
-
-	// number of blocks between a contract's 'startHeight' and the block we
-	// delete the contract if it hasn't appeared on-chain yet.
-	pendingContractPruneThreshold = 18
 )
 
 var (

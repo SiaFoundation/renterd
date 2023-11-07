@@ -240,6 +240,7 @@ func TestSQLContractStore(t *testing.T) {
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: 100,
+		State:       api.ContractStatePending,
 		WindowStart: 400,
 		WindowEnd:   500,
 		RenewedFrom: types.FileContractID{},
@@ -640,6 +641,7 @@ func TestRenewedContract(t *testing.T) {
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid1,
 		Size:        rhpv2.SectorSize,
+		State:       api.ContractStatePending,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
 			Downloads:   types.ZeroCurrency,
@@ -678,6 +680,7 @@ func TestRenewedContract(t *testing.T) {
 			WindowStart:    2,
 			WindowEnd:      3,
 			Size:           rhpv2.SectorSize,
+			State:          contractStatePending,
 
 			UploadSpending:      currency(types.Siacoins(1)),
 			DownloadSpending:    currency(types.Siacoins(2)),
@@ -755,6 +758,7 @@ func TestAncestorsContracts(t *testing.T) {
 			RenewedTo:   fcids[len(fcids)-1-i],
 			StartHeight: 2,
 			Size:        4096,
+			State:       api.ContractStatePending,
 			WindowStart: 400,
 			WindowEnd:   500,
 		}) {
@@ -1067,6 +1071,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							WindowStart:    400,
 							WindowEnd:      500,
 							Size:           4096,
+							State:          contractStatePending,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -1104,6 +1109,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							WindowStart:    400,
 							WindowEnd:      500,
 							Size:           4096,
+							State:          contractStatePending,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
