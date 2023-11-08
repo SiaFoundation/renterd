@@ -2368,6 +2368,14 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 					ss.unappliedContractState[fcid] = contractStatePending // revert from 'active' to 'pending'
 				}
 			}
+			// handle contract revision
+			for _, rev := range txn.FileContractRevisions {
+				if ss.isKnownContract(rev.ParentID) {
+					if rev.RevisionNumber == math.MaxUint64 {
+						ss.unappliedContractState[rev.ParentID] = contractStateActive // revert from 'complete' to 'active'
+					}
+				}
+			}
 			// handle storage proof
 			for _, sp := range txn.StorageProofs {
 				if ss.isKnownContract(sp.ParentID) {
@@ -2399,13 +2407,16 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 						number: rev.RevisionNumber,
 						size:   rev.Filesize,
 					}
+					if rev.RevisionNumber == math.MaxUint64 {
+						ss.unappliedContractState[rev.ParentID] = contractStateComplete // renewed: 'active' -> 'complete'
+					}
 				}
 			}
 			// handle storage proof
 			for _, sp := range txn.StorageProofs {
 				if ss.isKnownContract(sp.ParentID) {
 					ss.unappliedProofs[sp.ParentID] = height
-					ss.unappliedContractState[sp.ParentID] = contractStateComplete // 'active' -> 'complete'
+					ss.unappliedContractState[sp.ParentID] = contractStateComplete // storage proof: 'active' -> 'complete'
 				}
 			}
 		}
