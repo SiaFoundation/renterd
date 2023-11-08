@@ -396,11 +396,12 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 }
 
 func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {
+	inPool := w.tpoolSpent[types.SiacoinOutputID(id)]
 	lastUsed := w.lastUsed[id]
 	if w.usedUTXOExpiry == 0 {
-		return !lastUsed.IsZero()
+		return !lastUsed.IsZero() && !inPool
 	}
-	return time.Since(lastUsed) <= w.usedUTXOExpiry
+	return time.Since(lastUsed) <= w.usedUTXOExpiry && !inPool
 }
 
 // ReceiveUpdatedUnconfirmedTransactions implements modules.TransactionPoolSubscriber.
