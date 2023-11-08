@@ -107,6 +107,7 @@ type ConsensusNetwork struct {
 type ContractsIDAddRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
 	StartHeight uint64                 `json:"startHeight"`
+	State       string                 `json:"state,omitempty"`
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 
@@ -122,6 +123,7 @@ type ContractsIDRenewedRequest struct {
 	Contract    rhpv2.ContractRevision `json:"contract"`
 	RenewedFrom types.FileContractID   `json:"renewedFrom"`
 	StartHeight uint64                 `json:"startHeight"`
+	State       string                 `json:"state,omitempty"`
 	TotalCost   types.Currency         `json:"totalCost"`
 }
 

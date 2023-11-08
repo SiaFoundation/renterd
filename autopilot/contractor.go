@@ -1335,7 +1335,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, fcid)
+	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1423,7 +1423,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, contract.ID)
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1495,7 +1495,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	*budget = budget.Sub(renterFunds)
 
 	// persist contract in store
-	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, cs.BlockHeight)
+	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, cs.BlockHeight, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, true, err

@@ -108,8 +108,8 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
+		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -902,8 +902,11 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
 		return
 	}
+	if req.State == "" {
+		req.State = api.ContractStatePending
+	}
 
-	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
+	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
@@ -923,8 +926,11 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
 		return
 	}
+	if req.State == "" {
+		req.State = api.ContractStatePending
+	}
 
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
