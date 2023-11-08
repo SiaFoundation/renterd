@@ -1004,49 +1004,55 @@ func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogge
 
 func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info("performing migration 00023_slabIndices")
-	// Disable foreign keys in SQLite to avoid issues with updating constraints.
-	if isSQLite(txn) {
-		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
-			return err
-		}
-	}
 
 	if isSQLite(txn) {
 		// SQLite
-		if !txn.Migrator().HasColumn(&dbSector{}, "SlabIndex") {
-			if err := txn.Table("sectors").Migrator().AddColumn(&struct {
-				SlabIndex int
-			}{}, "SlabIndex"); err != nil {
-				return fmt.Errorf("failed to add slab_index column")
-			}
-		}
-
-		// Populate column
 		if err := txn.Exec(`
-		UPDATE sectors
-		SET slab_index = (
-            SELECT
-				COUNT(*) + 1
-            FROM
-				sectors AS s2
-            WHERE
-                s2.db_slab_id = sectors.db_slab_id AND s2.id < sectors.id
-		);`).Error; err != nil {
-			return fmt.Errorf("failed to populate slab_index column: %w", err)
-		}
+			BEGIN TRANSACTION;
+			PRAGMA foreign_keys = off;
 
-		// Fix constraints.
-		if err := txn.Migrator().DropConstraint(&dbSector{}, "SlabIndex"); err != nil {
-			return err
-		} else if err := txn.Migrator().CreateConstraint(&dbSector{}, "SlabIndex"); err != nil {
+			DROP INDEX IF EXISTS idx_sectors_root;
+			DROP INDEX IF EXISTS idx_sectors_slab_index;
+			DROP INDEX IF EXISTS idx_slabidx;
+			DROP INDEX IF EXISTS idx_sectors_db_slab_id;
+
+			CREATE TABLE sectors_temp (id integer,created_at datetime,db_slab_id integer NOT NULL,slab_index integer NOT NULL,latest_host blob NOT NULL,root blob NOT NULL UNIQUE,PRIMARY KEY (id),CONSTRAINT fk_slabs_shards FOREIGN KEY (db_slab_id) REFERENCES slabs(id) ON DELETE CASCADE);
+			CREATE INDEX idx_sectors_root ON sectors_temp(root);
+			CREATE INDEX idx_sectors_slab_index ON sectors_temp(slab_index);
+			CREATE UNIQUE INDEX idx_slabidx ON sectors_temp(db_slab_id,slab_index);
+			CREATE INDEX idx_sectors_db_slab_id ON sectors_temp(db_slab_id);
+
+			UPDATE sectors_temp
+			SET slab_index = (
+				SELECT
+			        COUNT(*) + 1
+				FROM
+			        sectors AS s2
+				WHERE
+					s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors_temp.id
+			);
+
+			DROP TABLE sectors;
+			ALTER TABLE sectors_temp RENAME TO sectors;
+
+			COMMIT;
+			`).Error; err != nil {
 			return err
 		}
 	} else {
 		// MySQL
-		if !txn.Migrator().HasColumn(&dbSector{}, "SlabIndex") {
-			if err := txn.Migrator().AddColumn(&dbSector{}, "SlabIndex"); err != nil {
-				return err
-			}
+		if err := txn.Migrator().AutoMigrate(&struct {
+			Model
+
+			DBSlabID  uint `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
+			SlabIndex int  `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
+
+			LatestHost publicKey `gorm:"NOT NULL"`
+			Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
+
+			Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
+		}{}); err != nil {
+			return err
 		}
 
 		// Populate column.
@@ -1064,24 +1070,15 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		`).Error; err != nil {
 			return err
 		}
+
+		// Create index.
+		if !txn.Migrator().HasIndex(&dbSector{}, "SlabIndex") {
+			if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
+				return err
+			}
+		}
 	}
 
-	// Create index.
-	if !txn.Migrator().HasIndex(&dbSector{}, "SlabIndex") {
-		if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
-			return err
-		}
-	}
-
-	// Enable foreign keys again.
-	if isSQLite(txn) {
-		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
-			return err
-		}
-		if err := txn.Exec(`PRAGMA foreign_key_check(sectors)`).Error; err != nil {
-			return err
-		}
-	}
 	logger.Info("migration 00023_slabIndices complete")
 	return nil
 }
