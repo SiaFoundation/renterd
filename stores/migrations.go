@@ -267,6 +267,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00021_multipartUploadsBucketCascade(tx, logger)
 			},
 		},
+		{
+			ID: "00022_healthValidUntilColumn",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00022_healthValidUntilColumn(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -971,5 +977,21 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 		}
 	}
 	logger.Info("migration 00021_multipoartUploadsBucketCascade complete")
+	return nil
+}
+
+func performMigration00022_healthValidUntilColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_healthValidUntilColumn")
+	if !txn.Migrator().HasColumn(&dbSlab{}, "health_valid_until") {
+		if err := txn.Migrator().AddColumn(&dbSlab{}, "health_valid_until"); err != nil {
+			return err
+		}
+	}
+	if txn.Migrator().HasColumn(&dbSlab{}, "health_valid") {
+		if err := txn.Migrator().DropColumn(&dbSlab{}, "health_valid"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00022_healthValidUntilColumn complete")
 	return nil
 }

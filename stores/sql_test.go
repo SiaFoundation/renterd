@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"lukechampine.com/frand"
 )
@@ -40,11 +42,12 @@ type testSQLStoreConfig struct {
 	dbName          string
 	dbMetricsName   string
 	dir             string
+	ephemeral       bool
 	skipMigrate     bool
 	skipContractSet bool
 }
 
-var defaultTestSQLStoreConfig = testSQLStoreConfig{}
+var defaultTestSQLStoreConfig = testSQLStoreConfig{ephemeral: true}
 
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
@@ -61,7 +64,14 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	if dbMetricsName == "" {
 		dbMetricsName = hex.EncodeToString(frand.Bytes(32)) // random name for metrics db
 	}
-	conn := NewEphemeralSQLiteConnection(dbName)
+
+	var conn gorm.Dialector
+	if cfg.ephemeral {
+		conn = NewEphemeralSQLiteConnection(dbName)
+	} else {
+		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
+	}
+
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
 	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
@@ -208,7 +218,7 @@ func TestQueryPlan(t *testing.T) {
 		"SELECT * FROM contract_set_contracts WHERE db_contract_set_id = 1",
 
 		// slabs
-		"SELECT * FROM slabs WHERE health_valid = 1",
+		"SELECT * FROM slabs WHERE health_valid_until > 0",
 		"SELECT * FROM slabs WHERE health > 0",
 		"SELECT * FROM slabs WHERE db_buffered_slab_id = 1",
 

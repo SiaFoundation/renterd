@@ -520,10 +520,11 @@ func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, to
 	}
 	createdSlab := dbBufferedSlab{
 		DBSlab: dbSlab{
-			DBContractSetID: contractSetID,
-			Key:             key,
-			MinShards:       minShards,
-			TotalShards:     totalShards,
+			DBContractSetID:  contractSetID,
+			Key:              key,
+			HealthValidUntil: time.Now().UnixNano(),
+			MinShards:        minShards,
+			TotalShards:      totalShards,
 		},
 		Complete: false,
 		Size:     0,
