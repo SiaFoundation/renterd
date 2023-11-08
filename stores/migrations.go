@@ -1022,12 +1022,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		}
 
 		// Populate column
-		if !txn.Migrator().HasColumn(&dbSector{}, "SlabIndex") {
-			if err := txn.Table("sectors").Migrator().AddColumn(&struct {
-				SlabIndex int
-			}{}, "SlabIndex"); err != nil {
-				return fmt.Errorf("failed to add slab_index column")
-			} else if err := txn.Exec(`
+		if err := txn.Exec(`
 		UPDATE sectors
 		SET slab_index = (
             SELECT
@@ -1036,9 +1031,8 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 				sectors AS s2
             WHERE
                 s2.db_slab_id = sectors.db_slab_id AND s2.id < sectors.id
-		);`); err != nil {
-				return fmt.Errorf("failed to populate slab_index column")
-			}
+		);`).Error; err != nil {
+			return fmt.Errorf("failed to populate slab_index column: %w", err)
 		}
 	} else {
 		// MySQL
@@ -1065,16 +1059,18 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		}
 	}
 
-	// Create constraint and index if necessary.
-	if !txn.Migrator().HasConstraint(&dbSector{}, "SlabIndex") {
-		if err := txn.Migrator().CreateConstraint(&dbSector{}, "SlabIndex"); err != nil {
-			return err
-		}
-	}
+	// Create index.
 	if !txn.Migrator().HasIndex(&dbSector{}, "SlabIndex") {
 		if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
 			return err
 		}
+	}
+
+	// Fix constraints.
+	if err := txn.Migrator().DropConstraint(&dbSector{}, "SlabIndex"); err != nil {
+		return err
+	} else if err := txn.Migrator().CreateConstraint(&dbSector{}, "SlabIndex"); err != nil {
+		return err
 	}
 
 	// Enable foreign keys again.
