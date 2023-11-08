@@ -23,8 +23,8 @@ const (
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
 
-	refreshHealthMinHealthValidity = time.Hour
-	refreshHealthMaxHealthValidity = 4 * time.Hour
+	refreshHealthMinHealthValidity = 12 * time.Hour
+	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
 var (
