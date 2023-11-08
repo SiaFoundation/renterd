@@ -1050,11 +1050,13 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		}
 	} else {
 		// MySQL
-		if err := txn.Migrator().AddColumn(&dbSector{}, "SlabIndex"); err != nil {
-			return err
+		if !txn.Migrator().HasColumn(&dbSector{}, "SlabIndex") {
+			if err := txn.Migrator().AddColumn(&dbSector{}, "SlabIndex"); err != nil {
+				return err
+			}
 		}
 
-		// Update objects to belong to default bucket
+		// Populate column.
 		if err := txn.Exec(`
 			UPDATE sectors
 			JOIN (
@@ -1071,8 +1073,10 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		}
 
 		// Create the unique index last
-		if err := txn.Migrator().CreateIndex(&dbSector{}, "Idx"); err != nil {
-			return err
+		if !txn.Migrator().HasIndex(&dbSector{}, "SlabIndex") {
+			if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
+				return err
+			}
 		}
 	}
 
