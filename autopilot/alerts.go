@@ -140,7 +140,22 @@ func newOngoingMigrationsAlert(n int) alerts.Alert {
 	}
 }
 
-func newSlabMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
+func newCriticalMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertIDForSlab(alertMigrationID, slabKey),
+		Severity: alerts.SeverityCritical,
+		Message:  "Critical slab migration failed",
+		Data: map[string]interface{}{
+			"error":   err.Error(),
+			"health":  health,
+			"slabKey": slabKey.String(),
+			"hint":    "If migrations of low-health slabs fail, it might be necessary to increase the MigrationSurchargeMultiplier in the gouging settings to ensure it has every chance of succeeding.",
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
 	severity := alerts.SeverityError
 	if health < 0.25 {
 		severity = alerts.SeverityCritical

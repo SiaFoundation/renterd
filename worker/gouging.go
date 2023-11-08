@@ -50,23 +50,29 @@ type (
 
 var _ GougingChecker = gougingChecker{}
 
-func GougingCheckerFromContext(ctx context.Context, applyMigrationSurchargeMultiplier bool) (GougingChecker, error) {
-	gc, ok := ctx.Value(keyGougingChecker).(func(applyMigrationSurchargeMultiplier bool) (GougingChecker, error))
+func GougingCheckerFromContext(ctx context.Context, criticalMigration bool) (GougingChecker, error) {
+	gc, ok := ctx.Value(keyGougingChecker).(func(bool) (GougingChecker, error))
 	if !ok {
 		panic("no gouging checker attached to the context") // developer error
 	}
-	return gc(applyMigrationSurchargeMultiplier)
+	return gc(criticalMigration)
 }
 
 func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
-	return context.WithValue(ctx, keyGougingChecker, func(applyMigrationSurchargeMultiplier bool) (GougingChecker, error) {
+	return context.WithValue(ctx, keyGougingChecker, func(criticalMigration bool) (GougingChecker, error) {
 		consensusState, err := cs.ConsensusState(ctx)
 		if err != nil {
 			return gougingChecker{}, fmt.Errorf("failed to get consensus state: %w", err)
 		}
 
-		if applyMigrationSurchargeMultiplier && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
-			gp.GougingSettings.MaxDownloadPrice = gp.GougingSettings.MaxDownloadPrice.Mul64(gp.GougingSettings.MigrationSurchargeMultiplier)
+		// adjust the max download price if we are dealing with a critical
+		// migration that might be failing due to gouging checks
+		if criticalMigration && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
+			if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); overflow {
+				return gougingChecker{}, errors.New("failed to apply the 'MigrationSurchargeMultiplier', overflow detected")
+			} else {
+				gp.GougingSettings.MaxDownloadPrice = adjustedMaxDownloadPrice
+			}
 		}
 
 		return gougingChecker{

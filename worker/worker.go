@@ -906,17 +906,30 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	used, numShardsMigrated, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
-	if jc.Check("couldn't migrate slabs", err) != nil {
+	used, numShardsMigrated, overpaid, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	if err != nil {
+		jc.Encode(api.MigrateSlabResponse{
+			NumShardsMigrated: numShardsMigrated,
+			Overpaid:          overpaid,
+			Error:             err.Error(),
+		})
 		return
 	}
 
 	// update the slab
-	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
+	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet, used); err != nil {
+		jc.Encode(api.MigrateSlabResponse{
+			NumShardsMigrated: numShardsMigrated,
+			Overpaid:          overpaid,
+			Error:             err.Error(),
+		})
 		return
 	}
 
-	jc.Encode(api.MigrateSlabResponse{NumShardsMigrated: numShardsMigrated})
+	jc.Encode(api.MigrateSlabResponse{
+		NumShardsMigrated: numShardsMigrated,
+		Overpaid:          overpaid,
+	})
 }
 
 func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {

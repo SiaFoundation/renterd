@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -50,6 +51,8 @@ func (j *job) execute(ctx context.Context, w Worker) (_ api.MigrateSlabResponse,
 	res, err := w.MigrateSlab(ctx, slab, j.set)
 	if err != nil {
 		return api.MigrateSlabResponse{}, fmt.Errorf("failed to migrate slab; %w", err)
+	} else if res.Error != "" {
+		return res, fmt.Errorf("failed to migrate slab; %w", errors.New(res.Error))
 	}
 
 	return res, nil
@@ -132,8 +135,12 @@ func (m *migrator) performMigrations(p *workerPool) {
 					for j := range jobs {
 						res, err := j.execute(ctx, w)
 						if err != nil {
-							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, err: failed to fetch autopilot settings; %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, err)
-							m.ap.RegisterAlert(ctx, newSlabMigrationFailedAlert(j.Key, j.Health, err))
+							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.Overpaid, err)
+							if res.Overpaid {
+								m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
+							} else {
+								m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
+							}
 						} else {
 							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.NumShardsMigrated)
 							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))

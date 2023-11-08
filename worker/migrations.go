@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (map[types.PublicKey]types.FileContractID, int, error) {
+func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (map[types.PublicKey]types.FileContractID, int, bool, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -52,7 +52,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 		for _, shard := range s.Shards {
 			used[shard.Host] = h2c[shard.Host]
 		}
-		return used, 0, nil
+		return used, 0, false, nil
 	}
 
 	// calculate the number of missing shards and take into account hosts for
@@ -67,16 +67,16 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 
 	// perform some sanity checks
 	if len(ulContracts) < int(s.MinShards) {
-		return nil, 0, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
+		return nil, 0, false, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
-		return nil, 0, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
+		return nil, 0, false, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
 	}
 
 	// download the slab
-	shards, err := d.DownloadSlab(ctx, *s, dlContracts)
+	shards, overpaid, err := d.DownloadSlab(ctx, *s, dlContracts)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to download slab for migration: %w", err)
+		return nil, 0, false, fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	s.Encrypt(shards)
 
@@ -97,7 +97,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	// migrate the shards
 	uploaded, used, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to upload slab for migration: %w", err)
+		return nil, 0, overpaid, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
@@ -111,12 +111,12 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 		_, exists := used[sector.Host]
 		if !exists {
 			if fcid, exists := h2c[sector.Host]; !exists {
-				return nil, 0, fmt.Errorf("couldn't find contract for host %v", sector.Host)
+				return nil, 0, overpaid, fmt.Errorf("couldn't find contract for host %v", sector.Host)
 			} else {
 				used[sector.Host] = fcid
 			}
 		}
 	}
 
-	return used, len(shards), nil
+	return used, len(shards), overpaid, nil
 }

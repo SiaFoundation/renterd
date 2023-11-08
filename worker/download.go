@@ -344,6 +344,8 @@ outer:
 			if resp.err != nil {
 				mgr.logger.Errorf("download slab %v failed: %v", resp.index, resp.err)
 				return resp.err
+			} else if resp.overpaid {
+				mgr.logger.Debugf("download slab %v succeeded by overpaying", resp.index)
 			}
 
 			responses[resp.index] = resp
@@ -392,7 +394,7 @@ outer:
 	return nil
 }
 
-func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, error) {
+func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, bool, error) {
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
 
@@ -412,7 +414,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 
 	// check if we have enough shards
 	if availableShards < slab.MinShards {
-		return nil, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
+		return nil, false, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
 	}
 
 	// create identifier
@@ -437,10 +439,10 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	var resp *slabDownloadResponse
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	case resp = <-responseChan:
 		if resp.err != nil {
-			return nil, resp.err
+			return nil, false, resp.err
 		}
 	}
 
@@ -448,10 +450,10 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	slice.Decrypt(resp.shards)
 	err := slice.Reconstruct(resp.shards)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return resp.shards, err
+	return resp.shards, resp.overpaid, err
 }
 
 func (mgr *downloadManager) Stats() downloadManagerStats {
