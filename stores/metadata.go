@@ -2181,8 +2181,6 @@ func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileCo
 		return nil
 	}
 
-	ts := time.Now().UnixNano()
-
 	for {
 		if resp := tx.Debug().Exec(`
 		UPDATE slabs SET health_valid_until = ? WHERE id in (
@@ -2196,7 +2194,7 @@ func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileCo
 					   WHERE c.fcid IN (?)
 					   LIMIT ?
 			   ) slab_ids
-		)`, ts, fcids, refreshHealthBatchSize); resp.Error != nil {
+		)`, time.Now().Add(-time.Second).UnixNano(), fcids, refreshHealthBatchSize); resp.Error != nil {
 			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
 		} else if resp.RowsAffected < refreshHealthBatchSize {
 			break // done
