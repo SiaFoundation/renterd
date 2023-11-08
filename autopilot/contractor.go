@@ -347,13 +347,22 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if uint64(len(updatedSet)) < threshold {
-		formed, err = c.runContractFormations(ctx, w, candidates, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)
+		// no need to try and form contracts if wallet is completely empty
+		wallet, err := c.ap.bus.Wallet(ctx)
 		if err != nil {
-			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
+			c.logger.Errorf("failed to fetch wallet, err: %v", err)
+			return false, err
+		} else if wallet.Confirmed.IsZero() {
+			c.logger.Warn("contract formations skipped, wallet is empty")
 		} else {
-			for _, fc := range formed {
-				updatedSet = append(updatedSet, fc)
-				contractData[fc] = 0
+			formed, err = c.runContractFormations(ctx, w, candidates, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)
+			if err != nil {
+				c.logger.Errorf("failed to form contracts, err: %v", err) // continue
+			} else {
+				for _, fc := range formed {
+					updatedSet = append(updatedSet, fc)
+					contractData[fc] = 0
+				}
 			}
 		}
 	}

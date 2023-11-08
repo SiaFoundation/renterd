@@ -268,9 +268,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00022_healthValidUntilColumn",
+			ID: "00022_extendObjectID",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00022_healthValidUntilColumn(tx, logger)
+				return performMigration00022_extendObjectID(tx, logger)
+			},
+		},
+		{
+			ID: "00023_healthValidUntilColumn",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00023_healthValidUntilColumn(tx, logger)
 			},
 		},
 	}
@@ -309,7 +315,7 @@ func initSchema(tx *gorm.DB) error {
 
 	// Change the collation of columns that we need to be case sensitive.
 	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -317,7 +323,7 @@ func initSchema(tx *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -980,8 +986,24 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 	return nil
 }
 
-func performMigration00022_healthValidUntilColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00022_healthValidUntilColumn")
+func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_extendObjectID")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = txn.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+	}
+	logger.Info("migration 00022_extendObjectID complete")
+	return nil
+}
+
+func performMigration00023_healthValidUntilColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00023_healthValidUntilColumn")
 	if !txn.Migrator().HasColumn(&dbSlab{}, "health_valid_until") {
 		if err := txn.Migrator().AddColumn(&dbSlab{}, "health_valid_until"); err != nil {
 			return err
@@ -992,6 +1014,6 @@ func performMigration00022_healthValidUntilColumn(txn *gorm.DB, logger *zap.Suga
 			return err
 		}
 	}
-	logger.Info("migration 00022_healthValidUntilColumn complete")
+	logger.Info("migration 00023_healthValidUntilColumn complete")
 	return nil
 }
