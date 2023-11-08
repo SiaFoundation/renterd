@@ -1581,8 +1581,8 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 
 		// make sure the roots stay the same.
 		for i, shard := range s.Shards {
-			if bytes.Equal(shard.Root[:], slab.Shards[i].Root) {
-				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root)
+			if !bytes.Equal(shard.Root[:], slab.Shards[i].Root) {
+				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root[:])
 			}
 		}
 

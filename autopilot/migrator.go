@@ -141,9 +141,16 @@ func (m *migrator) performMigrations(p *workerPool) {
 							} else {
 								m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
 							}
-						} else {
-							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.NumShardsMigrated)
-							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
+							continue
+						}
+
+						m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.Overpaid, res.NumShardsMigrated)
+						m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
+						if res.Overpaid {
+							// this alert confirms the user his gouging settings
+							// are working, it will be dismissed automatically
+							// the next time this slab is successfully migrated
+							m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.Key))
 						}
 					}
 				}(w)
@@ -239,5 +246,7 @@ OUTER:
 			case jobs <- job{slab, i, len(toMigrate), set, b}:
 			}
 		}
+
+		return
 	}
 }

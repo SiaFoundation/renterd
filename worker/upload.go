@@ -1561,7 +1561,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (finished bool, next bool) {
 	// failed reqs can't complete the upload
 	s.numInflight--
 	if resp.err != nil {
-		s.errs = append(s.errs, &HostError{resp.req.hk, resp.err})
+		s.errs[resp.req.hk] = resp.err
 		return false, false
 	}
 

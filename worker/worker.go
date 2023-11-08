@@ -396,6 +396,8 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 }
 
 func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, blockHeight uint64) (contracts []api.Contract, errs HostErrorSet) {
+	errs = make(HostErrorSet)
+
 	// create requests channel
 	reqs := make(chan api.ContractMetadata)
 
@@ -410,7 +412,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 			})
 			mu.Lock()
 			if err != nil {
-				errs = append(errs, &HostError{HostKey: md.HostKey, Err: err})
+				errs[md.HostKey] = err
 				contracts = append(contracts, api.Contract{
 					ContractMetadata: md,
 				})

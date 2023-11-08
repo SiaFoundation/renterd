@@ -140,11 +140,24 @@ func newOngoingMigrationsAlert(n int) alerts.Alert {
 	}
 }
 
+func newCriticalMigrationSucceededAlert(slabKey object.EncryptionKey) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertIDForSlab(alertMigrationID, slabKey),
+		Severity: alerts.SeverityInfo,
+		Message:  "Critical migration succeeded",
+		Data: map[string]interface{}{
+			"slabKey": slabKey.String(),
+			"hint":    "This migration succeeded thanks to the MigrationSurchargeMultiplier in the gouging settings that allowed overpaying hosts on some critical sector downloads",
+		},
+		Timestamp: time.Now(),
+	}
+}
+
 func newCriticalMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
 	return alerts.Alert{
 		ID:       alertIDForSlab(alertMigrationID, slabKey),
 		Severity: alerts.SeverityCritical,
-		Message:  "Critical slab migration failed",
+		Message:  "Critical migration failed",
 		Data: map[string]interface{}{
 			"error":   err.Error(),
 			"health":  health,

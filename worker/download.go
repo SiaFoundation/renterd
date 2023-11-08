@@ -566,6 +566,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 		used:          make(map[types.PublicKey]struct{}),
 
 		sectors: make([][]byte, len(slice.Shards)),
+		errs:    make(HostErrorSet),
 	}
 }
 
@@ -577,19 +578,14 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice obje
 	// prepare new download
 	slab := mgr.newSlabDownload(ctx, dID, slice, index, migration, nextSlabChan)
 
-	// start downloading
-	shards, overpaid, err := slab.download(ctx)
-	if err != nil {
-		responseChan <- &slabDownloadResponse{
-			index: index,
-			err:   err,
-		}
-	} else {
-		responseChan <- &slabDownloadResponse{
-			index:    index,
-			shards:   shards,
-			overpaid: overpaid,
-		}
+	// execute download
+	resp := &slabDownloadResponse{index: index}
+	resp.shards, resp.overpaid, resp.err = slab.download(ctx)
+
+	// send the response
+	select {
+	case <-ctx.Done():
+	case responseChan <- resp:
 	}
 }
 
@@ -976,9 +972,10 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 		hk:     sector.Host,
 
 		// overpay is set to 'true' when a request is retried after the slab
-		// download failed, and we realise that it might have succeeded if we
-		// allowed overpaying for this download, we only do this for migrations
-		// and when the slab is below a certain health threshold
+		// download failed and we realise that it might have succeeded if we
+		// allowed overpaying for certain sectors, we only do this when trying
+		// to migrate a critically low-health slab that might otherwise be
+		// unrecoverable
 		overpay: false,
 
 		overdrive:   overdrive,
@@ -1019,10 +1016,10 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 	var gouging []*sectorDownloadReq
 
 	// collect responses
-	var lastResort bool
+	var done bool
 
 loop:
-	for s.ongoing() {
+	for s.inflight() > 0 && !done {
 		select {
 		case <-s.mgr.stopChan:
 			return nil, false, errors.New("download stopped")
@@ -1032,22 +1029,28 @@ loop:
 			resetOverdrive()
 		}
 
-		resps.Foreach(func(resp *sectorDownloadResp) {
-			if done := s.receive(*resp); done {
-				return
+		for {
+			resp := resps.Next()
+			if resp == nil {
+				break
 			}
 
+			// receive the response
+			done = s.receive(*resp)
+			if done {
+				break
+			}
+
+			// handle errors
 			if resp.err != nil {
 				// launch overdrive requests
-				if !lastResort {
-					for {
-						if req := s.nextRequest(ctx, resps, true); req != nil {
-							if err := s.launch(req); err != nil {
-								continue // try the next request if this fails to launch
-							}
+				for {
+					if req := s.nextRequest(ctx, resps, true); req != nil {
+						if err := s.launch(req); err != nil {
+							continue
 						}
-						break
 					}
+					break
 				}
 
 				// handle lost sectors
@@ -1057,21 +1060,19 @@ loop:
 					} else {
 						s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.hk, "root", resp.req.root)
 					}
-				} else if isPriceTableGouging(resp.err) && s.overpay {
-					resp.req.overpay = true
+				} else if isPriceTableGouging(resp.err) && s.overpay && !resp.req.overpay {
+					resp.req.overpay = true // ensures we don't retry the same request over and over again
 					gouging = append(gouging, resp.req)
 				}
 			}
-		})
+		}
 	}
 
-	if !lastResort && !s.completed() && len(gouging) >= s.missing() {
-		lastResort = true
+	if !done && len(gouging) >= s.missing() {
 		for _, req := range gouging {
-			if err := s.launch(req); err == nil {
-				s.errs.Remove(req.hk)
-			}
+			_ = s.launch(req) // ignore error
 		}
+		gouging = nil
 		goto loop
 	}
 
@@ -1130,16 +1131,10 @@ func (s *slabDownload) missing() int {
 	return 0
 }
 
-func (s *slabDownload) completed() bool {
+func (s *slabDownload) inflight() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.numCompleted >= s.minShards
-}
-
-func (s *slabDownload) ongoing() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.numCompleted < s.minShards || s.numInflight > 0
+	return s.numInflight
 }
 
 func (s *slabDownload) launch(req *sectorDownloadReq) error {
@@ -1178,7 +1173,7 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	return nil
 }
 
-func (s *slabDownload) receive(resp sectorDownloadResp) bool {
+func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1190,8 +1185,17 @@ func (s *slabDownload) receive(resp sectorDownloadResp) bool {
 	// failed reqs can't complete the upload
 	s.numInflight--
 	if resp.err != nil {
-		s.errs = append(s.errs, &HostError{resp.req.hk, resp.err})
+		s.errs[resp.req.hk] = resp.err
 		return false
+	}
+
+	// try trigger next slab read
+	if !s.nextSlabTriggered && s.numCompleted+int(s.mgr.maxOverdrive) >= s.minShards {
+		select {
+		case <-s.nextSlabChan:
+			s.nextSlabTriggered = true
+		default:
+		}
 	}
 
 	// update num overpaid
@@ -1202,15 +1206,6 @@ func (s *slabDownload) receive(resp sectorDownloadResp) bool {
 	// store the sector
 	s.sectors[resp.req.sectorIndex] = resp.sector
 	s.numCompleted++
-
-	// try trigger next slab
-	if !s.nextSlabTriggered && s.numCompleted+int(s.mgr.maxOverdrive) >= s.minShards {
-		select {
-		case <-s.nextSlabChan:
-			s.nextSlabTriggered = true
-		default:
-		}
-	}
 
 	return s.numCompleted >= s.minShards
 }
@@ -1322,18 +1317,13 @@ func (sr *sectorResponses) Close() error {
 	return nil
 }
 
-func (sr *sectorResponses) Foreach(fn func(res *sectorDownloadResp)) {
-	for {
-		sr.mu.Lock()
-		if len(sr.responses) == 0 {
-			sr.mu.Unlock()
-			return
-		}
-
-		resp := sr.responses[0]
-		sr.responses = sr.responses[1:]
-		sr.mu.Unlock()
-
-		fn(resp)
+func (sr *sectorResponses) Next() *sectorDownloadResp {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	if len(sr.responses) == 0 {
+		return nil
 	}
+	resp := sr.responses[0]
+	sr.responses = sr.responses[1:]
+	return resp
 }
