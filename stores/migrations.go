@@ -1013,40 +1013,32 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 
 	if isSQLite(txn) {
 		// SQLite
-		if txn.Migrator().HasTable("sectors_temp") {
-			if err := txn.Migrator().DropTable("sectors_temp"); err != nil {
-				return err
+		if !txn.Migrator().HasColumn(&dbSector{}, "SlabIndex") {
+			if err := txn.Table("sectors").Migrator().AddColumn(&struct {
+				SlabIndex int
+			}{}, "SlabIndex"); err != nil {
+				return fmt.Errorf("failed to add slab_index column")
 			}
 		}
-		// Since SQLite doesn't support altering columns, we have to create
-		// a new temporary sectors table, copy the sectors over with the
-		// default bucket id and then delete the old table and rename the
-		// temporary one to 'sectors'.
-		if err := txn.Table("sectors_temp").Migrator().CreateTable(&dbSector{}); err != nil {
-			return fmt.Errorf("failed to create temporary table: %w", err)
-		} else if err := txn.Exec(`
-			INSERT INTO sectors_temp (id, created_at, db_slab_id, slab_index, latest_host, root)
-			SELECT sectors.id, sectors.created_at, db_slab_id, 0, latest_host, root
-			FROM sectors
-			`).Error; err != nil {
-			return fmt.Errorf("failed to copy old table over to new one: %w", err)
-		} else if err := txn.Exec(`
-		UPDATE sectors_temp
+
+		// Populate column
+		if !txn.Migrator().HasColumn(&dbSector{}, "SlabIndex") {
+			if err := txn.Table("sectors").Migrator().AddColumn(&struct {
+				SlabIndex int
+			}{}, "SlabIndex"); err != nil {
+				return fmt.Errorf("failed to add slab_index column")
+			} else if err := txn.Exec(`
+		UPDATE sectors
 		SET slab_index = (
             SELECT
 				COUNT(*) + 1
             FROM
-				sectors_temp AS s2
+				sectors AS s2
             WHERE
-                s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors.id
-		);
-`); err != nil {
-		} else if err := txn.Migrator().DropTable("sectors"); err != nil {
-			return fmt.Errorf("failed to drop objects table: %w", err)
-		} else if err := txn.Migrator().RenameTable("sectors_temp", "sectors"); err != nil {
-			return fmt.Errorf("failed to rename temporary table: %w", err)
-		} else if err := txn.Migrator().AutoMigrate(&dbSector{}); err != nil {
-			return fmt.Errorf("failed to auto-migrate sectors table: %w", err)
+                s2.db_slab_id = sectors.db_slab_id AND s2.id < sectors.id
+		);`); err != nil {
+				return fmt.Errorf("failed to populate slab_index column")
+			}
 		}
 	} else {
 		// MySQL
@@ -1071,12 +1063,17 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		`).Error; err != nil {
 			return err
 		}
+	}
 
-		// Create the unique index last
-		if !txn.Migrator().HasIndex(&dbSector{}, "SlabIndex") {
-			if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
-				return err
-			}
+	// Create constraint and index if necessary.
+	if !txn.Migrator().HasConstraint(&dbSector{}, "SlabIndex") {
+		if err := txn.Migrator().CreateConstraint(&dbSector{}, "SlabIndex"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasIndex(&dbSector{}, "SlabIndex") {
+		if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
+			return err
 		}
 	}
 
