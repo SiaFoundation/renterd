@@ -1003,7 +1003,7 @@ func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogge
 }
 
 func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration migration 00023_slabIndices")
+	logger.Info("performing migration 00023_slabIndices")
 	// Disable foreign keys in SQLite to avoid issues with updating constraints.
 	if isSQLite(txn) {
 		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
@@ -1033,6 +1033,13 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
                 s2.db_slab_id = sectors.db_slab_id AND s2.id < sectors.id
 		);`).Error; err != nil {
 			return fmt.Errorf("failed to populate slab_index column: %w", err)
+		}
+
+		// Fix constraints.
+		if err := txn.Migrator().DropConstraint(&dbSector{}, "SlabIndex"); err != nil {
+			return err
+		} else if err := txn.Migrator().CreateConstraint(&dbSector{}, "SlabIndex"); err != nil {
+			return err
 		}
 	} else {
 		// MySQL
@@ -1064,13 +1071,6 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		if err := txn.Migrator().CreateIndex(&dbSector{}, "SlabIndex"); err != nil {
 			return err
 		}
-	}
-
-	// Fix constraints.
-	if err := txn.Migrator().DropConstraint(&dbSector{}, "SlabIndex"); err != nil {
-		return err
-	} else if err := txn.Migrator().CreateConstraint(&dbSector{}, "SlabIndex"); err != nil {
-		return err
 	}
 
 	// Enable foreign keys again.
