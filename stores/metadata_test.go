@@ -3765,7 +3765,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
 			t.Fatal(err)
 		} else if slab.HealthValid() != expected {
-			t.Fatal("unexpected health valid", slab.HealthValid(), slab.HealthValidUntil)
+			t.Fatal("unexpected health valid", slab.HealthValid(), slab.HealthValidUntil, time.Now(), time.Unix(0, slab.HealthValidUntil))
 		}
 	}
 
