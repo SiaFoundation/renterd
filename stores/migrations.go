@@ -291,9 +291,23 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		m.InitSchema(initSchema)
 	}
 
+	// Disable foreign keys before migrations.
+	if isSQLite(db) {
+		if err := db.Exec(`PRAGMA foreign_keys = off;`).Error; err != nil {
+			return err
+		}
+	}
+
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate: %v", err)
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(db) {
+		if err := db.Exec(`PRAGMA foreign_keys = on;`).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1009,7 +1023,6 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		// SQLite
 		if err := txn.Exec(`
 			BEGIN TRANSACTION;
-			PRAGMA foreign_keys = off;
 
 			DROP INDEX IF EXISTS idx_sectors_root;
 			DROP INDEX IF EXISTS idx_sectors_slab_index;
@@ -1027,7 +1040,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 				SELECT
 			        COUNT(*) + 1
 				FROM
-			        sectors AS s2
+			        sectors_temp AS s2
 				WHERE
 					s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors_temp.id
 			);
@@ -1035,6 +1048,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 			DROP TABLE sectors;
 			ALTER TABLE sectors_temp RENAME TO sectors;
 
+			PRAGMA foreign_key_check(sectors);
 			COMMIT;
 			`).Error; err != nil {
 			return err
