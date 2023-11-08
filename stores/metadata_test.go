@@ -3705,6 +3705,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	slab := object.Slab{
 		Key:    object.GenerateEncryptionKey(),
 		Shards: shards,
+		Health: 1,
 	}
 
 	// set slab.
@@ -3721,7 +3722,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, rSlab) {
-		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab))
+		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
 	// change the length to fail the update.
