@@ -291,23 +291,9 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		m.InitSchema(initSchema)
 	}
 
-	// Disable foreign keys before migrations.
-	if isSQLite(db) {
-		if err := db.Exec(`PRAGMA foreign_keys = off;`).Error; err != nil {
-			return err
-		}
-	}
-
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate: %v", err)
-	}
-
-	// Enable foreign keys again.
-	if isSQLite(db) {
-		if err := db.Exec(`PRAGMA foreign_keys = on;`).Error; err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1023,6 +1009,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 		// SQLite
 		if err := txn.Exec(`
 			BEGIN TRANSACTION;
+			PRAGMA foreign_keys = 0;
 
 			DROP INDEX IF EXISTS idx_sectors_root;
 			DROP INDEX IF EXISTS idx_sectors_slab_index;
@@ -1030,10 +1017,7 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 			DROP INDEX IF EXISTS idx_sectors_db_slab_id;
 
 			CREATE TABLE sectors_temp (id integer,created_at datetime,db_slab_id integer NOT NULL,slab_index integer NOT NULL,latest_host blob NOT NULL,root blob NOT NULL UNIQUE,PRIMARY KEY (id),CONSTRAINT fk_slabs_shards FOREIGN KEY (db_slab_id) REFERENCES slabs(id) ON DELETE CASCADE);
-			CREATE INDEX idx_sectors_root ON sectors_temp(root);
-			CREATE INDEX idx_sectors_slab_index ON sectors_temp(slab_index);
-			CREATE UNIQUE INDEX idx_slabidx ON sectors_temp(db_slab_id,slab_index);
-			CREATE INDEX idx_sectors_db_slab_id ON sectors_temp(db_slab_id);
+			INSERT INTO sectors_temp (id, created_at, db_slab_id, slab_index, latest_host, root) SELECT id, created_at, db_slab_id, 0, latest_host, root FROM sectors;
 
 			UPDATE sectors_temp
 			SET slab_index = (
@@ -1045,9 +1029,15 @@ func performMigration00023_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 					s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors_temp.id
 			);
 
+			CREATE INDEX idx_sectors_root ON sectors_temp(root);
+			CREATE INDEX idx_sectors_slab_index ON sectors_temp(slab_index);
+			CREATE UNIQUE INDEX idx_slabidx ON sectors_temp(db_slab_id,slab_index);
+			CREATE INDEX idx_sectors_db_slab_id ON sectors_temp(db_slab_id);
+
 			DROP TABLE sectors;
 			ALTER TABLE sectors_temp RENAME TO sectors;
 
+			PRAGMA foreign_keys = 1;
 			PRAGMA foreign_key_check(sectors);
 			COMMIT;
 			`).Error; err != nil {
