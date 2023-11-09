@@ -1744,8 +1744,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		}
 		err = tx.Where(dbSlab{Key: slabKey}).
 			Assign(dbSlab{
-				DBContractSetID:  contractSetID,
-				HealthValidUntil: time.Now().UnixNano(),
+				DBContractSetID: contractSetID,
 			}).
 			FirstOrCreate(&slab).Error
 		if err != nil {
