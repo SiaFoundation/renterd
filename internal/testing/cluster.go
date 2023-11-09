@@ -62,8 +62,9 @@ var (
 			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
-			MaxDowntimeHours:  10,
-			AllowRedundantIPs: true, // allow for integration tests by default
+			MaxDowntimeHours:      10,
+			MinRecentScanFailures: 10,
+			AllowRedundantIPs:     true, // allow for integration tests by default
 		},
 	}
 
@@ -960,7 +961,6 @@ func testApCfg() node.AutopilotConfig {
 			ScannerInterval:                time.Second,
 			ScannerBatchSize:               10,
 			ScannerNumThreads:              1,
-			ScannerMinRecentFailures:       5,
 		},
 	}
 }
