@@ -3619,7 +3619,7 @@ func TestDeleteHostSector(t *testing.T) {
 		DBContractSetID:  1,
 		Key:              []byte(object.GenerateEncryptionKey().String()),
 		Health:           1.0,
-		HealthValidUntil: time.Now().Add(time.Hour).UnixNano(),
+		HealthValidUntil: time.Now().Add(time.Hour).Unix(),
 		TotalShards:      1,
 		Shards: []dbSector{
 			{
@@ -3765,7 +3765,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
 			t.Fatal(err)
 		} else if slab.HealthValid() != expected {
-			t.Fatal("unexpected health valid", slab.HealthValid(), slab.HealthValidUntil, time.Now(), time.Unix(0, slab.HealthValidUntil))
+			t.Fatal("unexpected health valid", slab.HealthValid(), slab.HealthValidUntil, time.Now(), time.Unix(slab.HealthValidUntil, 0))
 		}
 	}
 
@@ -3905,7 +3905,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		now := time.Now()
 		min := now.Add(refreshHealthMinHealthValidity)
 		max := now.Add(refreshHealthMaxHealthValidity)
-		validUntil := time.Unix(0, slab.HealthValidUntil)
+		validUntil := time.Unix(slab.HealthValidUntil, 0)
 		if !(min.Before(validUntil) && max.After(validUntil)) {
 			t.Fatal("valid until not in boundaries", min, max, validUntil, now)
 		}

@@ -204,7 +204,7 @@ type (
 )
 
 func (s dbSlab) HealthValid() bool {
-	return time.Now().Before(time.Unix(0, s.HealthValidUntil))
+	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
 }
 
 // TableName implements the gorm.Tabler interface.
@@ -1359,7 +1359,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 					sectorIDs = append(sectorIDs, s.DBSectorID)
 				}
 			}
-			err = tx.Exec("UPDATE slabs SET health_valid_until = ? WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", time.Now().UnixNano(), sectorIDs).Error
+			err = tx.Exec("UPDATE slabs SET health_valid_until = ? WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", time.Now().Unix(), sectorIDs).Error
 			if err != nil {
 				return fmt.Errorf("failed to invalidate slab health: %w", err)
 			}
@@ -1588,7 +1588,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			Where(&slab).
 			Updates(map[string]interface{}{
 				"db_contract_set_id": cs.ID,
-				"health_valid_until": time.Now().UnixNano(),
+				"health_valid_until": time.Now().Unix(),
 				"health":             1,
 			}).
 			Error; err != nil {
@@ -1653,10 +1653,10 @@ LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
 LEFT JOIN contracts c ON se.db_contract_id = c.id
 LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-WHERE slabs.health_valid_until < ?
+WHERE slabs.health_valid_until <= ?
 GROUP BY slabs.id
 LIMIT ?
-`, now.UnixNano(), refreshHealthBatchSize)
+`, now.Unix(), refreshHealthBatchSize)
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			s.objectsMu.Lock()
@@ -1664,9 +1664,9 @@ LIMIT ?
 
 			var res *gorm.DB
 			if isSQLite(s.db) {
-				res = tx.Exec(fmt.Sprintf("UPDATE slabs SET health = src.health, health_valid_until = (%s) FROM (?) AS src WHERE slabs.id=src.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity)), healthQuery)
+				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid_until = (?) FROM (?) AS src WHERE slabs.id=src.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity), healthQuery)
 			} else {
-				res = tx.Exec(fmt.Sprintf("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (%s)", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity)), healthQuery)
+				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (?)", healthQuery, sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
 			}
 			if res.Error != nil {
 				return res.Error
@@ -1704,7 +1704,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Select("slabs.key, slabs.health").
 		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
 		Model(&dbSlab{}).
-		Where("health <= ? AND ? < health_valid_until AND cs.name = ?", healthCutoff, time.Now().UnixNano(), set).
+		Where("health <= ? AND ? < health_valid_until AND cs.name = ?", healthCutoff, time.Now().Unix(), set).
 		Order("health ASC").
 		Limit(limit).
 		Find(&rows).
@@ -2193,7 +2193,7 @@ func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileCo
 					   WHERE c.fcid IN (?)
 					   LIMIT ?
 			   ) slab_ids
-		)`, time.Now().Add(-time.Second).UnixNano(), fcids, refreshHealthBatchSize); resp.Error != nil {
+		)`, time.Now().Unix(), fcids, refreshHealthBatchSize); resp.Error != nil {
 			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
 		} else if resp.RowsAffected < refreshHealthBatchSize {
 			break // done
@@ -2221,11 +2221,11 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
-func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) string {
+func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) clause.Expr {
 	if isSQLite(db) {
-		return fmt.Sprintf("ABS(RANDOM()) %% (%d - %d) + %d", max.Nanoseconds(), min.Nanoseconds(), now.Add(min).UnixNano())
+		return gorm.Expr("ABS(RANDOM()) % (? - ?) + ?", int(max.Seconds()), int(min.Seconds()), now.Add(min).Unix())
 	}
-	return fmt.Sprintf("FLOOR(%d + RAND() * (%d - %d))", now.Add(min).UnixNano(), max.Nanoseconds(), min.Nanoseconds())
+	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(min).Unix(), int(max.Seconds()), int(min.Seconds()))
 }
 
 func sqlWhereBucket(objTable string, bucket string) clause.Expr {
