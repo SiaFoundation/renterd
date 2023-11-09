@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/build"
+	"go.sia.tech/siad/crypto"
 )
 
 const (
@@ -388,17 +388,27 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 				A:    uint64(len(batch)),
 			})
 
-			// check funds
-			proofSize := uint64(len(batch)) * 2 * uint64(bits.Len64(numSectors)) * 32
-			if proofSize < minMessageSize {
-				proofSize = minMessageSize
+			// calculate the cost
+			var remainingDuration uint64 // not needed for deletions
+			rpcCost, err := settings.RPCWriteCost(actions, numSectors, remainingDuration, true)
+			if err != nil {
+				return err
+			}
+			cost, _ = rpcCost.Total()
+
+			// calculate the response size
+			proofSize := rhpv2.DiffProofSize(actions, numSectors)
+			responseSize := (proofSize + 1) * crypto.HashSize
+
+			// TODO: remove once the host network is updated
+			if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+				if responseSize < minMessageSize {
+					responseSize = minMessageSize
+				}
+				cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
+				cost = cost.Mul64(2) // generous leeway
 			}
 
-			// calculate the cost
-			//
-			// TODO: switch out for exact cost calculations once it is added to core
-			cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
-			cost = cost.Mul64(125).Div64(100) // leeway
 			if rev.RenterFunds().Cmp(cost) < 0 {
 				return ErrInsufficientFunds
 			}
@@ -432,8 +442,10 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			var merkleResp rhpv2.RPCWriteMerkleProof
 			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
-			} else if err := t.ReadResponse(&merkleResp, minMessageSize+proofSize); err != nil {
-				return fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
+			} else if err := t.ReadResponse(&merkleResp, minMessageSize+responseSize); err != nil {
+				err := fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
+				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
+				return err
 			}
 
 			// verify proof
@@ -441,7 +453,8 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			leafHashes := merkleResp.OldLeafHashes
 			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
 			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
-				err := ErrInvalidMerkleProof
+				err := fmt.Errorf("host %v version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
+				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				t.WriteResponseErr(err)
 				return err
 			}
@@ -505,9 +518,24 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 			n = numsectors - offset
 		}
 
+		// calculate the cost
+		cost, _ := settings.RPCSectorRootsCost(offset, n).Total()
+
+		// calculate the response size
+		proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
+		responseSize := (proofSize + n) * crypto.HashSize
+
+		// TODO: remove once host network is updated
+		if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+			if responseSize < minMessageSize {
+				responseSize = minMessageSize
+			}
+			cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
+			cost = cost.Mul64(2) // generous leeway
+		}
+
 		// check funds
-		price, _ := settings.RPCSectorRootsCost(offset, n).Total()
-		if rev.RenterFunds().Cmp(price) < 0 {
+		if rev.RenterFunds().Cmp(cost) < 0 {
 			return nil, ErrInsufficientFunds
 		}
 
@@ -518,7 +546,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		rev.Revision.RevisionNumber++
 
 		// update the revision outputs
-		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, price, types.ZeroCurrency)
+		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
 		if err != nil {
 			return nil, err
 		}
@@ -535,14 +563,11 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 			Signature:         renterKey.SignHash(revisionHash),
 		}
 
-		// calculate the proof size
-		proofSize := rhpv2.RangeProofSize(rev.NumSectors(), offset, n)
-
 		// execute the sector roots RPC
 		var rootsResp rhpv2.RPCSectorRootsResponse
 		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
 			return nil, err
-		} else if err := t.ReadResponse(&rootsResp, uint64(minMessageSize+proofSize+32*n)); err != nil {
+		} else if err := t.ReadResponse(&rootsResp, minMessageSize+responseSize); err != nil {
 			return nil, fmt.Errorf("couldn't read sector roots response: %w", err)
 		}
 
@@ -563,7 +588,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		offset += n
 
 		// record spending
-		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: price})
+		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: cost})
 	}
 	return
 }
