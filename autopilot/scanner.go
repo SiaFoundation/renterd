@@ -40,10 +40,9 @@ type (
 		ap      *Autopilot
 		wg      sync.WaitGroup
 
-		scanBatchSize         uint64
-		scanThreads           uint64
-		scanMinInterval       time.Duration
-		scanMinRecentFailures uint64
+		scanBatchSize   uint64
+		scanThreads     uint64
+		scanMinInterval time.Duration
 
 		timeoutMinInterval time.Duration
 		timeoutMinTimeout  time.Duration
@@ -119,7 +118,7 @@ func (t *tracker) timeout() time.Duration {
 	return time.Duration(percentile) * time.Millisecond
 }
 
-func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
+func newScanner(ap *Autopilot, scanBatchSize, scanThreads uint64, scanMinInterval, timeoutMinInterval, timeoutMinTimeout time.Duration) (*scanner, error) {
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")
 	}
@@ -139,10 +138,9 @@ func newScanner(ap *Autopilot, scanBatchSize, scanMinRecentFailures, scanThreads
 
 		interruptScanChan: make(chan struct{}),
 
-		scanBatchSize:         scanBatchSize,
-		scanThreads:           scanThreads,
-		scanMinInterval:       scanMinInterval,
-		scanMinRecentFailures: scanMinRecentFailures,
+		scanBatchSize:   scanBatchSize,
+		scanThreads:     scanThreads,
+		scanMinInterval: scanMinInterval,
 
 		timeoutMinInterval: timeoutMinInterval,
 		timeoutMinTimeout:  timeoutMinTimeout,
@@ -193,7 +191,9 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	s.mu.Unlock()
 
 	s.logger.Infof("%s started", scanType)
-	maxDowntime := time.Duration(s.ap.State().cfg.Hosts.MaxDowntimeHours) * time.Hour
+	hostCfg := s.ap.State().cfg.Hosts
+	maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
+	minRecentScanFailures := hostCfg.MinRecentScanFailures
 
 	s.wg.Add(1)
 	go func(st string) {
@@ -211,8 +211,8 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		}
 
 		if !interrupted && maxDowntime > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v", maxDowntime)
-			removed, err := s.bus.RemoveOfflineHosts(ctx, s.scanMinRecentFailures, maxDowntime)
+			s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
+			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
 			if err != nil {
 				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
 			} else if removed > 0 {

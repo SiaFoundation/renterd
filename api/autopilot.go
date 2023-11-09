@@ -57,9 +57,10 @@ type (
 
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
-		AllowRedundantIPs bool                        `json:"allowRedundantIPs"`
-		MaxDowntimeHours  uint64                      `json:"maxDowntimeHours"`
-		ScoreOverrides    map[types.PublicKey]float64 `json:"scoreOverrides"`
+		AllowRedundantIPs     bool                        `json:"allowRedundantIPs"`
+		MaxDowntimeHours      uint64                      `json:"maxDowntimeHours"`
+		MinRecentScanFailures uint64                      `json:"minRecentScanFailures"`
+		ScoreOverrides        map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 
 	// WalletConfig contains all wallet settings used in the autopilot.

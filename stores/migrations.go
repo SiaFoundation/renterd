@@ -274,9 +274,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "000023_addMultipartUploadIndices",
+			ID: "00023_defaultMinRecentScanFailures",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration000023_addMultipartUploadIndices(tx, logger)
+				return performMigration00023_defaultMinRecentScanFailures(tx, logger)
+			},
+		},
+		{
+			ID: "000024_addMultipartUploadIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration000024_addMultipartUploadIndices(tx, logger)
 			},
 		},
 	}
@@ -1002,8 +1008,31 @@ func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogge
 	return nil
 }
 
-func performMigration000023_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration000023_addMultipartUploadIndices")
+func performMigration00023_defaultMinRecentScanFailures(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00023_defaultMinRecentScanFailures")
+
+	var autopilots []dbAutopilot
+	if err := txn.Model(&dbAutopilot{}).Find(&autopilots).Error; err != nil {
+		return err
+	}
+
+	for _, autopilot := range autopilots {
+		if autopilot.Config.Hosts.MinRecentScanFailures == 0 {
+			autopilot.Config.Hosts.MinRecentScanFailures = 10
+			if err := txn.Save(&autopilot).Error; err != nil {
+				logger.Errorf("failed to set default value for MinRecentScanFailures on autopilot '%v', err: %v", autopilot.Identifier, err)
+				return err
+			}
+			logger.Debugf("successfully defaulted MinRecentScanFailures to 10 on autopilot '%v'", autopilot.Identifier)
+		}
+	}
+
+	logger.Info("migration 00023_defaultMinRecentScanFailures complete")
+	return nil
+}
+
+func performMigration000024_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration000024_addMultipartUploadIndices")
 
 	m := txn.Migrator()
 	for _, column := range []string{"ObjectID", "DBBucketID", "MimeType"} {
@@ -1014,6 +1043,6 @@ func performMigration000023_addMultipartUploadIndices(txn *gorm.DB, logger *zap.
 		}
 	}
 
-	logger.Info("migration migration000023_addMultipartUploadIndices complete")
+	logger.Info("migration migration000024_addMultipartUploadIndices complete")
 	return nil
 }
