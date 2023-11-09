@@ -2366,13 +2366,19 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 				fcid := txn.FileContractID(i)
 				if ss.isKnownContract(fcid) {
 					ss.unappliedContractState[fcid] = contractStatePending // revert from 'active' to 'pending'
+					ss.logger.Infow("contract state changed: active -> pending",
+						"fcid", fcid,
+						"reason", "contract reverted")
 				}
 			}
 			// handle contract revision
 			for _, rev := range txn.FileContractRevisions {
 				if ss.isKnownContract(rev.ParentID) {
-					if rev.RevisionNumber == math.MaxUint64 {
+					if rev.RevisionNumber == math.MaxUint64 && rev.Filesize == 0 {
 						ss.unappliedContractState[rev.ParentID] = contractStateActive // revert from 'complete' to 'active'
+						ss.logger.Infow("contract state changed: complete -> active",
+							"fcid", rev.ParentID,
+							"reason", "final revision reverted")
 					}
 				}
 			}
@@ -2380,6 +2386,9 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 			for _, sp := range txn.StorageProofs {
 				if ss.isKnownContract(sp.ParentID) {
 					ss.unappliedContractState[sp.ParentID] = contractStateActive // revert from 'complete' to 'active'
+					ss.logger.Infow("contract state changed: complete -> active",
+						"fcid", sp.ParentID,
+						"reason", "storage proof reverted")
 				}
 			}
 		}
@@ -2397,6 +2406,9 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 				fcid := txn.FileContractID(i)
 				if ss.isKnownContract(fcid) {
 					ss.unappliedContractState[fcid] = contractStateActive // 'pending' -> 'active'
+					ss.logger.Infow("contract state changed: pending -> active",
+						"fcid", fcid,
+						"reason", "contract confirmed")
 				}
 			}
 			// handle contract revision
@@ -2407,8 +2419,11 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 						number: rev.RevisionNumber,
 						size:   rev.Filesize,
 					}
-					if rev.RevisionNumber == math.MaxUint64 {
+					if rev.RevisionNumber == math.MaxUint64 && rev.Filesize == 0 {
 						ss.unappliedContractState[rev.ParentID] = contractStateComplete // renewed: 'active' -> 'complete'
+						ss.logger.Infow("contract state changed: active -> complete",
+							"fcid", rev.ParentID,
+							"reason", "final revision confirmed")
 					}
 				}
 			}
@@ -2417,6 +2432,9 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 				if ss.isKnownContract(sp.ParentID) {
 					ss.unappliedProofs[sp.ParentID] = height
 					ss.unappliedContractState[sp.ParentID] = contractStateComplete // storage proof: 'active' -> 'complete'
+					ss.logger.Infow("contract state changed: active -> complete",
+						"fcid", sp.ParentID,
+						"reason", "storage proof confirmed")
 				}
 			}
 		}
