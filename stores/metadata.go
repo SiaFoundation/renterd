@@ -144,8 +144,8 @@ type (
 	dbSector struct {
 		Model
 
-		DBSlabID  uint `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
-		SlabIndex int  `gorm:"index;uniqueIndex:idx_slabidx;NOT NULL"`
+		DBSlabID  uint `gorm:"index:idx_sectors_db_slab_id;uniqueIndex:idx_sectors_slab_id_slab_index;NOT NULL"`
+		SlabIndex int  `gorm:"index:idx_sectors_slab_index;uniqueIndex:idx_sectors_slab_id_slab_index;NOT NULL"`
 
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
