@@ -14,7 +14,7 @@ import (
 )
 
 // SendSiacoins is a helper method that sends siacoins to the given outputs.
-func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput) (err error) {
+func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput, useUnconfirmedTxns bool) (err error) {
 	var value types.Currency
 	for _, sco := range scos {
 		value = value.Add(sco.Value)
@@ -22,7 +22,7 @@ func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput) (
 	txn := types.Transaction{
 		SiacoinOutputs: scos,
 	}
-	toSign, parents, err := c.WalletFund(ctx, &txn, value)
+	toSign, parents, err := c.WalletFund(ctx, &txn, value, useUnconfirmedTxns)
 	if err != nil {
 		return err
 	}
@@ -51,10 +51,11 @@ func (c *Client) WalletDiscard(ctx context.Context, txn types.Transaction) error
 }
 
 // WalletFund funds txn using inputs controlled by the wallet.
-func (c *Client) WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error) {
+func (c *Client) WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTransactions bool) ([]types.Hash256, []types.Transaction, error) {
 	req := api.WalletFundRequest{
-		Transaction: *txn,
-		Amount:      amount,
+		Transaction:        *txn,
+		Amount:             amount,
+		UseUnconfirmedTxns: useUnconfirmedTransactions,
 	}
 	var resp api.WalletFundResponse
 	err := c.c.WithContext(ctx).POST("/wallet/fund", req, &resp)

@@ -352,7 +352,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		if err != nil {
 			c.logger.Errorf("failed to fetch wallet, err: %v", err)
 			return false, err
-		} else if wallet.Confirmed.IsZero() {
+		} else if wallet.Confirmed.IsZero() && wallet.Unconfirmed.IsZero() {
 			c.logger.Warn("contract formations skipped, wallet is empty")
 		} else {
 			formed, err = c.runContractFormations(ctx, w, candidates, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)

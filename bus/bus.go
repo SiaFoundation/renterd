@@ -81,7 +81,7 @@ type (
 	Wallet interface {
 		Address() types.Address
 		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
-		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error)
+		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error)
 		Height() uint64
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn types.Transaction)
@@ -383,7 +383,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		fee := b.tp.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
 		txn.MinerFees = []types.Currency{fee}
 	}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
@@ -467,7 +467,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		FileContracts: []types.FileContract{fc},
 	}
 	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
-	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), true)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
@@ -520,7 +520,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
 	// the renter key by the worker.
-	toSign, err := b.w.FundTransaction(cs, &txn, cost, b.tp.Transactions())
+	toSign, err := b.w.FundTransaction(cs, &txn, cost, true)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
