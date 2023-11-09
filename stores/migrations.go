@@ -279,6 +279,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00023_defaultMinRecentScanFailures(tx, logger)
 			},
 		},
+		{
+			ID: "00024_contractState",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00024_contractState(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1022,5 +1028,27 @@ func performMigration00023_defaultMinRecentScanFailures(txn *gorm.DB, logger *za
 	}
 
 	logger.Info("migration 00023_defaultMinRecentScanFailures complete")
+	return nil
+}
+
+func performMigration00024_contractState(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00024_contractState")
+	if !txn.Migrator().HasColumn(&dbContract{}, "State") {
+		if err := txn.Migrator().AddColumn(&dbContract{}, "State"); err != nil {
+			return err
+		}
+		if err := txn.Model(&dbContract{}).Where("TRUE").Update("State", contractStateActive).Error; err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasColumn(&dbArchivedContract{}, "State") {
+		if err := txn.Migrator().AddColumn(&dbArchivedContract{}, "State"); err != nil {
+			return err
+		}
+		if err := txn.Model(&dbArchivedContract{}).Where("TRUE").Update("State", contractStateComplete).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00024_contractState complete")
 	return nil
 }

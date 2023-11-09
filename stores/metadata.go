@@ -64,7 +64,7 @@ type (
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
-		State          contractState `gorm:"index;NOT NULL"`
+		State          contractState `gorm:"index;NOT NULL;default:0"`
 		TotalCost      currency
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
