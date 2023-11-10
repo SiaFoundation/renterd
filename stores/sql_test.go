@@ -42,12 +42,12 @@ type testSQLStoreConfig struct {
 	dbName          string
 	dbMetricsName   string
 	dir             string
-	ephemeral       bool
+	persistent      bool
 	skipMigrate     bool
 	skipContractSet bool
 }
 
-var defaultTestSQLStoreConfig = testSQLStoreConfig{ephemeral: true}
+var defaultTestSQLStoreConfig = testSQLStoreConfig{}
 
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
@@ -66,10 +66,10 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 
 	var conn gorm.Dialector
-	if cfg.ephemeral {
-		conn = NewEphemeralSQLiteConnection(dbName)
-	} else {
+	if cfg.persistent {
 		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
+	} else {
+		conn = NewEphemeralSQLiteConnection(dbName)
 	}
 
 	walletAddrs := types.Address(frand.Entropy256())
