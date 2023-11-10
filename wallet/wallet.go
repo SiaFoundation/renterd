@@ -12,7 +12,6 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -327,7 +326,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 		}
 	}
 	if outputs <= 0 {
-		return types.Transaction{}, nil, api.ErrWalletAlreadyRedistributed
+		return types.Transaction{}, nil, nil
 	}
 
 	// prepare all outputs

@@ -7,7 +7,6 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -144,9 +143,8 @@ func TestWalletRedistribute(t *testing.T) {
 		t.Fatalf("unexpected number of 3SC outputs, %v != 5", cnt)
 	}
 
-	// split into 4 outputs of 3SC - this should result in an error that
-	// indicates the wallet is already has the desired number of outputs
-	if _, _, err := w.Redistribute(cs, 4, amount, types.NewCurrency64(1), nil); err != api.ErrWalletAlreadyRedistributed {
+	// split into 4 outputs of 3SC - this should be a no-op
+	if _, _, err := w.Redistribute(cs, 4, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
 	}
 
