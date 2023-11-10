@@ -125,7 +125,7 @@ type (
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
 		Health           float64 `gorm:"index;default:1.0; NOT NULL"`
-		HealthValidUntil int64   `gorm:"index"`                   // unix timestap
+		HealthValidUntil int64   `gorm:"index"`                   // unix timestamp
 		Key              []byte  `gorm:"unique;NOT NULL;size:68"` // json string
 		MinShards        uint8   `gorm:"index"`
 		TotalShards      uint8   `gorm:"index"`
