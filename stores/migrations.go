@@ -291,6 +291,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00025_contractState(tx, logger)
 			},
 		},
+		{
+			ID: "00026_lostSectors",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00026_lostSectors(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1152,5 +1158,16 @@ func performMigration00025_contractState(txn *gorm.DB, logger *zap.SugaredLogger
 		}
 	}
 	logger.Info("migration 00025_contractState complete")
+	return nil
+}
+
+func performMigration00026_lostSectors(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00026_lostSectors")
+	if !txn.Migrator().HasColumn(&dbHost{}, "LostSectors") {
+		if err := txn.Migrator().AddColumn(&dbHost{}, "LostSectors"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00026_lostSectors complete")
 	return nil
 }

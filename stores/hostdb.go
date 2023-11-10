@@ -71,6 +71,8 @@ type (
 		SuccessfulInteractions float64
 		FailedInteractions     float64
 
+		LostSectors uint64
+
 		LastAnnouncement time.Time
 		NetAddress       string `gorm:"index"`
 
@@ -304,6 +306,7 @@ func (h dbHost) convert() hostdb.Host {
 			Downtime:                h.Downtime,
 			SuccessfulInteractions:  h.SuccessfulInteractions,
 			FailedInteractions:      h.FailedInteractions,
+			LostSectors:             h.LostSectors,
 		},
 		PriceTable: hostdb.HostPriceTable{
 			HostPriceTable: h.PriceTable.convert(),

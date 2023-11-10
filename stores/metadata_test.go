@@ -3673,6 +3673,13 @@ func TestDeleteHostSector(t *testing.T) {
 	} else if s.Shards[0].LatestHost != publicKey(hk2) {
 		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
 	}
+
+	hi, err := ss.Host(context.Background(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if hi.Interactions.LostSectors != 2 {
+		t.Fatalf("expected 2 lost sector, got %v", hi.Interactions.LostSectors)
+	}
 }
 
 func TestUpdateSlabSanityChecks(t *testing.T) {
