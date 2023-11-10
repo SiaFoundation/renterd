@@ -231,7 +231,7 @@ func TestSQLContractStore(t *testing.T) {
 	// Insert it.
 	totalCost := types.NewCurrency64(456)
 	startHeight := uint64(100)
-	returned, err := ss.AddContract(ctx, c, totalCost, startHeight)
+	returned, err := ss.AddContract(ctx, c, totalCost, startHeight, api.ContractStatePending)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +240,7 @@ func TestSQLContractStore(t *testing.T) {
 		HostIP:      "address",
 		HostKey:     hk,
 		StartHeight: 100,
+		State:       api.ContractStatePending,
 		WindowStart: 400,
 		WindowEnd:   500,
 		RenewedFrom: types.FileContractID{},
@@ -485,7 +486,7 @@ func TestRenewedContract(t *testing.T) {
 	oldContractTotal := types.NewCurrency64(111)
 	oldContractStartHeight := uint64(100)
 	ctx := context.Background()
-	added, err := ss.AddContract(ctx, c, oldContractTotal, oldContractStartHeight)
+	added, err := ss.AddContract(ctx, c, oldContractTotal, oldContractStartHeight, api.ContractStatePending)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +500,7 @@ func TestRenewedContract(t *testing.T) {
 	c2 := c
 	c2.Revision.ParentID = fcid2
 	c2.Revision.UnlockConditions = uc2
-	_, err = ss.AddContract(ctx, c2, oldContractTotal, oldContractStartHeight)
+	_, err = ss.AddContract(ctx, c2, oldContractTotal, oldContractStartHeight, api.ContractStatePending)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +589,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 	newContractTotal := types.NewCurrency64(222)
 	newContractStartHeight := uint64(200)
-	if _, err := ss.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1); err != nil {
+	if _, err := ss.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1, api.ContractStatePending); err != nil {
 		t.Fatal(err)
 	}
 
@@ -640,6 +641,7 @@ func TestRenewedContract(t *testing.T) {
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid1,
 		Size:        rhpv2.SectorSize,
+		State:       api.ContractStatePending,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
 			Downloads:   types.ZeroCurrency,
@@ -678,6 +680,7 @@ func TestRenewedContract(t *testing.T) {
 			WindowStart:    2,
 			WindowEnd:      3,
 			Size:           rhpv2.SectorSize,
+			State:          contractStatePending,
 
 			UploadSpending:      currency(types.Siacoins(1)),
 			DownloadSpending:    currency(types.Siacoins(2)),
@@ -706,7 +709,7 @@ func TestRenewedContract(t *testing.T) {
 	newContractStartHeight = uint64(300)
 
 	// Assert the renewed contract is returned
-	renewedContract, err := ss.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1Renewed)
+	renewedContract, err := ss.AddRenewedContract(ctx, rev, newContractTotal, newContractStartHeight, fcid1Renewed, api.ContractStatePending)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,6 +758,7 @@ func TestAncestorsContracts(t *testing.T) {
 			RenewedTo:   fcids[len(fcids)-1-i],
 			StartHeight: 2,
 			Size:        4096,
+			State:       api.ContractStatePending,
 			WindowStart: 400,
 			WindowEnd:   500,
 		}) {
@@ -835,12 +839,12 @@ func (s *SQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileC
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
-	return s.AddContract(context.Background(), rev, types.ZeroCurrency, 0)
+	return s.AddContract(context.Background(), rev, types.ZeroCurrency, 0, api.ContractStatePending)
 }
 
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
-	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, startHeight, renewedFrom)
+	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, startHeight, renewedFrom, api.ContractStatePending)
 }
 
 func (s *SQLStore) contractsCount() (cnt int64, err error) {
@@ -1068,6 +1072,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							WindowStart:    400,
 							WindowEnd:      500,
 							Size:           4096,
+							State:          contractStatePending,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -1106,6 +1111,7 @@ func TestSQLMetadataStore(t *testing.T) {
 							WindowStart:    400,
 							WindowEnd:      500,
 							Size:           4096,
+							State:          contractStatePending,
 
 							UploadSpending:      zeroCurrency,
 							DownloadSpending:    zeroCurrency,
@@ -3482,7 +3488,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 			},
 		},
 	}
-	_, err = ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), 100, fcid)
+	_, err = ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), 100, fcid, api.ContractStatePending)
 	if err != nil {
 		t.Fatal(err)
 	}
