@@ -887,8 +887,10 @@ WHERE c.fcid = ?
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
+	var wantedIds []fileContractID
 	wanted := make(map[fileContractID]struct{})
 	for _, fcid := range contractIds {
+		wantedIds = append(wantedIds, fileContractID(fcid))
 		wanted[fileContractID(fcid)] = struct{}{}
 	}
 
@@ -905,39 +907,33 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 			return err
 		}
 
-		// update the association
-		for _, existing := range cs.Contracts {
-			if _, keep := wanted[existing.FCID]; !keep {
-				diff = append(diff, existing.FCID)
-				if err := tx.Model(&cs).Association("Contracts").Unscoped().Delete(&existing); err != nil {
-					return err
-				}
-			}
-			delete(wanted, existing.FCID)
-		}
-
-		// fetch missing contracts
-		missing := make([]fileContractID, len(wanted))
-		for fcid := range wanted {
-			missing = append(missing, fcid)
-		}
-
-		var dbMissingContracts []dbContract
+		// fetch contracts
+		var dbContracts []dbContract
 		err = tx.
 			Model(&dbContract{}).
-			Where("fcid IN (?)", missing).
-			Find(&dbMissingContracts).
+			Where("fcid IN (?)", wantedIds).
+			Find(&dbContracts).
 			Error
 		if err != nil {
 			return err
 		}
 
-		// update the association
-		for _, c := range dbMissingContracts {
-			diff = append(diff, c.FCID)
-			if err := tx.Model(&cs).Association("Contracts").Append(&c); err != nil {
-				return err
+		// add removals to the diff
+		for _, contract := range cs.Contracts {
+			if _, ok := wanted[contract.FCID]; !ok {
+				diff = append(diff, contract.FCID)
 			}
+			delete(wanted, contract.FCID)
+		}
+
+		// add additions to the diff
+		for fcid := range wanted {
+			diff = append(diff, fcid)
+		}
+
+		// update the association
+		if err := tx.Model(&cs).Association("Contracts").Replace(&dbContracts); err != nil {
+			return err
 		}
 
 		return nil
