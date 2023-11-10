@@ -120,6 +120,9 @@ func TestNewTestCluster(t *testing.T) {
 		if contracts[0].ProofHeight != 0 {
 			return errors.New("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
+		if contracts[0].State != api.ContractStatePending {
+			return fmt.Errorf("contract should be pending but was %v", contracts[0].State)
+		}
 		return nil
 	})
 
@@ -134,6 +137,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Now wait for the revision and proof to be caught by the hostdb.
+	var ac api.ArchivedContract
 	tt.Retry(20, time.Second, func() error {
 		cluster.MineBlocks(1)
 
@@ -149,12 +153,15 @@ func TestNewTestCluster(t *testing.T) {
 		if len(archivedContracts) != 1 {
 			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
 		}
-		ac := archivedContracts[0]
+		ac = archivedContracts[0]
 		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
 			return fmt.Errorf("revision information is wrong: %v %v", ac.RevisionHeight, ac.RevisionNumber)
 		}
 		if ac.ProofHeight != 0 {
 			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
+		}
+		if ac.State != api.ContractStateComplete {
+			return fmt.Errorf("contract should be complete but was %v", ac.State)
 		}
 		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, math.MaxUint32)
 		if err != nil {
@@ -165,7 +172,6 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		return nil
 	})
-	tt.OK(err)
 
 	// Get host info for every host.
 	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
@@ -1246,11 +1252,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	// form 2 more contracts with the same host
 	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	tt.OK(err)
-	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight)
+	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight, api.ContractStatePending)
 	tt.OK(err)
 	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	tt.OK(err)
-	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight)
+	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight, api.ContractStatePending)
 	tt.OK(err)
 
 	// create a contract set with all 3 contracts
