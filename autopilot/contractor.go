@@ -633,6 +633,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+		} else if contract.State == api.ContractStatePending && cs.BlockHeight-contract.StartHeight > 18 {
+			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {
 			toStopUsing[fcid] = toArchive[fcid]
