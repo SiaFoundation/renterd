@@ -62,8 +62,9 @@ var (
 			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
-			MaxDowntimeHours:  10,
-			AllowRedundantIPs: true, // allow for integration tests by default
+			MaxDowntimeHours:      10,
+			MinRecentScanFailures: 10,
+			AllowRedundantIPs:     true, // allow for integration tests by default
 		},
 	}
 
@@ -255,13 +256,14 @@ func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.Autopil
 }
 
 type testClusterOptions struct {
-	dbName        string
-	dir           string
-	funding       *bool
-	hosts         int
-	logger        *zap.Logger
-	uploadPacking bool
-	walletKey     *types.PrivateKey
+	dbName               string
+	dir                  string
+	funding              *bool
+	hosts                int
+	logger               *zap.Logger
+	uploadPacking        bool
+	skipSettingAutopilot bool
+	walletKey            *types.PrivateKey
 
 	autopilotCfg      *node.AutopilotConfig
 	autopilotSettings *api.AutopilotConfig
@@ -504,10 +506,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{}))
 
 	// Update the autopilot to use test settings
-	tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
-		ID:     apCfg.ID,
-		Config: apSettings,
-	}))
+	if !opts.skipSettingAutopilot {
+		tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
+			ID:     apCfg.ID,
+			Config: apSettings,
+		}))
+	}
 
 	// Update the bus settings.
 	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings))
@@ -739,7 +743,7 @@ func (c *TestCluster) AddHost(h *Host) {
 			Address: h.WalletAddress(),
 		})
 	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos))
+	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
 
 	// Mine transaction.
 	c.MineBlocks(1)
@@ -960,7 +964,6 @@ func testApCfg() node.AutopilotConfig {
 			ScannerInterval:                time.Second,
 			ScannerBatchSize:               10,
 			ScannerNumThreads:              1,
-			ScannerMinRecentFailures:       5,
 		},
 	}
 }
