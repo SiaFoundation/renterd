@@ -54,7 +54,7 @@ type (
 	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
 	MigrateSlabResponse struct {
 		NumShardsMigrated int    `json:"numShardsMigrated"`
-		Overpaid          bool   `json:"overpaid"`
+		SurchargeApplied  bool   `json:"surchargeApplied,omitempty"`
 		Error             string `json:"error,omitempty"`
 	}
 

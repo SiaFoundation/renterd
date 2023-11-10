@@ -110,10 +110,10 @@ type (
 	}
 
 	slabDownloadResponse struct {
-		overpaid bool
-		shards   [][]byte
-		index    int
-		err      error
+		surchargeApplied bool
+		shards           [][]byte
+		index            int
+		err              error
 	}
 
 	sectorDownloadReq struct {
@@ -344,7 +344,7 @@ outer:
 			if resp.err != nil {
 				mgr.logger.Errorf("download slab %v failed: %v", resp.index, resp.err)
 				return resp.err
-			} else if resp.overpaid {
+			} else if resp.surchargeApplied {
 				mgr.logger.Debugf("download slab %v succeeded by overpaying", resp.index)
 			}
 
@@ -453,7 +453,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		return nil, false, err
 	}
 
-	return resp.shards, resp.overpaid, err
+	return resp.shards, resp.surchargeApplied, err
 }
 
 func (mgr *downloadManager) Stats() downloadManagerStats {
@@ -580,7 +580,7 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice obje
 
 	// execute download
 	resp := &slabDownloadResponse{index: index}
-	resp.shards, resp.overpaid, resp.err = slab.download(ctx)
+	resp.shards, resp.surchargeApplied, resp.err = slab.download(ctx)
 
 	// send the response
 	select {

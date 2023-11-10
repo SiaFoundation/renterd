@@ -908,11 +908,11 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	used, numShardsMigrated, overpaid, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	used, numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
-			Overpaid:          overpaid,
+			SurchargeApplied:  surchargeApplied,
 			Error:             err.Error(),
 		})
 		return
@@ -922,7 +922,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet, used); err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
-			Overpaid:          overpaid,
+			SurchargeApplied:  surchargeApplied,
 			Error:             err.Error(),
 		})
 		return
@@ -930,7 +930,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	jc.Encode(api.MigrateSlabResponse{
 		NumShardsMigrated: numShardsMigrated,
-		Overpaid:          overpaid,
+		SurchargeApplied:  surchargeApplied,
 	})
 }
 

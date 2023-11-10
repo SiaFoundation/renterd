@@ -74,7 +74,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	}
 
 	// download the slab
-	shards, overpaid, err := d.DownloadSlab(ctx, *s, dlContracts)
+	shards, surchargeApplied, err := d.DownloadSlab(ctx, *s, dlContracts)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("failed to download slab for migration: %w", err)
 	}
@@ -97,7 +97,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	// migrate the shards
 	uploaded, used, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
 	if err != nil {
-		return nil, 0, overpaid, fmt.Errorf("failed to upload slab for migration: %w", err)
+		return nil, 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
@@ -111,12 +111,12 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 		_, exists := used[sector.Host]
 		if !exists {
 			if fcid, exists := h2c[sector.Host]; !exists {
-				return nil, 0, overpaid, fmt.Errorf("couldn't find contract for host %v", sector.Host)
+				return nil, 0, surchargeApplied, fmt.Errorf("couldn't find contract for host %v", sector.Host)
 			} else {
 				used[sector.Host] = fcid
 			}
 		}
 	}
 
-	return used, len(shards), overpaid, nil
+	return used, len(shards), surchargeApplied, nil
 }

@@ -3,7 +3,6 @@ package testing
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -88,9 +87,7 @@ func TestGouging(t *testing.T) {
 
 	// download the data - should fail
 	buffer.Reset()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if err := w.DownloadObject(ctx, &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil || errors.Is(err, context.Canceled) {
+	if err := w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil {
 		t.Fatal("expected download to fail", err)
 	}
 }

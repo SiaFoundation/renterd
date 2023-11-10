@@ -135,8 +135,8 @@ func (m *migrator) performMigrations(p *workerPool) {
 					for j := range jobs {
 						res, err := j.execute(ctx, w)
 						if err != nil {
-							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.Overpaid, err)
-							if res.Overpaid {
+							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
+							if res.SurchargeApplied {
 								m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
 							} else {
 								m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
@@ -144,9 +144,9 @@ func (m *migrator) performMigrations(p *workerPool) {
 							continue
 						}
 
-						m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.Overpaid, res.NumShardsMigrated)
+						m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
 						m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
-						if res.Overpaid {
+						if res.SurchargeApplied {
 							// this alert confirms the user his gouging settings
 							// are working, it will be dismissed automatically
 							// the next time this slab is successfully migrated
