@@ -1053,6 +1053,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		Shards: []dbSector{
 			{
 				DBSlabID:   1,
+				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
 				Contracts: []dbContract{
@@ -1092,6 +1093,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		Shards: []dbSector{
 			{
 				DBSlabID:   2,
+				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
 				Contracts: []dbContract{
