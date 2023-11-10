@@ -342,7 +342,7 @@ outer:
 			atomic.AddUint64(&concurrentSlabs, ^uint64(0))
 
 			if resp.err != nil {
-				mgr.logger.Errorf("download slab %v failed: %v", resp.index, resp.err)
+				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
 				return resp.err
 			} else if resp.surchargeApplied {
 				mgr.logger.Debugf("download slab %v succeeded by overpaying", resp.index)
