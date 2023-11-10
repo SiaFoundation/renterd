@@ -279,6 +279,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00023_defaultMinRecentScanFailures(tx, logger)
 			},
 		},
+		{
+			ID: "00024_slabIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00024_slabIndices(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1022,5 +1028,88 @@ func performMigration00023_defaultMinRecentScanFailures(txn *gorm.DB, logger *za
 	}
 
 	logger.Info("migration 00023_defaultMinRecentScanFailures complete")
+	return nil
+}
+
+func performMigration00024_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00024_slabIndices")
+
+	if isSQLite(txn) {
+		// SQLite
+		if err := txn.Exec(`
+			BEGIN TRANSACTION;
+			PRAGMA foreign_keys = 0;
+
+			CREATE TABLE sectors_temp (id integer,created_at datetime,db_slab_id integer NOT NULL,slab_index integer NOT NULL,latest_host blob NOT NULL,root blob NOT NULL UNIQUE,PRIMARY KEY (id),CONSTRAINT fk_slabs_shards FOREIGN KEY (db_slab_id) REFERENCES slabs(id) ON DELETE CASCADE);
+			INSERT INTO sectors_temp (id, created_at, db_slab_id, slab_index, latest_host, root) SELECT id, created_at, db_slab_id, 0, latest_host, root FROM sectors;
+
+			DROP INDEX IF EXISTS idx_sectors_db_slab_id;
+			DROP INDEX IF EXISTS idx_sectors_slab_index;
+			DROP INDEX IF EXISTS idx_sectors_slab_id_slab_index;
+			DROP INDEX IF EXISTS idx_sectors_root;
+			
+			CREATE INDEX idx_sectors_db_slab_id ON sectors_temp(db_slab_id);
+			CREATE INDEX idx_sectors_slab_index ON sectors_temp(slab_index);
+			CREATE INDEX idx_sectors_root ON sectors_temp(root);
+
+			UPDATE sectors_temp
+			SET slab_index = (
+				SELECT
+			        COUNT(*) + 1
+				FROM
+			        sectors_temp AS s2
+				WHERE
+					s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors_temp.id
+			);
+
+			CREATE UNIQUE INDEX idx_sectors_slab_id_slab_index ON sectors_temp(db_slab_id,slab_index);
+
+			DROP TABLE sectors;
+			ALTER TABLE sectors_temp RENAME TO sectors;
+
+			PRAGMA foreign_keys = 1;
+			PRAGMA foreign_key_check(sectors);
+			COMMIT;
+			`).Error; err != nil {
+			return err
+		}
+	} else {
+		// MySQL
+		if err := txn.Table("sectors").Migrator().AutoMigrate(&struct {
+			SlabIndex int `gorm:"NOT NULL"`
+		}{}); err != nil {
+			return err
+		}
+
+		// Populate column.
+		if err := txn.Exec(`
+			UPDATE sectors
+			JOIN (
+			    SELECT
+			        id,
+			        ROW_NUMBER() OVER (PARTITION BY db_slab_id ORDER BY id) AS new_index
+			    FROM
+			        sectors
+			) AS RowNumbered ON sectors.id = RowNumbered.id
+			SET
+			    sectors.slab_index = RowNumbered.new_index;
+		`).Error; err != nil {
+			return err
+		}
+
+		// Create indices.
+		if !txn.Migrator().HasIndex(&dbSector{}, "idx_sectors_slab_index") {
+			if err := txn.Migrator().CreateIndex(&dbSector{}, "idx_sectors_slab_index"); err != nil {
+				return err
+			}
+		}
+		if !txn.Migrator().HasIndex(&dbSector{}, "idx_sectors_slab_id_slab_index") {
+			if err := txn.Migrator().CreateIndex(&dbSector{}, "idx_sectors_slab_id_slab_index"); err != nil {
+				return err
+			}
+		}
+	}
+
+	logger.Info("migration 00024_slabIndices complete")
 	return nil
 }
