@@ -211,7 +211,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		}
 
 		if !interrupted && maxDowntime > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v", maxDowntime)
+			s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
 			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
 			if err != nil {
 				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)

@@ -23,6 +23,9 @@ const (
 	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
+
+	refreshHealthMinHealthValidity = 12 * time.Hour
+	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
 var (
@@ -133,11 +136,11 @@ type (
 		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
-		Health      float64 `gorm:"index;default:1.0; NOT NULL"`
-		HealthValid bool    `gorm:"index;default:0;NOT NULL"`
-		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
-		MinShards   uint8   `gorm:"index"`
-		TotalShards uint8   `gorm:"index"`
+		Health           float64 `gorm:"index;default:1.0; NOT NULL"`
+		HealthValidUntil int64   `gorm:"index;default:0; NOT NULL"` // unix timestamp
+		Key              []byte  `gorm:"unique;NOT NULL;size:68"`   // json string
+		MinShards        uint8   `gorm:"index"`
+		TotalShards      uint8   `gorm:"index"`
 
 		Slices []dbSlice
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
@@ -249,6 +252,10 @@ func (s contractState) String() string {
 	}
 }
 
+func (s dbSlab) HealthValid() bool {
+	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
+}
+
 // TableName implements the gorm.Tabler interface.
 func (dbArchivedContract) TableName() string { return "archived_contracts" }
 
@@ -347,6 +354,9 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	if err != nil {
 		return
 	}
+
+	// set health
+	slab.Health = s.Health
 
 	// set shards
 	slab.MinShards = s.MinShards
@@ -798,7 +808,7 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 
 	// archive them
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, cs, toArchive)
+		return archiveContracts(ctx, tx, cs, toArchive)
 	}); err != nil {
 		return err
 	}
@@ -937,72 +947,56 @@ WHERE c.fcid = ?
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	fcids := make([]fileContractID, len(contractIds))
-	for i, fcid := range contractIds {
-		fcids[i] = fileContractID(fcid)
+	var wantedIds []fileContractID
+	wanted := make(map[fileContractID]struct{})
+	for _, fcid := range contractIds {
+		wantedIds = append(wantedIds, fileContractID(fcid))
+		wanted[fileContractID(fcid)] = struct{}{}
 	}
 
 	var diff []fileContractID
 	err := s.retryTransaction(func(tx *gorm.DB) error {
-		// fetch current contracts
-		var dbCurrentContracts []fileContractID
+		// fetch contract set
+		var cs dbContractSet
 		err := tx.
-			Model(&dbContract{}).
-			Select("contracts.fcid").
-			Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-			Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", name).
-			Group("contracts.fcid").
-			Scan(&dbCurrentContracts).
-			Error
-		if err != nil {
-			return err
-		}
-		// fetch new contracts
-		var dbNewContracts []dbContract
-		err = tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", fcids).
-			Find(&dbNewContracts).
-			Error
-		if err != nil {
-			return err
-		}
-
-		// create contract set
-		var contractset dbContractSet
-		err = tx.
 			Where(dbContractSet{Name: name}).
-			FirstOrCreate(&contractset).
+			Preload("Contracts").
+			FirstOrCreate(&cs).
 			Error
 		if err != nil {
 			return err
 		}
 
-		// invalidate the health on all slab which are affected by this change
-		currentMap := make(map[fileContractID]struct{})
-		for _, fcid := range dbCurrentContracts {
-			currentMap[fcid] = struct{}{}
+		// fetch contracts
+		var dbContracts []dbContract
+		err = tx.
+			Model(&dbContract{}).
+			Where("fcid IN (?)", wantedIds).
+			Find(&dbContracts).
+			Error
+		if err != nil {
+			return err
 		}
-		newMap := make(map[fileContractID]struct{})
-		for _, c := range dbNewContracts {
-			newMap[c.FCID] = struct{}{}
+
+		// add removals to the diff
+		for _, contract := range cs.Contracts {
+			if _, ok := wanted[contract.FCID]; !ok {
+				diff = append(diff, contract.FCID)
+			}
+			delete(wanted, contract.FCID)
 		}
-		for _, c := range dbNewContracts {
-			delete(currentMap, c.FCID)
-		}
-		for _, fcid := range dbCurrentContracts {
-			delete(newMap, fcid)
-		}
-		diff = make([]fileContractID, 0, len(currentMap)+len(newMap))
-		for fcid := range currentMap {
-			diff = append(diff, fcid)
-		}
-		for fcid := range newMap {
+
+		// add additions to the diff
+		for fcid := range wanted {
 			diff = append(diff, fcid)
 		}
 
-		// update contracts
-		return tx.Model(&contractset).Association("Contracts").Replace(&dbNewContracts)
+		// update the association
+		if err := tx.Model(&cs).Association("Contracts").Replace(&dbContracts); err != nil {
+			return err
+		}
+
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set contract set: %w", err)
@@ -1421,7 +1415,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 					sectorIDs = append(sectorIDs, s.DBSectorID)
 				}
 			}
-			err = tx.Exec("UPDATE slabs SET health_valid = 0 WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", sectorIDs).Error
+			err = tx.Exec("UPDATE slabs SET health_valid_until = ? WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", time.Now().Unix(), sectorIDs).Error
 			if err != nil {
 				return fmt.Errorf("failed to invalidate slab health: %w", err)
 			}
@@ -1655,7 +1649,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			Where(&slab).
 			Updates(map[string]interface{}{
 				"db_contract_set_id": cs.ID,
-				"health_valid":       false,
+				"health_valid_until": time.Now().Unix(),
 				"health":             1,
 			}).
 			Error; err != nil {
@@ -1705,6 +1699,8 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	}
 
 	// Update slab health in batches.
+	now := time.Now()
+
 	for {
 		healthQuery := s.db.Raw(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
@@ -1721,10 +1717,10 @@ LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
 LEFT JOIN contracts c ON se.db_contract_id = c.id
 LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-WHERE slabs.health_valid = 0
+WHERE slabs.health_valid_until <= ?
 GROUP BY slabs.id
 LIMIT ?
-`, refreshHealthBatchSize)
+`, now.Unix(), refreshHealthBatchSize)
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			s.objectsMu.Lock()
@@ -1732,9 +1728,9 @@ LIMIT ?
 
 			var res *gorm.DB
 			if isSQLite(s.db) {
-				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
+				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid_until = (?) FROM (?) AS src WHERE slabs.id=src.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity), healthQuery)
 			} else {
-				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
+				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (?)", healthQuery, sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
 			}
 			if res.Error != nil {
 				return res.Error
@@ -1772,7 +1768,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Select("slabs.key, slabs.health").
 		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
 		Model(&dbSlab{}).
-		Where("health <= ? AND health_valid = 1 AND cs.name = ?", healthCutoff, set).
+		Where("health <= ? AND cs.name = ?", healthCutoff, set).
 		Order("health ASC").
 		Limit(limit).
 		Find(&rows).
@@ -1846,7 +1842,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 			}
-
 			// Add contract and host to join tables.
 			contract, contractFound := contracts[shard.Host]
 			if contractFound {
@@ -2176,14 +2171,14 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 // archival reason
 //
 // NOTE: this function archives the contracts without setting a renewed ID
-func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
+func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
 	var toInvalidate []fileContractID
 	for _, contract := range contracts {
 		toInvalidate = append(toInvalidate, contract.FCID)
 	}
 	// Invalidate the health on the slabs before deleting the contracts to avoid
 	// breaking the relations beforehand.
-	if err := invalidateSlabHealthByFCID(tx, toInvalidate); err != nil {
+	if err := invalidateSlabHealthByFCID(ctx, tx, toInvalidate); err != nil {
 		return fmt.Errorf("invalidating slab health failed: %w", err)
 	}
 	for _, contract := range contracts {
@@ -2246,54 +2241,43 @@ func deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _
 	return numDeleted, nil
 }
 
-func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
-	return tx.Exec(`
-	UPDATE slabs SET health_valid = 0 WHERE id in (
-	       SELECT *
-	       FROM (
-	               SELECT slabs.id
-	               FROM slabs
-	               LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-	               LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-	               LEFT JOIN contracts c ON c.id = cs.db_contract_id
-	               WHERE health_valid = 1 AND c.fcid IN (?)
-	       ) slab_ids
-	)
-	               `, fcids).Error
-}
+func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileContractID) error {
+	if len(fcids) == 0 {
+		return nil
+	}
 
-func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
 	for {
-		var rowsAffected int64
-		err := s.retryTransaction(func(tx *gorm.DB) error {
-			resp := tx.Exec(`
-UPDATE slabs SET health_valid = 0 WHERE id in (
-	SELECT *
-	FROM (
-		SELECT slabs.id
-		FROM slabs
-		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-		LEFT JOIN contracts c ON c.id = cs.db_contract_id
-		WHERE health_valid = 1 AND c.fcid IN (?)
-		LIMIT ?
-	) slab_ids
-)
-		`, fcids, refreshHealthBatchSize)
-			rowsAffected = resp.RowsAffected
-			return resp.Error
-		})
-		if err != nil {
-			return fmt.Errorf("failed to invalidate slab health: %w", err)
-		} else if rowsAffected < refreshHealthBatchSize {
-			return nil // done
+		if resp := tx.Debug().Exec(`
+		UPDATE slabs SET health_valid_until = ? WHERE id in (
+			   SELECT *
+			   FROM (
+					   SELECT DISTINCT slabs.id
+					   FROM slabs
+					   LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+					   LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+					   LEFT JOIN contracts c ON c.id = cs.db_contract_id
+					   WHERE c.fcid IN (?)
+					   LIMIT ?
+			   ) slab_ids
+		)`, time.Now().Unix(), fcids, refreshHealthBatchSize); resp.Error != nil {
+			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
+		} else if resp.RowsAffected < refreshHealthBatchSize {
+			break // done
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(time.Second):
 		}
 	}
+	return nil
+}
+
+func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return invalidateSlabHealthByFCID(ctx, tx, fcids)
+	})
 }
 
 func sqlConcat(db *gorm.DB, a, b string) string {
@@ -2301,6 +2285,13 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 		return fmt.Sprintf("%s || %s", a, b)
 	}
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+}
+
+func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) clause.Expr {
+	if isSQLite(db) {
+		return gorm.Expr("ABS(RANDOM()) % (? - ?) + ?", int(max.Seconds()), int(min.Seconds()), now.Add(min).Unix())
+	}
+	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(min).Unix(), int(max.Seconds()), int(min.Seconds()))
 }
 
 func sqlWhereBucket(objTable string, bucket string) clause.Expr {

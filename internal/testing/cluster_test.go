@@ -1341,6 +1341,77 @@ func TestContractArchival(t *testing.T) {
 	tt.OK(err)
 }
 
+func TestUnconfirmedContractArchival(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		logger: zap.NewNop(),
+		hosts:  1,
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	cs, err := cluster.Bus.ConsensusState(context.Background())
+	tt.OK(err)
+
+	// we should have a contract with the host
+	contracts, err := cluster.Bus.Contracts(context.Background())
+	tt.OK(err)
+	if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, got %v", len(contracts))
+	}
+	c := contracts[0]
+
+	// add a contract to the bus
+	_, err = cluster.Bus.AddContract(context.Background(), rhpv2.ContractRevision{
+		Revision: types.FileContractRevision{
+			ParentID: types.FileContractID{1},
+			UnlockConditions: types.UnlockConditions{
+				PublicKeys: []types.UnlockKey{
+					c.HostKey.UnlockKey(),
+					c.HostKey.UnlockKey(),
+				},
+			},
+			FileContract: types.FileContract{
+				Filesize:       0,
+				FileMerkleRoot: types.Hash256{},
+				WindowStart:    math.MaxUint32,
+				WindowEnd:      math.MaxUint32 + 10,
+				Payout:         types.ZeroCurrency,
+				UnlockHash:     types.Hash256{},
+				RevisionNumber: 0,
+			},
+		},
+	}, types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	tt.OK(err)
+
+	// should have 2 contracts now
+	contracts, err = cluster.Bus.Contracts(context.Background())
+	tt.OK(err)
+	if len(contracts) != 2 {
+		t.Fatalf("expected 2 contracts, got %v", len(contracts))
+	}
+
+	// mine for 20 blocks to make sure we are beyond the 18 block deadline for
+	// contract confirmation
+	cluster.MineBlocks(20)
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background())
+		tt.OK(err)
+		if len(contracts) != 1 {
+			return fmt.Errorf("expected 1 contract, got %v", len(contracts))
+		}
+		if contracts[0].ID != c.ID {
+			t.Fatalf("expected contract %v, got %v", c.ID, contracts[0].ID)
+		}
+		return nil
+	})
+}
+
 func TestWalletTransactions(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()

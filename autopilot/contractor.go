@@ -221,10 +221,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// check if any used hosts have lost data to warn the user
 	for _, h := range hosts {
-		if h.Interactions.LostSectors == 0 {
-			continue
+		if h.Interactions.LostSectors > 0 {
+			c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
 		}
-		c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
 	}
 
 	// fetch candidate hosts
@@ -641,6 +640,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+		} else if contract.State == api.ContractStatePending && cs.BlockHeight-contract.StartHeight > 18 {
+			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {
 			toStopUsing[fcid] = toArchive[fcid]

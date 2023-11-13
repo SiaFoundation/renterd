@@ -89,14 +89,13 @@ type Interactions struct {
 	TotalScans              uint64        `json:"totalScans"`
 	LastScan                time.Time     `json:"lastScan"`
 	LastScanSuccess         bool          `json:"lastScanSuccess"`
+	LostSectors             uint64        `json:"lostSectors"`
 	SecondToLastScanSuccess bool          `json:"secondToLastScanSuccess"`
 	Uptime                  time.Duration `json:"uptime"`
 	Downtime                time.Duration `json:"downtime"`
 
 	SuccessfulInteractions float64 `json:"successfulInteractions"`
 	FailedInteractions     float64 `json:"failedInteractions"`
-
-	LostSectors uint64 `json:"lostSectors"`
 }
 
 type HostScan struct {
