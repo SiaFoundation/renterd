@@ -1092,3 +1092,12 @@ func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEnt
 	}
 	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
 }
+
+func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return tx.Model(&dbHost{}).
+			Where("public_key", publicKey(hk)).
+			Update("lost_sectors", 0).
+			Error
+	})
+}

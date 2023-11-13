@@ -219,6 +219,14 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, err
 	}
 
+	// check if any used hosts have lost data to warn the user
+	for _, h := range hosts {
+		if h.Interactions.LostSectors == 0 {
+			continue
+		}
+		c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
+	}
+
 	// fetch candidate hosts
 	candidates, unusableHosts, err := c.candidateHosts(ctx, hosts, usedHosts, hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
