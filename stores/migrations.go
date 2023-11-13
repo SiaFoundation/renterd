@@ -1163,13 +1163,37 @@ func performMigration00025_contractState(txn *gorm.DB, logger *zap.SugaredLogger
 
 func performMigration00026_healthValidUntilColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info("performing migration 00026_healthValidUntilColumn")
-	if !txn.Migrator().HasColumn(&dbSlab{}, "health_valid_until") {
-		if err := txn.Migrator().AddColumn(&dbSlab{}, "health_valid_until"); err != nil {
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
 			return err
 		}
 	}
-	if txn.Migrator().HasColumn(&dbSlab{}, "health_valid") {
-		if err := txn.Migrator().DropColumn(&dbSlab{}, "health_valid"); err != nil {
+
+	// Use 'AutoMigrate' to add 'health_valid_until'.
+	if err := txn.Table("slabs").Migrator().AutoMigrate(&struct {
+		HealthValidUntil int64 `gorm:"index"` // unix timestamp
+	}{}); err != nil {
+		return err
+	}
+
+	// Drop the current 'health_valid' column and accompanying index.
+	if isSQLite(txn) {
+		if err := txn.Exec("DROP INDEX IF EXISTS idx_slabs_health_valid;").Error; err != nil {
+			return err
+		}
+	}
+	if err := txn.Exec("ALTER TABLE slabs DROP COLUMN health_valid;").Error; err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
 			return err
 		}
 	}
