@@ -1218,7 +1218,7 @@ func performMigration000027_addMultipartUploadIndices(txn *gorm.DB, logger *zap.
 	}
 
 	// Use 'AutoMigrate' to add missing indices
-	if err := txn.Table("slabs").Migrator().AutoMigrate(&struct {
+	if err := txn.Table("multipart_uploads").Migrator().AutoMigrate(&struct {
 		ObjectID   string `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
 		DBBucketID uint   `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
 		MimeType   string `gorm:"index:idx_multipart_uploads_mime_type"`
