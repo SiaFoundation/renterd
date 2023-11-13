@@ -1138,6 +1138,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		slabs[i].Shards[0].Model = Model{}
 		slabs[i].Shards[0].Contracts[0].Model = Model{}
 		slabs[i].Shards[0].Contracts[0].Host.Model = Model{}
+		slabs[i].HealthValidUntil = 0
 	}
 	if !reflect.DeepEqual(slab1, expectedObjSlab1) {
 		t.Fatal("mismatch", cmp.Diff(slab1, expectedObjSlab1))
@@ -1589,7 +1590,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 	fcid1, fcid2, fcid3, fcid4 := fcids[0], fcids[1], fcids[2], fcids[3]
 
-	// select the first three contracts as good contracts
+	// update the contract set
 	goodContracts := []types.FileContractID{fcid1, fcid2, fcid3}
 	if err := ss.SetContractSet(context.Background(), testContractSet, goodContracts); err != nil {
 		t.Fatal(err)
@@ -1921,7 +1922,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
+	err = invalidateSlabHealthByFCID(context.Background(), ss.db, []fileContractID{fileContractID(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3616,18 +3617,18 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// get all contracts
 	var dbContracts []dbContract
-	if err := ss.db.Find(&dbContracts).Error; err != nil {
+	if err := ss.db.Model(&dbContract{}).Preload("Host").Find(&dbContracts).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	root := types.Hash256{1, 2, 3}
 	slab := dbSlab{
-		DBContractSetID: 1,
-		Key:             []byte(object.GenerateEncryptionKey().String()),
-		Health:          1.0,
-		HealthValid:     true,
-		TotalShards:     1,
+		DBContractSetID:  1,
+		Key:              []byte(object.GenerateEncryptionKey().String()),
+		Health:           1.0,
+		HealthValidUntil: time.Now().Add(time.Hour).Unix(),
+		TotalShards:      1,
 		Shards: []dbSector{
 			{
 				Contracts:  dbContracts,
@@ -3668,10 +3669,20 @@ func TestDeleteHostSector(t *testing.T) {
 	var s dbSlab
 	if err := ss.db.Preload("Shards").Take(&s).Error; err != nil {
 		t.Fatal(err)
-	} else if s.HealthValid {
+	} else if s.HealthValid() {
 		t.Fatal("expected health to be invalid")
 	} else if s.Shards[0].LatestHost != publicKey(hk2) {
 		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
+	}
+
+	// Fetch the sector and assert the contracts association.
+	var sectors []dbSector
+	if err := ss.db.Model(&dbSector{}).Preload("Contracts").Find(&sectors).Preload("Contracts").Error; err != nil {
+		t.Fatal(err)
+	} else if len(sectors) != 1 {
+		t.Fatal("expected 1 sector", len(sectors))
+	} else if sector := sectors[0]; len(sector.Contracts) != 2 {
+		t.Fatal("expected 2 contracts", len(sector.Contracts))
 	}
 }
 
@@ -3703,6 +3714,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	slab := object.Slab{
 		Key:    object.GenerateEncryptionKey(),
 		Shards: shards,
+		Health: 1,
 	}
 
 	// set slab.
@@ -3719,7 +3731,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, rSlab) {
-		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab))
+		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
 	// change the length to fail the update.
@@ -3742,5 +3754,168 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	}
 	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet, usedContracts); !errors.Is(err, errShardRootChanged) {
 		t.Fatal(err)
+	}
+}
+
+func TestSlabHealthInvalidation(t *testing.T) {
+	// create db
+	cfg := defaultTestSQLStoreConfig
+	ss := newTestSQLStore(t, cfg)
+	defer ss.Close()
+
+	// define a helper to assert the health validity of a given slab
+	assertHealthValid := func(slabKey object.EncryptionKey, expected bool) {
+		t.Helper()
+
+		var slab dbSlab
+		if key, err := slabKey.MarshalText(); err != nil {
+			t.Fatal(err)
+		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
+			t.Fatal(err)
+		} else if slab.HealthValid() != expected {
+			t.Fatal("unexpected health valid", slab.HealthValid(), slab.HealthValidUntil, time.Now(), time.Unix(slab.HealthValidUntil, 0))
+		}
+	}
+
+	// define a helper to refresh the health
+	refreshHealth := func(slabKeys ...object.EncryptionKey) {
+		t.Helper()
+
+		// refresh health
+		if err := ss.RefreshHealth(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+
+		// assert all slabs
+		for _, slabKey := range slabKeys {
+			assertHealthValid(slabKey, true)
+		}
+	}
+
+	// add hosts and contracts
+	hks, err := ss.addTestHosts(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare a slab with pieces on h1 and h2
+	s1 := object.GenerateEncryptionKey()
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o1", testContractSet, testETag, testMimeType, object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{{Slab: object.Slab{
+			Key: s1,
+			Shards: []object.Sector{
+				{Host: hks[0], Root: types.Hash256{0}},
+				{Host: hks[1], Root: types.Hash256{1}},
+			},
+		}}},
+	}, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0], hks[1]: fcids[1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare a slab with pieces on h3 and h4
+	s2 := object.GenerateEncryptionKey()
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o2", testContractSet, testETag, testMimeType, object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{{Slab: object.Slab{
+			Key: s2,
+			Shards: []object.Sector{
+				{Host: hks[2], Root: types.Hash256{2}},
+				{Host: hks[3], Root: types.Hash256{3}},
+			},
+		}}},
+	}, map[types.PublicKey]types.FileContractID{hks[2]: fcids[2], hks[3]: fcids[3]})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there are 0 contracts in the contract set
+	cscs, err := ss.ContractSetContracts(context.Background(), testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cscs) != 0 {
+		t.Fatal("expected 0 contracts", len(cscs))
+	}
+
+	// refresh health
+	refreshHealth(s1, s2)
+
+	// add 2 contracts to the contract set
+	if err := ss.SetContractSet(context.Background(), testContractSet, fcids[:2]); err != nil {
+		t.Fatal(err)
+	}
+	assertHealthValid(s1, false)
+	assertHealthValid(s2, true)
+
+	// refresh health
+	refreshHealth(s1, s2)
+
+	// switch out the contract set with two new contracts
+	if err := ss.SetContractSet(context.Background(), testContractSet, fcids[2:]); err != nil {
+		t.Fatal(err)
+	}
+	assertHealthValid(s1, false)
+	assertHealthValid(s2, false)
+
+	// assert there are 2 contracts in the contract set
+	cscs, err = ss.ContractSetContracts(context.Background(), testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cscs) != 2 {
+		t.Fatal("expected 2 contracts", len(cscs))
+	} else if cscs[0].ID != (types.FileContractID{3}) || cscs[1].ID != (types.FileContractID{4}) {
+		t.Fatal("unexpected contracts", cscs)
+	}
+
+	// refresh health
+	refreshHealth(s1, s2)
+
+	// archive the contract for h3 and assert s2 was invalidated
+	if err := ss.ArchiveContract(context.Background(), types.FileContractID{3}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	assertHealthValid(s1, true)
+	assertHealthValid(s2, false)
+
+	// archive the contract for h1 and assert s1 was invalidated
+	if err := ss.ArchiveContract(context.Background(), types.FileContractID{1}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	assertHealthValid(s1, false)
+	assertHealthValid(s2, false)
+
+	// assert the health validity is always updated to a random time in the future that matches the boundaries
+	for i := 0; i < 1e3; i++ {
+		// reset health validity
+		if tx := ss.db.Exec("UPDATE slabs SET health_valid_until = 0;"); tx.Error != nil {
+			t.Fatal(err)
+		}
+
+		// refresh health
+		if err := ss.RefreshHealth(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+
+		// fetch slab
+		var slab dbSlab
+		if key, err := s1.MarshalText(); err != nil {
+			t.Fatal(err)
+		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		// assert it's validity is within expected bounds
+		now := time.Now()
+		min := now.Add(refreshHealthMinHealthValidity)
+		max := now.Add(refreshHealthMaxHealthValidity)
+		validUntil := time.Unix(slab.HealthValidUntil, 0)
+		if !(min.Before(validUntil) && max.After(validUntil)) {
+			t.Fatal("valid until not in boundaries", min, max, validUntil, now)
+		}
 	}
 }

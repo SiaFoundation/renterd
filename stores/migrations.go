@@ -291,6 +291,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00025_contractState(tx, logger)
 			},
 		},
+		{
+			ID: "00026_healthValidUntilColumn",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00026_healthValidUntilColumn(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1053,7 +1059,7 @@ func performMigration00024_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) 
 			DROP INDEX IF EXISTS idx_sectors_slab_index;
 			DROP INDEX IF EXISTS idx_sectors_slab_id_slab_index;
 			DROP INDEX IF EXISTS idx_sectors_root;
-			
+
 			CREATE INDEX idx_sectors_db_slab_id ON sectors_temp(db_slab_id);
 			CREATE INDEX idx_sectors_slab_index ON sectors_temp(slab_index);
 			CREATE INDEX idx_sectors_root ON sectors_temp(root);
@@ -1152,5 +1158,45 @@ func performMigration00025_contractState(txn *gorm.DB, logger *zap.SugaredLogger
 		}
 	}
 	logger.Info("migration 00025_contractState complete")
+	return nil
+}
+
+func performMigration00026_healthValidUntilColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00026_healthValidUntilColumn")
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Use 'AutoMigrate' to add 'health_valid_until'.
+	if err := txn.Table("slabs").Migrator().AutoMigrate(&struct {
+		HealthValidUntil int64 `gorm:"index;default:0; NOT NULL"` // unix timestamp
+	}{}); err != nil {
+		return err
+	}
+
+	// Drop the current 'health_valid' column and accompanying index.
+	if isSQLite(txn) {
+		if err := txn.Exec("DROP INDEX IF EXISTS idx_slabs_health_valid;").Error; err != nil {
+			return err
+		}
+	}
+	if err := txn.Exec("ALTER TABLE slabs DROP COLUMN health_valid;").Error; err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00026_healthValidUntilColumn complete")
 	return nil
 }
