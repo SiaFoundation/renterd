@@ -572,7 +572,7 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 			}
 
 			// archive host contracts
-			if err := archiveContracts(tx, hcs, toArchive); err != nil {
+			if err := archiveContracts(ctx, tx, hcs, toArchive); err != nil {
 				return err
 			}
 
@@ -928,25 +928,6 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 				ss.unappliedHostKeys[hostKey] = struct{}{}
 			})
 		}
-
-		// Update RevisionHeight and RevisionNumber for our contracts.
-		for _, txn := range sb.Transactions {
-			for _, rev := range txn.FileContractRevisions {
-				if ss.isKnownContract(types.FileContractID(rev.ParentID)) {
-					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
-						height: height,
-						number: rev.NewRevisionNumber,
-						size:   rev.NewFileSize,
-					}
-				}
-			}
-			// Get ProofHeight for our contracts.
-			for _, sp := range txn.StorageProofs {
-				if ss.isKnownContract(types.FileContractID(sp.ParentID)) {
-					ss.unappliedProofs[types.FileContractID(sp.ParentID)] = height
-				}
-			}
-		}
 		height++
 	}
 
@@ -1041,6 +1022,21 @@ func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpd
 		"revision_number": fmt.Sprint(rev.number),
 		"size":            rev.size,
 	})
+}
+
+func updateContractState(db *gorm.DB, fcid types.FileContractID, cs contractState) error {
+	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
+		"state": cs,
+	})
+}
+
+func markFailedContracts(db *gorm.DB, height uint64) error {
+	if err := db.Model(&dbContract{}).
+		Where("state = ? AND ? > window_end", contractStateActive, height).
+		Update("state", contractStateFailed).Error; err != nil {
+		return fmt.Errorf("failed to mark failed contracts: %w", err)
+	}
+	return nil
 }
 
 func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {

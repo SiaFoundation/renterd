@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -119,6 +120,9 @@ func TestNewTestCluster(t *testing.T) {
 		if contracts[0].ProofHeight != 0 {
 			return errors.New("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
+		if contracts[0].State != api.ContractStatePending {
+			return fmt.Errorf("contract should be pending but was %v", contracts[0].State)
+		}
 		return nil
 	})
 
@@ -133,6 +137,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Now wait for the revision and proof to be caught by the hostdb.
+	var ac api.ArchivedContract
 	tt.Retry(20, time.Second, func() error {
 		cluster.MineBlocks(1)
 
@@ -148,12 +153,15 @@ func TestNewTestCluster(t *testing.T) {
 		if len(archivedContracts) != 1 {
 			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
 		}
-		ac := archivedContracts[0]
+		ac = archivedContracts[0]
 		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
 			return fmt.Errorf("revision information is wrong: %v %v", ac.RevisionHeight, ac.RevisionNumber)
 		}
 		if ac.ProofHeight != 0 {
 			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
+		}
+		if ac.State != api.ContractStateComplete {
+			return fmt.Errorf("contract should be complete but was %v", ac.State)
 		}
 		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, math.MaxUint32)
 		if err != nil {
@@ -164,7 +172,6 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		return nil
 	})
-	tt.OK(err)
 
 	// Get host info for every host.
 	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
@@ -1245,11 +1252,11 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	// form 2 more contracts with the same host
 	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	tt.OK(err)
-	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight)
+	c2, err := cluster.Bus.AddContract(context.Background(), rev2, c.TotalCost, c.StartHeight, api.ContractStatePending)
 	tt.OK(err)
 	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
 	tt.OK(err)
-	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight)
+	c3, err := cluster.Bus.AddContract(context.Background(), rev3, c.TotalCost, c.StartHeight, api.ContractStatePending)
 	tt.OK(err)
 
 	// create a contract set with all 3 contracts
@@ -1629,7 +1636,7 @@ func TestWallet(t *testing.T) {
 		},
 		MinerFees: []types.Currency{minerFee},
 	}
-	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value)
+	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value, false)
 	tt.OK(err)
 	err = b.WalletSign(context.Background(), &txn, toSign, types.CoveredFields{WholeTransaction: true})
 	tt.OK(err)
@@ -1948,5 +1955,128 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	} else if expectedData := data1[:1]; !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
+	}
+}
+
+func TestWalletSendUnconfirmed(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	tt := cluster.tt
+
+	wr, err := b.Wallet(context.Background())
+	tt.OK(err)
+
+	// check balance
+	if !wr.Unconfirmed.IsZero() {
+		t.Fatal("wallet should not have unconfirmed balance")
+	} else if wr.Confirmed.IsZero() {
+		t.Fatal("wallet should have confirmed balance")
+	}
+
+	// send the full balance back to the weallet
+	toSend := wr.Confirmed.Sub(types.Siacoins(1).Div64(100)) // leave some for the fee
+	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   toSend,
+		},
+	}, false))
+
+	// the unconfirmed balance should have changed to slightly more than toSend
+	// since we paid a fee
+	wr, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	if wr.Unconfirmed.Cmp(toSend) < 0 || wr.Unconfirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
+		t.Fatal("wallet should have unconfirmed balance")
+	}
+	fmt.Println(wr.Confirmed, wr.Unconfirmed)
+
+	// try again - this should fail
+	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   toSend,
+		},
+	}, false)
+	tt.AssertIs(err, wallet.ErrInsufficientBalance)
+
+	// try again - this time using unconfirmed transactions
+	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   toSend,
+		},
+	}, true))
+
+	// the unconfirmed balance should be almost the same
+	wr, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	if wr.Unconfirmed.Cmp(toSend) < 0 || wr.Unconfirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
+		t.Fatal("wallet should have unconfirmed balance")
+	}
+	fmt.Println(wr.Confirmed, wr.Unconfirmed)
+
+	// mine a block, this should confirm the transactions
+	cluster.MineBlocks(1)
+	tt.Retry(100, time.Millisecond, func() error {
+		wr, err = b.Wallet(context.Background())
+		tt.OK(err)
+
+		if !wr.Unconfirmed.IsZero() {
+			return fmt.Errorf("wallet should not have unconfirmed balance")
+		} else if wr.Confirmed.Cmp(toSend) < 0 || wr.Confirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
+			return fmt.Errorf("wallet should have almost the same confirmed balance as in the beginning")
+		}
+		return nil
+	})
+}
+
+func TestWalletFormUnconfirmed(t *testing.T) {
+	// New cluster with autopilot disabled
+	cfg := clusterOptsDefault
+	cfg.skipSettingAutopilot = true
+	cluster := newTestCluster(t, cfg)
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// Add a host.
+	cluster.AddHosts(1)
+
+	// Send the full balance back to the wallet to make sure it's all
+	// unconfirmed.
+	wr, err := b.Wallet(context.Background())
+	tt.OK(err)
+	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
+		{
+			Address: wr.Address,
+			Value:   wr.Confirmed.Sub(types.Siacoins(1).Div64(100)), // leave some for the fee
+		},
+	}, false))
+
+	// There should be hardly any money in the wallet.
+	wr, err = b.Wallet(context.Background())
+	tt.OK(err)
+	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(types.Siacoins(1).Div64(100)) > 0 {
+		t.Fatal("wallet should have hardly any confirmed balance")
+	}
+
+	// There shouldn't be any contracts at this point.
+	contracts, err := b.Contracts(context.Background())
+	tt.OK(err)
+	if len(contracts) != 0 {
+		t.Fatal("expected 0 contracts", len(contracts))
+	}
+
+	// Enable autopilot by setting it.
+	cluster.UpdateAutopilotConfig(context.Background(), testAutopilotConfig)
+
+	// Wait for a contract to form.
+	contractsFormed := cluster.WaitForContracts()
+	if len(contractsFormed) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
 	}
 }

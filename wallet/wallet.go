@@ -168,7 +168,9 @@ func (w *SingleAddressWallet) Balance() (spendable, confirmed, unconfirmed types
 		confirmed = confirmed.Add(sce.Value)
 	}
 	for _, sco := range w.tpoolUtxos {
-		unconfirmed = unconfirmed.Add(sco.Value)
+		if !w.isOutputUsed(sco.ID) {
+			unconfirmed = unconfirmed.Add(sco.Value)
+		}
 	}
 	return
 }
@@ -204,33 +206,34 @@ func (w *SingleAddressWallet) Transactions(before, since time.Time, offset, limi
 // FundTransaction adds siacoin inputs worth at least the requested amount to
 // the provided transaction. A change output is also added, if necessary. The
 // inputs will not be available to future calls to FundTransaction unless
-// ReleaseInputs is called.
-func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, pool []types.Transaction) ([]types.Hash256, error) {
+// ReleaseInputs is called or enough time has passed.
+func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if amount.IsZero() {
 		return nil, nil
 	}
 
-	// avoid reusing any inputs currently in the transaction pool
-	inPool := make(map[types.Hash256]bool)
-	for _, ptxn := range pool {
-		for _, in := range ptxn.SiacoinInputs {
-			inPool[types.Hash256(in.ParentID)] = true
-		}
-	}
-
+	// fetch all unspent siacoin elements
 	utxos, err := w.store.UnspentSiacoinElements(false)
 	if err != nil {
 		return nil, err
 	}
+
 	// choose outputs randomly
 	frand.Shuffle(len(utxos), reflect.Swapper(utxos))
+
+	// add all unconfirmed outputs to the end of the slice as a last resort
+	if useUnconfirmedTxns {
+		for _, sco := range w.tpoolUtxos {
+			utxos = append(utxos, sco)
+		}
+	}
 
 	var outputSum types.Currency
 	var fundingElements []SiacoinElement
 	for _, sce := range utxos {
-		if w.isOutputUsed(sce.ID) || inPool[sce.ID] || cs.Index.Height < sce.MaturityHeight {
+		if w.isOutputUsed(sce.ID) || w.tpoolSpent[types.SiacoinOutputID(sce.ID)] || cs.Index.Height < sce.MaturityHeight {
 			continue
 		}
 		fundingElements = append(fundingElements, sce)
@@ -301,6 +304,34 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// build map of inputs currently in the tx pool
+	inPool := make(map[types.Hash256]bool)
+	for _, ptxn := range pool {
+		for _, in := range ptxn.SiacoinInputs {
+			inPool[types.Hash256(in.ParentID)] = true
+		}
+	}
+
+	// fetch unspent transaction outputs
+	utxos, err := w.store.UnspentSiacoinElements(false)
+	if err != nil {
+		return types.Transaction{}, nil, err
+	}
+
+	// check whether a redistribution is necessary, adjust number of desired
+	// outputs accordingly
+	for _, sce := range utxos {
+		inUse := w.isOutputUsed(sce.ID) || inPool[sce.ID]
+		matured := cs.Index.Height >= sce.MaturityHeight
+		sameValue := sce.Value.Equals(amount)
+		if !inUse && matured && sameValue {
+			outputs--
+		}
+	}
+	if outputs <= 0 {
+		return types.Transaction{}, nil, nil
+	}
+
 	// prepare all outputs
 	var txn types.Transaction
 	for i := 0; i < int(outputs); i++ {
@@ -310,24 +341,10 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 		})
 	}
 
-	// fetch unspent transaction outputs
-	utxos, err := w.store.UnspentSiacoinElements(false)
-	if err != nil {
-		return types.Transaction{}, nil, err
-	}
-
 	// desc sort
 	sort.Slice(utxos, func(i, j int) bool {
 		return utxos[i].Value.Cmp(utxos[j].Value) > 0
 	})
-
-	// map used outputs
-	inPool := make(map[types.Hash256]bool)
-	for _, ptxn := range pool {
-		for _, in := range ptxn.SiacoinInputs {
-			inPool[types.Hash256(in.ParentID)] = true
-		}
-	}
 
 	// estimate the fees
 	outputFees := feePerByte.Mul64(uint64(len(encoding.Marshal(txn.SiacoinOutputs))))
@@ -393,11 +410,12 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 }
 
 func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {
+	inPool := w.tpoolSpent[types.SiacoinOutputID(id)]
 	lastUsed := w.lastUsed[id]
 	if w.usedUTXOExpiry == 0 {
-		return !lastUsed.IsZero()
+		return !lastUsed.IsZero() || inPool
 	}
-	return time.Since(lastUsed) <= w.usedUTXOExpiry
+	return time.Since(lastUsed) <= w.usedUTXOExpiry || inPool
 }
 
 // ReceiveUpdatedUnconfirmedTransactions implements modules.TransactionPoolSubscriber.
