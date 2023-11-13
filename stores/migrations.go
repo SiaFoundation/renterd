@@ -1208,16 +1208,34 @@ func performMigration00026_healthValidUntilColumn(txn *gorm.DB, logger *zap.Suga
 }
 
 func performMigration000027_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration000027_addMultipartUploadIndices")
+	logger.Info("performing migration 000027_addMultipartUploadIndices")
 
-	m := txn.Migrator()
-	for _, column := range []string{"ObjectID", "DBBucketID", "MimeType"} {
-		if !m.HasIndex(dbMultipartUpload{}, column) {
-			if err := m.CreateIndex(dbMultipartUpload{}, column); err != nil {
-				return fmt.Errorf("failed to create index on column '%s' of table '%s': %w", column, dbMultipartUpload{}.TableName(), err)
-			}
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
 		}
 	}
+
+	// Use 'AutoMigrate' to add missing indices
+	if err := txn.Table("slabs").Migrator().AutoMigrate(&struct {
+		ObjectID   string `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
+		DBBucketID uint   `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
+		MimeType   string `gorm:"index:idx_multipart_uploads_mime_type"`
+	}{}); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(multipart_uploads)`).Error; err != nil {
+			return err
+		}
+	}
+
 	logger.Info("migration 000027_addMultipartUploadIndices complete")
 	return nil
 }
