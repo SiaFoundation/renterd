@@ -1173,7 +1173,7 @@ func performMigration00026_healthValidUntilColumn(txn *gorm.DB, logger *zap.Suga
 
 	// Use 'AutoMigrate' to add 'health_valid_until'.
 	if err := txn.Table("slabs").Migrator().AutoMigrate(&struct {
-		HealthValidUntil int64 `gorm:"index"` // unix timestamp
+		HealthValidUntil int64 `gorm:"index;default:0; NOT NULL"` // unix timestamp
 	}{}); err != nil {
 		return err
 	}
