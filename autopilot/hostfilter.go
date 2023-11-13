@@ -26,6 +26,10 @@ const (
 	// currently has remaining.
 	minContractCollateralThresholdNumerator   = 10
 	minContractCollateralThresholdDenominator = 100
+
+	// contractConfirmationDeadline is the number of blocks since its start
+	// height we wait for a contract to appear on chain.
+	contractConfirmationDeadline = 18
 )
 
 var (
@@ -45,6 +49,7 @@ var (
 	errContractMaxRevisionNumber = errors.New("contract has reached max revision number")
 	errContractNoRevision        = errors.New("contract has no revision")
 	errContractExpired           = errors.New("contract has expired")
+	errContractNotConfirmed      = errors.New("contract hasn't been confirmed on chain in time")
 )
 
 type unusableHostResult struct {
