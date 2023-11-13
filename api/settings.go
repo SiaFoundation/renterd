@@ -128,14 +128,14 @@ func (rs RedundancySettings) Validate() error {
 	return nil
 }
 
-// Validate returns an error if the redundancy settings are not considered
+// Validate returns an error if the authentication settings are not considered
 // valid.
 func (s3as S3AuthenticationSettings) Validate() error {
 	for id, key := range s3as.V4Keypairs {
 		if len(id) == 0 {
 			return fmt.Errorf("AccessKeyID cannot be empty")
 		} else if len(key) < S3MinAccessKeyLen || len(key) > S3MaxAccessKeyLen {
-			return fmt.Errorf("AccessKeyID must be between %d and %d characters long", S3MinAccessKeyLen, S3MaxAccessKeyLen)
+			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(key))
 		}
 	}
 	return nil
