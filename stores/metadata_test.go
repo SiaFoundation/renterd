@@ -1590,7 +1590,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 	fcid1, fcid2, fcid3, fcid4 := fcids[0], fcids[1], fcids[2], fcids[3]
 
-	// select the first three contracts as good contracts
+	// update the contract set
 	goodContracts := []types.FileContractID{fcid1, fcid2, fcid3}
 	if err := ss.SetContractSet(context.Background(), testContractSet, goodContracts); err != nil {
 		t.Fatal(err)
