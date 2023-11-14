@@ -63,7 +63,7 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 		values.Set("fcid", opts.ContractID.String())
 	}
 	if opts.HostKey != (types.PublicKey{}) {
-		values.Set("host", opts.HostKey.String())
+		values.Set("hostKey", opts.HostKey.String())
 	}
 	var resp []api.ContractMetric
 	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?%s", api.MetricContract, values.Encode()), &resp)

@@ -612,7 +612,7 @@ type (
 
 	PerformanceMetric struct {
 		Action    string          `json:"action"`
-		HostKey   types.PublicKey `json:"host"`
+		HostKey   types.PublicKey `json:"hostKey"`
 		Origin    string          `json:"origin"`
 		Duration  time.Duration   `json:"duration"`
 		Timestamp time.Time       `json:"timestamp"`
