@@ -42,7 +42,7 @@ func TestMigrations(t *testing.T) {
 		used := make(map[types.PublicKey]struct{})
 		for _, slab := range res.Object.Slabs {
 			for _, sector := range slab.Shards {
-				used[sector.Host] = struct{}{}
+				used[sector.LatestHost] = struct{}{}
 			}
 		}
 		return used

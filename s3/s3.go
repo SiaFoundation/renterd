@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -30,7 +29,7 @@ type bus interface {
 	DeleteBucket(ctx context.Context, bucketName string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, opts api.AddObjectOptions) (err error)
+	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
 	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error)
 	ListObjects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)

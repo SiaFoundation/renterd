@@ -85,7 +85,21 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab) (err error) {
+	// collect all used contracts
+	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
+	for _, s := range slices {
+		for _, shard := range s.Shards {
+			for h, fcids := range shard.Hosts {
+				for _, fcid := range fcids {
+					if _, exists := usedContracts[h]; !exists {
+						usedContracts[h] = make(map[types.FileContractID]struct{})
+					}
+					usedContracts[h][fcid] = struct{}{}
+				}
+			}
+		}
+	}
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet

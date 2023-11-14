@@ -303,9 +303,8 @@ type UploadedPackedSlab struct {
 
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
-	ContractSet   string                                   `json:"contractSet"`
-	Slab          object.Slab                              `json:"slab"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	ContractSet string      `json:"contractSet"`
+	Slab        object.Slab `json:"slab"`
 }
 
 type UnhealthySlabsResponse struct {
@@ -360,8 +359,7 @@ type PackedSlabsRequestGET struct {
 }
 
 type PackedSlabsRequestPOST struct {
-	Slabs         []UploadedPackedSlab                     `json:"slabs"`
-	UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+	Slabs []UploadedPackedSlab `json:"slabs"`
 }
 
 // UploadParams contains the metadata needed by a worker to upload an object.
@@ -463,15 +461,14 @@ type (
 		ETag string `json:"eTag"`
 	}
 	MultipartAddPartRequest struct {
-		Bucket        string                                   `json:"bucket"`
-		ETag          string                                   `json:"eTag"`
-		Path          string                                   `json:"path"`
-		ContractSet   string                                   `json:"contractSet"`
-		UploadID      string                                   `json:"uploadID"`
-		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
-		PartNumber    int                                      `json:"partNumber"`
-		Slices        []object.SlabSlice                       `json:"slices"`
-		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		Bucket       string               `json:"bucket"`
+		ETag         string               `json:"eTag"`
+		Path         string               `json:"path"`
+		ContractSet  string               `json:"contractSet"`
+		UploadID     string               `json:"uploadID"`
+		PartialSlabs []object.PartialSlab `json:"partialSlabs"`
+		PartNumber   int                  `json:"partNumber"`
+		Slices       []object.SlabSlice   `json:"slices"`
 	}
 	MultipartListUploadsRequest struct {
 		Bucket         string `json:"bucket"`

@@ -66,7 +66,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
+	}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
 	tt.OK(err)
 
 	// Try talking to the worker and request the object.

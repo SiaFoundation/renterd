@@ -64,12 +64,7 @@ func TestObjectBasic(t *testing.T) {
 					Health:    1.0,
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-					},
+					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
@@ -79,12 +74,7 @@ func TestObjectBasic(t *testing.T) {
 					Health:    1.0,
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 2,
-					Shards: []object.Sector{
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
-					},
+					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -93,10 +83,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, want, map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk2: fcid2,
-	}); err != nil {
+	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, want); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,7 +119,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, want2, make(map[types.PublicKey]types.FileContractID)); err != nil {
+	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, want2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -413,19 +400,14 @@ func TestContractRoots(t *testing.T) {
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hks[0],
-							Root: root,
-						},
-					},
+					Shards:    newTestShards(hks[0], fcids[0], types.Hash256{1}),
 				},
 			},
 		},
 	}
 
 	// add the object.
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0]}); err != nil {
+	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,16 +496,7 @@ func TestRenewedContract(t *testing.T) {
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hk,
-							Root: types.Hash256{1},
-						},
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
-					},
+					Shards:    append(newTestShards(hk, fcid1, types.Hash256{1}), newTestShards(hk2, fcid2, types.Hash256{2})...),
 				},
 			},
 		},
@@ -535,10 +508,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{
-		hk:  fcid1,
-		hk2: fcid2,
-	}); err != nil {
+	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -926,12 +896,6 @@ func TestSQLMetadataStore(t *testing.T) {
 	startHeight1, totalCost1 := contracts[0].StartHeight, contracts[0].TotalCost
 	startHeight2, totalCost2 := contracts[1].StartHeight, contracts[1].TotalCost
 
-	// Define usedHosts.
-	usedHosts := map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk2: fcid2,
-	}
-
 	// Create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
 		Key: object.GenerateEncryptionKey(),
@@ -941,12 +905,7 @@ func TestSQLMetadataStore(t *testing.T) {
 					Health:    1,
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-					},
+					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
@@ -956,12 +915,7 @@ func TestSQLMetadataStore(t *testing.T) {
 					Health:    1,
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 2,
-					Shards: []object.Sector{
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
-					},
+					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -972,12 +926,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1, usedHosts); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1); err != nil {
 		t.Fatal(err)
 	}
 
 	// Try to store it again. Should work.
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1, usedHosts); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1055,7 +1009,7 @@ func TestSQLMetadataStore(t *testing.T) {
 				DBSlabID:   1,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
-				LatestHost: publicKey(obj1.Slabs[0].Shards[0].Host),
+				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
 				Contracts: []dbContract{
 					{
 						HostID: 1,
@@ -1095,7 +1049,7 @@ func TestSQLMetadataStore(t *testing.T) {
 				DBSlabID:   2,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
-				LatestHost: publicKey(obj1.Slabs[1].Shards[0].Host),
+				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
 				Contracts: []dbContract{
 					{
 						HostID: 2,
@@ -1149,7 +1103,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1, usedHosts); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1); err != nil {
 		t.Fatal(err)
 	}
 	fullObj, err = ss.Object(ctx, api.DefaultBucketName, objID)
@@ -1236,22 +1190,10 @@ func TestObjectHealth(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hks[0],
-							Root: types.Hash256{1},
-						},
-						{
-							Host: hks[1],
-							Root: types.Hash256{2},
-						},
-						{
-							Host: hks[2],
-							Root: types.Hash256{3},
-						},
-						{
-							Host: hks[3],
-							Root: types.Hash256{4},
-						},
+						newTestShard(hks[0], fcids[0], types.Hash256{1}),
+						newTestShard(hks[1], fcids[1], types.Hash256{2}),
+						newTestShard(hks[2], fcids[2], types.Hash256{3}),
+						newTestShard(hks[3], fcids[3], types.Hash256{4}),
 					},
 				},
 			},
@@ -1260,35 +1202,17 @@ func TestObjectHealth(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hks[1],
-							Root: types.Hash256{5},
-						},
-						{
-							Host: hks[2],
-							Root: types.Hash256{6},
-						},
-						{
-							Host: hks[3],
-							Root: types.Hash256{7},
-						},
-						{
-							Host: hks[4],
-							Root: types.Hash256{8},
-						},
+						newTestShard(hks[0], fcids[0], types.Hash256{5}),
+						newTestShard(hks[1], fcids[1], types.Hash256{6}),
+						newTestShard(hks[2], fcids[2], types.Hash256{7}),
+						newTestShard(hks[3], fcids[3], types.Hash256{8}),
 					},
 				},
 			},
 		},
 	}
 
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "/foo", testContractSet, testETag, testMimeType, add, map[types.PublicKey]types.FileContractID{
-		hks[0]: fcids[0],
-		hks[1]: fcids[1],
-		hks[2]: fcids[2],
-		hks[3]: fcids[3],
-		hks[4]: fcids[4],
-	}); err != nil {
+	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "/foo", testContractSet, testETag, testMimeType, add); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1382,7 +1306,7 @@ func TestObjectHealth(t *testing.T) {
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: nil,
 	}
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "/bar", testContractSet, testETag, testMimeType, add, nil); err != nil {
+	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "/bar", testContractSet, testETag, testMimeType, add); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1418,10 +1342,10 @@ func TestObjectEntries(t *testing.T) {
 
 	ctx := context.Background()
 	for _, o := range objects {
-		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, obj, ucs)
+		err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1534,10 +1458,10 @@ func TestSearchObjects(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, o := range objects {
-		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, obj, ucs); err != nil {
+		if err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1606,18 +1530,9 @@ func TestUnhealthySlabs(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
-						{
-							Host: hk3,
-							Root: types.Hash256{3},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{1}),
+						newTestShard(hk2, fcid2, types.Hash256{2}),
+						newTestShard(hk3, fcid3, types.Hash256{3}),
 					},
 				},
 			},
@@ -1627,18 +1542,9 @@ func TestUnhealthySlabs(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{4},
-						},
-						{
-							Host: hk2,
-							Root: types.Hash256{5},
-						},
-						{
-							Host: hk4,
-							Root: types.Hash256{6},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{4}),
+						newTestShard(hk2, fcid2, types.Hash256{5}),
+						newTestShard(hk3, fcid3, types.Hash256{6}),
 					},
 				},
 			},
@@ -1648,18 +1554,9 @@ func TestUnhealthySlabs(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{7},
-						},
-						{
-							Host: hk4,
-							Root: types.Hash256{8},
-						},
-						{
-							Host: hk4,
-							Root: types.Hash256{9},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{7}),
+						newTestShard(hk4, fcid4, types.Hash256{8}),
+						newTestShard(hk4, fcid4, types.Hash256{9}),
 					},
 				},
 			},
@@ -1669,18 +1566,9 @@ func TestUnhealthySlabs(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{10},
-						},
-						{
-							Host: hk2,
-							Root: types.Hash256{11},
-						},
-						{
-							Host: types.PublicKey{5},
-							Root: types.Hash256{12},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{10}),
+						newTestShard(hk2, fcid2, types.Hash256{11}),
+						newTestShard(types.PublicKey{5}, types.FileContractID{5}, types.Hash256{12}),
 					},
 				},
 			},
@@ -1690,18 +1578,9 @@ func TestUnhealthySlabs(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{13},
-						},
-						{
-							Host: hk1,
-							Root: types.Hash256{14},
-						},
-						{
-							Host: hk1,
-							Root: types.Hash256{15},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{13}),
+						newTestShard(hk1, fcid4, types.Hash256{14}),
+						newTestShard(hk1, fcid4, types.Hash256{15}),
 					},
 				},
 			},
@@ -1711,18 +1590,9 @@ func TestUnhealthySlabs(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: types.PublicKey{1},
-							Root: types.Hash256{16},
-						},
-						{
-							Host: types.PublicKey{2},
-							Root: types.Hash256{17},
-						},
-						{
-							Host: types.PublicKey{3},
-							Root: types.Hash256{18},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{16}),
+						newTestShard(hk2, fcid2, types.Hash256{17}),
+						newTestShard(hk3, fcid3, types.Hash256{18}),
 					},
 				},
 			},
@@ -1730,13 +1600,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk2: fcid2,
-		hk3: fcid3,
-		hk4: fcid4,
-		{5}: {5}, // deleted host and contract
-	}); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1826,14 +1690,8 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 2,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-						{
-							Host: hk1,
-							Root: types.Hash256{2},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{1}),
+						newTestShard(hk1, fcid1, types.Hash256{2}),
 					},
 				},
 			},
@@ -1842,7 +1700,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1891,12 +1749,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-					},
+					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 		},
@@ -1904,7 +1757,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// add the object
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{hk1: fcid1}); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1978,12 +1831,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 				Slab: object.Slab{
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
-					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-					},
+					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 			// hk4 is bad so this slab should have no health.
@@ -1992,14 +1840,8 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 2,
 					Shards: []object.Sector{
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
-						{
-							Host: hk3,
-							Root: types.Hash256{4},
-						},
+						newTestShard(hk2, fcid2, types.Hash256{2}),
+						newTestShard(hk3, fcid3, types.Hash256{4}),
 					},
 				},
 			},
@@ -2007,11 +1849,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk2: fcid2,
-		hk3: fcid3,
-	}); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2052,15 +1890,7 @@ func TestContractSectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sectorGood := object.Sector{
-		Host: hk1,
-		Root: types.Hash256{1},
-	}
-
-	// Prepare used contracts.
-	usedContracts := map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-	}
+	sectorGood := newTestShard(hk1, fcid1, types.Hash256{1})
 
 	// Create object.
 	obj := object.Object{
@@ -2078,7 +1908,7 @@ func TestContractSectors(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, usedContracts); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2104,7 +1934,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, usedContracts); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2153,24 +1983,15 @@ func TestUpdateSlab(t *testing.T) {
 					Key:       object.GenerateEncryptionKey(),
 					MinShards: 1,
 					Shards: []object.Sector{
-						{
-							Host: hk1,
-							Root: types.Hash256{1},
-						},
-						{
-							Host: hk2,
-							Root: types.Hash256{2},
-						},
+						newTestShard(hk1, fcid1, types.Hash256{1}),
+						newTestShard(hk2, fcid2, types.Hash256{2}),
 					},
 				},
 			},
 		},
 	}
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj, map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk2: fcid2,
-	}); err != nil {
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2233,16 +2054,10 @@ func TestUpdateSlab(t *testing.T) {
 
 	// migrate the sector from h2 to h3
 	slab := obj.Slabs[0].Slab
-	slab.Shards[1] = object.Sector{
-		Host: hk3,
-		Root: types.Hash256{2},
-	}
+	slab.Shards[1] = newTestShard(hk3, fcid3, types.Hash256{2})
 
 	// update the slab to reflect the migration
-	err = ss.UpdateSlab(ctx, slab, testContractSet, map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk3: fcid3,
-	})
+	err = ss.UpdateSlab(ctx, slab, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2302,10 +2117,7 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.SetContractSet(ctx, "other", nil); err != nil {
 		t.Fatal(err)
 	}
-	err = ss.UpdateSlab(ctx, slab, "other", map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk3: fcid3,
-	})
+	err = ss.UpdateSlab(ctx, slab, "other")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2322,9 +2134,8 @@ func TestUpdateSlab(t *testing.T) {
 	}
 }
 
-func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileContractID) {
+func newTestObject(slabs int) object.Object {
 	obj := object.Object{}
-	usedContracts := make(map[types.PublicKey]types.FileContractID)
 
 	obj.Slabs = make([]object.SlabSlice, slabs)
 	obj.Key = object.GenerateEncryptionKey()
@@ -2344,12 +2155,10 @@ func newTestObject(slabs int) (object.Object, map[types.PublicKey]types.FileCont
 		for j := range obj.Slabs[i].Shards {
 			var fcid types.FileContractID
 			frand.Read(fcid[:])
-			obj.Slabs[i].Shards[j].Root = frand.Entropy256()
-			obj.Slabs[i].Shards[j].Host = frand.Entropy256()
-			usedContracts[obj.Slabs[i].Shards[j].Host] = fcid
+			obj.Slabs[i].Shards[j] = newTestShard(frand.Entropy256(), fcid, frand.Entropy256())
 		}
 	}
-	return obj, usedContracts
+	return obj
 }
 
 // TestRecordContractSpending tests RecordContractSpending.
@@ -2450,8 +2259,8 @@ func TestRenameObjects(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, path := range objects {
-		obj, ucs := newTestObject(1)
-		if err := ss.UpdateObject(ctx, api.DefaultBucketName, path, testContractSet, testETag, testMimeType, obj, ucs); err != nil {
+		obj := newTestObject(1)
+		if err := ss.UpdateObject(ctx, api.DefaultBucketName, path, testContractSet, testETag, testMimeType, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2538,24 +2347,28 @@ func TestObjectsStats(t *testing.T) {
 	var objectsSize uint64
 	var sectorsSize uint64
 	for i := 0; i < 2; i++ {
-		obj, contracts := newTestObject(1)
+		obj := newTestObject(1)
 		objectsSize += uint64(obj.TotalSize())
 		for _, slab := range obj.Slabs {
 			sectorsSize += uint64(len(slab.Shards) * rhpv2.SectorSize)
-		}
 
-		for hpk, fcid := range contracts {
-			if err := ss.addTestHost(hpk); err != nil {
-				t.Fatal(err)
-			}
-			_, err := ss.addTestContract(fcid, hpk)
-			if err != nil {
-				t.Fatal(err)
+			for _, s := range slab.Shards {
+				for hpk, fcids := range s.Hosts {
+					if err := ss.addTestHost(hpk); err != nil {
+						t.Fatal(err)
+					}
+					for _, fcid := range fcids {
+						_, err := ss.addTestContract(fcid, hpk)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
 			}
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := ss.UpdateObject(context.Background(), api.DefaultBucketName, key, testContractSet, testETag, testMimeType, obj, contracts)
+		err := ss.UpdateObject(context.Background(), api.DefaultBucketName, key, testContractSet, testETag, testMimeType, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2622,10 +2435,6 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	fcid1, fcid2 := fcids[0], fcids[1]
-	usedContracts := map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-		hk2: fcid2,
-	}
 
 	// helper function to assert buffer stats returned by SlabBuffers.
 	assertBuffer := func(name string, size int64, complete, locked bool) {
@@ -2717,14 +2526,8 @@ func TestPartialSlab(t *testing.T) {
 						Key:       object.GenerateEncryptionKey(),
 						MinShards: 1,
 						Shards: []object.Sector{
-							{
-								Host: hk1,
-								Root: types.Hash256{1},
-							},
-							{
-								Host: hk2,
-								Root: types.Hash256{2},
-							},
+							newTestShard(hk1, fcid1, types.Hash256{1}),
+							newTestShard(hk2, fcid2, types.Hash256{2}),
 						},
 					},
 					Offset: 0,
@@ -2735,7 +2538,7 @@ func TestPartialSlab(t *testing.T) {
 		}
 	}
 	obj := testObject(slabs)
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key", testContractSet, testETag, testMimeType, obj, usedContracts)
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key", testContractSet, testETag, testMimeType, obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2774,7 +2577,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj2 := testObject(slabs)
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key2", testContractSet, testETag, testMimeType, obj2, usedContracts)
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key2", testContractSet, testETag, testMimeType, obj2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2824,7 +2627,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj3 := testObject(slabs)
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key3", testContractSet, testETag, testMimeType, obj3, usedContracts)
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key3", testContractSet, testETag, testMimeType, obj3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2861,17 +2664,11 @@ func TestPartialSlab(t *testing.T) {
 		{
 			BufferID: buffer.ID,
 			Shards: []object.Sector{
-				{
-					Host: hk1,
-					Root: types.Hash256{3},
-				},
-				{
-					Host: hk2,
-					Root: types.Hash256{4},
-				},
+				newTestShard(hk1, fcid1, types.Hash256{3}),
+				newTestShard(hk2, fcid2, types.Hash256{4}),
 			},
 		},
-	}, usedContracts)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2992,17 +2789,10 @@ func TestContractSizes(t *testing.T) {
 					Slab: object.Slab{
 						Key:       object.GenerateEncryptionKey(),
 						MinShards: 1,
-						Shards: []object.Sector{
-							{
-								Host: hks[i],
-								Root: types.Hash256{byte(i)},
-							},
-						},
+						Shards:    newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
 					},
 				},
 			},
-		}, map[types.PublicKey]types.FileContractID{
-			hks[i]: fcids[i],
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -3128,21 +2918,13 @@ func TestObjectsBySlabKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	fcid1 := fcids[0]
-	usedContracts := map[types.PublicKey]types.FileContractID{
-		hk1: fcid1,
-	}
 
 	// create a slab.
 	slab := object.Slab{
 		Health:    1.0,
 		Key:       object.GenerateEncryptionKey(),
 		MinShards: 1,
-		Shards: []object.Sector{
-			{
-				Host: hk1,
-				Root: types.Hash256{1},
-			},
-		},
+		Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
 	}
 
 	// Add 3 objects that all reference the slab.
@@ -3158,7 +2940,7 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 	for _, name := range []string{"obj1", "obj2", "obj3"} {
 		obj.Slabs[0].Length++
-		err = ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, obj, usedContracts)
+		err = ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3229,8 +3011,8 @@ func TestBucketObjects(t *testing.T) {
 	defer ss.Close()
 
 	// Adding an object to a bucket that doesn't exist shouldn't work.
-	obj, ucs := newTestObject(1)
-	err := ss.UpdateObject(context.Background(), "unknown-bucket", "foo", testContractSet, testETag, testMimeType, obj, ucs)
+	obj := newTestObject(1)
+	err := ss.UpdateObject(context.Background(), "unknown-bucket", "foo", testContractSet, testETag, testMimeType, obj)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
 	}
@@ -3258,10 +3040,10 @@ func TestBucketObjects(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, o := range objects {
-		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := ss.UpdateObject(ctx, o.bucket, o.path, testContractSet, testETag, testMimeType, obj, ucs)
+		err := ss.UpdateObject(ctx, o.bucket, o.path, testContractSet, testETag, testMimeType, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3407,8 +3189,8 @@ func TestCopyObject(t *testing.T) {
 	}
 
 	// Create one object.
-	obj, ucs := newTestObject(1)
-	err := ss.UpdateObject(ctx, "src", "/foo", testContractSet, testETag, testMimeType, obj, ucs)
+	obj := newTestObject(1)
+	err := ss.UpdateObject(ctx, "src", "/foo", testContractSet, testETag, testMimeType, obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3456,9 +3238,6 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 		t.Fatal(err)
 	}
 	fcid := fcids[0]
-	usedContracts := map[types.PublicKey]types.FileContractID{
-		hk: fcid,
-	}
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
@@ -3498,14 +3277,9 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	err = ss.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
 		{
 			BufferID: packedSlabs[0].BufferID,
-			Shards: []object.Sector{
-				{
-					Host: hk,
-					Root: types.Hash256{1},
-				},
-			},
+			Shards:   newTestShards(hk, fcid, types.Hash256{1}),
 		},
-	}, usedContracts)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3545,10 +3319,10 @@ func TestListObjects(t *testing.T) {
 
 	ctx := context.Background()
 	for _, o := range objects {
-		obj, ucs := newTestObject(frand.Intn(9) + 1)
+		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, obj, ucs); err != nil {
+		if err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3704,6 +3478,21 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatalf("expected 0 lost sector, got %v", hi.Interactions.LostSectors)
 	}
 }
+func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) []object.Sector {
+	return []object.Sector{
+		newTestShard(hk, fcid, root),
+	}
+}
+
+func newTestShard(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) object.Sector {
+	return object.Sector{
+		LatestHost: hk,
+		Hosts: map[types.PublicKey][]types.FileContractID{
+			hk: {fcid},
+		},
+		Root: root,
+	}
+}
 
 func TestUpdateSlabSanityChecks(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
@@ -3717,18 +3506,11 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usedContracts := make(map[types.PublicKey]types.FileContractID)
-	for _, c := range contracts {
-		usedContracts[c.HostKey] = c.ID
-	}
 
 	// prepare a slab.
 	var shards []object.Sector
 	for i := 0; i < 5; i++ {
-		shards = append(shards, object.Sector{
-			Host: hks[i],
-			Root: types.Hash256{byte(i + 1)},
-		})
+		shards = append(shards, newTestShard(hks[i], contracts[i].ID, types.Hash256{byte(i + 1)}))
 	}
 	slab := object.Slab{
 		Key:    object.GenerateEncryptionKey(),
@@ -3740,7 +3522,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, object.Object{
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: slab}},
-	}, usedContracts)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3757,7 +3539,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err := ss.UpdateSlab(context.Background(), object.Slab{
 		Key:    slab.Key,
 		Shards: shards[:len(shards)-1],
-	}, testContractSet, usedContracts); !errors.Is(err, errInvalidNumberOfShards) {
+	}, testContractSet); !errors.Is(err, errInvalidNumberOfShards) {
 		t.Fatal(err)
 	}
 
@@ -3771,7 +3553,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		Key:    slab.Key,
 		Shards: reversedShards,
 	}
-	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet, usedContracts); !errors.Is(err, errShardRootChanged) {
+	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, errShardRootChanged) {
 		t.Fatal(err)
 	}
 }
@@ -3828,11 +3610,11 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			Key: s1,
 			Shards: []object.Sector{
-				{Host: hks[0], Root: types.Hash256{0}},
-				{Host: hks[1], Root: types.Hash256{1}},
+				newTestShard(hks[0], fcids[0], types.Hash256{0}),
+				newTestShard(hks[1], fcids[1], types.Hash256{1}),
 			},
 		}}},
-	}, map[types.PublicKey]types.FileContractID{hks[0]: fcids[0], hks[1]: fcids[1]})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3844,11 +3626,11 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			Key: s2,
 			Shards: []object.Sector{
-				{Host: hks[2], Root: types.Hash256{2}},
-				{Host: hks[3], Root: types.Hash256{3}},
+				newTestShard(hks[2], fcids[2], types.Hash256{2}),
+				newTestShard(hks[3], fcids[3], types.Hash256{3}),
 			},
 		}}},
-	}, map[types.PublicKey]types.FileContractID{hks[2]: fcids[2], hks[3]: fcids[3]})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
