@@ -1183,8 +1183,8 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			}
 			m := api.ContractMetric{
 				Timestamp:           time.Now(),
-				FCID:                fcid,
-				Host:                types.PublicKey(contract.Host.PublicKey),
+				ContractID:          fcid,
+				HostKey:             types.PublicKey(contract.Host.PublicKey),
 				RemainingCollateral: remainingCollateral,
 				RemainingFunds:      latestValues[fcid].validRenterPayout,
 				RevisionNumber:      latestValues[fcid].revision,

@@ -59,11 +59,11 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 	values.Set("start", api.TimeRFC3339(start).String())
 	values.Set("n", fmt.Sprint(n))
 	values.Set("interval", api.DurationMS(interval).String())
-	if opts.FCID != (types.FileContractID{}) {
-		values.Set("fcid", opts.FCID.String())
+	if opts.ContractID != (types.FileContractID{}) {
+		values.Set("fcid", opts.ContractID.String())
 	}
-	if opts.Host != (types.PublicKey{}) {
-		values.Set("host", opts.Host.String())
+	if opts.HostKey != (types.PublicKey{}) {
+		values.Set("host", opts.HostKey.String())
 	}
 	var resp []api.ContractMetric
 	err := c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?%s", api.MetricContract, values.Encode()), &resp)

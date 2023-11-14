@@ -1996,7 +1996,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
 	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
 		t.Fatalf("expected added churn, got %v", m.Direction)
-	} else if m.FCID == (types.FileContractID{}) {
+	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
@@ -2020,9 +2020,9 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
 	} else if m := cMetrics[0]; !startTime.Before(m.Timestamp) {
 		t.Fatalf("expected time to be after start time, got %v", m.Timestamp)
-	} else if m.FCID == (types.FileContractID{}) {
+	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
-	} else if m.Host == (types.PublicKey{}) {
+	} else if m.HostKey == (types.PublicKey{}) {
 		t.Fatal("expected non-zero Host")
 	} else if m.RemainingCollateral == (types.Currency{}) {
 		t.Fatal("expected non-zero RemainingCollateral")

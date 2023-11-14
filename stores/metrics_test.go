@@ -97,11 +97,11 @@ func TestContractChurnSetMetrics(t *testing.T) {
 				for _, recordedTime := range times {
 					fcid := types.FileContractID{i}
 					if err := ss.RecordContractSetChurnMetric(context.Background(), api.ContractSetChurnMetric{
-						Timestamp: recordedTime,
-						Name:      set,
-						Direction: dir,
-						Reason:    reason,
-						FCID:      fcid,
+						Timestamp:  recordedTime,
+						Name:       set,
+						Direction:  dir,
+						Reason:     reason,
+						ContractID: fcid,
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -175,7 +175,7 @@ func TestPerformanceMetrics(t *testing.T) {
 							Action:    action,
 							Timestamp: recordedTime,
 							Duration:  duration,
-							Host:      host,
+							HostKey:   host,
 							Origin:    origin,
 						}); err != nil {
 							t.Fatal(err)
@@ -217,9 +217,9 @@ func TestPerformanceMetrics(t *testing.T) {
 	})
 
 	// Filter by hosts.
-	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{Host: hosts[0]}, 3, func(m api.PerformanceMetric) {
-		if m.Host != hosts[0] {
-			t.Fatalf("expected hosts to be %v, got %v", hosts[0], m.Host)
+	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.PerformanceMetric) {
+		if m.HostKey != hosts[0] {
+			t.Fatalf("expected hosts to be %v, got %v", hosts[0], m.HostKey)
 		}
 	})
 
@@ -244,8 +244,8 @@ func TestContractMetrics(t *testing.T) {
 		for _, recordedTime := range times {
 			metric := api.ContractMetric{
 				Timestamp:           recordedTime,
-				FCID:                types.FileContractID{i},
-				Host:                host,
+				ContractID:          types.FileContractID{i},
+				HostKey:             host,
 				RemainingCollateral: types.MaxCurrency,
 				RemainingFunds:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				RevisionNumber:      math.MaxUint64,
@@ -255,7 +255,7 @@ func TestContractMetrics(t *testing.T) {
 				DeleteSpending:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				ListSpending:        types.NewCurrency64(1),
 			}
-			fcid2Metric[metric.FCID] = metric
+			fcid2Metric[metric.ContractID] = metric
 			if err := ss.RecordContractMetric(context.Background(), metric); err != nil {
 				t.Fatal(err)
 			}
@@ -277,8 +277,8 @@ func TestContractMetrics(t *testing.T) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
 		for _, m := range metrics {
-			if !cmp.Equal(m, fcid2Metric[m.FCID]) {
-				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.FCID]))
+			if !cmp.Equal(m, fcid2Metric[m.ContractID]) {
+				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
 			}
 			cmpFn(m)
 		}
@@ -289,17 +289,17 @@ func TestContractMetrics(t *testing.T) {
 	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{}, 3, func(m api.ContractMetric) {})
 
 	// Query by host.
-	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{Host: hosts[0]}, 3, func(m api.ContractMetric) {
-		if m.Host != hosts[0] {
-			t.Fatalf("expected host to be %v, got %v", hosts[0], m.Host)
+	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.ContractMetric) {
+		if m.HostKey != hosts[0] {
+			t.Fatalf("expected host to be %v, got %v", hosts[0], m.HostKey)
 		}
 	})
 
 	// Query by fcid.
 	fcid := types.FileContractID{2}
-	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{FCID: fcid}, 1, func(m api.ContractMetric) {
-		if m.FCID != fcid {
-			t.Fatalf("expected fcid to be %v, got %v", fcid, m.FCID)
+	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{ContractID: fcid}, 1, func(m api.ContractMetric) {
+		if m.ContractID != fcid {
+			t.Fatalf("expected fcid to be %v, got %v", fcid, m.ContractID)
 		}
 	})
 }
