@@ -450,19 +450,19 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	var metrics []api.ContractSetChurnMetric
 	for _, fcid := range added {
 		metrics = append(metrics, api.ContractSetChurnMetric{
-			Name:      c.ap.state.cfg.Contracts.Set,
-			FCID:      fcid,
-			Direction: api.ChurnDirAdded,
-			Timestamp: now,
+			Name:       c.ap.state.cfg.Contracts.Set,
+			ContractID: fcid,
+			Direction:  api.ChurnDirAdded,
+			Timestamp:  now,
 		})
 	}
 	for _, fcid := range removed {
 		metrics = append(metrics, api.ContractSetChurnMetric{
-			Name:      c.ap.state.cfg.Contracts.Set,
-			FCID:      fcid,
-			Direction: api.ChurnDirRemoved,
-			Reason:    removedReasons[fcid.String()],
-			Timestamp: now,
+			Name:       c.ap.state.cfg.Contracts.Set,
+			ContractID: fcid,
+			Direction:  api.ChurnDirRemoved,
+			Reason:     removedReasons[fcid.String()],
+			Timestamp:  now,
 		})
 	}
 	if len(metrics) > 0 {

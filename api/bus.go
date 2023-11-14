@@ -593,61 +593,42 @@ type (
 	}
 
 	ContractSetMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
 		Name string
-
-		Offset int
-		Limit  int
 	}
 
 	ContractSetChurnMetric struct {
-		Direction string               `json:"direction"`
-		FCID      types.FileContractID `json:"fcid"`
-		Name      string               `json:"name"`
-		Reason    string               `json:"reason,omitempty"`
-		Timestamp time.Time            `json:"timestamp"`
+		Direction  string               `json:"direction"`
+		ContractID types.FileContractID `json:"contractID"`
+		Name       string               `json:"name"`
+		Reason     string               `json:"reason,omitempty"`
+		Timestamp  time.Time            `json:"timestamp"`
 	}
 
 	ContractSetChurnMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
 		Name      string
 		Direction string
 		Reason    string
-
-		Offset int
-		Limit  int
 	}
 
 	PerformanceMetric struct {
 		Action    string          `json:"action"`
-		Host      types.PublicKey `json:"host"`
+		HostKey   types.PublicKey `json:"hostKey"`
 		Origin    string          `json:"origin"`
 		Duration  time.Duration   `json:"duration"`
 		Timestamp time.Time       `json:"timestamp"`
 	}
 
 	PerformanceMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
-		Action   string
-		Host     types.PublicKey
-		Origin   string
-		Duration time.Duration
-
-		Offset int
-		Limit  int
+		Action  string
+		HostKey types.PublicKey
+		Origin  string
 	}
 
 	ContractMetric struct {
 		Timestamp time.Time `json:"timestamp"`
 
-		FCID types.FileContractID `json:"fcid"`
-		Host types.PublicKey      `json:"host"`
+		ContractID types.FileContractID `json:"contractID"`
+		HostKey    types.PublicKey      `json:"hostKey"`
 
 		RemainingCollateral types.Currency `json:"remainingCollateral"`
 		RemainingFunds      types.Currency `json:"remainingFunds"`
@@ -661,13 +642,7 @@ type (
 	}
 
 	ContractMetricsQueryOpts struct {
-		After  time.Time
-		Before time.Time
-
-		FCID types.FileContractID
-		Host types.PublicKey
-
-		Offset int
-		Limit  int
+		ContractID types.FileContractID
+		HostKey    types.PublicKey
 	}
 )

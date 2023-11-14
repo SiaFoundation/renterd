@@ -1965,7 +1965,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// Get contract set metrics.
-	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
+	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, math.MaxUint32, time.Second, api.ContractSetMetricsQueryOpts{})
 	cluster.tt.OK(err)
 
 	for i := 0; i < len(csMetrics); i++ {
@@ -1989,14 +1989,14 @@ func TestBusRecordedMetrics(t *testing.T) {
 	}
 
 	// Get churn metrics. Should have 1 for the new contract.
-	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), api.ContractSetChurnMetricsQueryOpts{})
+	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, math.MaxUint32, time.Second, api.ContractSetChurnMetricsQueryOpts{})
 	cluster.tt.OK(err)
 
 	if len(cscMetrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
 	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
 		t.Fatalf("expected added churn, got %v", m.Direction)
-	} else if m.FCID == (types.FileContractID{}) {
+	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
@@ -2008,7 +2008,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 	var cMetrics []api.ContractMetric
 	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
 		// Retry fetching metrics since they are buffered.
-		cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), api.ContractMetricsQueryOpts{})
+		cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, math.MaxUint32, time.Second, api.ContractMetricsQueryOpts{})
 		cluster.tt.OK(err)
 		if len(cMetrics) != 1 {
 			return fmt.Errorf("expected 1 metric, got %v", len(cMetrics))
@@ -2020,9 +2020,9 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
 	} else if m := cMetrics[0]; !startTime.Before(m.Timestamp) {
 		t.Fatalf("expected time to be after start time, got %v", m.Timestamp)
-	} else if m.FCID == (types.FileContractID{}) {
+	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
-	} else if m.Host == (types.PublicKey{}) {
+	} else if m.HostKey == (types.PublicKey{}) {
 		t.Fatal("expected non-zero Host")
 	} else if m.RemainingCollateral == (types.Currency{}) {
 		t.Fatal("expected non-zero RemainingCollateral")

@@ -18,7 +18,7 @@ func TestContractSetMetrics(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	metrics, err := ss.ContractSetMetrics(context.Background(), api.ContractSetMetricsQueryOpts{})
+	metrics, err := ss.ContractSetMetrics(context.Background(), testStart, 1, time.Minute, api.ContractSetMetricsQueryOpts{})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(metrics) != 1 {
@@ -35,7 +35,7 @@ func TestContractSetMetrics(t *testing.T) {
 	// The recorded timestamps are out of order to test that the query ordery by
 	// time.
 	cs := t.Name()
-	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
+	times := []time.Time{time.UnixMilli(200), time.UnixMilli(100), time.UnixMilli(150)}
 	for i, recordedTime := range times {
 		if err := ss.RecordContractSetMetric(context.Background(), api.ContractSetMetric{
 			Contracts: i + 1,
@@ -46,14 +46,14 @@ func TestContractSetMetrics(t *testing.T) {
 		}
 	}
 
-	assertMetrics := func(opts api.ContractSetMetricsQueryOpts, expected int, contracts []int) {
+	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts, expected int, contracts []int) {
 		t.Helper()
-		metrics, err := ss.ContractSetMetrics(context.Background(), opts)
+		metrics, err := ss.ContractSetMetrics(context.Background(), start, n, interval, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(metrics) != expected {
-			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
+			t.Fatalf("expected %v metrics, got %v: %v", expected, len(metrics), metrics)
 		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
 			return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
 		}) {
@@ -66,16 +66,19 @@ func TestContractSetMetrics(t *testing.T) {
 		}
 	}
 
-	// Check that we have 4 metrics now.
-	assertMetrics(api.ContractSetMetricsQueryOpts{}, 4, []int{2, 3, 1, 0})
+	// Start at unix timestamp 100ms and fetch 3 period at a 50ms interval. This
+	// should return 3 metrics.
+	start := time.UnixMilli(100)
+	assertMetrics(start, 3, 50*time.Millisecond, api.ContractSetMetricsQueryOpts{}, 3, []int{2, 3, 1})
+
+	// Start at the same timestamp but fetch 2 period at 100ms each.
+	assertMetrics(start, 2, 51*time.Millisecond, api.ContractSetMetricsQueryOpts{}, 2, []int{2, 1})
 
 	// Query all metrics by contract set.
-	assertMetrics(api.ContractSetMetricsQueryOpts{Name: cs}, 3, []int{2, 3, 1})
+	assertMetrics(start, 3, 50*time.Millisecond, api.ContractSetMetricsQueryOpts{Name: cs}, 3, []int{2, 3, 1})
 
 	// Query the metric in the middle of the 3 we added.
-	after := time.UnixMilli(1)  // 'after' is exclusive
-	before := time.UnixMilli(2) // 'before' is inclusive
-	assertMetrics(api.ContractSetMetricsQueryOpts{After: after, Before: before}, 1, []int{3})
+	assertMetrics(time.UnixMilli(150), 1, 50*time.Millisecond, api.ContractSetMetricsQueryOpts{Name: cs}, 1, []int{3})
 }
 
 func TestContractChurnSetMetrics(t *testing.T) {
@@ -94,11 +97,11 @@ func TestContractChurnSetMetrics(t *testing.T) {
 				for _, recordedTime := range times {
 					fcid := types.FileContractID{i}
 					if err := ss.RecordContractSetChurnMetric(context.Background(), api.ContractSetChurnMetric{
-						Timestamp: recordedTime,
-						Name:      set,
-						Direction: dir,
-						Reason:    reason,
-						FCID:      fcid,
+						Timestamp:  recordedTime,
+						Name:       set,
+						Direction:  dir,
+						Reason:     reason,
+						ContractID: fcid,
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -108,9 +111,9 @@ func TestContractChurnSetMetrics(t *testing.T) {
 		}
 	}
 
-	assertMetrics := func(opts api.ContractSetChurnMetricsQueryOpts, expected int, cmp func(api.ContractSetChurnMetric)) {
+	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts, expected int, cmp func(api.ContractSetChurnMetric)) {
 		t.Helper()
-		metrics, err := ss.ContractSetChurnMetrics(context.Background(), opts)
+		metrics, err := ss.ContractSetChurnMetrics(context.Background(), start, n, interval, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,33 +130,25 @@ func TestContractChurnSetMetrics(t *testing.T) {
 	}
 
 	// Query without any filters.
-	assertMetrics(api.ContractSetChurnMetricsQueryOpts{}, 24, func(m api.ContractSetChurnMetric) {})
+	start := time.UnixMilli(1)
+	assertMetrics(start, 3, time.Millisecond, api.ContractSetChurnMetricsQueryOpts{}, 3, func(m api.ContractSetChurnMetric) {})
 
 	// Query by set name.
-	assertMetrics(api.ContractSetChurnMetricsQueryOpts{Name: sets[0]}, 12, func(m api.ContractSetChurnMetric) {
+	assertMetrics(start, 3, time.Millisecond, api.ContractSetChurnMetricsQueryOpts{Name: sets[0]}, 3, func(m api.ContractSetChurnMetric) {
 		if m.Name != sets[0] {
 			t.Fatalf("expected name to be %v, got %v", sets[0], m.Name)
 		}
 	})
 
-	// Query by time.
-	after := time.UnixMilli(2)  // 'after' is exclusive
-	before := time.UnixMilli(3) // 'before' is inclusive
-	assertMetrics(api.ContractSetChurnMetricsQueryOpts{After: after, Before: before}, 8, func(m api.ContractSetChurnMetric) {
-		if !m.Timestamp.Equal(before) {
-			t.Fatalf("expected time to be %v, got %v", before, time.Time(m.Timestamp).UnixMilli())
-		}
-	})
-
 	// Query by direction.
-	assertMetrics(api.ContractSetChurnMetricsQueryOpts{Direction: directions[0]}, 12, func(m api.ContractSetChurnMetric) {
+	assertMetrics(start, 3, time.Millisecond, api.ContractSetChurnMetricsQueryOpts{Direction: directions[0]}, 3, func(m api.ContractSetChurnMetric) {
 		if m.Direction != directions[0] {
 			t.Fatalf("expected direction to be %v, got %v", directions[1], m.Direction)
 		}
 	})
 
 	// Query by reason.
-	assertMetrics(api.ContractSetChurnMetricsQueryOpts{Reason: reasons[0]}, 12, func(m api.ContractSetChurnMetric) {
+	assertMetrics(start, 3, time.Millisecond, api.ContractSetChurnMetricsQueryOpts{Reason: reasons[0]}, 3, func(m api.ContractSetChurnMetric) {
 		if m.Reason != reasons[0] {
 			t.Fatalf("expected reason to be %v, got %v", reasons[0], m.Reason)
 		}
@@ -180,7 +175,7 @@ func TestPerformanceMetrics(t *testing.T) {
 							Action:    action,
 							Timestamp: recordedTime,
 							Duration:  duration,
-							Host:      host,
+							HostKey:   host,
 							Origin:    origin,
 						}); err != nil {
 							t.Fatal(err)
@@ -192,9 +187,9 @@ func TestPerformanceMetrics(t *testing.T) {
 		}
 	}
 
-	assertMetrics := func(opts api.PerformanceMetricsQueryOpts, expected int, cmp func(api.PerformanceMetric)) {
+	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts, expected int, cmp func(api.PerformanceMetric)) {
 		t.Helper()
-		metrics, err := ss.PerformanceMetrics(context.Background(), opts)
+		metrics, err := ss.PerformanceMetrics(context.Background(), start, n, interval, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -211,42 +206,27 @@ func TestPerformanceMetrics(t *testing.T) {
 	}
 
 	// Query without any filters.
-	assertMetrics(api.PerformanceMetricsQueryOpts{}, 48, func(m api.PerformanceMetric) {})
+	start := time.UnixMilli(1)
+	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{}, 3, func(m api.PerformanceMetric) {})
 
 	// Filter by actions.
-	assertMetrics(api.PerformanceMetricsQueryOpts{Action: actions[0]}, 24, func(m api.PerformanceMetric) {
+	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{Action: actions[0]}, 3, func(m api.PerformanceMetric) {
 		if m.Action != actions[0] {
 			t.Fatalf("expected action to be %v, got %v", actions[0], m.Action)
 		}
 	})
 
 	// Filter by hosts.
-	assertMetrics(api.PerformanceMetricsQueryOpts{Host: hosts[0]}, 24, func(m api.PerformanceMetric) {
-		if m.Host != hosts[0] {
-			t.Fatalf("expected hosts to be %v, got %v", hosts[0], m.Host)
+	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.PerformanceMetric) {
+		if m.HostKey != hosts[0] {
+			t.Fatalf("expected hosts to be %v, got %v", hosts[0], m.HostKey)
 		}
 	})
 
 	// Filter by reporters.
-	assertMetrics(api.PerformanceMetricsQueryOpts{Origin: origins[0]}, 24, func(m api.PerformanceMetric) {
+	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{Origin: origins[0]}, 3, func(m api.PerformanceMetric) {
 		if m.Origin != origins[0] {
 			t.Fatalf("expected origin to be %v, got %v", origins[0], m.Origin)
-		}
-	})
-
-	// Filter by duration.
-	assertMetrics(api.PerformanceMetricsQueryOpts{Duration: durations[0]}, 24, func(m api.PerformanceMetric) {
-		if m.Duration != durations[0] {
-			t.Fatalf("expected duration to be %v, got %v", durations[0], m.Duration)
-		}
-	})
-
-	// Filter by time.
-	after := time.UnixMilli(2)  // 'after' is exclusive
-	before := time.UnixMilli(3) // 'before' is inclusive
-	assertMetrics(api.PerformanceMetricsQueryOpts{After: after, Before: before}, 16, func(m api.PerformanceMetric) {
-		if !m.Timestamp.Equal(before) {
-			t.Fatalf("expected time to be %v, got %v", before, m.Timestamp)
 		}
 	})
 }
@@ -264,8 +244,8 @@ func TestContractMetrics(t *testing.T) {
 		for _, recordedTime := range times {
 			metric := api.ContractMetric{
 				Timestamp:           recordedTime,
-				FCID:                types.FileContractID{i},
-				Host:                host,
+				ContractID:          types.FileContractID{i},
+				HostKey:             host,
 				RemainingCollateral: types.MaxCurrency,
 				RemainingFunds:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				RevisionNumber:      math.MaxUint64,
@@ -275,7 +255,7 @@ func TestContractMetrics(t *testing.T) {
 				DeleteSpending:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				ListSpending:        types.NewCurrency64(1),
 			}
-			fcid2Metric[metric.FCID] = metric
+			fcid2Metric[metric.ContractID] = metric
 			if err := ss.RecordContractMetric(context.Background(), metric); err != nil {
 				t.Fatal(err)
 			}
@@ -283,9 +263,9 @@ func TestContractMetrics(t *testing.T) {
 		}
 	}
 
-	assertMetrics := func(opts api.ContractMetricsQueryOpts, expected int, cmpFn func(api.ContractMetric)) {
+	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts, expected int, cmpFn func(api.ContractMetric)) {
 		t.Helper()
-		metrics, err := ss.ContractMetrics(context.Background(), opts)
+		metrics, err := ss.ContractMetrics(context.Background(), start, n, interval, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -297,37 +277,29 @@ func TestContractMetrics(t *testing.T) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
 		for _, m := range metrics {
-			if !cmp.Equal(m, fcid2Metric[m.FCID]) {
-				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.FCID]))
+			if !cmp.Equal(m, fcid2Metric[m.ContractID]) {
+				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
 			}
 			cmpFn(m)
 		}
 	}
 
 	// Query without any filters.
-	assertMetrics(api.ContractMetricsQueryOpts{}, 6, func(m api.ContractMetric) {})
+	start := time.UnixMilli(1)
+	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{}, 3, func(m api.ContractMetric) {})
 
 	// Query by host.
-	assertMetrics(api.ContractMetricsQueryOpts{Host: hosts[0]}, 3, func(m api.ContractMetric) {
-		if m.Host != hosts[0] {
-			t.Fatalf("expected host to be %v, got %v", hosts[0], m.Host)
+	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.ContractMetric) {
+		if m.HostKey != hosts[0] {
+			t.Fatalf("expected host to be %v, got %v", hosts[0], m.HostKey)
 		}
 	})
 
 	// Query by fcid.
 	fcid := types.FileContractID{2}
-	assertMetrics(api.ContractMetricsQueryOpts{FCID: fcid}, 1, func(m api.ContractMetric) {
-		if m.FCID != fcid {
-			t.Fatalf("expected fcid to be %v, got %v", fcid, m.FCID)
-		}
-	})
-
-	// Query by time.
-	after := time.UnixMilli(2)  // 'after' is exclusive
-	before := time.UnixMilli(3) // 'before' is inclusive
-	assertMetrics(api.ContractMetricsQueryOpts{After: after, Before: before}, 2, func(m api.ContractMetric) {
-		if !m.Timestamp.Equal(before) {
-			t.Fatalf("expected time to be %v, got %v", before, m.Timestamp)
+	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{ContractID: fcid}, 1, func(m api.ContractMetric) {
+		if m.ContractID != fcid {
+			t.Fatalf("expected fcid to be %v, got %v", fcid, m.ContractID)
 		}
 	})
 }
