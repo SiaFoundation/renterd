@@ -48,10 +48,10 @@ type uploadParameters struct {
 	encryptionOffset uint64
 	mimeType         string
 
+	ups         api.UploadPackingSettings
 	rs          api.RedundancySettings
 	bh          uint64
 	contractSet string
-	packing     bool
 }
 
 func defaultParameters() uploadParameters {
@@ -59,6 +59,7 @@ func defaultParameters() uploadParameters {
 		ec:               object.GenerateEncryptionKey(), // random key
 		encryptionOffset: 0,                              // from the beginning
 		rs:               build.DefaultRedundancySettings,
+		ups:              build.DefaultUploadPackingSettings,
 	}
 }
 
@@ -94,9 +95,9 @@ func WithMimeType(mimeType string) UploadOption {
 	}
 }
 
-func WithPacking(packing bool) UploadOption {
+func WithUploadPackingSettings(ups api.UploadPackingSettings) UploadOption {
 	return func(up *uploadParameters) {
-		up.packing = packing
+		up.ups = ups
 	}
 }
 
@@ -285,7 +286,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// if packing was enabled try uploading packed slabs
-	if up.packing {
+	if up.ups.Enabled {
 		if err := w.tryUploadPackedSlabs(ctx, up.rs, up.contractSet, bufferSizeLimitReached); err != nil {
 			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 		}
@@ -322,7 +323,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	}
 
 	// if packing was enabled try uploading packed slabs
-	if up.packing {
+	if up.ups.Enabled {
 		if err := w.tryUploadPackedSlabs(ctx, up.rs, up.contractSet, bufferSizeLimitReached); err != nil {
 			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 		}
@@ -544,7 +545,20 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, up.rs.TotalShards, contracts, up.bh, lockPriority)
 	if err != nil {
-		return object.Object{}, nil, nil, "", err
+		// when there are not enough contracts and we have upload packing
+		// enabled, we want to fetch the size of the current slab buffer and
+		// check if we're still under its max size because if we are we can
+		// allow this upload to happen without necessarily having enough
+		// contracts to support the redundancy at this point in time
+		if errors.Is(err, errNotEnoughContracts) && up.ups.Enabled {
+			if res, err := mgr.b.SlabBufferSize(ctx, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet); err != nil {
+				mgr.logger.Errorf("failed to fetch slab buffer size, err: %v", err)
+			} else if res.SlabBufferMaxSizeSoftReached {
+				return object.Object{}, nil, nil, "", err
+			}
+		} else {
+			return object.Object{}, nil, nil, "", err
+		}
 	}
 	defer finishFn()
 
@@ -588,7 +602,7 @@ loop:
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				return object.Object{}, nil, nil, "", err
 			}
-			if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
+			if up.ups.Enabled && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
 				// uploading.
 				partialSlab = data[:length]

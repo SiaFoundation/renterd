@@ -163,6 +163,7 @@ type (
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, bufferSize int64, err error)
+		BufferSize(_ context.Context, minShards, totalShards uint8, contractSet string) (int64, error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
@@ -1295,6 +1296,48 @@ func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
 	jc.ResponseWriter.Write(data)
 }
 
+func (b *bus) slabsPartialBufferSizeHandlerGET(jc jape.Context) {
+	var minShards int
+	if jc.DecodeForm("minShards", &minShards) != nil {
+		return
+	}
+	var totalShards int
+	if jc.DecodeForm("totalShards", &totalShards) != nil {
+		return
+	}
+	var contractSet string
+	if jc.DecodeForm("contractSet", &contractSet) != nil {
+		return
+	}
+	if minShards <= 0 || totalShards <= minShards {
+		jc.Error(errors.New("min_shards must be positive and total_shards must be greater than min_shards"), http.StatusBadRequest)
+		return
+	}
+	if totalShards > math.MaxUint8 {
+		jc.Error(fmt.Errorf("total_shards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
+		return
+	}
+	if contractSet == "" {
+		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	}
+
+	bufferSize, err := b.ms.BufferSize(jc.Request.Context(), uint8(minShards), uint8(totalShards), contractSet)
+	if jc.Check("failed to fetch buffer size", err) != nil {
+		return
+	}
+
+	var pus api.UploadPackingSettings
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(api.SlabBufferSizeResponse{
+		SlabBufferSize:               bufferSize,
+		SlabBufferMaxSizeSoftReached: bufferSize >= pus.SlabBufferMaxSizeSoft,
+	})
+}
+
 func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	var minShards int
 	if jc.DecodeForm("minShards", &minShards) != nil {
@@ -1463,20 +1506,17 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		contractSet = css.Default
 	}
 
-	var uploadPacking bool
-	var pus api.UploadPackingSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	var ups api.UploadPackingSettings
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &ups); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
 		return
-	} else if err == nil {
-		uploadPacking = pus.Enabled
 	}
 
 	jc.Encode(api.UploadParams{
-		ContractSet:   contractSet,
-		CurrentHeight: b.cm.TipState().Index.Height,
-		GougingParams: gp,
-		UploadPacking: uploadPacking,
+		ContractSet:           contractSet,
+		CurrentHeight:         b.cm.TipState().Index.Height,
+		GougingParams:         gp,
+		UploadPackingSettings: ups,
 	})
 }
 
@@ -2130,13 +2170,14 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
-		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
-		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
-		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
-		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
-		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
+		"POST   /slabs/migration":         b.slabsMigrationHandlerPOST,
+		"GET   /slabs/partial/buffersize": b.slabsPartialBufferSizeHandlerGET,
+		"GET    /slabs/partial/:key":      b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":           b.slabsPartialHandlerPOST,
+		"POST   /slabs/refreshhealth":     b.slabsRefreshHealthHandlerPOST,
+		"GET    /slab/:key":               b.slabHandlerGET,
+		"GET    /slab/:key/objects":       b.slabObjectsHandlerGET,
+		"PUT    /slab":                    b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,
 		"GET    /stats/objects": b.objectsStatshandlerGET,

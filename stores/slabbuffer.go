@@ -282,12 +282,24 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		}
 	}
 
-	return slabs, mgr.BufferSize(gid), nil
+	var bufferSize int64
+	mgr.mu.Lock()
+	for _, buffer := range mgr.completeBuffers[gid] {
+		bufferSize += buffer.maxSize
+	}
+	for _, buffer := range mgr.incompleteBuffers[gid] {
+		bufferSize += buffer.maxSize
+	}
+	mgr.mu.Unlock()
+
+	return slabs, bufferSize, nil
 }
 
-func (mgr *SlabBufferManager) BufferSize(gid bufferGroupID) (total int64) {
+func (mgr *SlabBufferManager) BufferSize(minShards, totalShards uint8, contractSetID uint) (total int64) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
+
+	gid := bufferGID(minShards, totalShards, uint32(contractSetID))
 	for _, buffer := range mgr.completeBuffers[gid] {
 		total += buffer.maxSize
 	}

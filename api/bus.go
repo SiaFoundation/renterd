@@ -366,9 +366,9 @@ type PackedSlabsRequestPOST struct {
 
 // UploadParams contains the metadata needed by a worker to upload an object.
 type UploadParams struct {
-	CurrentHeight uint64
-	ContractSet   string
-	UploadPacking bool
+	CurrentHeight         uint64
+	ContractSet           string
+	UploadPackingSettings UploadPackingSettings
 	GougingParams
 }
 
@@ -553,6 +553,11 @@ type SearchHostsRequest struct {
 	UsabilityMode   string            `json:"usabilityMode"`
 	AddressContains string            `json:"addressContains"`
 	KeyIn           []types.PublicKey `json:"keyIn"`
+}
+
+type SlabBufferSizeResponse struct {
+	SlabBufferMaxSizeSoftReached bool  `json:"slabBufferMaxSizeSoftReached"`
+	SlabBufferSize               int64 `json:"slabBufferSize"`
 }
 
 type AddPartialSlabResponse struct {

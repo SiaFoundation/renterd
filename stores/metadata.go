@@ -1307,6 +1307,14 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
+func (s *SQLStore) BufferSize(ctx context.Context, minShards, totalShards uint8, contractSet string) (int64, error) {
+	var contractSetID uint
+	if err := s.db.Raw("SELECT id FROM contract_sets WHERE name = ?", contractSet).Scan(&contractSetID).Error; err != nil {
+		return 0, err
+	}
+	return s.slabBufferMgr.BufferSize(minShards, totalShards, contractSetID), nil
+}
+
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject

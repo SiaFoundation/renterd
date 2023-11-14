@@ -152,6 +152,7 @@ type Bus interface {
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+	SlabBufferSize(ctx context.Context, minShards, totalShards uint8, contractSet string) (res api.SlabBufferSizeResponse, err error)
 
 	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 
@@ -1121,8 +1122,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithMimeType(mimeType),
-		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
+		WithUploadPackingSettings(up.UploadPackingSettings),
 	}
 
 	// attach gouging checker to the context
@@ -1230,8 +1231,8 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	opts := []UploadOption{
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
-		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
+		WithUploadPackingSettings(up.UploadPackingSettings),
 	}
 	if disablePreshardingEncryption {
 		opts = append(opts, WithCustomKey(object.NoOpKey))

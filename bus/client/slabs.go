@@ -120,6 +120,18 @@ func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
 	return
 }
 
+// SlabBufferSize returns the buffer size for the slab buffer that matches the
+// given redundancy and contractset.
+func (c *Client) SlabBufferSize(ctx context.Context, minShards, totalShards uint8, contractSet string) (res api.SlabBufferSizeResponse, err error) {
+	values := url.Values{}
+	values.Set("minShards", fmt.Sprint(minShards))
+	values.Set("totalShards", fmt.Sprint(totalShards))
+	values.Set("contractSet", contractSet)
+
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slabs/partial/buffersize?"+values.Encode()), &res)
+	return
+}
+
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.
