@@ -204,6 +204,10 @@ type (
 		SectorIndex uint
 		SectorRoot  []byte
 		SectorHost  publicKey
+
+		// contract
+		FCID    fileContractID
+		HostKey publicKey
 	}
 
 	// rawObjectMetadata is used for hydrating object metadata.
@@ -499,15 +503,26 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	// hydrate all sectors
 	slabID := raw[0].SlabID
 	sectors := make([]object.Sector, 0, len(raw))
+	secIdx := uint(0)
 	for _, sector := range raw {
 		if sector.SlabID != slabID {
 			return object.SlabSlice{}, errors.New("sectors from different slabs") // developer error
 		}
-		// TODO: fix this
-		sectors = append(sectors, object.Sector{
-			LatestHost: types.PublicKey(sector.SectorHost),
-			Root:       *(*types.Hash256)(sector.SectorRoot),
-		})
+		hk := types.PublicKey(sector.SectorHost)
+		fcid := types.FileContractID(sector.FCID)
+
+		// next sector
+		if sector.SectorIndex != secIdx {
+			sectors = append(sectors, object.Sector{
+				Hosts:      make(map[types.PublicKey][]types.FileContractID),
+				LatestHost: hk,
+				Root:       *(*types.Hash256)(sector.SectorRoot),
+			})
+			secIdx = sector.SectorIndex
+		}
+
+		// add host+contract to sector
+		sectors[len(sectors)-1].Hosts[hk] = append(sectors[len(sectors)-1].Hosts[hk], fcid)
 	}
 
 	// hydrate all fields
@@ -1940,13 +1955,16 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as SectorHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
+		Joins("LEFT JOIN contract_sectors cs ON sec.id = cs.`db_sector_id`").
+		Joins("LEFT JOIN contracts c ON cs.`db_contract_id` = c.`id`").
+		Joins("LEFT JOIN hosts h ON c.host_id = h.id").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
 		Order("sli.id ASC").

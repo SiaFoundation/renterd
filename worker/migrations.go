@@ -76,7 +76,7 @@ SHARDS:
 	// which we have a contract (so hosts from which we can download)
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
-		for hk, _ := range s.Shards[si].Hosts {
+		for hk := range s.Shards[si].Hosts {
 			if _, exists := h2c[hk]; exists {
 				missingShards--
 				break
