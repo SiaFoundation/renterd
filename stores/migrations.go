@@ -303,6 +303,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration000027_addMultipartUploadIndices(tx, logger)
 			},
 		},
+		{
+			ID: "00028_lostSectors",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00028_lostSectors(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1237,5 +1243,16 @@ func performMigration000027_addMultipartUploadIndices(txn *gorm.DB, logger *zap.
 	}
 
 	logger.Info("migration 000027_addMultipartUploadIndices complete")
+	return nil
+}
+
+func performMigration00028_lostSectors(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00028_lostSectors")
+	if !txn.Migrator().HasColumn(&dbHost{}, "LostSectors") {
+		if err := txn.Migrator().AddColumn(&dbHost{}, "LostSectors"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00028_lostSectors complete")
 	return nil
 }

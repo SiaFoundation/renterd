@@ -3684,6 +3684,25 @@ func TestDeleteHostSector(t *testing.T) {
 	} else if sector := sectors[0]; len(sector.Contracts) != 2 {
 		t.Fatal("expected 2 contracts", len(sector.Contracts))
 	}
+
+	hi, err := ss.Host(context.Background(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if hi.Interactions.LostSectors != 2 {
+		t.Fatalf("expected 2 lost sector, got %v", hi.Interactions.LostSectors)
+	}
+
+	// Reset lost sectors again.
+	if err := ss.ResetLostSectors(context.Background(), hk1); err != nil {
+		t.Fatal(err)
+	}
+
+	hi, err = ss.Host(context.Background(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if hi.Interactions.LostSectors != 0 {
+		t.Fatalf("expected 0 lost sector, got %v", hi.Interactions.LostSectors)
+	}
 }
 
 func TestUpdateSlabSanityChecks(t *testing.T) {

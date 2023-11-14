@@ -1427,6 +1427,11 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 			} else if res.RowsAffected != int64(len(sectors)) {
 				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
 			}
+
+			// Increment the host's lostSectors by the number of lost sectors.
+			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
+				return fmt.Errorf("failed to increment lost sectors: %w", err)
+			}
 		}
 
 		// Fetch the sector and update the latest_host field if the host for

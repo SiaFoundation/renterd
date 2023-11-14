@@ -15,6 +15,7 @@ import (
 
 var (
 	alertAccountRefillID = frand.Entropy256() // constant until restarted
+	alertLostSectorsID   = frand.Entropy256() // constant until restarted
 	alertLowBalanceID    = frand.Entropy256() // constant until restarted
 	alertMigrationID     = frand.Entropy256() // constant until restarted
 	alertRenewalFailedID = frand.Entropy256() // constant until restarted
@@ -26,6 +27,10 @@ func alertIDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
 
 func alertIDForContract(alertID [32]byte, contract api.ContractMetadata) types.Hash256 {
 	return types.HashBytes(append(alertID[:], contract.ID[:]...))
+}
+
+func alertIDForHost(alertID [32]byte, hk types.PublicKey) types.Hash256 {
+	return types.HashBytes(append(alertID[:], hk[:]...))
 }
 
 func alertIDForSlab(alertID [32]byte, slab object.Slab) types.Hash256 {
@@ -126,6 +131,20 @@ func newContractSetChangeAlert(name string, added, removed int, removedReasons m
 			"removed":  removed,
 			"removals": removedReasons,
 			"hint":     hint,
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newLostSectorsAlert(hk types.PublicKey, lostSectors uint64) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertIDForHost(alertLostSectorsID, hk),
+		Severity: alerts.SeverityWarning,
+		Message:  "Host has lost sectors",
+		Data: map[string]interface{}{
+			"lostSectors": lostSectors,
+			"hostKey":     hk.String(),
+			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature. If you think this was a mistake and you want to ignore this warning for now you can reset the lost sector count",
 		},
 		Timestamp: time.Now(),
 	}

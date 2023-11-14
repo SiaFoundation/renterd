@@ -86,15 +86,16 @@ func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, 
 
 // Interactions contains metadata about a host's interactions.
 type Interactions struct {
-	TotalScans              uint64
-	LastScan                time.Time
-	LastScanSuccess         bool
-	SecondToLastScanSuccess bool
-	Uptime                  time.Duration
-	Downtime                time.Duration
+	TotalScans              uint64        `json:"totalScans"`
+	LastScan                time.Time     `json:"lastScan"`
+	LastScanSuccess         bool          `json:"lastScanSuccess"`
+	LostSectors             uint64        `json:"lostSectors"`
+	SecondToLastScanSuccess bool          `json:"secondToLastScanSuccess"`
+	Uptime                  time.Duration `json:"uptime"`
+	Downtime                time.Duration `json:"downtime"`
 
-	SuccessfulInteractions float64
-	FailedInteractions     float64
+	SuccessfulInteractions float64 `json:"successfulInteractions"`
+	FailedInteractions     float64 `json:"failedInteractions"`
 }
 
 type HostScan struct {
