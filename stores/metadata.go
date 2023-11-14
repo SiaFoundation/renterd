@@ -2251,7 +2251,7 @@ func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileCo
 		UPDATE slabs SET health_valid_until = ? WHERE id in (
 			   SELECT *
 			   FROM (
-					   SELECT DISTINCT slabs.id
+					   SELECT slabs.id
 					   FROM slabs
 					   LEFT JOIN sectors se ON se.db_slab_id = slabs.id
 					   LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
