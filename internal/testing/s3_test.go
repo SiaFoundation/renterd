@@ -586,3 +586,61 @@ func TestS3SpecialChars(t *testing.T) {
 		}
 	}
 }
+
+func TestS3SettingsValidate(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+
+	tests := []struct {
+		id         string
+		key        string
+		shouldFail bool
+	}{
+		{
+			// Min length
+			id:         "id",
+			key:        "aaaaaaaaaaaaaaaa",
+			shouldFail: false,
+		},
+		{
+			// Max length
+			id:         "id",
+			key:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			shouldFail: false,
+		},
+		{
+			// Min length - 1
+			id:         "id",
+			key:        "aaaaaaaaaaaaaaa",
+			shouldFail: true,
+		},
+		{
+			// Max length + 1
+			id:         "id",
+			key:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			shouldFail: true,
+		},
+		{
+			// No ID
+			id:         "",
+			key:        "aaaaaaaaaaaaaaaa",
+			shouldFail: true,
+		},
+	}
+	for i, test := range tests {
+		err := cluster.Bus.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
+			V4Keypairs: map[string]string{
+				test.id: test.key,
+			},
+		})
+		if err != nil && !test.shouldFail {
+			t.Errorf("%d: unexpected error: %v", i, err)
+		} else if err == nil && test.shouldFail {
+			t.Errorf("%d: expected error", i)
+		}
+	}
+}

@@ -92,8 +92,8 @@ var (
 		TotalShards: 3,
 	}
 
-	testS3Credentials = credentials.NewStaticV4("myaccesskeyidentifier", "mysecret", "")
-	testS3AuthPairs   = map[string]string{"myaccesskeyidentifier": "mysecret"}
+	testS3Credentials = credentials.NewStaticV4("myaccesskeyidentifier", "mysupersecretkey", "")
+	testS3AuthPairs   = map[string]string{"myaccesskeyidentifier": "mysupersecretkey"}
 )
 
 type TT struct {

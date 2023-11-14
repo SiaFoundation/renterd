@@ -1409,6 +1409,15 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update redundancy settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+	case api.SettingS3Authentication:
+		var s3as api.S3AuthenticationSettings
+		if err := json.Unmarshal(data, &s3as); err != nil {
+			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := s3as.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
+			return
+		}
 	}
 
 	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
