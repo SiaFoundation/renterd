@@ -1296,7 +1296,7 @@ func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
 	jc.ResponseWriter.Write(data)
 }
 
-func (b *bus) slabsPartialBufferSizeHandlerGET(jc jape.Context) {
+func (b *bus) slabsBufferSizeHandlerGET(jc jape.Context) {
 	var minShards int
 	if jc.DecodeForm("minShards", &minShards) != nil {
 		return
@@ -2170,14 +2170,14 @@ func (b *bus) Handler() http.Handler {
 		"PUT    /setting/:key": b.settingKeyHandlerPUT,
 		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
-		"POST   /slabs/migration":          b.slabsMigrationHandlerPOST,
-		"GET    /slabs/partial/buffersize": b.slabsPartialBufferSizeHandlerGET,
-		"GET    /slabs/partial/:key":       b.slabsPartialHandlerGET,
-		"POST   /slabs/partial":            b.slabsPartialHandlerPOST,
-		"POST   /slabs/refreshhealth":      b.slabsRefreshHealthHandlerPOST,
-		"GET    /slab/:key":                b.slabHandlerGET,
-		"GET    /slab/:key/objects":        b.slabObjectsHandlerGET,
-		"PUT    /slab":                     b.slabHandlerPUT,
+		"GET    /slabs/buffersize":    b.slabsBufferSizeHandlerGET,
+		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
+		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
+		"GET    /slab/:key":           b.slabHandlerGET,
+		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
+		"PUT    /slab":                b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,
 		"GET    /stats/objects": b.objectsStatshandlerGET,
