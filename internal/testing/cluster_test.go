@@ -926,6 +926,9 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Wait for account to appear.
 	accounts := cluster.WaitForAccounts()
 
+	// Shut down the autopilot to prevent it from interfering with the test.
+	cluster.ShutdownAutopilot(context.Background())
+
 	// Newly created accounts are !cleanShutdown. Simulate a sync to change
 	// that.
 	for _, acc := range accounts {
@@ -972,13 +975,16 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Check that the spending was recorded for the contract. The recorded
 	// spending should be > the fundAmt since it consists of the fundAmt plus
 	// fee.
-	time.Sleep(2 * testBusFlushInterval)
-	cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
-	tt.OK(err)
 	fundAmt := types.Siacoins(1)
-	if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
-		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
-	}
+	tt.Retry(10, testBusFlushInterval, func() error {
+		cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
+		tt.OK(err)
+
+		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
+			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+		}
+		return nil
+	})
 
 	// Update the balance to create some drift.
 	newBalance := fundAmt.Div64(2)
@@ -1338,7 +1344,6 @@ func TestContractArchival(t *testing.T) {
 		}
 		return nil
 	})
-	tt.OK(err)
 }
 
 func TestUnconfirmedContractArchival(t *testing.T) {
@@ -1645,7 +1650,6 @@ func TestUploadPacking(t *testing.T) {
 		}
 		return nil
 	})
-	tt.OK(err)
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.

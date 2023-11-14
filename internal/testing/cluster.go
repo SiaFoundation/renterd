@@ -828,7 +828,7 @@ func (c *TestCluster) Sync() {
 // they have money in them
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(30, time.Second, func() error {
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		accounts, err := c.Bus.Accounts(context.Background())
 		if err != nil {
 			return err
@@ -852,7 +852,7 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 
 func (c *TestCluster) WaitForContractSet(set string, n int) {
 	c.tt.Helper()
-	c.tt.Retry(30, time.Second, func() error {
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -871,7 +871,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(30, time.Second, func() error {
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		contracts, err := c.Bus.Contracts(context.Background())
 		if err != nil {
 			return err
