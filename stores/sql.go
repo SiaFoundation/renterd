@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -318,7 +317,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 	// Try to apply the updates.
 	if err := ss.applyUpdates(false); err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
 
 	// Force a persist if no block has been received for some time.
@@ -340,7 +339,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		ss.persistMu.Lock()
 		defer ss.persistMu.Unlock()
 		if err := ss.applyUpdates(true); err != nil {
-			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+			ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 		}
 	})
 }
@@ -363,7 +362,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		Model(&dbAllowlistEntry{}).
 		Find(&allowlist).
 		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to fetch allowlist, err: %v", err))
 	}
 
 	// Fetch blocklist
@@ -372,7 +371,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		Model(&dbBlocklistEntry{}).
 		Find(&blocklist).
 		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to fetch blocklist, err: %v", err))
 	}
 
 	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
@@ -384,7 +383,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
 			for host := range ss.unappliedHostKeys {
 				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
-					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+					ss.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
 				}
 			}
 		}

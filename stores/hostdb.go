@@ -71,6 +71,8 @@ type (
 		SuccessfulInteractions float64
 		FailedInteractions     float64
 
+		LostSectors uint64
+
 		LastAnnouncement time.Time
 		NetAddress       string `gorm:"index"`
 
@@ -304,6 +306,7 @@ func (h dbHost) convert() hostdb.Host {
 			Downtime:                h.Downtime,
 			SuccessfulInteractions:  h.SuccessfulInteractions,
 			FailedInteractions:      h.FailedInteractions,
+			LostSectors:             h.LostSectors,
 		},
 		PriceTable: hostdb.HostPriceTable{
 			HostPriceTable: h.PriceTable.convert(),
@@ -572,7 +575,7 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 			}
 
 			// archive host contracts
-			if err := archiveContracts(tx, hcs, toArchive); err != nil {
+			if err := archiveContracts(ctx, tx, hcs, toArchive); err != nil {
 				return err
 			}
 
@@ -1088,4 +1091,13 @@ func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEnt
 		}
 	}
 	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
+}
+
+func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return tx.Model(&dbHost{}).
+			Where("public_key", publicKey(hk)).
+			Update("lost_sectors", 0).
+			Error
+	})
 }

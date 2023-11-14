@@ -1,14 +1,12 @@
 package worker
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/gotd/contrib/http_range"
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
@@ -91,7 +89,7 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 
 	// set the response headers, no need to set Last-Modified header as
 	// serveContent does that for us
-	rw.Header().Set("ETag", api.FormatETag(buildETag(req, obj.ETag)))
+	rw.Header().Set("ETag", api.FormatETag(obj.ETag))
 	rw.Header().Set("Content-Type", contentType)
 
 	http.ServeContent(rw, req, obj.Name, obj.ModTime, rs)
@@ -117,17 +115,4 @@ func parseRangeHeader(req *http.Request, obj api.Object) (int64, int64, error) {
 		return 0, 0, errMultiRangeNotSupported
 	}
 	return offset, length, nil
-}
-
-func buildETag(req *http.Request, objETag string) string {
-	rh := req.Header.Get("Range")
-	if rh == "" {
-		return objETag
-	}
-
-	h := types.NewHasher()
-	h.E.Write([]byte(rh))
-	h.E.Write([]byte(objETag))
-	sum := h.Sum()
-	return hex.EncodeToString(sum[:])
 }

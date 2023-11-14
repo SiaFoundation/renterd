@@ -99,6 +99,7 @@ type (
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -630,6 +631,17 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	host, err := b.hdb.Host(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
+	}
+}
+
+func (b *bus) hostsResetLostSectorsPOST(jc jape.Context) {
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	err := b.hdb.ResetLostSectors(jc.Request.Context(), hostKey)
+	if jc.Check("couldn't reset lost sectors", err) != nil {
+		return
 	}
 }
 
@@ -1397,6 +1409,15 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update redundancy settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+	case api.SettingS3Authentication:
+		var s3as api.S3AuthenticationSettings
+		if err := json.Unmarshal(data, &s3as); err != nil {
+			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := s3as.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
+			return
+		}
 	}
 
 	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
@@ -2046,16 +2067,17 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 
-		"GET    /hosts":             b.hostsHandlerGET,
-		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":   b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
-		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
-		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
-		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
+		"GET    /hosts":                          b.hostsHandlerGET,
+		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
+		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
+		"GET    /hosts/scanning":                 b.hostsScanningHandlerGET,
+		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,

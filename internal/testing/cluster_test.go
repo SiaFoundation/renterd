@@ -926,6 +926,9 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Wait for account to appear.
 	accounts := cluster.WaitForAccounts()
 
+	// Shut down the autopilot to prevent it from interfering with the test.
+	cluster.ShutdownAutopilot(context.Background())
+
 	// Newly created accounts are !cleanShutdown. Simulate a sync to change
 	// that.
 	for _, acc := range accounts {
@@ -972,13 +975,16 @@ func TestEphemeralAccounts(t *testing.T) {
 	// Check that the spending was recorded for the contract. The recorded
 	// spending should be > the fundAmt since it consists of the fundAmt plus
 	// fee.
-	time.Sleep(2 * testBusFlushInterval)
-	cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
-	tt.OK(err)
 	fundAmt := types.Siacoins(1)
-	if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
-		t.Fatalf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
-	}
+	tt.Retry(10, testBusFlushInterval, func() error {
+		cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
+		tt.OK(err)
+
+		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
+			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+		}
+		return nil
+	})
 
 	// Update the balance to create some drift.
 	newBalance := fundAmt.Div64(2)
@@ -1338,7 +1344,77 @@ func TestContractArchival(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestUnconfirmedContractArchival(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		logger: zap.NewNop(),
+		hosts:  1,
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
+
+	// we should have a contract with the host
+	contracts, err := cluster.Bus.Contracts(context.Background())
+	tt.OK(err)
+	if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, got %v", len(contracts))
+	}
+	c := contracts[0]
+
+	// add a contract to the bus
+	_, err = cluster.Bus.AddContract(context.Background(), rhpv2.ContractRevision{
+		Revision: types.FileContractRevision{
+			ParentID: types.FileContractID{1},
+			UnlockConditions: types.UnlockConditions{
+				PublicKeys: []types.UnlockKey{
+					c.HostKey.UnlockKey(),
+					c.HostKey.UnlockKey(),
+				},
+			},
+			FileContract: types.FileContract{
+				Filesize:       0,
+				FileMerkleRoot: types.Hash256{},
+				WindowStart:    math.MaxUint32,
+				WindowEnd:      math.MaxUint32 + 10,
+				Payout:         types.ZeroCurrency,
+				UnlockHash:     types.Hash256{},
+				RevisionNumber: 0,
+			},
+		},
+	}, types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	tt.OK(err)
+
+	// should have 2 contracts now
+	contracts, err = cluster.Bus.Contracts(context.Background())
+	tt.OK(err)
+	if len(contracts) != 2 {
+		t.Fatalf("expected 2 contracts, got %v", len(contracts))
+	}
+
+	// mine for 20 blocks to make sure we are beyond the 18 block deadline for
+	// contract confirmation
+	cluster.MineBlocks(20)
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background())
+		tt.OK(err)
+		if len(contracts) != 1 {
+			return fmt.Errorf("expected 1 contract, got %v", len(contracts))
+		}
+		if contracts[0].ID != c.ID {
+			t.Fatalf("expected contract %v, got %v", c.ID, contracts[0].ID)
+		}
+		return nil
+	})
 }
 
 func TestWalletTransactions(t *testing.T) {
@@ -1574,7 +1650,6 @@ func TestUploadPacking(t *testing.T) {
 		}
 		return nil
 	})
-	tt.OK(err)
 
 	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
 	// and file2 share the same slab.

@@ -307,8 +307,8 @@ go.opentelemetry.io/proto/otlp v1.0.0 h1:T0TX0tmXU8a3CbNXzEKGeU5mIVOdf0oykP+u2lI
 go.opentelemetry.io/proto/otlp v1.0.0/go.mod h1:Sy6pihPLfYHkr3NkUbEhGHFhINUSI/v80hjKIs5JXpM=
 go.sia.tech/core v0.1.12-0.20231011172826-6ca0ac7b3b6b h1:gHnhRiY1SMWCEFu+1Xo0a967RVzHg+g+0grMbHNuLfE=
 go.sia.tech/core v0.1.12-0.20231011172826-6ca0ac7b3b6b/go.mod h1:3EoY+rR78w1/uGoXXVqcYdwSjSJKuEMI5bL7WROA27Q=
-go.sia.tech/gofakes3 v0.0.0-20231003090232-776c144c0a19 h1:qCJHxn1RgRdmltGl3jehgbJcpTSTaWhzdDuOiWkjvm0=
-go.sia.tech/gofakes3 v0.0.0-20231003090232-776c144c0a19/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
+go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2 h1:ulzfJNjxN5DjXHClkW2pTiDk+eJ+0NQhX87lFDZ03t0=
+go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
 go.sia.tech/hostd v0.2.1-0.20231013174940-920057ff41c8 h1:0kVIAauXG2+C5EZWlnJDVtf6TrLLgB+EcObuCJyDNfY=
 go.sia.tech/hostd v0.2.1-0.20231013174940-920057ff41c8/go.mod h1:B+jY+eJ2jlcowcXwYOb28N/A6/cy2dblX/WUec9pFM8=
 go.sia.tech/jape v0.10.1 h1:Vr7WoAwZM+kPM1q4dWRZ0q3qCDcoplTHTR9uivFDDEI=

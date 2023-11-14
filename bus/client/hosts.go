@@ -71,6 +71,12 @@ func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures u
 	return
 }
 
+// ResetLostSectors resets the lost sector count for a host.
+func (c *Client) ResetLostSectors(ctx context.Context, hk types.PublicKey) (err error) {
+	err = c.c.WithContext(ctx).POST("/host/%s/resetlostsectors", hk, nil)
+	return
+}
+
 // SearchHosts returns all hosts that match certain search criteria.
 func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []hostdb.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
