@@ -1736,7 +1736,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			if err := tx.
 				Model(&sector).
 				Association("Contracts").
-				Replace(&associatedContracts); err != nil {
+				Append(&associatedContracts); err != nil {
 				return err
 			}
 		}
@@ -1909,7 +1909,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			if err := tx.
 				Model(&sector).
 				Association("Contracts").
-				Replace(&associatedContracts); err != nil {
+				Append(&associatedContracts); err != nil {
 				return err
 			}
 		}
