@@ -1544,7 +1544,7 @@ func TestUnhealthySlabs(t *testing.T) {
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{4}),
 						newTestShard(hk2, fcid2, types.Hash256{5}),
-						newTestShard(hk3, fcid3, types.Hash256{6}),
+						newTestShard(hk4, fcid4, types.Hash256{6}),
 					},
 				},
 			},
