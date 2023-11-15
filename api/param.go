@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -74,7 +73,7 @@ func (s *ParamString) UnmarshalText(b []byte) error {
 }
 
 // String implements fmt.Stringer.
-func (t TimeRFC3339) String() string { return url.QueryEscape((time.Time)(t).Format(time.RFC3339)) }
+func (t TimeRFC3339) String() string { return (time.Time)(t).Format(time.RFC3339Nano) }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (t *TimeRFC3339) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }

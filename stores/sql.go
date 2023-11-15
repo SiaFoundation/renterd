@@ -27,6 +27,10 @@ const (
 	maxSQLVars = 32000
 )
 
+var (
+	exprTRUE = gorm.Expr("TRUE")
+)
+
 type (
 	// Model defines the common fields of every table. Same as Model
 	// but excludes soft deletion since it breaks cascading deletes.
@@ -37,9 +41,10 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts alerts.Alerter
-		db     *gorm.DB
-		logger *zap.SugaredLogger
+		alerts    alerts.Alerter
+		db        *gorm.DB
+		dbMetrics *gorm.DB
+		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
 
@@ -114,6 +119,13 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL", path))
 }
 
+// NewMetricsSQLiteConnection opens a sqlite db at the given path similarly to
+// NewSQLiteConnection but with weaker consistency guarantees since it's
+// optimised for recording metrics.
+func NewMetricsSQLiteConnection(path string) gorm.Dialector {
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
+}
+
 // NewMySQLConnection creates a connection to a MySQL database.
 func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", user, password, addr, dbName))
@@ -130,7 +142,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, announcementMaxAge, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, announcementMaxAge, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	// Sanity check announcement max age.
 	if announcementMaxAge == 0 {
 		return nil, modules.ConsensusChangeID{}, errors.New("announcementMaxAge must be non-zero")
@@ -143,7 +155,13 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 		Logger: gormLogger, // custom logger
 	})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
+	}
+	dbMetrics, err := gorm.Open(connMetrics, &gorm.Config{
+		Logger: gormLogger, // custom logger
+	})
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open metrics db")
 	}
 	l := logger.Named("sql")
 
@@ -151,6 +169,9 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	if migrate {
 		if err := performMigrations(db, l); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
+		}
+		if err := performMetricsMigrations(dbMetrics, l); err != nil {
+			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
 
@@ -199,6 +220,7 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	ss := &SQLStore{
 		alerts:                 alerts,
 		db:                     db,
+		dbMetrics:              dbMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
@@ -282,8 +304,16 @@ func (s *SQLStore) Close() error {
 	if err != nil {
 		return err
 	}
+	dbMetrics, err := s.dbMetrics.DB()
+	if err != nil {
+		return err
+	}
 
 	err = db.Close()
+	if err != nil {
+		return err
+	}
+	err = dbMetrics.Close()
 	if err != nil {
 		return err
 	}
