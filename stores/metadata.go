@@ -203,7 +203,7 @@ type (
 		// sector
 		SectorIndex uint
 		SectorRoot  []byte
-		SectorHost  publicKey
+		LatestHost  publicKey
 
 		// contract
 		FCID    fileContractID
@@ -508,21 +508,21 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 		if sector.SlabID != slabID {
 			return object.SlabSlice{}, errors.New("sectors from different slabs") // developer error
 		}
-		hk := types.PublicKey(sector.SectorHost)
+		latestHost := types.PublicKey(sector.LatestHost)
 		fcid := types.FileContractID(sector.FCID)
 
 		// next sector
 		if sector.SectorIndex != secIdx {
 			sectors = append(sectors, object.Sector{
 				Hosts:      make(map[types.PublicKey][]types.FileContractID),
-				LatestHost: hk,
+				LatestHost: latestHost,
 				Root:       *(*types.Hash256)(sector.SectorRoot),
 			})
 			secIdx = sector.SectorIndex
 		}
 
 		// add host+contract to sector
-		sectors[len(sectors)-1].Hosts[hk] = append(sectors[len(sectors)-1].Hosts[hk], fcid)
+		sectors[len(sectors)-1].Hosts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Hosts[types.PublicKey(sector.HostKey)], fcid)
 	}
 
 	// hydrate all fields
@@ -1961,7 +1961,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as SectorHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
