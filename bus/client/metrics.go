@@ -2,7 +2,11 @@ package client
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -73,6 +77,28 @@ func (c *Client) RecordContractSetChurnMetric(ctx context.Context, metrics ...ap
 	})
 }
 
-func (c *Client) metric(ctx context.Context, key string, values url.Values, resp interface{}) error {
-	return c.c.WithContext(ctx).GET(fmt.Sprintf("/metric/%s?"+values.Encode(), key), &resp)
+func (c *Client) metric(ctx context.Context, key string, values url.Values, res interface{}) error {
+	u, err := url.Parse(fmt.Sprintf("%s/metric/%s", c.c.BaseURL, key))
+	if err != nil {
+		panic(err)
+	}
+
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
+		err, _ := io.ReadAll(resp.Body)
+		return errors.New(string(err))
+	}
+	return json.NewDecoder(resp.Body).Decode(&res)
 }
