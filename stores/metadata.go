@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -553,13 +554,18 @@ func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.B
 }
 
 func (s *SQLStore) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	b, err := json.Marshal(policy)
+	if err != nil {
+		return err
+	}
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		return tx.
 			Model(&dbBucket{}).
 			Where("name", bucket).
-			Updates(dbBucket{
-				Policy: policy,
-			}).
+			Updates(map[string]interface{}{
+				"policy": string(b),
+			},
+			).
 			Error
 	})
 }
