@@ -2236,20 +2236,6 @@ func (b *bus) Handler() http.Handler {
 		"POST   /webhooks":        b.webhookHandlerPost,
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
 		"POST   /webhook/delete":  b.webhookHandlerDelete,
-
-		// TODO: remove these deprecated routes
-		"POST   /accounts/:id":              b.accountHandlerGET,
-		"POST   /accounts/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /accounts/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /accounts/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /accounts/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /accounts/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /accounts/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
-		"GET    /autopilots/:id":            b.autopilotsHandlerGET,
-		"PUT    /autopilots/:id":            b.autopilotsHandlerPUT,
-		"PUT    /buckets/:name/policy":      b.bucketsHandlerPolicyPUT,
-		"DELETE /buckets/:name":             b.bucketHandlerDELETE,
-		"GET    /buckets/:name":             b.bucketHandlerGET,
 	}))
 }
 
