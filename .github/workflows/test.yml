@@ -58,5 +58,7 @@ jobs:
         with:
           analyzers: |
             go.sia.tech/jape.Analyzer
+          directories: |
+            autopilot
       - name: Build
         run: go build -o bin/ ./cmd/renterd

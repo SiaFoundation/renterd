@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 var zeroCurrency = currency(types.ZeroCurrency)
 
 type (
+	unixTimeMS     time.Time
 	datetime       time.Time
 	currency       types.Currency
 	fileContractID types.FileContractID
@@ -25,6 +27,7 @@ type (
 	hostSettings   rhpv2.HostSettings
 	hostPriceTable rhpv3.HostPriceTable
 	balance        big.Int
+	unsigned64     uint64 // used for storing large uint64 values in sqlite
 )
 
 // GormDataType implements gorm.GormDataTypeInterface.
@@ -240,4 +243,65 @@ func (dt *datetime) Scan(value interface{}) error {
 // Value returns a datetime value, implements driver.Valuer interface.
 func (dt datetime) Value() (driver.Value, error) {
 	return (time.Time)(dt).Format(SQLiteTimestampFormats[0]), nil
+}
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (unixTimeMS) GormDataType() string {
+	return "BIGINT"
+}
+
+// Scan scan value into balance, implements sql.Scanner interface.
+func (u *unixTimeMS) Scan(value interface{}) error {
+	var msec int64
+	var err error
+	switch value := value.(type) {
+	case int64:
+		msec = value
+	case []uint8:
+		msec, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+		}
+	default:
+		return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+	}
+
+	*u = unixTimeMS(time.UnixMilli(msec))
+	return nil
+}
+
+// Value returns a int64 value representing a unix timestamp in milliseconds,
+// implements driver.Valuer interface.
+func (u unixTimeMS) Value() (driver.Value, error) {
+	return time.Time(u).UnixMilli(), nil
+}
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (unsigned64) GormDataType() string {
+	return "BIGINT"
+}
+
+// Scan scan value into balance, implements sql.Scanner interface.
+func (u *unsigned64) Scan(value interface{}) error {
+	var n int64
+	var err error
+	switch value := value.(type) {
+	case int64:
+		n = value
+	case []uint8:
+		n, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
+		}
+	default:
+		return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
+	}
+
+	*u = unsigned64(n)
+	return nil
+}
+
+// Value returns a datetime value, implements driver.Valuer interface.
+func (u unsigned64) Value() (driver.Value, error) {
+	return int64(u), nil
 }

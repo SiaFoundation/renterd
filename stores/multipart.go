@@ -182,15 +182,15 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 		limit++
 	}
 
-	prefixExpr := gorm.Expr("TRUE")
+	prefixExpr := exprTRUE
 	if prefix != "" {
 		prefixExpr = gorm.Expr("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
 	}
-	keyMarkerExpr := gorm.Expr("TRUE")
+	keyMarkerExpr := exprTRUE
 	if keyMarker != "" {
 		keyMarkerExpr = gorm.Expr("object_id > ?", keyMarker)
 	}
-	uploadIDMarkerExpr := gorm.Expr("TRUE")
+	uploadIDMarkerExpr := exprTRUE
 	if uploadIDMarker != "" {
 		uploadIDMarkerExpr = gorm.Expr("upload_id > ?", keyMarker)
 	}

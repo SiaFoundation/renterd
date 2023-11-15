@@ -49,6 +49,12 @@ var (
 		// webhooks.WebhookStore tables
 		&dbWebhook{},
 	}
+	metricsTables = []interface{}{
+		&dbContractMetric{},
+		&dbContractSetMetric{},
+		&dbContractSetChurnMetric{},
+		&dbPerformanceMetric{},
+	}
 )
 
 // migrateShards performs the migrations necessary for removing the 'shards'
@@ -309,6 +315,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00028_lostSectors(tx, logger)
 			},
 		},
+		{
+			ID: "00029_contractPrice",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00029_contractPrice(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -320,6 +332,21 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	if !db.Migrator().HasTable(&dbConsensusInfo{}) {
 		m.InitSchema(initSchema)
 	}
+
+	// Perform migrations.
+	if err := m.Migrate(); err != nil {
+		return fmt.Errorf("failed to migrate: %v", err)
+	}
+	return nil
+}
+
+func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
+	migrations := []*gormigrate.Migration{}
+	// Create migrator.
+	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
+
+	// Set init function.
+	m.InitSchema(initMetricsSchema)
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {
@@ -363,6 +390,17 @@ func initSchema(tx *gorm.DB) error {
 	return tx.Create(&dbBucket{
 		Name: api.DefaultBucketName,
 	}).Error
+}
+
+// initMetricsSchema is executed only on a clean database. Otherwise the individual
+// migrations are executed.
+func initMetricsSchema(tx *gorm.DB) error {
+	// Run auto migrations.
+	err := tx.AutoMigrate(metricsTables...)
+	if err != nil {
+		return fmt.Errorf("failed to init schema: %w", err)
+	}
+	return nil
 }
 
 func detectMissingIndicesOnType(tx *gorm.DB, table interface{}, t reflect.Type, f func(dst interface{}, name string)) {
@@ -1254,5 +1292,17 @@ func performMigration00028_lostSectors(txn *gorm.DB, logger *zap.SugaredLogger) 
 		}
 	}
 	logger.Info("migration 00028_lostSectors complete")
+	return nil
+}
+
+func performMigration00029_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00029_contractPrice")
+	if err := txn.Migrator().AutoMigrate(&dbArchivedContract{}); err != nil {
+		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'archived_contracts': %w", err)
+	}
+	if err := txn.Migrator().AutoMigrate(&dbContract{}); err != nil {
+		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'contracts': %w", err)
+	}
+	logger.Info("migration 00029_contractPrice complete")
 	return nil
 }
