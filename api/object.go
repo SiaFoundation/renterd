@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -274,4 +275,12 @@ func (opts SearchObjectOptions) Apply(values url.Values) {
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
+}
+
+func FormatETag(ETag string) string {
+	return fmt.Sprintf("\"%s\"", ETag)
+}
+
+func ObjectPathEscape(path string) string {
+	return url.PathEscape(strings.TrimPrefix(path, "/"))
 }

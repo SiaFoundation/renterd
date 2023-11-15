@@ -14,7 +14,7 @@ import (
 
 // AddContract adds the provided contract to the metadata store.
 func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
 		Contract:    contract,
 		StartHeight: startHeight,
 		State:       state,
@@ -25,7 +25,7 @@ func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevisio
 
 // AddRenewedContract adds the provided contract to the metadata store.
 func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractRenewedRequest{
 		Contract:    contract,
 		RenewedFrom: renewedFrom,
 		StartHeight: startHeight,
@@ -36,18 +36,18 @@ func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.Contract
 }
 
 // AncestorContracts returns any ancestors of a given contract.
-func (c *Client) AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
+func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), fcid), &contracts)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), contractID), &contracts)
 	return
 }
 
 // AcquireContract acquires a contract for a given amount of time unless
 // released manually before that time.
-func (c *Client) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+func (c *Client) AcquireContract(ctx context.Context, contractID types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
 	var resp api.ContractAcquireResponse
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/acquire", fcid), api.ContractAcquireRequest{
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/acquire", contractID), api.ContractAcquireRequest{
 		Duration: api.DurationMS(d),
 		Priority: priority,
 	}, &resp)
@@ -69,9 +69,9 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 
 // ContractRoots returns the sector roots, as well as the ones that are still
 // uploading, for the contract with given id.
-func (c *Client) ContractRoots(ctx context.Context, fcid types.FileContractID) (roots, uploading []types.Hash256, err error) {
+func (c *Client) ContractRoots(ctx context.Context, contractID types.FileContractID) (roots, uploading []types.Hash256, err error) {
 	var resp api.ContractRootsResponse
-	if err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", fcid), &resp); err != nil {
+	if err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", contractID), &resp); err != nil {
 		return
 	}
 	return resp.Roots, resp.Uploading, nil
@@ -84,8 +84,8 @@ func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
 }
 
 // ContractSize returns the contract's size.
-func (c *Client) ContractSize(ctx context.Context, fcid types.FileContractID) (size api.ContractSize, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/size", fcid), &size)
+func (c *Client) ContractSize(ctx context.Context, contractID types.FileContractID) (size api.ContractSize, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/size", contractID), &size)
 	return
 }
 
@@ -136,8 +136,8 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 
 // KeepaliveContract extends the duration on an already acquired lock on a
 // contract.
-func (c *Client) KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/keepalive", fcid), api.ContractKeepaliveRequest{
+func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileContractID, lockID uint64, d time.Duration) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/keepalive", contractID), api.ContractKeepaliveRequest{
 		Duration: api.DurationMS(d),
 		LockID:   lockID,
 	}, nil)
@@ -164,8 +164,8 @@ func (c *Client) RecordContractSpending(ctx context.Context, records []api.Contr
 }
 
 // ReleaseContract releases a contract that was previously acquired using AcquireContract.
-func (c *Client) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/release", fcid), api.ContractReleaseRequest{
+func (c *Client) ReleaseContract(ctx context.Context, contractID types.FileContractID, lockID uint64) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/release", contractID), api.ContractReleaseRequest{
 		LockID: lockID,
 	}, nil)
 	return
