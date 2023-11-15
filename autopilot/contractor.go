@@ -219,6 +219,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, err
 	}
 
+	// check if any used hosts have lost data to warn the user
+	for _, h := range hosts {
+		if h.Interactions.LostSectors > 0 {
+			c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
+		}
+	}
+
 	// fetch candidate hosts
 	candidates, unusableHosts, err := c.candidateHosts(ctx, hosts, usedHosts, hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
@@ -347,13 +354,22 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// check if we need to form contracts and add them to the contract set
 	var formed []types.FileContractID
 	if uint64(len(updatedSet)) < threshold {
-		formed, err = c.runContractFormations(ctx, w, candidates, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)
+		// no need to try and form contracts if wallet is completely empty
+		wallet, err := c.ap.bus.Wallet(ctx)
 		if err != nil {
-			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
+			c.logger.Errorf("failed to fetch wallet, err: %v", err)
+			return false, err
+		} else if wallet.Confirmed.IsZero() && wallet.Unconfirmed.IsZero() {
+			c.logger.Warn("contract formations skipped, wallet is empty")
 		} else {
-			for _, fc := range formed {
-				updatedSet = append(updatedSet, fc)
-				contractData[fc] = 0
+			formed, err = c.runContractFormations(ctx, w, candidates, usedHosts, unusableHosts, state.cfg.Contracts.Amount-uint64(len(updatedSet)), &remaining)
+			if err != nil {
+				c.logger.Errorf("failed to form contracts, err: %v", err) // continue
+			} else {
+				for _, fc := range formed {
+					updatedSet = append(updatedSet, fc)
+					contractData[fc] = 0
+				}
 			}
 		}
 	}
@@ -650,6 +666,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+		} else if contract.State == api.ContractStatePending && cs.BlockHeight-contract.StartHeight > 18 {
+			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {
 			toStopUsing[fcid] = toArchive[fcid]
@@ -1353,7 +1371,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 
 	// persist the contract
 	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
-	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, fcid)
+	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1442,7 +1460,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// persist the contract
 	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
-	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, contract.ID)
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1515,7 +1533,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 
 	// persist contract in store
 	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
-	formedContract, err := c.ap.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight)
+	formedContract, err := c.ap.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, true, err

@@ -15,6 +15,7 @@ import (
 
 var (
 	alertAccountRefillID = frand.Entropy256() // constant until restarted
+	alertLostSectorsID   = frand.Entropy256() // constant until restarted
 	alertLowBalanceID    = frand.Entropy256() // constant until restarted
 	alertMigrationID     = frand.Entropy256() // constant until restarted
 	alertRenewalFailedID = frand.Entropy256() // constant until restarted
@@ -26,6 +27,10 @@ func alertIDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
 
 func alertIDForContract(alertID [32]byte, contract api.ContractMetadata) types.Hash256 {
 	return types.HashBytes(append(alertID[:], contract.ID[:]...))
+}
+
+func alertIDForHost(alertID [32]byte, hk types.PublicKey) types.Hash256 {
+	return types.HashBytes(append(alertID[:], hk[:]...))
 }
 
 func alertIDForSlab(alertID [32]byte, slab object.Slab) types.Hash256 {
@@ -72,7 +77,7 @@ func newAccountLowBalanceAlert(address types.Address, balance, allowance types.C
 
 func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err refillError) alerts.Alert {
 	data := map[string]interface{}{
-		"error":      err,
+		"error":      err.Error(),
 		"accountID":  id.String(),
 		"contractID": contract.ID.String(),
 		"hostKey":    contract.HostKey.String(),
@@ -101,7 +106,7 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 		Severity: severity,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
-			"error":               err,
+			"error":               err.Error(),
 			"renewalsInterrupted": interrupted,
 			"contractID":          contract.ID.String(),
 			"hostKey":             contract.HostKey.String(),
@@ -111,6 +116,11 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 }
 
 func newContractSetChangeAlert(name string, added, removed int, removedReasons map[string]string) alerts.Alert {
+	var hint string
+	if removed > 0 {
+		hint = "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set."
+	}
+
 	return alerts.Alert{
 		ID:       randomAlertID(),
 		Severity: alerts.SeverityInfo,
@@ -120,7 +130,21 @@ func newContractSetChangeAlert(name string, added, removed int, removedReasons m
 			"added":    added,
 			"removed":  removed,
 			"removals": removedReasons,
-			"hint":     "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set.",
+			"hint":     hint,
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newLostSectorsAlert(hk types.PublicKey, lostSectors uint64) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertIDForHost(alertLostSectorsID, hk),
+		Severity: alerts.SeverityWarning,
+		Message:  "Host has lost sectors",
+		Data: map[string]interface{}{
+			"lostSectors": lostSectors,
+			"hostKey":     hk.String(),
+			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature. If you think this was a mistake and you want to ignore this warning for now you can reset the lost sector count",
 		},
 		Timestamp: time.Now(),
 	}
@@ -136,9 +160,11 @@ func newOngoingMigrationsAlert(n int) alerts.Alert {
 }
 
 func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) alerts.Alert {
-	severity := alerts.SeverityWarning
-	if health < 0.5 {
+	severity := alerts.SeverityError
+	if health < 0.25 {
 		severity = alerts.SeverityCritical
+	} else if health < 0.5 {
+		severity = alerts.SeverityWarning
 	}
 
 	return alerts.Alert{
@@ -146,7 +172,7 @@ func newSlabMigrationFailedAlert(slab object.Slab, health float64, err error) al
 		Severity: severity,
 		Message:  "Slab migration failed",
 		Data: map[string]interface{}{
-			"error":   err,
+			"error":   err.Error(),
 			"health":  health,
 			"slabKey": slab.Key.String(),
 			"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
@@ -162,7 +188,7 @@ func newRefreshHealthFailedAlert(err error) alerts.Alert {
 		Message:  "Health refresh failed",
 		Data: map[string]interface{}{
 			"migrationsInterrupted": true,
-			"error":                 err,
+			"error":                 err.Error(),
 		},
 		Timestamp: time.Now(),
 	}

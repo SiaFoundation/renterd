@@ -166,7 +166,7 @@ type Bus interface {
 	FinishUpload(ctx context.Context, uID api.UploadID) error
 
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency) ([]types.Hash256, []types.Transaction, error)
+	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
@@ -592,7 +592,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 	// Fund the txn. We pass 0 here since we only need the wallet to fund
 	// the fee.
-	toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency)
+	toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency, true)
 	if jc.Check("failed to fund transaction", err) != nil {
 		return
 	}

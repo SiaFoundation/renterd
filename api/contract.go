@@ -5,6 +5,15 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	ContractStateInvalid  = "invalid"
+	ContractStateUnknown  = "unknown"
+	ContractStatePending  = "pending"
+	ContractStateActive   = "active"
+	ContractStateComplete = "complete"
+	ContractStateFailed   = "failed"
+)
+
 type (
 	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
@@ -31,6 +40,7 @@ type (
 		RevisionNumber uint64 `json:"revisionNumber"`
 		Size           uint64 `json:"size"`
 		StartHeight    uint64 `json:"startHeight"`
+		State          string `json:"state"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
 
@@ -72,6 +82,7 @@ type (
 		RevisionNumber uint64 `json:"revisionNumber"`
 		Size           uint64 `json:"size"`
 		StartHeight    uint64 `json:"startHeight"`
+		State          string `json:"state"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
 	}

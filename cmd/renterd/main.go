@@ -101,7 +101,6 @@ var (
 			RevisionBroadcastInterval:      7 * 24 * time.Hour,
 			ScannerBatchSize:               1000,
 			ScannerInterval:                24 * time.Hour,
-			ScannerMinRecentFailures:       10,
 			ScannerNumThreads:              100,
 			MigratorParallelSlabsPerWorker: 1,
 		},
@@ -302,7 +301,6 @@ func main() {
 	flag.DurationVar(&cfg.Autopilot.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", cfg.Autopilot.RevisionBroadcastInterval, "interval at which the autopilot broadcasts contract revisions to be mined - can be overwritten using the RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL environment variable - setting it to 0 will disable this feature")
 	flag.Uint64Var(&cfg.Autopilot.ScannerBatchSize, "autopilot.scannerBatchSize", cfg.Autopilot.ScannerBatchSize, "size of the batch with which hosts are scanned")
 	flag.DurationVar(&cfg.Autopilot.ScannerInterval, "autopilot.scannerInterval", cfg.Autopilot.ScannerInterval, "interval at which hosts are scanned")
-	flag.Uint64Var(&cfg.Autopilot.ScannerMinRecentFailures, "autopilot.scannerMinRecentFailures", cfg.Autopilot.ScannerMinRecentFailures, "minimum amount of consesutive failed scans a host must have before it is removed for exceeding the max downtime")
 	flag.Uint64Var(&cfg.Autopilot.ScannerNumThreads, "autopilot.scannerNumThreads", cfg.Autopilot.ScannerNumThreads, "number of threads that scan hosts")
 	flag.Uint64Var(&cfg.Autopilot.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", cfg.Autopilot.MigratorParallelSlabsPerWorker, "number of slabs that the autopilot migrates in parallel per worker. Can be overwritten using the RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER environment variable")
 	flag.BoolVar(&cfg.Autopilot.Enabled, "autopilot.enabled", cfg.Autopilot.Enabled, "enable/disable the autopilot - can be overwritten using the RENTERD_AUTOPILOT_ENABLED environment variable")

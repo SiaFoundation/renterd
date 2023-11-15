@@ -13,23 +13,25 @@ import (
 )
 
 // AddContract adds the provided contract to the metadata store.
-func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64) (added api.ContractMetadata, err error) {
+func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractsIDAddRequest{
 		Contract:      contract,
 		StartHeight:   startHeight,
 		ContractPrice: contractPrice,
+		State:         state,
 		TotalCost:     totalCost,
 	}, &added)
 	return
 }
 
 // AddRenewedContract adds the provided contract to the metadata store.
-func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (renewed api.ContractMetadata, err error) {
+func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractsIDRenewedRequest{
 		Contract:      contract,
 		RenewedFrom:   renewedFrom,
 		StartHeight:   startHeight,
 		ContractPrice: contractPrice,
+		State:         state,
 		TotalCost:     totalCost,
 	}, &renewed)
 	return

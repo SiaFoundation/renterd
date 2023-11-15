@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -55,6 +54,7 @@ type (
 		persistMu              sync.Mutex
 		persistTimer           *time.Timer
 		unappliedAnnouncements []announcement
+		unappliedContractState map[types.FileContractID]contractState
 		unappliedHostKeys      map[types.PublicKey]struct{}
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
@@ -218,19 +218,20 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 	}
 
 	ss := &SQLStore{
-		alerts:             alerts,
-		db:                 db,
-		dbMetrics:          dbMetrics,
-		logger:             l,
-		knownContracts:     isOurContract,
-		lastSave:           time.Now(),
-		persistInterval:    persistInterval,
-		hasAllowlist:       allowlistCnt > 0,
-		hasBlocklist:       blocklistCnt > 0,
-		settings:           make(map[string]string),
-		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
-		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:    make(map[types.FileContractID]uint64),
+		alerts:                 alerts,
+		db:                     db,
+		dbMetrics:              dbMetrics,
+		logger:                 l,
+		knownContracts:         isOurContract,
+		lastSave:               time.Now(),
+		persistInterval:        persistInterval,
+		hasAllowlist:           allowlistCnt > 0,
+		hasBlocklist:           blocklistCnt > 0,
+		settings:               make(map[string]string),
+		unappliedContractState: make(map[types.FileContractID]contractState),
+		unappliedHostKeys:      make(map[types.PublicKey]struct{}),
+		unappliedRevisions:     make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:        make(map[types.FileContractID]uint64),
 
 		announcementMaxAge: announcementMaxAge,
 
@@ -334,6 +335,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	defer ss.persistMu.Unlock()
 
 	ss.processConsensusChangeHostDB(cc)
+	ss.processConsensusChangeContracts(cc)
 	ss.processConsensusChangeWallet(cc)
 
 	// Update consensus fields.
@@ -345,7 +347,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 	// Try to apply the updates.
 	if err := ss.applyUpdates(false); err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
 
 	// Force a persist if no block has been received for some time.
@@ -367,7 +369,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		ss.persistMu.Lock()
 		defer ss.persistMu.Unlock()
 		if err := ss.applyUpdates(true); err != nil {
-			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+			ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 		}
 	})
 }
@@ -379,7 +381,8 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0     // enough revisions/proofs have accumulated
 	unappliedOutputsOrTxns := len(ss.unappliedOutputChanges) > 0 || len(ss.unappliedTxnChanges) > 0 // enough outputs/txns have accumualted
-	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputsOrTxns {
+	unappliedContractState := len(ss.unappliedContractState) > 0                                    // the chain state of a contract changed
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputsOrTxns && !unappliedContractState {
 		return nil
 	}
 
@@ -389,7 +392,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		Model(&dbAllowlistEntry{}).
 		Find(&allowlist).
 		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to fetch allowlist, err: %v", err))
 	}
 
 	// Fetch blocklist
@@ -398,7 +401,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		Model(&dbBlocklistEntry{}).
 		Find(&blocklist).
 		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to fetch blocklist, err: %v", err))
 	}
 
 	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
@@ -410,7 +413,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
 			for host := range ss.unappliedHostKeys {
 				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
-					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+					ss.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
 				}
 			}
 		}
@@ -444,9 +447,18 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
 			}
 		}
+		for fcid, cs := range ss.unappliedContractState {
+			if err := updateContractState(tx, fcid, cs); err != nil {
+				return fmt.Errorf("%w; failed to update chain state", err)
+			}
+		}
+		if err := markFailedContracts(tx, ss.chainIndex.Height); err != nil {
+			return err
+		}
 		return updateCCID(tx, ss.ccid, ss.chainIndex)
 	})
 
+	ss.unappliedContractState = make(map[types.FileContractID]contractState)
 	ss.unappliedProofs = make(map[types.FileContractID]uint64)
 	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
 	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})

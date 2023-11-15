@@ -67,7 +67,7 @@ func (s *SQLStore) UnspentSiacoinElements(matured bool) ([]wallet.SiacoinElement
 	tx := s.db
 	var elems []dbSiacoinElement
 	if matured {
-		tx = tx.Where("maturity_height < ?", height)
+		tx = tx.Where("maturity_height <= ?", height)
 	}
 	if err := tx.Find(&elems).Error; err != nil {
 		return nil, err

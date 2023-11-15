@@ -274,9 +274,51 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00022_contractPrice",
+			ID: "00022_extendObjectID",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00022_contractPrice(tx, logger)
+				return performMigration00022_extendObjectID(tx, logger)
+			},
+		},
+		{
+			ID: "00023_defaultMinRecentScanFailures",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00023_defaultMinRecentScanFailures(tx, logger)
+			},
+		},
+		{
+			ID: "00024_slabIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00024_slabIndices(tx, logger)
+			},
+		},
+		{
+			ID: "00025_contractState",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00025_contractState(tx, logger)
+			},
+		},
+		{
+			ID: "00026_healthValidUntilColumn",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00026_healthValidUntilColumn(tx, logger)
+			},
+		},
+		{
+			ID: "000027_addMultipartUploadIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration000027_addMultipartUploadIndices(tx, logger)
+			},
+		},
+		{
+			ID: "00028_lostSectors",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00028_lostSectors(tx, logger)
+			},
+		},
+		{
+			ID: "00029_contractPrice",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00029_contractPrice(tx, logger)
 			},
 		},
 	}
@@ -330,7 +372,7 @@ func initSchema(tx *gorm.DB) error {
 
 	// Change the collation of columns that we need to be case sensitive.
 	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -338,7 +380,7 @@ func initSchema(tx *gorm.DB) error {
 		if err != nil {
 			return fmt.Errorf("failed to change buckets_name collation: %w", err)
 		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
 		if err != nil {
 			return fmt.Errorf("failed to change object_id collation: %w", err)
 		}
@@ -1012,14 +1054,255 @@ func performMigration00021_multipartUploadsBucketCascade(txn *gorm.DB, logger *z
 	return nil
 }
 
-func performMigration00022_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00022_contractPrice")
+func performMigration00022_extendObjectID(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00022_extendObjectID")
+	if !isSQLite(txn) {
+		err := txn.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = txn.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+	}
+	logger.Info("migration 00022_extendObjectID complete")
+	return nil
+}
+
+func performMigration00023_defaultMinRecentScanFailures(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00023_defaultMinRecentScanFailures")
+
+	var autopilots []dbAutopilot
+	if err := txn.Model(&dbAutopilot{}).Find(&autopilots).Error; err != nil {
+		return err
+	}
+
+	for _, autopilot := range autopilots {
+		if autopilot.Config.Hosts.MinRecentScanFailures == 0 {
+			autopilot.Config.Hosts.MinRecentScanFailures = 10
+			if err := txn.Save(&autopilot).Error; err != nil {
+				logger.Errorf("failed to set default value for MinRecentScanFailures on autopilot '%v', err: %v", autopilot.Identifier, err)
+				return err
+			}
+			logger.Debugf("successfully defaulted MinRecentScanFailures to 10 on autopilot '%v'", autopilot.Identifier)
+		}
+	}
+
+	logger.Info("migration 00023_defaultMinRecentScanFailures complete")
+	return nil
+}
+
+func performMigration00024_slabIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00024_slabIndices")
+
+	if isSQLite(txn) {
+		// SQLite
+		if err := txn.Exec(`
+			BEGIN TRANSACTION;
+			PRAGMA foreign_keys = 0;
+
+			CREATE TABLE sectors_temp (id integer,created_at datetime,db_slab_id integer NOT NULL,slab_index integer NOT NULL,latest_host blob NOT NULL,root blob NOT NULL UNIQUE,PRIMARY KEY (id),CONSTRAINT fk_slabs_shards FOREIGN KEY (db_slab_id) REFERENCES slabs(id) ON DELETE CASCADE);
+			INSERT INTO sectors_temp (id, created_at, db_slab_id, slab_index, latest_host, root) SELECT id, created_at, db_slab_id, 0, latest_host, root FROM sectors;
+
+			DROP INDEX IF EXISTS idx_sectors_db_slab_id;
+			DROP INDEX IF EXISTS idx_sectors_slab_index;
+			DROP INDEX IF EXISTS idx_sectors_slab_id_slab_index;
+			DROP INDEX IF EXISTS idx_sectors_root;
+
+			CREATE INDEX idx_sectors_db_slab_id ON sectors_temp(db_slab_id);
+			CREATE INDEX idx_sectors_slab_index ON sectors_temp(slab_index);
+			CREATE INDEX idx_sectors_root ON sectors_temp(root);
+
+			UPDATE sectors_temp
+			SET slab_index = (
+				SELECT
+			        COUNT(*) + 1
+				FROM
+			        sectors_temp AS s2
+				WHERE
+					s2.db_slab_id = sectors_temp.db_slab_id AND s2.id < sectors_temp.id
+			);
+
+			CREATE UNIQUE INDEX idx_sectors_slab_id_slab_index ON sectors_temp(db_slab_id,slab_index);
+
+			DROP TABLE sectors;
+			ALTER TABLE sectors_temp RENAME TO sectors;
+
+			PRAGMA foreign_keys = 1;
+			PRAGMA foreign_key_check(sectors);
+			COMMIT;
+			`).Error; err != nil {
+			return err
+		}
+	} else {
+		// MySQL
+		if err := txn.Table("sectors").Migrator().AutoMigrate(&struct {
+			SlabIndex int `gorm:"NOT NULL"`
+		}{}); err != nil {
+			return err
+		}
+
+		// Populate column.
+		if err := txn.Exec(`
+			UPDATE sectors
+			JOIN (
+			    SELECT
+			        id,
+			        ROW_NUMBER() OVER (PARTITION BY db_slab_id ORDER BY id) AS new_index
+			    FROM
+			        sectors
+			) AS RowNumbered ON sectors.id = RowNumbered.id
+			SET
+			    sectors.slab_index = RowNumbered.new_index;
+		`).Error; err != nil {
+			return err
+		}
+
+		// Create indices.
+		if !txn.Migrator().HasIndex(&dbSector{}, "idx_sectors_slab_index") {
+			if err := txn.Migrator().CreateIndex(&dbSector{}, "idx_sectors_slab_index"); err != nil {
+				return err
+			}
+		}
+		if !txn.Migrator().HasIndex(&dbSector{}, "idx_sectors_slab_id_slab_index") {
+			if err := txn.Migrator().CreateIndex(&dbSector{}, "idx_sectors_slab_id_slab_index"); err != nil {
+				return err
+			}
+		}
+	}
+
+	logger.Info("migration 00024_slabIndices complete")
+	return nil
+}
+
+func performMigration00025_contractState(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00025_contractState")
+	// create column
+	if !txn.Migrator().HasColumn(&dbContract{}, "State") {
+		if err := txn.Migrator().AddColumn(&dbContract{}, "State"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasColumn(&dbArchivedContract{}, "State") {
+		if err := txn.Migrator().AddColumn(&dbArchivedContract{}, "State"); err != nil {
+			return err
+		}
+	}
+	// update column
+	if err := txn.Model(&dbContract{}).Where("TRUE").Update("State", contractStateActive).Error; err != nil {
+		return err
+	}
+	if err := txn.Model(&dbArchivedContract{}).Where("TRUE").Update("State", contractStateComplete).Error; err != nil {
+		return err
+	}
+	// create index
+	if !txn.Migrator().HasIndex(&dbContract{}, "State") {
+		if err := txn.Migrator().CreateIndex(&dbContract{}, "State"); err != nil {
+			return err
+		}
+	}
+	if !txn.Migrator().HasIndex(&dbArchivedContract{}, "State") {
+		if err := txn.Migrator().CreateIndex(&dbArchivedContract{}, "State"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00025_contractState complete")
+	return nil
+}
+
+func performMigration00026_healthValidUntilColumn(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00026_healthValidUntilColumn")
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Use 'AutoMigrate' to add 'health_valid_until'.
+	if err := txn.Table("slabs").Migrator().AutoMigrate(&struct {
+		HealthValidUntil int64 `gorm:"index;default:0; NOT NULL"` // unix timestamp
+	}{}); err != nil {
+		return err
+	}
+
+	// Drop the current 'health_valid' column and accompanying index.
+	if isSQLite(txn) {
+		if err := txn.Exec("DROP INDEX IF EXISTS idx_slabs_health_valid;").Error; err != nil {
+			return err
+		}
+	}
+	if err := txn.Exec("ALTER TABLE slabs DROP COLUMN health_valid;").Error; err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(slabs)`).Error; err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00026_healthValidUntilColumn complete")
+	return nil
+}
+
+func performMigration000027_addMultipartUploadIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 000027_addMultipartUploadIndices")
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
+	// Use 'AutoMigrate' to add missing indices
+	if err := txn.Table("multipart_uploads").Migrator().AutoMigrate(&struct {
+		ObjectID   string `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
+		DBBucketID uint   `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
+		MimeType   string `gorm:"index:idx_multipart_uploads_mime_type"`
+	}{}); err != nil {
+		return err
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(multipart_uploads)`).Error; err != nil {
+			return err
+		}
+	}
+
+	logger.Info("migration 000027_addMultipartUploadIndices complete")
+	return nil
+}
+
+func performMigration00028_lostSectors(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00028_lostSectors")
+	if !txn.Migrator().HasColumn(&dbHost{}, "LostSectors") {
+		if err := txn.Migrator().AddColumn(&dbHost{}, "LostSectors"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00028_lostSectors complete")
+	return nil
+}
+
+func performMigration00029_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00029_contractPrice")
 	if err := txn.Migrator().AutoMigrate(&dbArchivedContract{}); err != nil {
 		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'archived_contracts': %w", err)
 	}
 	if err := txn.Migrator().AutoMigrate(&dbContract{}); err != nil {
 		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'contracts': %w", err)
 	}
-	logger.Info("migration 00022_contractPrice complete")
+	logger.Info("migration 00029_contractPrice complete")
 	return nil
 }
