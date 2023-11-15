@@ -979,6 +979,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		if err != nil {
 			return err
 		}
+		nContractsAfter = len(dbContracts)
 
 		// add removals to the diff
 		for _, contract := range cs.Contracts {
