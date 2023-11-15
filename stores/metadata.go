@@ -1291,7 +1291,13 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types
 	}
 	fetchedContracts := make(map[types.FileContractID]dbContract, len(contracts))
 	for _, c := range contracts {
-		fetchedContracts[types.FileContractID(c.FCID)] = c
+		// If a contract has been renewed, we add the renewed contract to the
+		// map using the old contract's id.
+		if _, renewed := usedContracts[types.PublicKey(c.Host.PublicKey)][types.FileContractID(c.RenewedFrom)]; renewed {
+			fetchedContracts[types.FileContractID(c.RenewedFrom)] = c
+		} else {
+			fetchedContracts[types.FileContractID(c.FCID)] = c
+		}
 	}
 	return fetchedContracts, nil
 }
