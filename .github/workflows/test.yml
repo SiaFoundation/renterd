@@ -61,5 +61,6 @@ jobs:
           directories: |
             autopilot
             bus bus/client
+            worker worker/client
       - name: Build
         run: go build -o bin/ ./cmd/renterd
