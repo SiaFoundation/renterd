@@ -15,7 +15,7 @@ import (
 type (
 	// A ContractSpendingRecorder records the spending of a contract.
 	ContractSpendingRecorder interface {
-		Record(fcid types.FileContractID, revisionNumber, size uint64, cs api.ContractSpending)
+		Record(rev types.FileContractRevision, cs api.ContractSpending)
 	}
 
 	contractSpendingRecorder struct {
@@ -42,23 +42,25 @@ func (w *worker) initContractSpendingRecorder() {
 }
 
 // Record sends contract spending records to the bus.
-func (sr *contractSpendingRecorder) Record(fcid types.FileContractID, revisionNumber, size uint64, cs api.ContractSpending) {
+func (sr *contractSpendingRecorder) Record(rev types.FileContractRevision, cs api.ContractSpending) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
 	// Update buffer.
-	csr, found := sr.contractSpendings[fcid]
+	csr, found := sr.contractSpendings[rev.ParentID]
 	if !found {
 		csr = api.ContractSpendingRecord{
-			ContractID: fcid,
+			ContractID: rev.ParentID,
 		}
 	}
 	csr.ContractSpending = csr.ContractSpending.Add(cs)
-	if revisionNumber > csr.RevisionNumber {
-		csr.RevisionNumber = revisionNumber
-		csr.Size = size
+	if rev.RevisionNumber > csr.RevisionNumber {
+		csr.RevisionNumber = rev.RevisionNumber
+		csr.Size = rev.Filesize
+		csr.ValidRenterPayout = rev.ValidRenterPayout()
+		csr.MissedHostPayout = rev.MissedHostPayout()
 	}
-	sr.contractSpendings[fcid] = csr
+	sr.contractSpendings[rev.ParentID] = csr
 
 	// If a thread was scheduled to flush the buffer we are done.
 	if sr.contractSpendingsFlushTimer != nil {
