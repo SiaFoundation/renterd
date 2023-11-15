@@ -41,6 +41,8 @@ type testSQLStore struct {
 type testSQLStoreConfig struct {
 	dbName          string
 	dbMetricsName   string
+	dbConn          gorm.Dialector
+	dbMetricsConn   gorm.Dialector
 	dir             string
 	persistent      bool
 	skipMigrate     bool
@@ -65,16 +67,18 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		dbMetricsName = hex.EncodeToString(frand.Bytes(32)) // random name for metrics db
 	}
 
-	var conn gorm.Dialector
+	var conn, connMetrics gorm.Dialector
 	if cfg.persistent {
 		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
+		connMetrics = NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite"))
 	} else {
 		conn = NewEphemeralSQLiteConnection(dbName)
+		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
 	}
 
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(conn, connMetrics, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}

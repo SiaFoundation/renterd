@@ -353,9 +353,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		if dbName == "" {
 			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
+		dbMetricsName := "db" + hex.EncodeToString(frand.Bytes(16))
 		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbMetricsName)).Error)
 
 		busCfg.DBDialector = stores.NewMySQLConnection(user, password, uri, dbName)
+		busCfg.DBMetricsDialector = stores.NewMySQLConnection(user, password, uri, dbMetricsName)
 	}
 
 	// Prepare individual dirs.
