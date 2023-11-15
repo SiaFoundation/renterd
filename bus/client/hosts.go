@@ -72,8 +72,8 @@ func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures u
 }
 
 // ResetLostSectors resets the lost sector count for a host.
-func (c *Client) ResetLostSectors(ctx context.Context, hk types.PublicKey) (err error) {
-	err = c.c.WithContext(ctx).POST("/host/%s/resetlostsectors", hk, nil)
+func (c *Client) ResetLostSectors(ctx context.Context, hostKey types.PublicKey) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/host/%s/resetlostsectors", hostKey), nil, nil)
 	return
 }
 
