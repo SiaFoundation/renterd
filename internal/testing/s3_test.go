@@ -177,24 +177,21 @@ func TestS3Authentication(t *testing.T) {
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
-	assertAuth := func(c *minio.Client, shouldWork bool) {
+	assertAuth := func(c *minio.Core, shouldWork bool) {
 		t.Helper()
-		resp := c.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{})
-		for obj := range resp {
-			err := obj.Err
-			if shouldWork && err != nil {
-				t.Fatal(err)
-			} else if !shouldWork && err == nil {
-				t.Fatal("expected error")
-			} else if !shouldWork && err != nil && !strings.Contains(err.Error(), "AccessDenied") {
-				t.Fatal("wrong error")
-			}
+		_, err := c.ListObjectsV2(api.DefaultBucketName, "/", "", "", "", 100)
+		if shouldWork && err != nil {
+			t.Fatal(err)
+		} else if !shouldWork && err == nil {
+			t.Fatal("expected error")
+		} else if !shouldWork && err != nil && !strings.Contains(err.Error(), "AccessDenied") {
+			t.Fatal("wrong error")
 		}
 	}
 
 	// Create client.
 	url := cluster.S3.EndpointURL().Host
-	s3Unauthenticated, err := minio.New(url, &minio.Options{
+	s3Unauthenticated, err := minio.NewCore(url, &minio.Options{
 		Creds: nil, // no authentication
 	})
 	tt.OK(err)
@@ -203,7 +200,7 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Unauthenticated, false)
 
 	// Create client with credentials and try again..
-	s3Authenticated, err := minio.New(url, &minio.Options{
+	s3Authenticated, err := minio.NewCore(url, &minio.Options{
 		Creds: testS3Credentials,
 	})
 	tt.OK(err)
@@ -216,6 +213,13 @@ func TestS3Authentication(t *testing.T) {
 		PublicReadAccess: true,
 	}))
 
+	// Check that the policy was updated.
+	b, err := cluster.Bus.Bucket(context.Background(), api.DefaultBucketName)
+	tt.OK(err)
+	if b.Policy.PublicReadAccess != true {
+		t.Fatal("expected public read access")
+	}
+
 	// Listing should work now.
 	assertAuth(s3Unauthenticated, true)
 
@@ -223,6 +227,13 @@ func TestS3Authentication(t *testing.T) {
 	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
 		PublicReadAccess: false,
 	}))
+
+	// Check that the policy was updated.
+	b, err = cluster.Bus.Bucket(context.Background(), api.DefaultBucketName)
+	tt.OK(err)
+	if b.Policy.PublicReadAccess == true {
+		t.Fatal("expected no public read access")
+	}
 
 	// Listing should not work now.
 	assertAuth(s3Unauthenticated, false)
