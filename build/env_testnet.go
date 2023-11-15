@@ -34,6 +34,7 @@ var (
 		MinPriceTableValidity:         5 * time.Minute,                                     // 5 minutes
 		MinAccountExpiry:              24 * time.Hour,                                      // 1 day
 		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
+		MigrationSurchargeMultiplier:  10,                                                  // 10x
 	}
 
 	// DefaultUploadPackingSettings define the default upload packing settings
