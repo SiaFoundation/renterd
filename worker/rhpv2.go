@@ -473,7 +473,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			deleted += uint64(len(batch))
 
 			// record spending
-			w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: cost})
+			w.contractSpendingRecorder.Record(rev.Revision, api.ContractSpending{Deletions: cost})
 			return nil
 		}(); err != nil {
 			return
@@ -562,7 +562,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		offset += n
 
 		// record spending
-		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: price})
+		w.contractSpendingRecorder.Record(rev.Revision, api.ContractSpending{SectorRoots: price})
 	}
 	return
 }

@@ -67,10 +67,11 @@ type (
 
 	// MySQL contains the configuration for an optional MySQL database.
 	MySQL struct {
-		URI      string `yaml:"URI"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Database string `yaml:"database"`
+		URI             string `yaml:"URI"`
+		User            string `yaml:"user"`
+		Password        string `yaml:"password"`
+		Database        string `yaml:"database"`
+		MetricsDatabase string `yaml:"metricsDatabase"`
 	}
 
 	RemoteWorker struct {

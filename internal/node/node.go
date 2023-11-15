@@ -33,10 +33,11 @@ import (
 
 type BusConfig struct {
 	config.Bus
-	Network        *consensus.Network
-	Miner          *Miner
-	DBLoggerConfig stores.LoggerConfig
-	DBDialector    gorm.Dialector
+	Network            *consensus.Network
+	Miner              *Miner
+	DBLoggerConfig     stores.LoggerConfig
+	DBDialector        gorm.Dialector
+	DBMetricsDialector gorm.Dialector
 }
 
 type AutopilotConfig struct {
@@ -93,13 +94,21 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
+	dbMetricsConn := cfg.DBMetricsDialector
+	if dbMetricsConn == nil {
+		dbDir := filepath.Join(dir, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return nil, nil, err
+		}
+		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
+	}
 
 	alertsMgr := alerts.NewManager()
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, announcementMaxAge, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
+	sqlStore, ccid, err := stores.NewSQLStore(dbConn, dbMetricsConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, announcementMaxAge, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,7 +153,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		return nil, nil, err
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}
