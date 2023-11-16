@@ -525,7 +525,9 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 		}
 
 		// add host+contract to sector
-		sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)], fcid)
+		if fcid != (types.FileContractID{}) {
+			sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)], fcid)
+		}
 	}
 
 	// hydrate all fields
