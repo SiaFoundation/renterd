@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
@@ -12,6 +14,22 @@ const (
 	ContractStateActive   = "active"
 	ContractStateComplete = "complete"
 	ContractStateFailed   = "failed"
+)
+
+const (
+	ContractArchivalReasonHostPruned = "hostpruned"
+	ContractArchivalReasonRemoved    = "removed"
+	ContractArchivalReasonRenewed    = "renewed"
+)
+
+var (
+	// ErrContractNotFound is returned when a contract can't be retrieved from
+	// the database.
+	ErrContractNotFound = errors.New("couldn't find contract")
+
+	// ErrContractSetNotFound is returned when a contract set can't be retrieved
+	// from the database.
+	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
 
 type (
@@ -50,6 +68,12 @@ type (
 		TotalCost     types.Currency       `json:"totalCost"`
 	}
 
+	// ContractPrunableData wraps a contract's size information with its id.
+	ContractPrunableData struct {
+		ID types.FileContractID `json:"id"`
+		ContractSize
+	}
+
 	// ContractSpending contains all spending details for a contract.
 	ContractSpending struct {
 		Uploads     types.Currency `json:"uploads"`
@@ -85,6 +109,72 @@ type (
 		State          string `json:"state"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
+	}
+)
+
+type (
+	// ContractAcquireRequest is the request type for the /contract/acquire
+	// endpoint.
+	ContractAcquireRequest struct {
+		Duration DurationMS `json:"duration"`
+		Priority int        `json:"priority"`
+	}
+
+	// ContractAcquireResponse is the response type for the /contract/:id/acquire
+	// endpoint.
+	ContractAcquireResponse struct {
+		LockID uint64 `json:"lockID"`
+	}
+
+	// ContractAddRequest is the request type for the /contract/:id endpoint.
+	ContractAddRequest struct {
+		Contract      rhpv2.ContractRevision `json:"contract"`
+		ContractPrice types.Currency         `json:"contractPrice"`
+		StartHeight   uint64                 `json:"startHeight"`
+		State         string                 `json:"state,omitempty"`
+		TotalCost     types.Currency         `json:"totalCost"`
+	}
+
+	// ContractKeepaliveRequest is the request type for the /contract/:id/keepalive
+	// endpoint.
+	ContractKeepaliveRequest struct {
+		Duration DurationMS `json:"duration"`
+		LockID   uint64     `json:"lockID"`
+	}
+
+	// ContractAcquireRequest is the request type for the /contract/:id/release
+	// endpoint.
+	ContractReleaseRequest struct {
+		LockID uint64 `json:"lockID"`
+	}
+
+	// ContractRenewedRequest is the request type for the /contract/:id/renewed
+	// endpoint.
+	ContractRenewedRequest struct {
+		Contract      rhpv2.ContractRevision `json:"contract"`
+		ContractPrice types.Currency         `json:"contractPrice"`
+		RenewedFrom   types.FileContractID   `json:"renewedFrom"`
+		StartHeight   uint64                 `json:"startHeight"`
+		State         string                 `json:"state,omitempty"`
+		TotalCost     types.Currency         `json:"totalCost"`
+	}
+
+	// ContractRootsResponse is the response type for the /contract/:id/roots
+	// endpoint.
+	ContractRootsResponse struct {
+		Roots     []types.Hash256 `json:"roots"`
+		Uploading []types.Hash256 `json:"uploading"`
+	}
+
+	// ContractsArchiveRequest is the request type for the /contracts/archive endpoint.
+	ContractsArchiveRequest = map[types.FileContractID]string
+
+	// ContractsPrunableDataResponse is the response type for the
+	// /contracts/prunable endpoint.
+	ContractsPrunableDataResponse struct {
+		Contracts     []ContractPrunableData `json:"contracts"`
+		TotalPrunable uint64                 `json:"totalPrunable"`
+		TotalSize     uint64                 `json:"totalSize"`
 	}
 )
 

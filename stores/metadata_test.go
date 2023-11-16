@@ -3705,6 +3705,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// refresh health
+		now := time.Now()
 		if err := ss.RefreshHealth(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -3718,7 +3719,6 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// assert it's validity is within expected bounds
-		now := time.Now()
 		min := now.Add(refreshHealthMinHealthValidity)
 		max := now.Add(refreshHealthMaxHealthValidity)
 		validUntil := time.Unix(slab.HealthValidUntil, 0)

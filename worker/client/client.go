@@ -18,14 +18,40 @@ import (
 	"go.sia.tech/renterd/object"
 )
 
-// A Client provides methods for interacting with a renterd API server.
+// A Client provides methods for interacting with a worker.
 type Client struct {
 	c jape.Client
+}
+
+// New returns a new worker client.
+func New(addr, password string) *Client {
+	return &Client{jape.Client{
+		BaseURL:  addr,
+		Password: password,
+	}}
 }
 
 // Account returns the account id for a given host.
 func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
+	return
+}
+
+// Contracts returns all contracts from the worker. These contracts decorate a
+// bus contract with the contract's latest revision.
+func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts?hosttimeout=%s", api.DurationMS(hostTimeout)), &resp)
+	return
+}
+
+// DeleteObject deletes the object at the given path.
+func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error) {
+	values := url.Values{}
+	values.Set("bucket", bucket)
+	opts.Apply(values)
+
+	path = api.ObjectPathEscape(path)
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 
@@ -107,24 +133,6 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 // ID returns the id of the worker.
 func (c *Client) ID(ctx context.Context) (id string, err error) {
 	err = c.c.WithContext(ctx).GET("/id", &id)
-	return
-}
-
-// Contracts returns all contracts from the worker. These contracts decorate a
-// bus contract with the contract's latest revision.
-func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts?hosttimeout=%s", api.DurationMS(hostTimeout)), &resp)
-	return
-}
-
-// DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	opts.Apply(values)
-
-	path = api.ObjectPathEscape(path)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
 
@@ -228,15 +236,6 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 	err = c.c.GET("/stats/uploads", &resp)
 	return
-}
-
-// New returns a client that communicates with a renterd worker server
-// listening on the specified address.
-func New(addr, password string) *Client {
-	return &Client{jape.Client{
-		BaseURL:  addr,
-		Password: password,
-	}}
 }
 
 func (c *Client) object(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (_ io.ReadCloser, _ http.Header, err error) {

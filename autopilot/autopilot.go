@@ -28,50 +28,39 @@ import (
 )
 
 type Bus interface {
-	webhooks.Broadcaster
 	alerts.Alerter
+	webhooks.Broadcaster
 
 	// Accounts
-	Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error)
+	Account(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey) (account api.Account, err error)
 	Accounts(ctx context.Context) (accounts []api.Account, err error)
 
 	// Autopilots
 	Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error)
 	UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error
 
-	// wallet
-	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
-	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
-	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)
-
-	// hostdb
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.Host, error)
-	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
-	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+	// consensus
+	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// contracts
-	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
 	AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
 	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
-	// txpool
-	RecommendedFee(ctx context.Context) (types.Currency, error)
-	TransactionPool(ctx context.Context) (txns []types.Transaction, err error)
+	// hostdb
+	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+	Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
+	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
+	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.Host, error)
 
-	// consensus
-	ConsensusState(ctx context.Context) (api.ConsensusState, error)
-
-	// syncer
-	SyncerPeers(ctx context.Context) (resp []string, err error)
+	// metrics
+	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 
 	// objects
 	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
@@ -84,16 +73,28 @@ type Bus interface {
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
 
-	// metrics
-	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+	// syncer
+	SyncerPeers(ctx context.Context) (resp []string, err error)
+
+	// txpool
+	RecommendedFee(ctx context.Context) (types.Currency, error)
+	TransactionPool(ctx context.Context) (txns []types.Transaction, err error)
+
+	// wallet
+	Wallet(ctx context.Context) (api.WalletResponse, error)
+	WalletDiscard(ctx context.Context, txn types.Transaction) error
+	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
+	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
+	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)
 }
 
 type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
-	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab, set string) (api.MigrateSlabResponse, error)
+
+	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (hostdb.HostPriceTable, error)
@@ -110,9 +111,6 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	mu    sync.Mutex
-	state state
-
 	a *accounts
 	c *contractor
 	m *migrator
@@ -120,6 +118,9 @@ type Autopilot struct {
 
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
+
+	stateMu sync.Mutex
+	state   state
 
 	startStopMu sync.Mutex
 	startTime   time.Time
@@ -327,8 +328,8 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 }
 
 func (ap *Autopilot) State() state {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
+	ap.stateMu.Lock()
+	defer ap.stateMu.Unlock()
 	return ap.state
 }
 
@@ -520,7 +521,7 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	}
 
 	// update the state
-	ap.mu.Lock()
+	ap.stateMu.Lock()
 	ap.state = state{
 		gs:  gs,
 		rs:  rs,
@@ -530,7 +531,7 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 		fee:     fee,
 		period:  autopilot.CurrentPeriod,
 	}
-	ap.mu.Unlock()
+	ap.stateMu.Unlock()
 	return nil
 }
 

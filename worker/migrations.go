@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (int, error) {
+func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (int, bool, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -69,7 +69,7 @@ SHARDS:
 				}
 			}
 		}
-		return 0, nil
+		return 0, false, nil
 	}
 
 	// calculate the number of missing shards and take into account hosts for
@@ -86,16 +86,16 @@ SHARDS:
 
 	// perform some sanity checks
 	if len(ulContracts) < int(s.MinShards) {
-		return 0, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
+		return 0, false, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
-		return 0, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-missingShards, int(s.MinShards))
+		return 0, false, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-missingShards, int(s.MinShards))
 	}
 
 	// download the slab
-	shards, err := d.DownloadSlab(ctx, *s, dlContracts)
+	shards, surchargeApplied, err := d.DownloadSlab(ctx, *s, dlContracts)
 	if err != nil {
-		return 0, fmt.Errorf("failed to download slab for migration: %w", err)
+		return 0, false, fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	s.Encrypt(shards)
 
@@ -117,7 +117,7 @@ SHARDS:
 	// migrate the shards
 	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
 	if err != nil {
-		return 0, fmt.Errorf("failed to upload slab for migration: %w", err)
+		return 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
@@ -138,5 +138,5 @@ SHARDS:
 			}
 		}
 	}
-	return len(shards), nil
+	return len(shards), surchargeApplied, nil
 }

@@ -33,7 +33,7 @@ const (
 
 type (
 	GougingChecker interface {
-		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		Check(_ *rhpv2.HostSettings, _ *rhpv3.HostPriceTable) api.HostGougingBreakdown
 	}
 
 	gougingChecker struct {
@@ -50,20 +50,31 @@ type (
 
 var _ GougingChecker = gougingChecker{}
 
-func GougingCheckerFromContext(ctx context.Context) (GougingChecker, error) {
-	gc, ok := ctx.Value(keyGougingChecker).(func() (GougingChecker, error))
+func GougingCheckerFromContext(ctx context.Context, criticalMigration bool) (GougingChecker, error) {
+	gc, ok := ctx.Value(keyGougingChecker).(func(bool) (GougingChecker, error))
 	if !ok {
 		panic("no gouging checker attached to the context") // developer error
 	}
-	return gc()
+	return gc(criticalMigration)
 }
 
 func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
-	return context.WithValue(ctx, keyGougingChecker, func() (GougingChecker, error) {
+	return context.WithValue(ctx, keyGougingChecker, func(criticalMigration bool) (GougingChecker, error) {
 		consensusState, err := cs.ConsensusState(ctx)
 		if err != nil {
 			return gougingChecker{}, fmt.Errorf("failed to get consensus state: %w", err)
 		}
+
+		// adjust the max download price if we are dealing with a critical
+		// migration that might be failing due to gouging checks
+		if criticalMigration && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
+			if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); overflow {
+				return gougingChecker{}, errors.New("failed to apply the 'MigrationSurchargeMultiplier', overflow detected")
+			} else {
+				gp.GougingSettings.MaxDownloadPrice = adjustedMaxDownloadPrice
+			}
+		}
+
 		return gougingChecker{
 			consensusState: consensusState,
 			settings:       gp.GougingSettings,
