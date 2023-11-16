@@ -303,6 +303,10 @@ type UploadedPackedSlab struct {
 	Shards   []object.Sector
 }
 
+func (s UploadedPackedSlab) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
+	return object.ContractsFromShards(s.Shards)
+}
+
 // UpdateSlabRequest is the request type for the /slab endpoint.
 type UpdateSlabRequest struct {
 	ContractSet string      `json:"contractSet"`

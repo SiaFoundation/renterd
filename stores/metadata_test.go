@@ -2360,7 +2360,7 @@ func TestObjectsStats(t *testing.T) {
 			sectorsSize += uint64(len(slab.Shards) * rhpv2.SectorSize)
 
 			for _, s := range slab.Shards {
-				for hpk, fcids := range s.Hosts {
+				for hpk, fcids := range s.Contracts {
 					if err := ss.addTestHost(hpk); err != nil {
 						t.Fatal(err)
 					}
@@ -3494,7 +3494,7 @@ func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Has
 func newTestShard(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) object.Sector {
 	return object.Sector{
 		LatestHost: hk,
-		Hosts: map[types.PublicKey][]types.FileContractID{
+		Contracts: map[types.PublicKey][]types.FileContractID{
 			hk: {fcid},
 		},
 		Root: root,

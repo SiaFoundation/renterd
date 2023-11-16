@@ -374,10 +374,10 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 		slab.Shards[i].LatestHost = types.PublicKey(shard.LatestHost)
 		slab.Shards[i].Root = *(*types.Hash256)(shard.Root)
 		for _, c := range shard.Contracts {
-			if slab.Shards[i].Hosts == nil {
-				slab.Shards[i].Hosts = make(map[types.PublicKey][]types.FileContractID)
+			if slab.Shards[i].Contracts == nil {
+				slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
 			}
-			slab.Shards[i].Hosts[types.PublicKey(c.Host.PublicKey)] = append(slab.Shards[i].Hosts[types.PublicKey(c.Host.PublicKey)], types.FileContractID(c.FCID))
+			slab.Shards[i].Contracts[types.PublicKey(c.Host.PublicKey)] = append(slab.Shards[i].Contracts[types.PublicKey(c.Host.PublicKey)], types.FileContractID(c.FCID))
 		}
 	}
 
@@ -517,7 +517,7 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 		// next sector
 		if sector.SectorIndex != secIdx {
 			sectors = append(sectors, object.Sector{
-				Hosts:      make(map[types.PublicKey][]types.FileContractID),
+				Contracts:  make(map[types.PublicKey][]types.FileContractID),
 				LatestHost: latestHost,
 				Root:       *(*types.Hash256)(sector.SectorRoot),
 			})
@@ -525,7 +525,7 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 		}
 
 		// add host+contract to sector
-		sectors[len(sectors)-1].Hosts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Hosts[types.PublicKey(sector.HostKey)], fcid)
+		sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)], fcid)
 	}
 
 	// hydrate all fields
@@ -1546,26 +1546,14 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 	for _, s := range o.Slabs {
 		for i, shard := range s.Shards {
 			// Verify that all hosts have a contract.
-			if len(shard.Hosts) == 0 {
+			if len(shard.Contracts) == 0 {
 				return fmt.Errorf("missing hosts for slab %d", i)
 			}
 		}
 	}
 
 	// collect all used contracts
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	for _, s := range o.Slabs {
-		for _, shard := range s.Shards {
-			for h, fcids := range shard.Hosts {
-				for _, fcid := range fcids {
-					if _, exists := usedContracts[h]; !exists {
-						usedContracts[h] = make(map[types.FileContractID]struct{})
-					}
-					usedContracts[h][fcid] = struct{}{}
-				}
-			}
-		}
-	}
+	usedContracts := o.Contracts()
 
 	// UpdateObject is ACID.
 	return s.retryTransaction(func(tx *gorm.DB) error {
@@ -1686,7 +1674,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	// Sanity check input.
 	for i, shard := range s.Shards {
 		// Verify that all hosts have a contract.
-		if len(shard.Hosts) == 0 {
+		if len(shard.Contracts) == 0 {
 			return fmt.Errorf("missing hosts for slab %d", i)
 		}
 	}
@@ -1698,17 +1686,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	}
 
 	// collect all used contracts
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	for _, shard := range s.Shards {
-		for h, fcids := range shard.Hosts {
-			for _, fcid := range fcids {
-				if _, exists := usedContracts[h]; !exists {
-					usedContracts[h] = make(map[types.FileContractID]struct{})
-				}
-				usedContracts[h][fcid] = struct{}{}
-			}
-		}
-	}
+	usedContracts := s.Contracts()
 
 	// Update slab.
 	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
@@ -1784,7 +1762,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 
 			// ensure the associations are updated
 			var associatedContracts []dbContract
-			for _, fcids := range shard.Hosts {
+			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						associatedContracts = append(associatedContracts, contracts[fcid])
@@ -1957,7 +1935,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			}
 			// Add contract and host to join tables.
 			var associatedContracts []dbContract
-			for _, fcids := range shard.Hosts {
+			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						associatedContracts = append(associatedContracts, contracts[fcid])
@@ -2120,7 +2098,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	for i, ss := range slabs {
 		for _, shard := range ss.Shards {
 			// Verify that all hosts have a contract.
-			if len(shard.Hosts) == 0 {
+			if len(shard.Contracts) == 0 {
 				return fmt.Errorf("missing hosts for slab %d", i)
 			}
 		}
@@ -2147,17 +2125,7 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 
 func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab) (string, error) {
 	// collect all used contracts
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	for _, shard := range slab.Shards {
-		for h, fcids := range shard.Hosts {
-			for _, fcid := range fcids {
-				if _, exists := usedContracts[h]; !exists {
-					usedContracts[h] = make(map[types.FileContractID]struct{})
-				}
-				usedContracts[h][fcid] = struct{}{}
-			}
-		}
-	}
+	usedContracts := slab.Contracts()
 	contracts, err := fetchUsedContracts(tx, usedContracts)
 	if err != nil {
 		return "", err
@@ -2200,7 +2168,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 			LatestHost: publicKey(slab.Shards[i].LatestHost),
 			Root:       slab.Shards[i].Root[:],
 		}
-		for _, fcids := range slab.Shards[i].Hosts {
+		for _, fcids := range slab.Shards[i].Contracts {
 			for _, fcid := range fcids {
 				if c, ok := contracts[fcid]; ok {
 					sector.Contracts = append(sector.Contracts, c)

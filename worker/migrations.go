@@ -35,7 +35,7 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	var shardIndices []int
 SHARDS:
 	for i, shard := range s.Shards {
-		for hk, fcids := range shard.Hosts {
+		for hk, fcids := range shard.Contracts {
 			for _, fcid := range fcids {
 				// bad host
 				if _, exists := goodHosts[hk]; !exists {
@@ -76,7 +76,7 @@ SHARDS:
 	// which we have a contract (so hosts from which we can download)
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
-		for hk := range s.Shards[si].Hosts {
+		for hk := range s.Shards[si].Contracts {
 			if _, exists := h2c[hk]; exists {
 				missingShards--
 				break
@@ -125,15 +125,15 @@ SHARDS:
 		s.Shards[si].LatestHost = uploaded[i].LatestHost
 
 		knownContracts := make(map[types.FileContractID]struct{})
-		for _, fcids := range s.Shards[si].Hosts {
+		for _, fcids := range s.Shards[si].Contracts {
 			for _, fcid := range fcids {
 				knownContracts[fcid] = struct{}{}
 			}
 		}
-		for hk, fcids := range uploaded[i].Hosts {
+		for hk, fcids := range uploaded[i].Contracts {
 			for _, fcid := range fcids {
 				if _, exists := knownContracts[fcid]; !exists {
-					s.Shards[si].Hosts[hk] = append(s.Shards[si].Hosts[hk], fcid)
+					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
 				}
 			}
 		}

@@ -1533,7 +1533,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (finished bool, next bool) {
 
 	// store the sector and call cancel on the sector ctx
 	s.sectors[resp.req.sectorIndex] = object.Sector{
-		Hosts: map[types.PublicKey][]types.FileContractID{
+		Contracts: map[types.PublicKey][]types.FileContractID{
 			resp.hk: {
 				resp.fcid,
 			},

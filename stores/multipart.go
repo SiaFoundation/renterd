@@ -90,7 +90,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
 	for _, s := range slices {
 		for _, shard := range s.Shards {
-			for h, fcids := range shard.Hosts {
+			for h, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, exists := usedContracts[h]; !exists {
 						usedContracts[h] = make(map[types.FileContractID]struct{})

@@ -93,10 +93,10 @@ func TestMigrations(t *testing.T) {
 		for _, shard := range slab.Shards {
 			if shard.LatestHost == (types.PublicKey{}) {
 				t.Fatal("latest host should be set")
-			} else if len(shard.Hosts) == 0 {
+			} else if len(shard.Contracts) == 0 {
 				t.Fatal("each shard should have > 0 hosts")
 			}
-			for hpk, contracts := range shard.Hosts {
+			for hpk, contracts := range shard.Contracts {
 				if len(contracts) != 1 {
 					t.Fatal("each host should have one contract")
 				} else if _, found := hosts[hpk]; found {
@@ -105,7 +105,7 @@ func TestMigrations(t *testing.T) {
 				hosts[hpk] = struct{}{}
 			}
 			roots[shard.Root] = struct{}{}
-			shardHosts += len(shard.Hosts)
+			shardHosts += len(shard.Contracts)
 		}
 	}
 	// all shards should have 1 host except for 1. So we end up with 4 in total.

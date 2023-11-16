@@ -549,12 +549,12 @@ func TestUploadDownloadBasic(t *testing.T) {
 		for _, shard := range slab.Shards {
 			if shard.LatestHost == (types.PublicKey{}) {
 				t.Fatal("latest host should be set")
-			} else if len(shard.Hosts) != 1 {
+			} else if len(shard.Contracts) != 1 {
 				t.Fatal("each shard should have a host")
 			} else if _, found := roots[shard.Root]; found {
 				t.Fatal("each root should only exist once per slab")
 			}
-			for hpk, contracts := range shard.Hosts {
+			for hpk, contracts := range shard.Contracts {
 				if len(contracts) != 1 {
 					t.Fatal("each host should have one contract")
 				} else if _, found := hosts[hpk]; found {

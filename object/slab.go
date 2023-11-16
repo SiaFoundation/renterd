@@ -12,7 +12,7 @@ import (
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Hosts      map[types.PublicKey][]types.FileContractID `json:"hosts"`
+	Contracts  map[types.PublicKey][]types.FileContractID `json:"contracts"`
 	LatestHost types.PublicKey                            `json:"latestHost"`
 	Root       types.Hash256                              `json:"root"`
 }
@@ -40,6 +40,27 @@ func NewSlab(minShards uint8) Slab {
 		Key:       GenerateEncryptionKey(),
 		MinShards: minShards,
 	}
+}
+
+// ContractsFromShards is a helper to extract all contracts used by a set of
+// shards.
+func ContractsFromShards(shards []Sector) map[types.PublicKey]map[types.FileContractID]struct{} {
+	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
+	for _, shard := range shards {
+		for h, fcids := range shard.Contracts {
+			for _, fcid := range fcids {
+				if _, exists := usedContracts[h]; !exists {
+					usedContracts[h] = make(map[types.FileContractID]struct{})
+				}
+				usedContracts[h][fcid] = struct{}{}
+			}
+		}
+	}
+	return usedContracts
+}
+
+func (s Slab) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
+	return ContractsFromShards(s.Shards)
 }
 
 // Length returns the length of the raw data stored in s.
