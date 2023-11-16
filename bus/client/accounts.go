@@ -12,9 +12,9 @@ import (
 )
 
 // Account returns the account for given id.
-func (c *Client) Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error) {
+func (c *Client) Account(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey) (account api.Account, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/account/%s", id), api.AccountHandlerPOST{
-		HostKey: host,
+		HostKey: hostKey,
 	}, &account)
 	return
 }

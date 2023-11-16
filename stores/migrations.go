@@ -2,6 +2,8 @@ package stores
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -319,6 +322,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID: "00029_contractPrice",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00029_contractPrice(tx, logger)
+			},
+		},
+		{
+			ID: "00030_defaultMigrationSurchargeMultiplier",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00030_defaultMigrationSurchargeMultiplier(tx, logger)
 			},
 		},
 	}
@@ -1304,5 +1313,50 @@ func performMigration00029_contractPrice(txn *gorm.DB, logger *zap.SugaredLogger
 		return fmt.Errorf("failed to migrate column 'ContractPrice' on table 'contracts': %w", err)
 	}
 	logger.Info("migration 00029_contractPrice complete")
+	return nil
+}
+
+func performMigration00030_defaultMigrationSurchargeMultiplier(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00030_defaultMigrationSurchargeMultiplier")
+
+	// fetch setting
+	var entry dbSetting
+	if err := txn.
+		Where(&dbSetting{Key: api.SettingGouging}).
+		Take(&entry).
+		Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		logger.Debugf("no gouging settings found, skipping migration")
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch gouging settings: %w", err)
+	}
+
+	// unmarshal setting into gouging settings
+	var gs api.GougingSettings
+	if err := json.Unmarshal([]byte(entry.Value), &gs); err != nil {
+		return err
+	}
+
+	// set default value
+	if gs.MigrationSurchargeMultiplier == 0 {
+		gs.MigrationSurchargeMultiplier = 10
+	}
+
+	// update setting
+	if err := gs.Validate(); err != nil {
+		return err
+	} else if bytes, err := json.Marshal(gs); err != nil {
+		return err
+	} else if err := txn.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value"}),
+	}).Create(&dbSetting{
+		Key:   api.SettingGouging,
+		Value: string(bytes),
+	}).Error; err != nil {
+		return err
+	}
+
+	logger.Info("migration 00030_defaultMigrationSurchargeMultiplier complete")
 	return nil
 }

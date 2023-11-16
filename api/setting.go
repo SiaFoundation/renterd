@@ -70,6 +70,12 @@ type (
 		// MinMaxEphemeralAccountBalance is the minimum accepted value for
 		// `MaxEphemeralAccountBalance` in the host's price settings.
 		MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
+
+		// MigrationSurchargeMultiplier is the multiplier applied to the
+		// 'MaxDownloadPrice' when checking whether a host is too expensive,
+		// this multiplier is only applied for when trying to migrate critically
+		// low-health slabs.
+		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
 	// RedundancySettings contain settings that dictate an object's redundancy.

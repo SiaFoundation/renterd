@@ -9,13 +9,12 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-// A Client provides methods for interacting with a renterd API server.
+// A Client provides methods for interacting with an autopilot.
 type Client struct {
 	c jape.Client
 }
 
-// NewClient returns a client that communicates with a renterd store server
-// listening on the specified address.
+// NewClient returns a new autopilot client.
 func NewClient(addr, password string) *Client {
 	return &Client{jape.Client{
 		BaseURL:  addr,
@@ -23,20 +22,24 @@ func NewClient(addr, password string) *Client {
 	}}
 }
 
+// Config returns the autopilot config.
 func (c *Client) Config() (cfg api.AutopilotConfig, err error) {
 	err = c.c.GET("/config", &cfg)
 	return
 }
 
+// UpdateConfig updates the autopilot config.
 func (c *Client) UpdateConfig(cfg api.AutopilotConfig) error {
 	return c.c.PUT("/config", cfg)
 }
 
+// HostInfo returns information about the host with given host key.
 func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerResponse, err error) {
 	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &resp)
 	return
 }
 
+// HostInfo returns information about all hosts.
 func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostHandlerResponse, err error) {
 	err = c.c.POST("/hosts", api.SearchHostsRequest{
 		Offset:          offset,
@@ -55,6 +58,7 @@ func (c *Client) State() (state api.AutopilotStateResponse, err error) {
 	return
 }
 
+// Trigger triggers an iteration of the autopilot's main loop.
 func (c *Client) Trigger(forceScan bool) (_ bool, err error) {
 	var resp api.AutopilotTriggerResponse
 	err = c.c.POST("/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)

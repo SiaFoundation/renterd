@@ -61,10 +61,10 @@ type (
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
 	Syncer interface {
-		SyncerAddress(ctx context.Context) (string, error)
-		Peers() []string
-		Connect(addr string) error
 		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
+		Connect(addr string) error
+		Peers() []string
+		SyncerAddress(ctx context.Context) (string, error)
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
@@ -94,12 +94,12 @@ type (
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
-		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -128,23 +128,26 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+
 		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
 		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
 		DeleteBucket(_ context.Context, bucketName string) error
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (api.ObjectMetadata, error)
 		ListObjects(ctx context.Context, bucketName, prefix, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, bucketName, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
-		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string) error
 		RenameObjects(ctx context.Context, bucketName, from, to string) error
+		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
+		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
 
 		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
 		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
@@ -158,10 +161,6 @@ type (
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
-		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
-
-		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
-
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, bufferSize int64, err error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
@@ -172,8 +171,8 @@ type (
 
 	// An AutopilotStore stores autopilots.
 	AutopilotStore interface {
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
@@ -185,9 +184,9 @@ type (
 		UpdateSetting(ctx context.Context, key, value string) error
 	}
 
-	// EphemeralAccountStore persists information about accounts. Since
-	// accounts are rapidly updated and can be recovered, they are only
-	// loaded upon startup and persisted upon shutdown.
+	// EphemeralAccountStore persists information about accounts. Since accounts
+	// are rapidly updated and can be recovered, they are only loaded upon
+	// startup and persisted upon shutdown.
 	EphemeralAccountStore interface {
 		Accounts(context.Context) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
@@ -206,27 +205,190 @@ type (
 )
 
 type bus struct {
-	alerts   alerts.Alerter
-	alertMgr *alerts.Manager
-	hooks    *webhooks.Manager
-	s        Syncer
-	cm       ChainManager
-	tp       TransactionPool
-	w        Wallet
-	hdb      HostDB
-	as       AutopilotStore
-	ms       MetadataStore
-	mtrcs    MetricsStore
-	ss       SettingStore
+	startTime time.Time
 
-	eas EphemeralAccountStore
+	cm ChainManager
+	s  Syncer
+	tp TransactionPool
 
-	logger           *zap.SugaredLogger
+	as    AutopilotStore
+	eas   EphemeralAccountStore
+	hdb   HostDB
+	ms    MetadataStore
+	ss    SettingStore
+	mtrcs MetricsStore
+	w     Wallet
+
 	accounts         *accounts
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
-	startTime time.Time
+	alerts   alerts.Alerter
+	alertMgr *alerts.Manager
+	hooks    *webhooks.Manager
+	logger   *zap.SugaredLogger
+}
+
+// Handler returns an HTTP handler that serves the bus API.
+func (b *bus) Handler() http.Handler {
+	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
+		"GET    /accounts":                 b.accountsHandlerGET,
+		"POST   /account/:id":              b.accountHandlerGET,
+		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
+		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
+		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
+		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
+		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
+		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+
+		"GET    /alerts":          b.handleGETAlerts,
+		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
+		"POST   /alerts/register": b.handlePOSTAlertsRegister,
+
+		"GET    /autopilots":    b.autopilotsListHandlerGET,
+		"GET    /autopilot/:id": b.autopilotsHandlerGET,
+		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
+
+		"GET    /buckets":             b.bucketsHandlerGET,
+		"POST   /buckets":             b.bucketsHandlerPOST,
+		"PUT    /bucket/:name/policy": b.bucketsHandlerPolicyPUT,
+		"DELETE /bucket/:name":        b.bucketHandlerDELETE,
+		"GET    /bucket/:name":        b.bucketHandlerGET,
+
+		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
+		"GET    /consensus/network":            b.consensusNetworkHandler,
+		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
+		"GET    /consensus/state":              b.consensusStateHandler,
+
+		"GET    /contracts":              b.contractsHandlerGET,
+		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
+		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
+		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
+		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
+		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
+		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
+		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
+		"GET    /contract/:id":           b.contractIDHandlerGET,
+		"POST   /contract/:id":           b.contractIDHandlerPOST,
+		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
+		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
+		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
+		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
+		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
+		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
+		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
+
+		"GET    /hosts":                          b.hostsHandlerGET,
+		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
+		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
+		"GET    /hosts/scanning":                 b.hostsScanningHandlerGET,
+		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
+
+		"PUT /metric/:key": b.metricsHandlerPUT,
+		"GET /metric/:key": b.metricsHandlerGET,
+
+		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
+		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
+		"POST   /multipart/complete":    b.multipartHandlerCompletePOST,
+		"PUT    /multipart/part":        b.multipartHandlerUploadPartPUT,
+		"GET    /multipart/upload/:id":  b.multipartHandlerUploadGET,
+		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
+		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
+
+		"GET    /objects/*path":  b.objectsHandlerGET,
+		"PUT    /objects/*path":  b.objectsHandlerPUT,
+		"DELETE /objects/*path":  b.objectsHandlerDELETE,
+		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
+		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+		"POST   /objects/list":   b.objectsListHandlerPOST,
+
+		"GET    /params/gouging": b.paramsHandlerGougingGET,
+		"GET    /params/upload":  b.paramsHandlerUploadGET,
+
+		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
+
+		"POST   /search/hosts":   b.searchHostsHandlerPOST,
+		"GET    /search/objects": b.searchObjectsHandlerGET,
+
+		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
+
+		"GET    /settings":     b.settingsHandlerGET,
+		"GET    /setting/:key": b.settingKeyHandlerGET,
+		"PUT    /setting/:key": b.settingKeyHandlerPUT,
+		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+
+		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
+		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
+		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
+		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
+		"GET    /slab/:key":           b.slabHandlerGET,
+		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
+		"PUT    /slab":                b.slabHandlerPUT,
+
+		"GET    /state":         b.stateHandlerGET,
+		"GET    /stats/objects": b.objectsStatshandlerGET,
+
+		"GET    /syncer/address": b.syncerAddrHandler,
+		"POST   /syncer/connect": b.syncerConnectHandler,
+		"GET    /syncer/peers":   b.syncerPeersHandler,
+
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
+		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
+		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
+
+		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
+		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
+		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
+
+		"GET    /wallet":               b.walletHandler,
+		"POST   /wallet/discard":       b.walletDiscardHandler,
+		"POST   /wallet/fund":          b.walletFundHandler,
+		"GET    /wallet/outputs":       b.walletOutputsHandler,
+		"GET    /wallet/pending":       b.walletPendingHandler,
+		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
+		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
+		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
+		"POST   /wallet/sign":          b.walletSignHandler,
+		"GET    /wallet/transactions":  b.walletTransactionsHandler,
+
+		"GET    /webhooks":        b.webhookHandlerGet,
+		"POST   /webhooks":        b.webhookHandlerPost,
+		"POST   /webhooks/action": b.webhookActionHandlerPost,
+		"POST   /webhook/delete":  b.webhookHandlerDelete,
+	}))
+}
+
+// Shutdown shuts down the bus.
+func (b *bus) Shutdown(ctx context.Context) error {
+	b.hooks.Close()
+	accounts := b.accounts.ToPersist()
+	err := b.eas.SaveAccounts(ctx, accounts)
+	if err != nil {
+		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
+	} else {
+		b.logger.Infof("successfully saved %v accounts", len(accounts))
+	}
+	return err
+}
+
+func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
+	if val, err := b.ss.Setting(ctx, key); err != nil {
+		return fmt.Errorf("could not get contract set settings: %w", err)
+	} else if err := json.Unmarshal([]byte(val), &value); err != nil {
+		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
+	}
+	return nil
 }
 
 func (b *bus) consensusAcceptBlock(jc jape.Context) {
@@ -746,7 +908,7 @@ func (b *bus) contractsRenewedIDHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
-	var toArchive api.ArchiveContractsRequest
+	var toArchive api.ContractsArchiveRequest
 	if jc.Decode(&toArchive) != nil {
 		return
 	}
@@ -917,7 +1079,7 @@ func (b *bus) contractIDHandlerGET(jc jape.Context) {
 
 func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
-	var req api.ContractsIDAddRequest
+	var req api.ContractAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
 	}
@@ -938,7 +1100,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 
 func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
-	var req api.ContractsIDRenewedRequest
+	var req api.ContractRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
 	}
@@ -1904,6 +2066,105 @@ func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 	return nil, nil
 }
 
+func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
+	var req api.MultipartCreateRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	key := req.Key
+	if key == (object.EncryptionKey{}) {
+		key = object.NoOpKey
+	}
+
+	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType)
+	if jc.Check("failed to create multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
+	var req api.MultipartAbortRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
+	if jc.Check("failed to abort multipart upload", err) != nil {
+		return
+	}
+}
+
+func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
+	var req api.MultipartCompleteRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts)
+	if jc.Check("failed to complete multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
+	var req api.MultipartAddPartRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if req.Bucket == "" {
+		req.Bucket = api.DefaultBucketName
+	} else if req.ContractSet == "" {
+		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
+		return
+	} else if req.ETag == "" {
+		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
+		return
+	} else if req.PartNumber <= 0 || req.PartNumber > gofakes3.MaxUploadPartNumber {
+		jc.Error(fmt.Errorf("part_number must be between 1 and %d", gofakes3.MaxUploadPartNumber), http.StatusBadRequest)
+		return
+	} else if req.UploadID == "" {
+		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
+		return
+	}
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.UsedContracts)
+	if jc.Check("failed to upload part", err) != nil {
+		return
+	}
+}
+
+func (b *bus) multipartHandlerUploadGET(jc jape.Context) {
+	resp, err := b.ms.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
+	if jc.Check("failed to get multipart upload", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
+	var req api.MultipartListUploadsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.PathMarker, req.UploadIDMarker, req.Limit)
+	if jc.Check("failed to list multipart uploads", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
+func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
+	var req api.MultipartListPartsRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
+	if jc.Check("failed to list multipart upload parts", err) != nil {
+		return
+	}
+	jc.Encode(resp)
+}
+
 // New returns a new Bus.
 func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
@@ -2007,265 +2268,4 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
 	return b, nil
-}
-
-func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
-	var req api.MultipartCreateRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	key := req.Key
-	if key == (object.EncryptionKey{}) {
-		key = object.NoOpKey
-	}
-
-	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType)
-	if jc.Check("failed to create multipart upload", err) != nil {
-		return
-	}
-	jc.Encode(resp)
-}
-
-func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
-	var req api.MultipartAbortRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
-	if jc.Check("failed to abort multipart upload", err) != nil {
-		return
-	}
-}
-
-func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
-	var req api.MultipartCompleteRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts)
-	if jc.Check("failed to complete multipart upload", err) != nil {
-		return
-	}
-	jc.Encode(resp)
-}
-
-func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
-	var req api.MultipartAddPartRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
-	} else if req.ContractSet == "" {
-		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
-		return
-	} else if req.ETag == "" {
-		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
-		return
-	} else if req.PartNumber <= 0 || req.PartNumber > gofakes3.MaxUploadPartNumber {
-		jc.Error(fmt.Errorf("part_number must be between 1 and %d", gofakes3.MaxUploadPartNumber), http.StatusBadRequest)
-		return
-	} else if req.UploadID == "" {
-		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
-		return
-	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.UsedContracts)
-	if jc.Check("failed to upload part", err) != nil {
-		return
-	}
-}
-
-func (b *bus) multipartHandlerUploadGET(jc jape.Context) {
-	resp, err := b.ms.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
-	if jc.Check("failed to get multipart upload", err) != nil {
-		return
-	}
-	jc.Encode(resp)
-}
-
-func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
-	var req api.MultipartListUploadsRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.PathMarker, req.UploadIDMarker, req.Limit)
-	if jc.Check("failed to list multipart uploads", err) != nil {
-		return
-	}
-	jc.Encode(resp)
-}
-
-func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
-	var req api.MultipartListPartsRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
-	if jc.Check("failed to list multipart upload parts", err) != nil {
-		return
-	}
-	jc.Encode(resp)
-}
-
-// Handler returns an HTTP handler that serves the bus API.
-func (b *bus) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
-		"GET    /accounts":                 b.accountsHandlerGET,
-		"POST   /account/:id":              b.accountHandlerGET,
-		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
-
-		"GET    /alerts":          b.handleGETAlerts,
-		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
-		"POST   /alerts/register": b.handlePOSTAlertsRegister,
-
-		"GET    /autopilots":    b.autopilotsListHandlerGET,
-		"GET    /autopilot/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
-
-		"GET    /buckets":             b.bucketsHandlerGET,
-		"POST   /buckets":             b.bucketsHandlerPOST,
-		"PUT    /bucket/:name/policy": b.bucketsHandlerPolicyPUT,
-		"DELETE /bucket/:name":        b.bucketHandlerDELETE,
-		"GET    /bucket/:name":        b.bucketHandlerGET,
-
-		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
-		"GET    /consensus/network":            b.consensusNetworkHandler,
-		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
-		"GET    /consensus/state":              b.consensusStateHandler,
-
-		"GET    /contracts":              b.contractsHandlerGET,
-		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
-		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
-		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
-		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
-		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
-		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
-		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
-		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
-		"GET    /contract/:id":           b.contractIDHandlerGET,
-		"POST   /contract/:id":           b.contractIDHandlerPOST,
-		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
-		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
-		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
-		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
-		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
-		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
-		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
-		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
-
-		"GET    /hosts":                          b.hostsHandlerGET,
-		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
-		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
-		"GET    /hosts/scanning":                 b.hostsScanningHandlerGET,
-		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
-		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
-
-		"PUT /metric/:key": b.metricsHandlerPUT,
-		"GET /metric/:key": b.metricsHandlerGET,
-
-		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
-		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
-		"POST   /multipart/complete":    b.multipartHandlerCompletePOST,
-		"PUT    /multipart/part":        b.multipartHandlerUploadPartPUT,
-		"GET    /multipart/upload/:id":  b.multipartHandlerUploadGET,
-		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
-		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
-
-		"GET    /objects/*path":  b.objectsHandlerGET,
-		"PUT    /objects/*path":  b.objectsHandlerPUT,
-		"DELETE /objects/*path":  b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
-		"POST   /objects/list":   b.objectsListHandlerPOST,
-
-		"GET    /params/gouging": b.paramsHandlerGougingGET,
-		"GET    /params/upload":  b.paramsHandlerUploadGET,
-
-		"GET    /syncer/address": b.syncerAddrHandler,
-		"POST   /syncer/connect": b.syncerConnectHandler,
-		"GET    /syncer/peers":   b.syncerPeersHandler,
-
-		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
-		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
-		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
-
-		"GET    /wallet":               b.walletHandler,
-		"POST   /wallet/discard":       b.walletDiscardHandler,
-		"POST   /wallet/fund":          b.walletFundHandler,
-		"GET    /wallet/outputs":       b.walletOutputsHandler,
-		"GET    /wallet/pending":       b.walletPendingHandler,
-		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
-		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
-		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
-		"POST   /wallet/sign":          b.walletSignHandler,
-		"GET    /wallet/transactions":  b.walletTransactionsHandler,
-
-		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
-		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
-		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
-		"GET    /search/objects": b.searchObjectsHandlerGET,
-
-		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
-
-		"GET    /settings":     b.settingsHandlerGET,
-		"GET    /setting/:key": b.settingKeyHandlerGET,
-		"PUT    /setting/:key": b.settingKeyHandlerPUT,
-		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
-
-		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
-		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
-		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
-		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
-		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
-
-		"GET    /state":         b.stateHandlerGET,
-		"GET    /stats/objects": b.objectsStatshandlerGET,
-
-		"POST   /upload/:id":        b.uploadTrackHandlerPOST,
-		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
-		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
-
-		"GET    /webhooks":        b.webhookHandlerGet,
-		"POST   /webhooks":        b.webhookHandlerPost,
-		"POST   /webhooks/action": b.webhookActionHandlerPost,
-		"POST   /webhook/delete":  b.webhookHandlerDelete,
-	}))
-}
-
-// Shutdown shuts down the bus.
-func (b *bus) Shutdown(ctx context.Context) error {
-	b.hooks.Close()
-	accounts := b.accounts.ToPersist()
-	err := b.eas.SaveAccounts(ctx, accounts)
-	if err != nil {
-		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
-	} else {
-		b.logger.Infof("successfully saved %v accounts", len(accounts))
-	}
-	return err
-}
-
-func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
-	if val, err := b.ss.Setting(ctx, key); err != nil {
-		return fmt.Errorf("could not get contract set settings: %w", err)
-	} else if err := json.Unmarshal([]byte(val), &value); err != nil {
-		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
-	}
-	return nil
 }
