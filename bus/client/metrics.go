@@ -78,6 +78,8 @@ func (c *Client) RecordContractSetChurnMetric(ctx context.Context, metrics ...ap
 }
 
 func (c *Client) metric(ctx context.Context, key string, values url.Values, res interface{}) error {
+	c.c.Custom("GET", fmt.Sprintf("/metric/%s", key), nil, (*interface{})(nil))
+
 	u, err := url.Parse(fmt.Sprintf("%s/metric/%s", c.c.BaseURL, key))
 	if err != nil {
 		panic(err)
