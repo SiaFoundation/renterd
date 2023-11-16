@@ -39,7 +39,7 @@ type accounts struct {
 }
 
 type AccountStore interface {
-	Account(ctx context.Context, id rhpv3.Account, host types.PublicKey) (account api.Account, err error)
+	Account(ctx context.Context, id rhpv3.Account, hk types.PublicKey) (account api.Account, err error)
 	Accounts(ctx context.Context) (accounts []api.Account, err error)
 }
 
@@ -61,10 +61,10 @@ func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, 
 	}
 }
 
-func (a *accounts) markRefillInProgress(workerID string, host types.PublicKey) bool {
+func (a *accounts) markRefillInProgress(workerID string, hk types.PublicKey) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	k := types.HashBytes(append([]byte(workerID), host[:]...))
+	k := types.HashBytes(append([]byte(workerID), hk[:]...))
 	_, inProgress := a.inProgressRefills[k]
 	if inProgress {
 		return false
@@ -73,10 +73,10 @@ func (a *accounts) markRefillInProgress(workerID string, host types.PublicKey) b
 	return true
 }
 
-func (a *accounts) markRefillDone(workerID string, host types.PublicKey) {
+func (a *accounts) markRefillDone(workerID string, hk types.PublicKey) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	k := types.HashBytes(append([]byte(workerID), host[:]...))
+	k := types.HashBytes(append([]byte(workerID), hk[:]...))
 	_, inProgress := a.inProgressRefills[k]
 	if !inProgress {
 		panic("releasing a refill that hasn't been in progress")
