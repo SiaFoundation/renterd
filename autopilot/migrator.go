@@ -2,6 +2,8 @@ package autopilot
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"sync"
@@ -17,16 +19,43 @@ const (
 	migratorBatchSize = math.MaxInt // TODO: change once we have a fix for the infinite loop
 )
 
-type migrator struct {
-	ap                        *Autopilot
-	logger                    *zap.SugaredLogger
-	healthCutoff              float64
-	parallelSlabsPerWorker    uint64
-	signalMaintenanceFinished chan struct{}
+type (
+	migrator struct {
+		ap                        *Autopilot
+		logger                    *zap.SugaredLogger
+		healthCutoff              float64
+		parallelSlabsPerWorker    uint64
+		signalMaintenanceFinished chan struct{}
 
-	mu                 sync.Mutex
-	migrating          bool
-	migratingLastStart time.Time
+		mu                 sync.Mutex
+		migrating          bool
+		migratingLastStart time.Time
+	}
+
+	job struct {
+		api.UnhealthySlab
+		slabIdx   int
+		batchSize int
+		set       string
+
+		b Bus
+	}
+)
+
+func (j *job) execute(ctx context.Context, w Worker) (_ api.MigrateSlabResponse, err error) {
+	slab, err := j.b.Slab(ctx, j.Key)
+	if err != nil {
+		return api.MigrateSlabResponse{}, fmt.Errorf("failed to fetch slab; %w", err)
+	}
+
+	res, err := w.MigrateSlab(ctx, slab, j.set)
+	if err != nil {
+		return api.MigrateSlabResponse{}, fmt.Errorf("failed to migrate slab; %w", err)
+	} else if res.Error != "" {
+		return res, fmt.Errorf("failed to migrate slab; %w", errors.New(res.Error))
+	}
+
+	return res, nil
 }
 
 func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uint64) *migrator {
@@ -75,16 +104,11 @@ func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
 func (m *migrator) performMigrations(p *workerPool) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
+
 	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
 	defer span.End()
 
 	// prepare a channel to push work to the workers
-	type job struct {
-		api.UnhealthySlab
-		slabIdx   int
-		batchSize int
-		set       string
-	}
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 	defer func() {
@@ -100,32 +124,34 @@ func (m *migrator) performMigrations(p *workerPool) {
 				go func(w Worker) {
 					defer wg.Done()
 
+					// fetch worker id once
 					id, err := w.ID(ctx)
 					if err != nil {
 						m.logger.Errorf("failed to fetch worker id: %v", err)
 						return
 					}
 
+					// process jobs
 					for j := range jobs {
-						slab, err := b.Slab(ctx, j.Key)
+						res, err := j.execute(ctx, w)
 						if err != nil {
-							m.logger.Errorf("%v: failed to fetch slab for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
+							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
+							if res.SurchargeApplied {
+								m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
+							} else {
+								m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
+							}
 							continue
 						}
-						ap, err := b.Autopilot(ctx, m.ap.id)
-						if err != nil {
-							m.logger.Errorf("%v: failed to fetch autopilot settings for migration %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
-							continue
+
+						m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
+						m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
+						if res.SurchargeApplied {
+							// this alert confirms the user his gouging settings
+							// are working, it will be dismissed automatically
+							// the next time this slab is successfully migrated
+							m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.Key))
 						}
-						res, err := w.MigrateSlab(ctx, slab, ap.Config.Contracts.Set)
-						if err != nil {
-							m.ap.RegisterAlert(ctx, newSlabMigrationFailedAlert(slab, j.Health, err))
-							m.logger.Errorf("%v: failed to migrate slab %d/%d, health: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Health, err)
-							continue
-						} else {
-							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, slab))
-						}
-						m.logger.Debugf("%v: successfully migrated slab (health: %v migrated shards: %d) %d/%d", id, j.Health, res.NumShardsMigrated, j.slabIdx+1, j.batchSize)
 					}
 				}(w)
 			}
@@ -151,10 +177,7 @@ OUTER:
 		// recompute health.
 		start := time.Now()
 		if err := b.RefreshHealth(ctx); err != nil {
-			rerr := m.ap.alerts.RegisterAlert(ctx, newRefreshHealthFailedAlert(err))
-			if rerr != nil {
-				m.logger.Errorf("failed to register alert: err %v", rerr)
-			}
+			m.ap.RegisterAlert(ctx, newRefreshHealthFailedAlert(err))
 			m.logger.Errorf("failed to recompute cached health before migration", err)
 			return
 		}
@@ -193,7 +216,7 @@ OUTER:
 			toMigrate = append(toMigrate, *slab)
 		}
 
-		// sort the newsly added slabs by health
+		// sort the newly added slabs by health
 		newSlabs := toMigrate[len(toMigrate)-len(migrateNewMap):]
 		sort.Slice(newSlabs, func(i, j int) bool {
 			return newSlabs[i].Health < newSlabs[j].Health
@@ -205,10 +228,7 @@ OUTER:
 
 		// register an alert to notify users about ongoing migrations.
 		if len(toMigrate) > 0 {
-			err = m.ap.alerts.RegisterAlert(ctx, newOngoingMigrationsAlert(len(toMigrate)))
-			if err != nil {
-				m.logger.Errorf("failed to register alert: err %v", err)
-			}
+			m.ap.RegisterAlert(ctx, newOngoingMigrationsAlert(len(toMigrate)))
 		}
 
 		// return if there are no slabs to migrate
@@ -223,8 +243,10 @@ OUTER:
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")
 				continue OUTER
-			case jobs <- job{slab, i, len(toMigrate), set}:
+			case jobs <- job{slab, i, len(toMigrate), set, b}:
 			}
 		}
+
+		return
 	}
 }

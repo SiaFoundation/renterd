@@ -215,7 +215,7 @@ type hostV2 interface {
 type hostV3 interface {
 	hostV2
 
-	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
+	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
 	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
@@ -396,6 +396,8 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 }
 
 func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, blockHeight uint64) (contracts []api.Contract, errs HostErrorSet) {
+	errs = make(HostErrorSet)
+
 	// create requests channel
 	reqs := make(chan api.ContractMetadata)
 
@@ -410,7 +412,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 			})
 			mu.Lock()
 			if err != nil {
-				errs = append(errs, &HostError{HostKey: md.HostKey, Err: err})
+				errs[md.HostKey] = err
 				contracts = append(contracts, api.Contract{
 					ContractMetadata: md,
 				})
@@ -523,7 +525,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		// just used it to dial the host we know it's valid
 		hostSettings.NetAddress = hostIP
 
-		gc, err := GougingCheckerFromContext(ctx)
+		gc, err := GougingCheckerFromContext(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -906,17 +908,30 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	used, numShardsMigrated, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
-	if jc.Check("couldn't migrate slabs", err) != nil {
+	used, numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	if err != nil {
+		jc.Encode(api.MigrateSlabResponse{
+			NumShardsMigrated: numShardsMigrated,
+			SurchargeApplied:  surchargeApplied,
+			Error:             err.Error(),
+		})
 		return
 	}
 
 	// update the slab
-	if jc.Check("couldn't update slab", w.bus.UpdateSlab(ctx, slab, up.ContractSet, used)) != nil {
+	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet, used); err != nil {
+		jc.Encode(api.MigrateSlabResponse{
+			NumShardsMigrated: numShardsMigrated,
+			SurchargeApplied:  surchargeApplied,
+			Error:             err.Error(),
+		})
 		return
 	}
 
-	jc.Encode(api.MigrateSlabResponse{NumShardsMigrated: numShardsMigrated})
+	jc.Encode(api.MigrateSlabResponse{
+		NumShardsMigrated: numShardsMigrated,
+		SurchargeApplied:  surchargeApplied,
+	})
 }
 
 func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
