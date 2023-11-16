@@ -76,11 +76,9 @@ SHARDS:
 	// which we have a contract (so hosts from which we can download)
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
-		for hk := range s.Shards[si].Contracts {
-			if _, exists := h2c[hk]; exists {
-				missingShards--
-				break
-			}
+		if _, exists := h2c[s.Shards[si].LatestHost]; exists {
+			missingShards--
+			continue
 		}
 	}
 
@@ -133,6 +131,9 @@ SHARDS:
 		for hk, fcids := range uploaded[i].Contracts {
 			for _, fcid := range fcids {
 				if _, exists := knownContracts[fcid]; !exists {
+					if s.Shards[si].Contracts == nil {
+						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
+					}
 					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
 				}
 			}
