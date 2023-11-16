@@ -89,7 +89,7 @@ SHARDS:
 		return 0, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
-		return 0, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
+		return 0, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-missingShards, int(s.MinShards))
 	}
 
 	// download the slab
