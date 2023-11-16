@@ -84,7 +84,6 @@ func (c *Client) metric(ctx context.Context, key string, values url.Values, res 
 	if err != nil {
 		panic(err)
 	}
-
 	u.RawQuery = values.Encode()
 	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
