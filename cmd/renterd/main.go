@@ -67,6 +67,11 @@ var (
 				IgnoreRecordNotFoundError: true,
 				SlowThreshold:             100 * time.Millisecond,
 			},
+			MySQL: config.MySQL{
+				Database:        "renterd",
+				User:            "renterd",
+				MetricsDatabase: "renterd_metrics",
+			},
 		},
 		Log: config.Log{
 			Level: "warn",
@@ -269,6 +274,7 @@ func main() {
 	flag.StringVar(&cfg.Database.MySQL.URI, "db.uri", cfg.Database.MySQL.URI, "URI of the database to use for the bus - can be overwritten using RENTERD_DB_URI environment variable")
 	flag.StringVar(&cfg.Database.MySQL.User, "db.user", cfg.Database.MySQL.User, "username for the database to use for the bus - can be overwritten using RENTERD_DB_USER environment variable")
 	flag.StringVar(&cfg.Database.MySQL.Database, "db.name", cfg.Database.MySQL.Database, "name of the database to use for the bus - can be overwritten using RENTERD_DB_NAME environment variable")
+	flag.StringVar(&cfg.Database.MySQL.MetricsDatabase, "db.metricsName", cfg.Database.MySQL.MetricsDatabase, "name of the database to use for storing metrics - can be overwritten using RENTERD_DB_METRICS_NAME environment variable")
 
 	// db logger
 	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "ignore not found error for logger - can be overwritten using RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR environment variable")
@@ -341,6 +347,7 @@ func main() {
 	parseEnvVar("RENTERD_DB_USER", &cfg.Database.MySQL.User)
 	parseEnvVar("RENTERD_DB_PASSWORD", &cfg.Database.MySQL.Password)
 	parseEnvVar("RENTERD_DB_NAME", &cfg.Database.MySQL.Database)
+	parseEnvVar("RENTERD_DB_METRICS_NAME", &cfg.Database.MySQL.MetricsDatabase)
 
 	parseEnvVar("RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR", &cfg.Database.Log.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
@@ -390,6 +397,12 @@ func main() {
 			cfg.Database.MySQL.Password,
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.Database,
+		)
+		busCfg.DBMetricsDialector = stores.NewMySQLConnection(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.MetricsDatabase,
 		)
 	}
 

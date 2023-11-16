@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -22,6 +24,9 @@ const (
 	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
+
+	refreshHealthMinHealthValidity = 12 * time.Hour
+	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
 var (
@@ -29,7 +34,17 @@ var (
 	errShardRootChanged      = errors.New("shard root changed")
 )
 
+const (
+	contractStateInvalid contractState = iota
+	contractStatePending
+	contractStateActive
+	contractStateComplete
+	contractStateFailed
+)
+
 type (
+	contractState uint8
+
 	dbArchivedContract struct {
 		Model
 
@@ -53,6 +68,8 @@ type (
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
 
+		ContractPrice  currency
+		State          contractState `gorm:"index;NOT NULL;default:0"`
 		TotalCost      currency
 		ProofHeight    uint64 `gorm:"index;default:0"`
 		RevisionHeight uint64 `gorm:"index;default:0"`
@@ -121,11 +138,11 @@ type (
 		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
-		Health      float64 `gorm:"index;default:1.0; NOT NULL"`
-		HealthValid bool    `gorm:"index;default:0;NOT NULL"`
-		Key         []byte  `gorm:"unique;NOT NULL;size:68"` // json string
-		MinShards   uint8   `gorm:"index"`
-		TotalShards uint8   `gorm:"index"`
+		Health           float64 `gorm:"index;default:1.0; NOT NULL"`
+		HealthValidUntil int64   `gorm:"index;default:0; NOT NULL"` // unix timestamp
+		Key              []byte  `gorm:"unique;NOT NULL;size:68"`   // json string
+		MinShards        uint8   `gorm:"index"`
+		TotalShards      uint8   `gorm:"index"`
 
 		Slices []dbSlice
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
@@ -144,7 +161,9 @@ type (
 	dbSector struct {
 		Model
 
-		DBSlabID   uint      `gorm:"index"`
+		DBSlabID  uint `gorm:"index:idx_sectors_db_slab_id;uniqueIndex:idx_sectors_slab_id_slab_index;NOT NULL"`
+		SlabIndex int  `gorm:"index:idx_sectors_slab_index;uniqueIndex:idx_sectors_slab_id_slab_index;NOT NULL"`
+
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 
@@ -184,9 +203,9 @@ type (
 		SlabMinShards uint8
 
 		// sector
-		SectorID   uint
-		SectorRoot []byte
-		SectorHost publicKey
+		SectorIndex uint
+		SectorRoot  []byte
+		SectorHost  publicKey
 	}
 
 	// rawObjectMetadata is used for hydrating object metadata.
@@ -199,6 +218,45 @@ type (
 		Size     int64
 	}
 )
+
+func (s *contractState) LoadString(state string) error {
+	switch strings.ToLower(state) {
+	case api.ContractStateInvalid:
+		*s = contractStateInvalid
+	case api.ContractStatePending:
+		*s = contractStatePending
+	case api.ContractStateActive:
+		*s = contractStateActive
+	case api.ContractStateComplete:
+		*s = contractStateComplete
+	case api.ContractStateFailed:
+		*s = contractStateFailed
+	default:
+		*s = contractStateInvalid
+	}
+	return nil
+}
+
+func (s contractState) String() string {
+	switch s {
+	case contractStateInvalid:
+		return api.ContractStateInvalid
+	case contractStatePending:
+		return api.ContractStatePending
+	case contractStateActive:
+		return api.ContractStateActive
+	case contractStateComplete:
+		return api.ContractStateComplete
+	case contractStateFailed:
+		return api.ContractStateFailed
+	default:
+		return api.ContractStateUnknown
+	}
+}
+
+func (s dbSlab) HealthValid() bool {
+	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
+}
 
 // TableName implements the gorm.Tabler interface.
 func (dbArchivedContract) TableName() string { return "archived_contracts" }
@@ -247,6 +305,7 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 		RevisionNumber: revisionNumber,
 		Size:           c.Size,
 		StartHeight:    c.StartHeight,
+		State:          c.State.String(),
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 
@@ -265,10 +324,11 @@ func (c dbContract) convert() api.ContractMetadata {
 	var revisionNumber uint64
 	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
 	return api.ContractMetadata{
-		ID:         types.FileContractID(c.FCID),
-		HostIP:     c.Host.NetAddress,
-		HostKey:    types.PublicKey(c.Host.PublicKey),
-		SiamuxAddr: c.Host.Settings.convert().SiamuxAddr(),
+		ContractPrice: types.Currency(c.ContractPrice),
+		ID:            types.FileContractID(c.FCID),
+		HostIP:        c.Host.NetAddress,
+		HostKey:       types.PublicKey(c.Host.PublicKey),
+		SiamuxAddr:    c.Host.Settings.convert().SiamuxAddr(),
 
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
@@ -284,6 +344,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		RevisionNumber: revisionNumber,
 		Size:           c.Size,
 		StartHeight:    c.StartHeight,
+		State:          c.State.String(),
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 	}
@@ -296,6 +357,9 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 	if err != nil {
 		return
 	}
+
+	// set health
+	slab.Health = s.Health
 
 	// set shards
 	slab.MinShards = s.MinShards
@@ -368,7 +432,7 @@ func (raw rawObject) convert() (api.Object, error) {
 
 		curr := filtered[0]
 		for j, sector := range filtered {
-			if sector.SectorID == 0 {
+			if sector.SectorIndex == 0 {
 				return api.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.SlabID != curr.SlabID ||
@@ -490,13 +554,18 @@ func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.B
 }
 
 func (s *SQLStore) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	b, err := json.Marshal(policy)
+	if err != nil {
+		return err
+	}
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		return tx.
 			Model(&dbBucket{}).
 			Where("name", bucket).
-			Updates(dbBucket{
-				Policy: policy,
-			}).
+			Updates(map[string]interface{}{
+				"policy": string(b),
+			},
+			).
 			Error
 	})
 }
@@ -629,10 +698,14 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 	return buffers, nil
 }
 
-func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (_ api.ContractMetadata, err error) {
+func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (_ api.ContractMetadata, err error) {
+	var cs contractState
+	if err := cs.LoadString(state); err != nil {
+		return api.ContractMetadata{}, err
+	}
 	var added dbContract
 	if err = s.retryTransaction(func(tx *gorm.DB) error {
-		added, err = addContract(tx, c, totalCost, startHeight, types.FileContractID{})
+		added, err = addContract(tx, c, contractPrice, totalCost, startHeight, types.FileContractID{}, cs)
 		return err
 	}); err != nil {
 		return
@@ -664,7 +737,11 @@ func (s *SQLStore) Contracts(ctx context.Context) ([]api.ContractMetadata, error
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
+	var cs contractState
+	if err := cs.LoadString(state); err != nil {
+		return api.ContractMetadata{}, err
+	}
 	var renewed dbContract
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract we renew from.
@@ -686,7 +763,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		}
 
 		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size)
+		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, contractPrice, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size, cs)
 		newContract.Model = oldContract.Model
 		newContract.CreatedAt = time.Now()
 		err = tx.Save(&newContract).Error
@@ -738,7 +815,7 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 
 	// archive them
 	if err := s.retryTransaction(func(tx *gorm.DB) error {
-		return archiveContracts(tx, cs, toArchive)
+		return archiveContracts(ctx, tx, cs, toArchive)
 	}); err != nil {
 		return err
 	}
@@ -877,72 +954,58 @@ WHERE c.fcid = ?
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	fcids := make([]fileContractID, len(contractIds))
-	for i, fcid := range contractIds {
-		fcids[i] = fileContractID(fcid)
+	var wantedIds []fileContractID
+	wanted := make(map[fileContractID]struct{})
+	for _, fcid := range contractIds {
+		wantedIds = append(wantedIds, fileContractID(fcid))
+		wanted[fileContractID(fcid)] = struct{}{}
 	}
 
 	var diff []fileContractID
+	var nContractsAfter int
 	err := s.retryTransaction(func(tx *gorm.DB) error {
-		// fetch current contracts
-		var dbCurrentContracts []fileContractID
+		// fetch contract set
+		var cs dbContractSet
 		err := tx.
-			Model(&dbContract{}).
-			Select("contracts.fcid").
-			Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-			Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", name).
-			Group("contracts.fcid").
-			Scan(&dbCurrentContracts).
-			Error
-		if err != nil {
-			return err
-		}
-		// fetch new contracts
-		var dbNewContracts []dbContract
-		err = tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", fcids).
-			Find(&dbNewContracts).
-			Error
-		if err != nil {
-			return err
-		}
-
-		// create contract set
-		var contractset dbContractSet
-		err = tx.
 			Where(dbContractSet{Name: name}).
-			FirstOrCreate(&contractset).
+			Preload("Contracts").
+			FirstOrCreate(&cs).
 			Error
 		if err != nil {
 			return err
 		}
 
-		// invalidate the health on all slab which are affected by this change
-		currentMap := make(map[fileContractID]struct{})
-		for _, fcid := range dbCurrentContracts {
-			currentMap[fcid] = struct{}{}
+		// fetch contracts
+		var dbContracts []dbContract
+		err = tx.
+			Model(&dbContract{}).
+			Where("fcid IN (?)", wantedIds).
+			Find(&dbContracts).
+			Error
+		if err != nil {
+			return err
 		}
-		newMap := make(map[fileContractID]struct{})
-		for _, c := range dbNewContracts {
-			newMap[c.FCID] = struct{}{}
+		nContractsAfter = len(dbContracts)
+
+		// add removals to the diff
+		for _, contract := range cs.Contracts {
+			if _, ok := wanted[contract.FCID]; !ok {
+				diff = append(diff, contract.FCID)
+			}
+			delete(wanted, contract.FCID)
 		}
-		for _, c := range dbNewContracts {
-			delete(currentMap, c.FCID)
-		}
-		for _, fcid := range dbCurrentContracts {
-			delete(newMap, fcid)
-		}
-		diff = make([]fileContractID, 0, len(currentMap)+len(newMap))
-		for fcid := range currentMap {
-			diff = append(diff, fcid)
-		}
-		for fcid := range newMap {
+
+		// add additions to the diff
+		for fcid := range wanted {
 			diff = append(diff, fcid)
 		}
 
-		// update contracts
-		return tx.Model(&contractset).Association("Contracts").Replace(&dbNewContracts)
+		// update the association
+		if err := tx.Model(&cs).Association("Contracts").Replace(&dbContracts); err != nil {
+			return err
+		}
+
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set contract set: %w", err)
@@ -952,6 +1015,16 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	err = s.invalidateSlabHealthByFCID(ctx, diff)
 	if err != nil {
 		return fmt.Errorf("failed to invalidate slab health: %w", err)
+	}
+
+	// Record the update.
+	err = s.RecordContractSetMetric(ctx, api.ContractSetMetric{
+		Name:      name,
+		Contracts: nContractsAfter,
+		Timestamp: time.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to record contract set metric: %w", err)
 	}
 	return nil
 }
@@ -1132,49 +1205,82 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	defer s.spendingMu.Unlock()
 
 	squashedRecords := make(map[types.FileContractID]api.ContractSpending)
-	latestRevision := make(map[types.FileContractID]uint64)
-	latestSize := make(map[types.FileContractID]uint64)
+	latestValues := make(map[types.FileContractID]struct {
+		revision          uint64
+		size              uint64
+		missedHostPayout  types.Currency
+		validRenterPayout types.Currency
+	})
 	for _, r := range records {
 		squashedRecords[r.ContractID] = squashedRecords[r.ContractID].Add(r.ContractSpending)
-		if r.RevisionNumber > latestRevision[r.ContractID] {
-			latestRevision[r.ContractID] = r.RevisionNumber
-			latestSize[r.ContractID] = r.Size
+		v := latestValues[r.ContractID]
+		if r.RevisionNumber > latestValues[r.ContractID].revision {
+			v.revision = r.RevisionNumber
+			v.size = r.Size
+			v.missedHostPayout = r.MissedHostPayout
+			v.validRenterPayout = r.ValidRenterPayout
+			latestValues[r.ContractID] = v
 		}
 	}
+	metrics := make([]api.ContractMetric, 0, len(squashedRecords))
 	for fcid, newSpending := range squashedRecords {
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			var contract dbContract
 			err := tx.Model(&dbContract{}).
 				Where("fcid = ?", fileContractID(fcid)).
+				Joins("Host").
 				Take(&contract).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil // contract not found, continue with next one
 			} else if err != nil {
 				return err
 			}
+
+			remainingCollateral := types.ZeroCurrency
+			if mhp := latestValues[fcid].missedHostPayout; types.Currency(contract.ContractPrice).Cmp(mhp) <= 0 {
+				remainingCollateral = mhp.Sub(types.Currency(contract.ContractPrice))
+			}
+			m := api.ContractMetric{
+				Timestamp:           time.Now(),
+				ContractID:          fcid,
+				HostKey:             types.PublicKey(contract.Host.PublicKey),
+				RemainingCollateral: remainingCollateral,
+				RemainingFunds:      latestValues[fcid].validRenterPayout,
+				RevisionNumber:      latestValues[fcid].revision,
+				UploadSpending:      types.Currency(contract.UploadSpending).Add(newSpending.Uploads),
+				DownloadSpending:    types.Currency(contract.DownloadSpending).Add(newSpending.Downloads),
+				FundAccountSpending: types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount),
+				DeleteSpending:      types.Currency(contract.DeleteSpending).Add(newSpending.Deletions),
+				ListSpending:        types.Currency(contract.ListSpending).Add(newSpending.SectorRoots),
+			}
+			metrics = append(metrics, m)
+
 			updates := make(map[string]interface{})
 			if !newSpending.Uploads.IsZero() {
-				updates["upload_spending"] = currency(types.Currency(contract.UploadSpending).Add(newSpending.Uploads))
+				updates["upload_spending"] = currency(m.UploadSpending)
 			}
 			if !newSpending.Downloads.IsZero() {
-				updates["download_spending"] = currency(types.Currency(contract.DownloadSpending).Add(newSpending.Downloads))
+				updates["download_spending"] = currency(m.DownloadSpending)
 			}
 			if !newSpending.FundAccount.IsZero() {
-				updates["fund_account_spending"] = currency(types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount))
+				updates["fund_account_spending"] = currency(m.FundAccountSpending)
 			}
 			if !newSpending.Deletions.IsZero() {
-				updates["delete_spending"] = currency(types.Currency(contract.DeleteSpending).Add(newSpending.Deletions))
+				updates["delete_spending"] = currency(m.DeleteSpending)
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates["list_spending"] = currency(types.Currency(contract.ListSpending).Add(newSpending.SectorRoots))
+				updates["list_spending"] = currency(m.ListSpending)
 			}
-			updates["revision_number"] = latestRevision[fcid]
-			updates["size"] = latestSize[fcid]
+			updates["revision_number"] = latestValues[fcid].revision
+			updates["size"] = latestValues[fcid].size
 			return tx.Model(&contract).Updates(updates).Error
 		})
 		if err != nil {
 			return err
 		}
+	}
+	if err := s.RecordContractMetric(ctx, metrics...); err != nil {
+		s.logger.Errorw("failed to record contract metrics", "err", err)
 	}
 	return nil
 }
@@ -1361,7 +1467,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 					sectorIDs = append(sectorIDs, s.DBSectorID)
 				}
 			}
-			err = tx.Exec("UPDATE slabs SET health_valid = 0 WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", sectorIDs).Error
+			err = tx.Exec("UPDATE slabs SET health_valid_until = ? WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", time.Now().Unix(), sectorIDs).Error
 			if err != nil {
 				return fmt.Errorf("failed to invalidate slab health: %w", err)
 			}
@@ -1372,6 +1478,11 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 				return fmt.Errorf("failed to delete contract sectors: %w", err)
 			} else if res.RowsAffected != int64(len(sectors)) {
 				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
+			}
+
+			// Increment the host's lostSectors by the number of lost sectors.
+			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
+				return fmt.Errorf("failed to increment lost sectors: %w", err)
 			}
 		}
 
@@ -1581,7 +1692,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// make sure the roots stay the same.
 		for i, shard := range s.Shards {
 			if shard.Root != types.Hash256(slab.Shards[i].Root) {
-				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root)
+				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root[:])
 			}
 		}
 
@@ -1590,7 +1701,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			Where(&slab).
 			Updates(map[string]interface{}{
 				"db_contract_set_id": cs.ID,
-				"health_valid":       false,
+				"health_valid_until": time.Now().Unix(),
 				"health":             1,
 			}).
 			Error; err != nil {
@@ -1598,14 +1709,17 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 
 		// loop updated shards
-		for _, shard := range s.Shards {
+		for i, shard := range s.Shards {
 			// ensure the sector exists
 			var sector dbSector
 			if err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
 				Assign(dbSector{
 					DBSlabID:   slab.ID,
-					LatestHost: publicKey(shard.Host)},
+					SlabIndex:  i + 1,
+					LatestHost: publicKey(shard.Host),
+					Root:       shard.Root[:],
+				},
 				).
 				FirstOrCreate(&sector).
 				Error; err != nil {
@@ -1637,6 +1751,8 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	}
 
 	// Update slab health in batches.
+	now := time.Now()
+
 	for {
 		healthQuery := s.db.Raw(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
@@ -1653,10 +1769,10 @@ LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
 LEFT JOIN contracts c ON se.db_contract_id = c.id
 LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-WHERE slabs.health_valid = 0
+WHERE slabs.health_valid_until <= ?
 GROUP BY slabs.id
 LIMIT ?
-`, refreshHealthBatchSize)
+`, now.Unix(), refreshHealthBatchSize)
 		var rowsAffected int64
 		err := s.retryTransaction(func(tx *gorm.DB) error {
 			s.objectsMu.Lock()
@@ -1664,9 +1780,9 @@ LIMIT ?
 
 			var res *gorm.DB
 			if isSQLite(s.db) {
-				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid = 1 FROM (?) AS src WHERE slabs.id=src.id", healthQuery)
+				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid_until = (?) FROM (?) AS src WHERE slabs.id=src.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity), healthQuery)
 			} else {
-				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id AND sla.health_valid = 0 SET sla.health = h.health, health_valid = 1", healthQuery)
+				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (?)", healthQuery, sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
 			}
 			if res.Error != nil {
 				return res.Error
@@ -1704,7 +1820,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Select("slabs.key, slabs.health").
 		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
 		Model(&dbSlab{}).
-		Where("health <= ? AND health_valid = 1 AND cs.name = ?", healthCutoff, set).
+		Where("health <= ? AND cs.name = ?", healthCutoff, set).
 		Order("health ASC").
 		Limit(limit).
 		Find(&rows).
@@ -1765,12 +1881,12 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		}
 
 		for j, shard := range ss.Shards {
-			// Create sector if it doesn't exist yet.
 			var sector dbSector
 			err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
 				Assign(dbSector{
 					DBSlabID:   slab.ID,
+					SlabIndex:  j + 1,
 					LatestHost: publicKey(shard.Host),
 				}).
 				FirstOrCreate(&sector).
@@ -1778,7 +1894,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 			}
-
 			// Add contract and host to join tables.
 			contract, contractFound := contracts[shard.Host]
 			if contractFound {
@@ -1830,7 +1945,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.id as SectorID, sec.root as SectorRoot, sec.latest_host as SectorHost").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -1840,7 +1955,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
 		Order("sli.id ASC").
-		Order("sec.id ASC").
+		Order("sec.slab_index ASC").
 		Scan(&rows)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
 		return nil, api.ErrObjectNotFound
@@ -1997,6 +2112,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 	for i := range slab.Shards {
 		sector := dbSector{
 			DBSlabID:   sla.ID,
+			SlabIndex:  i + 1,
 			LatestHost: publicKey(slab.Shards[i].Host),
 			Root:       slab.Shards[i].Root[:],
 		}
@@ -2053,7 +2169,7 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 	return
 }
 
-func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64) dbContract {
+func newContract(hostID uint, fcid, renewedFrom types.FileContractID, contractPrice, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64, state contractState) dbContract {
 	return dbContract{
 		HostID: hostID,
 
@@ -2061,6 +2177,8 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 			FCID:        fileContractID(fcid),
 			RenewedFrom: fileContractID(renewedFrom),
 
+			ContractPrice:  currency(contractPrice),
+			State:          state,
 			TotalCost:      currency(totalCost),
 			RevisionNumber: "0",
 			Size:           size,
@@ -2078,7 +2196,7 @@ func newContract(hostID uint, fcid, renewedFrom types.FileContractID, totalCost 
 }
 
 // addContract adds a contract to the store.
-func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (dbContract, error) {
+func addContract(tx *gorm.DB, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state contractState) (dbContract, error) {
 	fcid := c.ID()
 
 	// Find host.
@@ -2090,7 +2208,7 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 	}
 
 	// Create contract.
-	contract := newContract(host.ID, fcid, renewedFrom, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize)
+	contract := newContract(host.ID, fcid, renewedFrom, contractPrice, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, c.Revision.Filesize, state)
 
 	// Insert contract.
 	err = tx.Create(&contract).Error
@@ -2106,14 +2224,14 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, totalCost types.Currency
 // archival reason
 //
 // NOTE: this function archives the contracts without setting a renewed ID
-func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
+func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
 	var toInvalidate []fileContractID
 	for _, contract := range contracts {
 		toInvalidate = append(toInvalidate, contract.FCID)
 	}
 	// Invalidate the health on the slabs before deleting the contracts to avoid
 	// breaking the relations beforehand.
-	if err := invalidateSlabHealthByFCID(tx, toInvalidate); err != nil {
+	if err := invalidateSlabHealthByFCID(ctx, tx, toInvalidate); err != nil {
 		return fmt.Errorf("invalidating slab health failed: %w", err)
 	}
 	for _, contract := range contracts {
@@ -2176,54 +2294,43 @@ func deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _
 	return numDeleted, nil
 }
 
-func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
-	return tx.Exec(`
-	UPDATE slabs SET health_valid = 0 WHERE id in (
-	       SELECT *
-	       FROM (
-	               SELECT slabs.id
-	               FROM slabs
-	               LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-	               LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-	               LEFT JOIN contracts c ON c.id = cs.db_contract_id
-	               WHERE health_valid = 1 AND c.fcid IN (?)
-	       ) slab_ids
-	)
-	               `, fcids).Error
-}
+func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileContractID) error {
+	if len(fcids) == 0 {
+		return nil
+	}
 
-func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
 	for {
-		var rowsAffected int64
-		err := s.retryTransaction(func(tx *gorm.DB) error {
-			resp := tx.Exec(`
-UPDATE slabs SET health_valid = 0 WHERE id in (
-	SELECT *
-	FROM (
-		SELECT slabs.id
-		FROM slabs
-		LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-		LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-		LEFT JOIN contracts c ON c.id = cs.db_contract_id
-		WHERE health_valid = 1 AND c.fcid IN (?)
-		LIMIT ?
-	) slab_ids
-)
-		`, fcids, refreshHealthBatchSize)
-			rowsAffected = resp.RowsAffected
-			return resp.Error
-		})
-		if err != nil {
-			return fmt.Errorf("failed to invalidate slab health: %w", err)
-		} else if rowsAffected < refreshHealthBatchSize {
-			return nil // done
+		if resp := tx.Debug().Exec(`
+		UPDATE slabs SET health_valid_until = ? WHERE id in (
+			   SELECT *
+			   FROM (
+					   SELECT slabs.id
+					   FROM slabs
+					   LEFT JOIN sectors se ON se.db_slab_id = slabs.id
+					   LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
+					   LEFT JOIN contracts c ON c.id = cs.db_contract_id
+					   WHERE c.fcid IN (?)
+					   LIMIT ?
+			   ) slab_ids
+		)`, time.Now().Unix(), fcids, refreshHealthBatchSize); resp.Error != nil {
+			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
+		} else if resp.RowsAffected < refreshHealthBatchSize {
+			break // done
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(time.Second):
 		}
 	}
+	return nil
+}
+
+func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileContractID) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		return invalidateSlabHealthByFCID(ctx, tx, fcids)
+	})
 }
 
 func sqlConcat(db *gorm.DB, a, b string) string {
@@ -2231,6 +2338,13 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 		return fmt.Sprintf("%s || %s", a, b)
 	}
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+}
+
+func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) clause.Expr {
+	if isSQLite(db) {
+		return gorm.Expr("ABS(RANDOM()) % (? - ?) + ?", int(max.Seconds()), int(min.Seconds()), now.Add(min).Unix())
+	}
+	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(min).Unix(), int(max.Seconds()), int(min.Seconds()))
 }
 
 func sqlWhereBucket(objTable string, bucket string) clause.Expr {
@@ -2248,11 +2362,11 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		limit++
 	}
 
-	prefixExpr := gorm.Expr("TRUE")
+	prefixExpr := exprTRUE
 	if prefix != "" {
 		prefixExpr = gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
 	}
-	markerExpr := gorm.Expr("TRUE")
+	markerExpr := exprTRUE
 	if marker != "" {
 		markerExpr = gorm.Expr("o.object_id > ?", marker)
 	}
@@ -2292,4 +2406,93 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		NextMarker: nextMarker,
 		Objects:    objects,
 	}, nil
+}
+
+func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) {
+	height := uint64(cc.InitialHeight())
+	for _, sb := range cc.RevertedBlocks {
+		var b types.Block
+		convertToCore(sb, (*types.V1Block)(&b))
+
+		// revert contracts that got reorged to "pending".
+		for _, txn := range b.Transactions {
+			// handle contracts
+			for i := range txn.FileContracts {
+				fcid := txn.FileContractID(i)
+				if ss.isKnownContract(fcid) {
+					ss.unappliedContractState[fcid] = contractStatePending // revert from 'active' to 'pending'
+					ss.logger.Infow("contract state changed: active -> pending",
+						"fcid", fcid,
+						"reason", "contract reverted")
+				}
+			}
+			// handle contract revision
+			for _, rev := range txn.FileContractRevisions {
+				if ss.isKnownContract(rev.ParentID) {
+					if rev.RevisionNumber == math.MaxUint64 && rev.Filesize == 0 {
+						ss.unappliedContractState[rev.ParentID] = contractStateActive // revert from 'complete' to 'active'
+						ss.logger.Infow("contract state changed: complete -> active",
+							"fcid", rev.ParentID,
+							"reason", "final revision reverted")
+					}
+				}
+			}
+			// handle storage proof
+			for _, sp := range txn.StorageProofs {
+				if ss.isKnownContract(sp.ParentID) {
+					ss.unappliedContractState[sp.ParentID] = contractStateActive // revert from 'complete' to 'active'
+					ss.logger.Infow("contract state changed: complete -> active",
+						"fcid", sp.ParentID,
+						"reason", "storage proof reverted")
+				}
+			}
+		}
+		height--
+	}
+
+	for _, sb := range cc.AppliedBlocks {
+		var b types.Block
+		convertToCore(sb, (*types.V1Block)(&b))
+
+		// Update RevisionHeight and RevisionNumber for our contracts.
+		for _, txn := range b.Transactions {
+			// handle contracts
+			for i := range txn.FileContracts {
+				fcid := txn.FileContractID(i)
+				if ss.isKnownContract(fcid) {
+					ss.unappliedContractState[fcid] = contractStateActive // 'pending' -> 'active'
+					ss.logger.Infow("contract state changed: pending -> active",
+						"fcid", fcid,
+						"reason", "contract confirmed")
+				}
+			}
+			// handle contract revision
+			for _, rev := range txn.FileContractRevisions {
+				if ss.isKnownContract(rev.ParentID) {
+					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
+						height: height,
+						number: rev.RevisionNumber,
+						size:   rev.Filesize,
+					}
+					if rev.RevisionNumber == math.MaxUint64 && rev.Filesize == 0 {
+						ss.unappliedContractState[rev.ParentID] = contractStateComplete // renewed: 'active' -> 'complete'
+						ss.logger.Infow("contract state changed: active -> complete",
+							"fcid", rev.ParentID,
+							"reason", "final revision confirmed")
+					}
+				}
+			}
+			// handle storage proof
+			for _, sp := range txn.StorageProofs {
+				if ss.isKnownContract(sp.ParentID) {
+					ss.unappliedProofs[sp.ParentID] = height
+					ss.unappliedContractState[sp.ParentID] = contractStateComplete // storage proof: 'active' -> 'complete'
+					ss.logger.Infow("contract state changed: active -> complete",
+						"fcid", sp.ParentID,
+						"reason", "storage proof confirmed")
+				}
+			}
+		}
+		height++
+	}
 }

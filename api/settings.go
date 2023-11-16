@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -13,6 +14,11 @@ const (
 	SettingRedundancy       = "redundancy"
 	SettingS3Authentication = "s3authentication"
 	SettingUploadPacking    = "uploadpacking"
+)
+
+const (
+	S3MinAccessKeyLen = 16
+	S3MaxAccessKeyLen = 40
 )
 
 var (
@@ -64,6 +70,12 @@ type (
 		// MinMaxEphemeralAccountBalance is the minimum accepted value for
 		// `MaxEphemeralAccountBalance` in the host's price settings.
 		MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
+
+		// MigrationSurchargeMultiplier is the multiplier applied to the
+		// 'MaxDownloadPrice' when checking whether a host is too expensive,
+		// this multiplier is only applied for when trying to migrate critically
+		// low-health slabs.
+		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
 	// RedundancySettings contain settings that dictate an object's redundancy.
@@ -118,6 +130,19 @@ func (rs RedundancySettings) Validate() error {
 	}
 	if rs.TotalShards > 255 {
 		return errors.New("TotalShards must be less than 256")
+	}
+	return nil
+}
+
+// Validate returns an error if the authentication settings are not considered
+// valid.
+func (s3as S3AuthenticationSettings) Validate() error {
+	for id, key := range s3as.V4Keypairs {
+		if len(id) == 0 {
+			return fmt.Errorf("AccessKeyID cannot be empty")
+		} else if len(key) < S3MinAccessKeyLen || len(key) > S3MaxAccessKeyLen {
+			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(key))
+		}
 	}
 	return nil
 }

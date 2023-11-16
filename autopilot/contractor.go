@@ -219,6 +219,13 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		return false, err
 	}
 
+	// check if any used hosts have lost data to warn the user
+	for _, h := range hosts {
+		if h.Interactions.LostSectors > 0 {
+			c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
+		}
+	}
+
 	// fetch candidate hosts
 	candidates, unusableHosts, err := c.candidateHosts(ctx, hosts, usedHosts, hostData, math.SmallestNonzeroFloat64) // avoid 0 score hosts
 	if err != nil {
@@ -394,10 +401,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// return whether the maintenance changed the contract set
-	return c.computeContractSetChanged(state.cfg.Contracts.Set, currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
+	return c.computeContractSetChanged(ctx, state.cfg.Contracts.Set, currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
 }
 
-func (c *contractor) computeContractSetChanged(name string, oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
+func (c *contractor) computeContractSetChanged(ctx context.Context, name string, oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
 	// build some maps for easier lookups
 	previous := make(map[types.FileContractID]struct{})
 	for _, c := range oldSet {
@@ -452,6 +459,32 @@ func (c *contractor) computeContractSetChanged(name string, oldSet []api.Contrac
 	logFn := c.logger.Debugw
 	if len(newSet) < int(c.ap.State().rs.TotalShards) {
 		logFn = c.logger.Warnw
+	}
+
+	// record churn metrics
+	now := time.Now()
+	var metrics []api.ContractSetChurnMetric
+	for _, fcid := range added {
+		metrics = append(metrics, api.ContractSetChurnMetric{
+			Name:       c.ap.state.cfg.Contracts.Set,
+			ContractID: fcid,
+			Direction:  api.ChurnDirAdded,
+			Timestamp:  now,
+		})
+	}
+	for _, fcid := range removed {
+		metrics = append(metrics, api.ContractSetChurnMetric{
+			Name:       c.ap.state.cfg.Contracts.Set,
+			ContractID: fcid,
+			Direction:  api.ChurnDirRemoved,
+			Reason:     removedReasons[fcid.String()],
+			Timestamp:  now,
+		})
+	}
+	if len(metrics) > 0 {
+		if err := c.ap.bus.RecordContractSetChurnMetric(ctx, metrics...); err != nil {
+			c.logger.Error("failed to record contract set churn metric:", err)
+		}
 	}
 
 	// log the contract set after maintenance
@@ -633,6 +666,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
+		} else if contract.State == api.ContractStatePending && cs.BlockHeight-contract.StartHeight > 18 {
+			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {
 			toStopUsing[fcid] = toArchive[fcid]
@@ -1335,7 +1370,8 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, fcid)
+	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
+	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1423,7 +1459,8 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, renterFunds, cs.BlockHeight, contract.ID)
+	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1495,7 +1532,8 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	*budget = budget.Sub(renterFunds)
 
 	// persist contract in store
-	formedContract, err := c.ap.bus.AddContract(ctx, contract, renterFunds, cs.BlockHeight)
+	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
+	formedContract, err := c.ap.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, true, err

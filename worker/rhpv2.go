@@ -50,31 +50,30 @@ var (
 	ErrContractFinalized = errors.New("contract cannot be revised further")
 )
 
-// A HostError associates an error with a given host.
-type HostError struct {
-	HostKey types.PublicKey
-	Err     error
-}
-
-// Error implements error.
-func (he HostError) Error() string {
-	return fmt.Sprintf("%x: %v", he.HostKey[:4], he.Err.Error())
-}
-
-// Unwrap returns the underlying error.
-func (he HostError) Unwrap() error {
-	return he.Err
-}
-
 // A HostErrorSet is a collection of errors from various hosts.
-type HostErrorSet []*HostError
+type HostErrorSet map[types.PublicKey]error
+
+// NumGouging returns numbers of host that errored out due to price gouging.
+func (hes HostErrorSet) NumGouging() (n int) {
+	for _, he := range hes {
+		if errors.Is(he, errPriceTableGouging) {
+			n++
+		}
+	}
+	return
+}
 
 // Error implements error.
 func (hes HostErrorSet) Error() string {
-	strs := make([]string, len(hes))
-	for i := range strs {
-		strs[i] = hes[i].Error()
+	if len(hes) == 0 {
+		return ""
 	}
+
+	var strs []string
+	for hk, he := range hes {
+		strs = append(strs, fmt.Sprintf("%x: %v", hk[:4], he.Error()))
+	}
+
 	// include a leading newline so that the first error isn't printed on the
 	// same line as the error context
 	return "\n" + strings.Join(strs, "\n")
@@ -487,7 +486,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			deleted += uint64(len(batch))
 
 			// record spending
-			w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{Deletions: cost})
+			w.contractSpendingRecorder.Record(rev.Revision, api.ContractSpending{Deletions: cost})
 			return nil
 		}(); err != nil {
 			return
@@ -588,7 +587,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		offset += n
 
 		// record spending
-		w.contractSpendingRecorder.Record(rev.ID(), rev.Revision.RevisionNumber, rev.Revision.Filesize, api.ContractSpending{SectorRoots: cost})
+		w.contractSpendingRecorder.Record(rev.Revision, api.ContractSpending{SectorRoots: cost})
 	}
 	return
 }

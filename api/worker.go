@@ -53,7 +53,9 @@ type (
 
 	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
 	MigrateSlabResponse struct {
-		NumShardsMigrated int `json:"numShardsMigrated"`
+		NumShardsMigrated int    `json:"numShardsMigrated"`
+		SurchargeApplied  bool   `json:"surchargeApplied,omitempty"`
+		Error             string `json:"error,omitempty"`
 	}
 
 	// RHPFormRequest is the request type for the /rhp/form endpoint.

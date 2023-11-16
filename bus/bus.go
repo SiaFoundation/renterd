@@ -99,6 +99,7 @@ type (
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -108,8 +109,8 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
+		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -192,6 +193,16 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 		SetUncleanShutdown() error
 	}
+
+	MetricsStore interface {
+		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
+
+		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
+
+		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
+		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+	}
 )
 
 type bus struct {
@@ -205,6 +216,7 @@ type bus struct {
 	hdb      HostDB
 	as       AutopilotStore
 	ms       MetadataStore
+	mtrcs    MetricsStore
 	ss       SettingStore
 
 	eas EphemeralAccountStore
@@ -633,6 +645,17 @@ func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) hostsResetLostSectorsPOST(jc jape.Context) {
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	err := b.hdb.ResetLostSectors(jc.Request.Context(), hostKey)
+	if jc.Check("couldn't reset lost sectors", err) != nil {
+		return
+	}
+}
+
 func (b *bus) hostsScanHandlerPOST(jc jape.Context) {
 	var req api.HostsScanRequest
 	if jc.Decode(&req) != nil {
@@ -907,7 +930,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight)
+	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
@@ -927,8 +950,10 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
 		return
 	}
-
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.TotalCost, req.StartHeight, req.RenewedFrom)
+	if req.State == "" {
+		req.State = api.ContractStatePending
+	}
+	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
@@ -1391,6 +1416,15 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update redundancy settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+	case api.SettingS3Authentication:
+		var s3as api.S3AuthenticationSettings
+		if err := json.Unmarshal(data, &s3as); err != nil {
+			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := s3as.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
+			return
+		}
 	}
 
 	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
@@ -1785,8 +1819,84 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	}
 }
 
+func (b *bus) metricsHandlerPUT(jc jape.Context) {
+	key := jc.PathParam("key")
+	switch key {
+	case api.MetricContractSetChurn:
+		var req api.ContractSetChurnMetricRequestPUT
+		if jc.Decode(&req) != nil {
+			return
+		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
+			return
+		}
+	default:
+		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		return
+	}
+}
+
+func (b *bus) metricsHandlerGET(jc jape.Context) {
+	key := jc.PathParam("key")
+
+	// parse mandatory query parameters
+	var err error
+	var start time.Time
+	var n uint64
+	var interval time.Duration
+	if jc.DecodeForm("start", (*api.TimeRFC3339)(&start)) != nil {
+		return
+	} else if jc.DecodeForm("n", &n) != nil {
+		return
+	} else if jc.DecodeForm("interval", (*api.DurationMS)(&interval)) != nil {
+		return
+	}
+
+	// parse optional query parameters
+	switch key {
+	case api.MetricContract:
+		var metrics []api.ContractMetric
+		var opts api.ContractMetricsQueryOpts
+		if jc.DecodeForm("fcid", &opts.ContractID) != nil {
+			return
+		} else if jc.DecodeForm("host", &opts.HostKey) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
+	case api.MetricContractSet:
+		var metrics []api.ContractSetMetric
+		var opts api.ContractSetMetricsQueryOpts
+		if jc.DecodeForm("name", &opts.Name) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
+	case api.MetricContractSetChurn:
+		var metrics []api.ContractSetChurnMetric
+		var opts api.ContractSetChurnMetricsQueryOpts
+		if jc.DecodeForm("name", &opts.Name) != nil {
+			return
+		} else if jc.DecodeForm("direction", &opts.Direction) != nil {
+			return
+		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
+			return
+		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
+			return
+		}
+		jc.Encode(metrics)
+		return
+	default:
+		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
+		return
+	}
+}
+
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
@@ -1798,6 +1908,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		hdb:              hdb,
 		as:               as,
 		ms:               ms,
+		mtrcs:            mtrcs,
 		ss:               ss,
 		eas:              eas,
 		contractLocks:    newContractLocks(),
@@ -2040,16 +2151,20 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 
-		"GET    /hosts":             b.hostsHandlerGET,
-		"GET    /hosts/allowlist":   b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":   b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":   b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":   b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/pricetables": b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":      b.hostsRemoveHandlerPOST,
-		"POST   /hosts/scans":       b.hostsScanHandlerPOST,
-		"GET    /hosts/scanning":    b.hostsScanningHandlerGET,
-		"GET    /host/:hostkey":     b.hostsPubkeyHandlerGET,
+		"GET    /hosts":                          b.hostsHandlerGET,
+		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
+		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
+		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
+		"GET    /hosts/scanning":                 b.hostsScanningHandlerGET,
+		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
+
+		"PUT /metric/:key": b.metricsHandlerPUT,
+		"GET /metric/:key": b.metricsHandlerGET,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,

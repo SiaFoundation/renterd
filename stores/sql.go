@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -28,6 +27,10 @@ const (
 	maxSQLVars = 32000
 )
 
+var (
+	exprTRUE = gorm.Expr("TRUE")
+)
+
 type (
 	// Model defines the common fields of every table. Same as Model
 	// but excludes soft deletion since it breaks cascading deletes.
@@ -38,9 +41,10 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts alerts.Alerter
-		db     *gorm.DB
-		logger *zap.SugaredLogger
+		alerts    alerts.Alerter
+		db        *gorm.DB
+		dbMetrics *gorm.DB
+		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
 
@@ -50,6 +54,7 @@ type (
 		persistMu              sync.Mutex
 		persistTimer           *time.Timer
 		unappliedAnnouncements []announcement
+		unappliedContractState map[types.FileContractID]contractState
 		unappliedHostKeys      map[types.PublicKey]struct{}
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
@@ -114,6 +119,13 @@ func NewSQLiteConnection(path string) gorm.Dialector {
 	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL", path))
 }
 
+// NewMetricsSQLiteConnection opens a sqlite db at the given path similarly to
+// NewSQLiteConnection but with weaker consistency guarantees since it's
+// optimised for recording metrics.
+func NewMetricsSQLiteConnection(path string) gorm.Dialector {
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
+}
+
 // NewMySQLConnection creates a connection to a MySQL database.
 func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", user, password, addr, dbName))
@@ -130,7 +142,7 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, announcementMaxAge, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, announcementMaxAge, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
 	// Sanity check announcement max age.
 	if announcementMaxAge == 0 {
 		return nil, modules.ConsensusChangeID{}, errors.New("announcementMaxAge must be non-zero")
@@ -143,7 +155,13 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 		Logger: gormLogger, // custom logger
 	})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
+	}
+	dbMetrics, err := gorm.Open(connMetrics, &gorm.Config{
+		Logger: gormLogger, // custom logger
+	})
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open metrics db")
 	}
 	l := logger.Named("sql")
 
@@ -151,6 +169,9 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	if migrate {
 		if err := performMigrations(db, l); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
+		}
+		if err := performMetricsMigrations(dbMetrics, l); err != nil {
+			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
 
@@ -197,18 +218,20 @@ func NewSQLStore(conn gorm.Dialector, alerts alerts.Alerter, partialSlabDir stri
 	}
 
 	ss := &SQLStore{
-		alerts:             alerts,
-		db:                 db,
-		logger:             l,
-		knownContracts:     isOurContract,
-		lastSave:           time.Now(),
-		persistInterval:    persistInterval,
-		hasAllowlist:       allowlistCnt > 0,
-		hasBlocklist:       blocklistCnt > 0,
-		settings:           make(map[string]string),
-		unappliedHostKeys:  make(map[types.PublicKey]struct{}),
-		unappliedRevisions: make(map[types.FileContractID]revisionUpdate),
-		unappliedProofs:    make(map[types.FileContractID]uint64),
+		alerts:                 alerts,
+		db:                     db,
+		dbMetrics:              dbMetrics,
+		logger:                 l,
+		knownContracts:         isOurContract,
+		lastSave:               time.Now(),
+		persistInterval:        persistInterval,
+		hasAllowlist:           allowlistCnt > 0,
+		hasBlocklist:           blocklistCnt > 0,
+		settings:               make(map[string]string),
+		unappliedContractState: make(map[types.FileContractID]contractState),
+		unappliedHostKeys:      make(map[types.PublicKey]struct{}),
+		unappliedRevisions:     make(map[types.FileContractID]revisionUpdate),
+		unappliedProofs:        make(map[types.FileContractID]uint64),
 
 		announcementMaxAge: announcementMaxAge,
 
@@ -281,8 +304,16 @@ func (s *SQLStore) Close() error {
 	if err != nil {
 		return err
 	}
+	dbMetrics, err := s.dbMetrics.DB()
+	if err != nil {
+		return err
+	}
 
 	err = db.Close()
+	if err != nil {
+		return err
+	}
+	err = dbMetrics.Close()
 	if err != nil {
 		return err
 	}
@@ -304,6 +335,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	defer ss.persistMu.Unlock()
 
 	ss.processConsensusChangeHostDB(cc)
+	ss.processConsensusChangeContracts(cc)
 	ss.processConsensusChangeWallet(cc)
 
 	// Update consensus fields.
@@ -315,7 +347,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 	// Try to apply the updates.
 	if err := ss.applyUpdates(false); err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
 
 	// Force a persist if no block has been received for some time.
@@ -337,7 +369,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 		ss.persistMu.Lock()
 		defer ss.persistMu.Unlock()
 		if err := ss.applyUpdates(true); err != nil {
-			ss.logger.Error(context.Background(), fmt.Sprintf("failed to apply updates, err: %v", err))
+			ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 		}
 	})
 }
@@ -349,7 +381,8 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated
 	unappliedRevisionsOrProofs := len(ss.unappliedRevisions) > 0 || len(ss.unappliedProofs) > 0     // enough revisions/proofs have accumulated
 	unappliedOutputsOrTxns := len(ss.unappliedOutputChanges) > 0 || len(ss.unappliedTxnChanges) > 0 // enough outputs/txns have accumualted
-	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputsOrTxns {
+	unappliedContractState := len(ss.unappliedContractState) > 0                                    // the chain state of a contract changed
+	if !force && !persistIntervalPassed && !softLimitReached && !unappliedRevisionsOrProofs && !unappliedOutputsOrTxns && !unappliedContractState {
 		return nil
 	}
 
@@ -359,7 +392,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		Model(&dbAllowlistEntry{}).
 		Find(&allowlist).
 		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch allowlist, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to fetch allowlist, err: %v", err))
 	}
 
 	// Fetch blocklist
@@ -368,7 +401,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		Model(&dbBlocklistEntry{}).
 		Find(&blocklist).
 		Error; err != nil {
-		ss.logger.Error(context.Background(), fmt.Sprintf("failed to fetch blocklist, err: %v", err))
+		ss.logger.Error(fmt.Sprintf("failed to fetch blocklist, err: %v", err))
 	}
 
 	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
@@ -380,7 +413,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		if len(ss.unappliedHostKeys) > 0 && (len(allowlist)+len(blocklist)) > 0 {
 			for host := range ss.unappliedHostKeys {
 				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
-					ss.logger.Error(context.Background(), fmt.Sprintf("failed to update blocklist, err: %v", err))
+					ss.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
 				}
 			}
 		}
@@ -414,9 +447,18 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
 			}
 		}
+		for fcid, cs := range ss.unappliedContractState {
+			if err := updateContractState(tx, fcid, cs); err != nil {
+				return fmt.Errorf("%w; failed to update chain state", err)
+			}
+		}
+		if err := markFailedContracts(tx, ss.chainIndex.Height); err != nil {
+			return err
+		}
 		return updateCCID(tx, ss.ccid, ss.chainIndex)
 	})
 
+	ss.unappliedContractState = make(map[types.FileContractID]contractState)
 	ss.unappliedProofs = make(map[types.FileContractID]uint64)
 	ss.unappliedRevisions = make(map[types.FileContractID]revisionUpdate)
 	ss.unappliedHostKeys = make(map[types.PublicKey]struct{})

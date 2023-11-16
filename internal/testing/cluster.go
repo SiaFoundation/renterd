@@ -92,8 +92,8 @@ var (
 		TotalShards: 3,
 	}
 
-	testS3Credentials = credentials.NewStaticV4("myaccesskeyidentifier", "mysecret", "")
-	testS3AuthPairs   = map[string]string{"myaccesskeyidentifier": "mysecret"}
+	testS3Credentials = credentials.NewStaticV4("myaccesskeyidentifier", "mysupersecretkey", "")
+	testS3AuthPairs   = map[string]string{"myaccesskeyidentifier": "mysupersecretkey"}
 )
 
 type TT struct {
@@ -353,9 +353,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		if dbName == "" {
 			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
+		dbMetricsName := "db" + hex.EncodeToString(frand.Bytes(16))
 		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbMetricsName)).Error)
 
 		busCfg.DBDialector = stores.NewMySQLConnection(user, password, uri, dbName)
+		busCfg.DBMetricsDialector = stores.NewMySQLConnection(user, password, uri, dbMetricsName)
 	}
 
 	// Prepare individual dirs.
@@ -828,7 +831,7 @@ func (c *TestCluster) Sync() {
 // they have money in them
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(30, time.Second, func() error {
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		accounts, err := c.Bus.Accounts(context.Background())
 		if err != nil {
 			return err
@@ -852,7 +855,7 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 
 func (c *TestCluster) WaitForContractSet(set string, n int) {
 	c.tt.Helper()
-	c.tt.Retry(30, time.Second, func() error {
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -871,7 +874,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(30, time.Second, func() error {
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		contracts, err := c.Bus.Contracts(context.Background())
 		if err != nil {
 			return err

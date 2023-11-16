@@ -5,6 +5,15 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	ContractStateInvalid  = "invalid"
+	ContractStateUnknown  = "unknown"
+	ContractStatePending  = "pending"
+	ContractStateActive   = "active"
+	ContractStateComplete = "complete"
+	ContractStateFailed   = "failed"
+)
+
 type (
 	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
@@ -31,12 +40,14 @@ type (
 		RevisionNumber uint64 `json:"revisionNumber"`
 		Size           uint64 `json:"size"`
 		StartHeight    uint64 `json:"startHeight"`
+		State          string `json:"state"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
 
-		RenewedFrom types.FileContractID `json:"renewedFrom"`
-		Spending    ContractSpending     `json:"spending"`
-		TotalCost   types.Currency       `json:"totalCost"`
+		ContractPrice types.Currency       `json:"contractPrice"`
+		RenewedFrom   types.FileContractID `json:"renewedFrom"`
+		Spending      ContractSpending     `json:"spending"`
+		TotalCost     types.Currency       `json:"totalCost"`
 	}
 
 	// ContractSpending contains all spending details for a contract.
@@ -53,6 +64,9 @@ type (
 		ContractID     types.FileContractID `json:"contractID"`
 		RevisionNumber uint64               `json:"revisionNumber"`
 		Size           uint64               `json:"size"`
+
+		MissedHostPayout  types.Currency `json:"missedHostPayout"`
+		ValidRenterPayout types.Currency `json:"validRenterPayout"`
 	}
 
 	// An ArchivedContract contains all information about a contract with a host
@@ -68,6 +82,7 @@ type (
 		RevisionNumber uint64 `json:"revisionNumber"`
 		Size           uint64 `json:"size"`
 		StartHeight    uint64 `json:"startHeight"`
+		State          string `json:"state"`
 		WindowStart    uint64 `json:"windowStart"`
 		WindowEnd      uint64 `json:"windowEnd"`
 	}

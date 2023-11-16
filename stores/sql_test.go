@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"lukechampine.com/frand"
 )
@@ -39,7 +41,10 @@ type testSQLStore struct {
 type testSQLStoreConfig struct {
 	dbName          string
 	dbMetricsName   string
+	dbConn          gorm.Dialector
+	dbMetricsConn   gorm.Dialector
 	dir             string
+	persistent      bool
 	skipMigrate     bool
 	skipContractSet bool
 }
@@ -61,10 +66,19 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	if dbMetricsName == "" {
 		dbMetricsName = hex.EncodeToString(frand.Bytes(32)) // random name for metrics db
 	}
-	conn := NewEphemeralSQLiteConnection(dbName)
+
+	var conn, connMetrics gorm.Dialector
+	if cfg.persistent {
+		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
+		connMetrics = NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite"))
+	} else {
+		conn = NewEphemeralSQLiteConnection(dbName)
+		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
+	}
+
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(conn, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(conn, connMetrics, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
@@ -208,7 +222,7 @@ func TestQueryPlan(t *testing.T) {
 		"SELECT * FROM contract_set_contracts WHERE db_contract_set_id = 1",
 
 		// slabs
-		"SELECT * FROM slabs WHERE health_valid = 1",
+		"SELECT * FROM slabs WHERE health_valid_until > 0",
 		"SELECT * FROM slabs WHERE health > 0",
 		"SELECT * FROM slabs WHERE db_buffered_slab_id = 1",
 

@@ -23,11 +23,11 @@ type (
 
 		Key        []byte
 		UploadID   string            `gorm:"uniqueIndex;NOT NULL;size:64"`
-		ObjectID   string            `gorm:"index;NOT NULL"`
+		ObjectID   string            `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
 		DBBucket   dbBucket          `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
-		DBBucketID uint              `gorm:"index;NOT NULL"`
+		DBBucketID uint              `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
 		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
-		MimeType   string            `gorm:"index"`
+		MimeType   string            `gorm:"index:idx_multipart_uploads_mime_type"`
 	}
 
 	dbMultipartPart struct {
@@ -168,15 +168,15 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 		limit++
 	}
 
-	prefixExpr := gorm.Expr("TRUE")
+	prefixExpr := exprTRUE
 	if prefix != "" {
 		prefixExpr = gorm.Expr("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
 	}
-	keyMarkerExpr := gorm.Expr("TRUE")
+	keyMarkerExpr := exprTRUE
 	if keyMarker != "" {
 		keyMarkerExpr = gorm.Expr("object_id > ?", keyMarker)
 	}
-	uploadIDMarkerExpr := gorm.Expr("TRUE")
+	uploadIDMarkerExpr := exprTRUE
 	if uploadIDMarker != "" {
 		uploadIDMarkerExpr = gorm.Expr("upload_id > ?", keyMarker)
 	}

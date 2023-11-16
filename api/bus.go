@@ -105,9 +105,11 @@ type ConsensusNetwork struct {
 
 // ContractsIDAddRequest is the request type for the /contract/:id endpoint.
 type ContractsIDAddRequest struct {
-	Contract    rhpv2.ContractRevision `json:"contract"`
-	StartHeight uint64                 `json:"startHeight"`
-	TotalCost   types.Currency         `json:"totalCost"`
+	Contract      rhpv2.ContractRevision `json:"contract"`
+	StartHeight   uint64                 `json:"startHeight"`
+	ContractPrice types.Currency         `json:"contractPrice"`
+	State         string                 `json:"state,omitempty"`
+	TotalCost     types.Currency         `json:"totalCost"`
 }
 
 // UploadSectorRequest is the request type for the /upload/:id/sector endpoint.
@@ -119,10 +121,12 @@ type UploadSectorRequest struct {
 // ContractsIDRenewedRequest is the request type for the /contract/:id/renewed
 // endpoint.
 type ContractsIDRenewedRequest struct {
-	Contract    rhpv2.ContractRevision `json:"contract"`
-	RenewedFrom types.FileContractID   `json:"renewedFrom"`
-	StartHeight uint64                 `json:"startHeight"`
-	TotalCost   types.Currency         `json:"totalCost"`
+	Contract      rhpv2.ContractRevision `json:"contract"`
+	RenewedFrom   types.FileContractID   `json:"renewedFrom"`
+	StartHeight   uint64                 `json:"startHeight"`
+	State         string                 `json:"state,omitempty"`
+	ContractPrice types.Currency         `json:"contractPrice"`
+	TotalCost     types.Currency         `json:"totalCost"`
 }
 
 // ContractRootsResponse is the response type for the /contract/:id/roots
@@ -565,3 +569,83 @@ func FormatETag(ETag string) string {
 func ObjectPathEscape(path string) string {
 	return url.PathEscape(strings.TrimPrefix(path, "/"))
 }
+
+const (
+	ChurnDirAdded   = "added"
+	ChurnDirRemoved = "removed"
+
+	MetricContractSet      = "contractset"
+	MetricContractSetChurn = "churn"
+	MetricContract         = "contract"
+)
+
+type (
+	ContractSetChurnMetricRequestPUT struct {
+		Metrics []ContractSetChurnMetric `json:"metrics"`
+	}
+	ContractMetricRequestPUT struct {
+		Metrics []ContractMetric `json:"metrics"`
+	}
+)
+
+type (
+	ContractSetMetric struct {
+		Contracts int       `json:"contracts"`
+		Name      string    `json:"name"`
+		Timestamp time.Time `json:"timestamp"`
+	}
+
+	ContractSetMetricsQueryOpts struct {
+		Name string
+	}
+
+	ContractSetChurnMetric struct {
+		Direction  string               `json:"direction"`
+		ContractID types.FileContractID `json:"contractID"`
+		Name       string               `json:"name"`
+		Reason     string               `json:"reason,omitempty"`
+		Timestamp  time.Time            `json:"timestamp"`
+	}
+
+	ContractSetChurnMetricsQueryOpts struct {
+		Name      string
+		Direction string
+		Reason    string
+	}
+
+	PerformanceMetric struct {
+		Action    string          `json:"action"`
+		HostKey   types.PublicKey `json:"hostKey"`
+		Origin    string          `json:"origin"`
+		Duration  time.Duration   `json:"duration"`
+		Timestamp time.Time       `json:"timestamp"`
+	}
+
+	PerformanceMetricsQueryOpts struct {
+		Action  string
+		HostKey types.PublicKey
+		Origin  string
+	}
+
+	ContractMetric struct {
+		Timestamp time.Time `json:"timestamp"`
+
+		ContractID types.FileContractID `json:"contractID"`
+		HostKey    types.PublicKey      `json:"hostKey"`
+
+		RemainingCollateral types.Currency `json:"remainingCollateral"`
+		RemainingFunds      types.Currency `json:"remainingFunds"`
+		RevisionNumber      uint64         `json:"revisionNumber"`
+
+		UploadSpending      types.Currency `json:"uploadSpending"`
+		DownloadSpending    types.Currency `json:"downloadSpending"`
+		FundAccountSpending types.Currency `json:"fundAccountSpending"`
+		DeleteSpending      types.Currency `json:"deleteSpending"`
+		ListSpending        types.Currency `json:"listSpending"`
+	}
+
+	ContractMetricsQueryOpts struct {
+		ContractID types.FileContractID
+		HostKey    types.PublicKey
+	}
+)
