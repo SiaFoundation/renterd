@@ -2354,19 +2354,20 @@ func invalidateSlabHealthByFCID(ctx context.Context, tx *gorm.DB, fcids []fileCo
 	}
 
 	for {
-		if resp := tx.Debug().Exec(`
+		now := time.Now().Unix()
+		if resp := tx.Exec(`
 		UPDATE slabs SET health_valid_until = ? WHERE id in (
 			   SELECT *
 			   FROM (
 					   SELECT slabs.id
 					   FROM slabs
-					   LEFT JOIN sectors se ON se.db_slab_id = slabs.id
-					   LEFT JOIN contract_sectors cs ON cs.db_sector_id = se.id
-					   LEFT JOIN contracts c ON c.id = cs.db_contract_id
-					   WHERE c.fcid IN (?)
+					   INNER JOIN sectors se ON se.db_slab_id = slabs.id
+					   INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
+					   INNER JOIN contracts c ON c.id = cs.db_contract_id
+					   WHERE c.fcid IN (?) AND slabs.health_valid_until >= ?
 					   LIMIT ?
 			   ) slab_ids
-		)`, time.Now().Unix(), fcids, refreshHealthBatchSize); resp.Error != nil {
+		)`, now, fcids, now, refreshHealthBatchSize); resp.Error != nil {
 			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
 		} else if resp.RowsAffected < refreshHealthBatchSize {
 			break // done
