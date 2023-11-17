@@ -61,14 +61,6 @@ SHARDS:
 
 	// if all shards are on good hosts, we're done
 	if len(shardIndices) == 0 {
-		used := make(map[types.PublicKey]types.FileContractID)
-		for hk, contracts := range goodHosts {
-			for fcid, inUse := range contracts {
-				if inUse {
-					used[hk] = fcid
-				}
-			}
-		}
 		return 0, false, nil
 	}
 
