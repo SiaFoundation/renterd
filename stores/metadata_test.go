@@ -2513,7 +2513,8 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	var buffer dbBufferedSlab
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
+	sk, _ := slabs[0].Key.MarshalBinary()
+	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	if buffer.Filename == "" {
@@ -2577,7 +2578,8 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("wrong data")
 	}
 	buffer = dbBufferedSlab{}
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
+	sk, _ = slabs[0].Key.MarshalBinary()
+	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	assertBuffer(buffer1Name, 4194303, false, false)
@@ -2621,12 +2623,14 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("wrong data")
 	}
 	buffer = dbBufferedSlab{}
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[0].Key.String())).Error; err != nil {
+	sk, _ = slabs[0].Key.MarshalBinary()
+	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
 	buffer = dbBufferedSlab{}
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", []byte(slabs[1].Key.String())).Error; err != nil {
+	sk, _ = slabs[1].Key.MarshalBinary()
+	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer2Name := buffer.Filename
