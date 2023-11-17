@@ -66,7 +66,7 @@ func TestNewTestCluster(t *testing.T) {
 				Length: 0,
 			},
 		},
-	}, map[types.PublicKey]types.FileContractID{}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
+	}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
 	tt.OK(err)
 
 	// Try talking to the worker and request the object.
@@ -536,6 +536,35 @@ func TestUploadDownloadBasic(t *testing.T) {
 	// upload the data
 	path := fmt.Sprintf("data_%v", len(data))
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
+
+	// fetch object and check its slabs
+	resp, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+	tt.OK(err)
+	for _, slab := range resp.Object.Slabs {
+		hosts := make(map[types.PublicKey]struct{})
+		roots := make(map[types.Hash256]struct{})
+		if len(slab.Shards) != testRedundancySettings.TotalShards {
+			t.Fatal("wrong amount of shards", len(slab.Shards), testRedundancySettings.TotalShards)
+		}
+		for _, shard := range slab.Shards {
+			if shard.LatestHost == (types.PublicKey{}) {
+				t.Fatal("latest host should be set")
+			} else if len(shard.Contracts) != 1 {
+				t.Fatal("each shard should have a host")
+			} else if _, found := roots[shard.Root]; found {
+				t.Fatal("each root should only exist once per slab")
+			}
+			for hpk, contracts := range shard.Contracts {
+				if len(contracts) != 1 {
+					t.Fatal("each host should have one contract")
+				} else if _, found := hosts[hpk]; found {
+					t.Fatal("each host should only be used once per slab")
+				}
+				hosts[hpk] = struct{}{}
+			}
+			roots[shard.Root] = struct{}{}
+		}
+	}
 
 	// download data
 	var buffer bytes.Buffer

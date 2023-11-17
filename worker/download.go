@@ -299,7 +299,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				// check if we have enough downloaders
 				var available uint8
 				for _, s := range next.Shards {
-					if _, exists := hosts[s.Host]; exists {
+					if _, exists := hosts[s.LatestHost]; exists {
 						available++
 					}
 				}
@@ -407,7 +407,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	// count how many shards we can download (best-case)
 	var availableShards uint8
 	for _, shard := range slab.Shards {
-		if _, exists := available[shard.Host]; exists {
+		if _, exists := available[shard.LatestHost]; exists {
 			availableShards++
 		}
 	}
@@ -544,7 +544,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	// build sector info
 	hostToSectors := make(map[types.PublicKey][]sectorInfo)
 	for sI, s := range slice.Shards {
-		hostToSectors[s.Host] = append(hostToSectors[s.Host], sectorInfo{s, sI})
+		hostToSectors[s.LatestHost] = append(hostToSectors[s.LatestHost], sectorInfo{s, sI})
 	}
 
 	// create slab download
@@ -958,7 +958,7 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 
 	// create the span
 	sCtx, span := tracing.Tracer.Start(ctx, "sectorDownloadReq")
-	span.SetAttributes(attribute.Stringer("hk", sector.Host))
+	span.SetAttributes(attribute.Stringer("hk", sector.LatestHost))
 	span.SetAttributes(attribute.Bool("overdrive", overdrive))
 	span.SetAttributes(attribute.Int("sector", sector.index))
 
@@ -969,7 +969,7 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 		offset: s.offset,
 		length: s.length,
 		root:   sector.Root,
-		hk:     sector.Host,
+		hk:     sector.LatestHost,
 
 		// overpay is set to 'true' when a request is retried after the slab
 		// download failed and we realise that it might have succeeded if we

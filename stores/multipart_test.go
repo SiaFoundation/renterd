@@ -58,7 +58,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		etag := hex.EncodeToString(frand.Bytes(16))
-		err = ss.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs, usedContracts)
+		err = ss.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,10 +108,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i, shard := range splitData {
-			ups.Shards = append(ups.Shards, object.Sector{
-				Host: hks[i],
-				Root: types.HashBytes(shard),
-			})
+			ups.Shards = append(ups.Shards, newTestShard(hks[i], fcids[i], types.HashBytes(shard)))
 		}
 		return ups
 	}
@@ -123,7 +120,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	for _, ps := range packedSlabs {
 		uploadedPackedSlabs = append(uploadedPackedSlabs, upload(ps))
 	}
-	if err := ss.MarkPackedSlabsUploaded(ctx, uploadedPackedSlabs, usedContracts); err != nil {
+	if err := ss.MarkPackedSlabsUploaded(ctx, uploadedPackedSlabs); err != nil {
 		t.Fatal(err)
 	}
 

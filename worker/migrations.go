@@ -11,72 +11,89 @@ import (
 	"go.uber.org/zap"
 )
 
-func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (map[types.PublicKey]types.FileContractID, int, bool, error) {
+func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (int, bool, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
 	// make a map of good hosts
-	goodHosts := make(map[types.PublicKey]struct{})
+	goodHosts := make(map[types.PublicKey]map[types.FileContractID]bool)
 	for _, c := range ulContracts {
-		goodHosts[c.HostKey] = struct{}{}
+		if goodHosts[c.HostKey] == nil {
+			goodHosts[c.HostKey] = make(map[types.FileContractID]bool)
+		}
+		goodHosts[c.HostKey][c.ID] = false
 	}
 
-	// make a map of host to contract id
+	// make a map of hosts we can download from
 	h2c := make(map[types.PublicKey]types.FileContractID)
 	for _, c := range append(dlContracts, ulContracts...) {
 		h2c[c.HostKey] = c.ID
 	}
 
 	// collect indices of shards that need to be migrated
-	usedMap := make(map[types.FileContractID]struct{})
+	usedMap := make(map[types.PublicKey]struct{})
 	var shardIndices []int
+SHARDS:
 	for i, shard := range s.Shards {
-		// bad host
-		if _, exists := goodHosts[shard.Host]; !exists {
-			shardIndices = append(shardIndices, i)
-			continue
+		for hk, fcids := range shard.Contracts {
+			for _, fcid := range fcids {
+				// bad host
+				if _, exists := goodHosts[hk]; !exists {
+					continue
+				}
+				// bad contract
+				if _, exists := goodHosts[hk][fcid]; !exists {
+					continue
+				}
+				// reused host
+				_, exists := usedMap[hk]
+				if exists {
+					continue
+				}
+				goodHosts[hk][fcid] = true
+				usedMap[hk] = struct{}{}
+				continue SHARDS
+			}
 		}
-
-		// reused host
-		_, exists := usedMap[h2c[shard.Host]]
-		if exists {
-			shardIndices = append(shardIndices, i)
-			continue
-		}
-		usedMap[h2c[shard.Host]] = struct{}{}
+		// no good host found for shard
+		shardIndices = append(shardIndices, i)
 	}
 
 	// if all shards are on good hosts, we're done
 	if len(shardIndices) == 0 {
 		used := make(map[types.PublicKey]types.FileContractID)
-		for _, shard := range s.Shards {
-			used[shard.Host] = h2c[shard.Host]
+		for hk, contracts := range goodHosts {
+			for fcid, inUse := range contracts {
+				if inUse {
+					used[hk] = fcid
+				}
+			}
 		}
-		return used, 0, false, nil
+		return 0, false, nil
 	}
 
 	// calculate the number of missing shards and take into account hosts for
 	// which we have a contract (so hosts from which we can download)
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
-		_, hasContract := h2c[s.Shards[si].Host]
-		if hasContract {
+		if _, exists := h2c[s.Shards[si].LatestHost]; exists {
 			missingShards--
+			continue
 		}
 	}
 
 	// perform some sanity checks
 	if len(ulContracts) < int(s.MinShards) {
-		return nil, 0, false, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
+		return 0, false, fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
-		return nil, 0, false, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-len(shardIndices), int(s.MinShards))
+		return 0, false, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-missingShards, int(s.MinShards))
 	}
 
 	// download the slab
 	shards, surchargeApplied, err := d.DownloadSlab(ctx, *s, dlContracts)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("failed to download slab for migration: %w", err)
+		return 0, false, fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	s.Encrypt(shards)
 
@@ -89,34 +106,38 @@ func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *o
 	// filter upload contracts to the ones we haven't used yet
 	var allowed []api.ContractMetadata
 	for c := range ulContracts {
-		if _, exists := usedMap[ulContracts[c].ID]; !exists {
+		if _, exists := usedMap[ulContracts[c].HostKey]; !exists {
 			allowed = append(allowed, ulContracts[c])
+			usedMap[ulContracts[c].HostKey] = struct{}{}
 		}
 	}
 
 	// migrate the shards
-	uploaded, used, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
+	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
 	if err != nil {
-		return nil, 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
+		return 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
 	// overwrite the unhealthy shards with the newly migrated ones
 	for i, si := range shardIndices {
-		s.Shards[si] = uploaded[i]
-	}
+		s.Shards[si].LatestHost = uploaded[i].LatestHost
 
-	// loop all shards and extend the used contracts map so it reflects all used
-	// contracts, not just the used contracts for the migrated shards
-	for _, sector := range s.Shards {
-		_, exists := used[sector.Host]
-		if !exists {
-			if fcid, exists := h2c[sector.Host]; !exists {
-				return nil, 0, surchargeApplied, fmt.Errorf("couldn't find contract for host %v", sector.Host)
-			} else {
-				used[sector.Host] = fcid
+		knownContracts := make(map[types.FileContractID]struct{})
+		for _, fcids := range s.Shards[si].Contracts {
+			for _, fcid := range fcids {
+				knownContracts[fcid] = struct{}{}
+			}
+		}
+		for hk, fcids := range uploaded[i].Contracts {
+			for _, fcid := range fcids {
+				if _, exists := knownContracts[fcid]; !exists {
+					if s.Shards[si].Contracts == nil {
+						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
+					}
+					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
+				}
 			}
 		}
 	}
-
-	return used, len(shards), surchargeApplied, nil
+	return len(shards), surchargeApplied, nil
 }

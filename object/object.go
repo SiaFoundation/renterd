@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 
+	"go.sia.tech/core/types"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
@@ -106,6 +107,23 @@ func NewObject(ec EncryptionKey) Object {
 	return Object{
 		Key: ec,
 	}
+}
+
+func (o Object) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
+	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
+	for _, s := range o.Slabs {
+		contracts := ContractsFromShards(s.Shards)
+		for h, fcids := range contracts {
+			for fcid := range fcids {
+				if _, exists := usedContracts[h]; !exists {
+					usedContracts[h] = fcids
+				} else {
+					usedContracts[h][fcid] = struct{}{}
+				}
+			}
+		}
+	}
+	return usedContracts
 }
 
 // TotalSize returns the total size of the object.
