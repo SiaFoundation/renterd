@@ -191,9 +191,6 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	s.mu.Unlock()
 
 	s.logger.Infof("%s started", scanType)
-	hostCfg := s.ap.State().cfg.Hosts
-	maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
-	minRecentScanFailures := hostCfg.MinRecentScanFailures
 
 	s.wg.Add(1)
 	go func(st string) {
@@ -209,6 +206,12 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 				s.logger.Error(resp.err)
 			}
 		}
+
+		// fetch the config right before removing offline hosts to get the most
+		// recent settings in case they were updated while scanning.
+		hostCfg := s.ap.State().cfg.Hosts
+		maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
+		minRecentScanFailures := hostCfg.MinRecentScanFailures
 
 		if !interrupted && maxDowntime > 0 {
 			s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
