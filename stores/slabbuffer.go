@@ -85,7 +85,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		}
 		// Get the encryption key.
 		var ec object.EncryptionKey
-		if err := ec.UnmarshalText(buffer.DBSlab.Key); err != nil {
+		if err := ec.UnmarshalBinary(buffer.DBSlab.Key); err != nil {
 			return nil, err
 		}
 		// Open the file.
@@ -507,7 +507,7 @@ func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferG
 
 func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
 	ec := object.GenerateEncryptionKey()
-	key, err := ec.MarshalText()
+	key, err := ec.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
