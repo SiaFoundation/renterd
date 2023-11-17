@@ -405,6 +405,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		for i := range slices {
 			slices[i].ID = 0
 			slices[i].DBObjectID = &obj.ID
+			slices[i].ObjectIndex = uint(i + 1)
 			slices[i].DBMultipartPartID = nil
 		}
 
