@@ -948,15 +948,15 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	obj1Key, err := obj1.Key.MarshalText()
+	obj1Key, err := obj1.Key.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj1Slab0Key, err := obj1.Slabs[0].Key.MarshalText()
+	obj1Slab0Key, err := obj1.Slabs[0].Key.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj1Slab1Key, err := obj1.Slabs[1].Key.MarshalText()
+	obj1Slab1Key, err := obj1.Slabs[1].Key.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2003,7 +2003,7 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// extract the slab key
-	key, err := obj.Slabs[0].Key.MarshalText()
+	key, err := obj.Slabs[0].Key.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3170,7 +3170,7 @@ func TestBucketObjects(t *testing.T) {
 	var ec object.EncryptionKey
 	if obj, err := ss.object(context.Background(), ss.db, b1, "/bar"); err != nil {
 		t.Fatal(err)
-	} else if err := ec.UnmarshalText(obj[0].SlabKey); err != nil {
+	} else if err := ec.UnmarshalBinary(obj[0].SlabKey); err != nil {
 		t.Fatal(err)
 	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, ec); err != nil {
 		t.Fatal(err)
@@ -3576,7 +3576,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		t.Helper()
 
 		var slab dbSlab
-		if key, err := slabKey.MarshalText(); err != nil {
+		if key, err := slabKey.MarshalBinary(); err != nil {
 			t.Fatal(err)
 		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
 			t.Fatal(err)
@@ -3712,7 +3712,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 
 		// fetch slab
 		var slab dbSlab
-		if key, err := s1.MarshalText(); err != nil {
+		if key, err := s1.MarshalBinary(); err != nil {
 			t.Fatal(err)
 		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
 			t.Fatal(err)

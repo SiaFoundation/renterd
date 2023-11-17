@@ -140,7 +140,7 @@ type (
 
 		Health           float64   `gorm:"index;default:1.0; NOT NULL"`
 		HealthValidUntil int64     `gorm:"index;default:0; NOT NULL"` // unix timestamp
-		Key              secretKey `gorm:"unique;NOT NULL;size:68"`   // json string
+		Key              secretKey `gorm:"unique;NOT NULL;size:32"`   // json string
 		MinShards        uint8     `gorm:"index"`
 		TotalShards      uint8     `gorm:"index"`
 
