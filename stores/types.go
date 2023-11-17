@@ -54,7 +54,7 @@ func (k *secretKey) Scan(value interface{}) error {
 
 // Value returns an addr value, implements driver.Valuer interface.
 func (k secretKey) Value() (driver.Value, error) {
-	return k[:], nil
+	return []byte(k), nil
 }
 
 // GormDataType implements gorm.GormDataTypeInterface.
