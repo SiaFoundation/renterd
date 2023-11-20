@@ -411,9 +411,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		return false, err
 	}
 	defer func() {
-		if pruned && err == nil {
-			err = os.Remove(srcPath)
-		} else if err != nil {
+		if err != nil {
 			err = errors.Join(err, src.Close())
 		}
 	}()
@@ -508,6 +506,14 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 			break
 		}
 	}
+
+	// delete the old buffer from disk.
+	if err := b.file.Close(); err != nil {
+		mgr.s.logger.Errorf("failed to close old buffer after pruning %v: %v", b.filename, err)
+	} else if err := os.Remove(srcPath); err != nil {
+		mgr.s.logger.Errorf("failed to remove old buffer after pruning %v: %v", b.filename, err)
+	}
+
 	return true, nil
 }
 
