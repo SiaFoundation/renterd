@@ -1370,9 +1370,9 @@ func performMigration00030_defaultMigrationSurchargeMultiplier(txn *gorm.DB, log
 func performMigration00031_secretKey(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info("performing migration 00031_secretKey")
 	err := txn.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("UPDATE slabs SET slabs.key = unhex(substr(slabs.key, 5))").Error; err != nil {
+		if err := tx.Exec("UPDATE slabs SET `key` = unhex(substr(`key`, 5))").Error; err != nil {
 			return fmt.Errorf("failed to update slabs: %w", err)
-		} else if err := tx.Exec("UPDATE objects SET objects.key = unhex(substr(objects.key, 5))").Error; err != nil {
+		} else if err := tx.Exec("UPDATE objects SET `key` = unhex(substr(`key`, 5))").Error; err != nil {
 			return fmt.Errorf("failed to update objects: %w", err)
 		}
 		return nil
