@@ -909,7 +909,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 
 	// migrate the slab
 	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
-	if jc.Check("couldn't migrate slabs", err) != nil {
+	if err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
 			SurchargeApplied:  surchargeApplied,
