@@ -17,6 +17,12 @@ import (
 const (
 	ObjectsRenameModeSingle = "single"
 	ObjectsRenameModeMulti  = "multi"
+
+	ObjectSortByHealth = "health"
+	ObjectSortByName   = "name"
+
+	ObjectSortDirAsc  = "asc"
+	ObjectSortDirDesc = "desc"
 )
 
 var (
@@ -27,6 +33,10 @@ var (
 	// ErrObjectCorrupted is returned if we were unable to retrieve the object
 	// from the database.
 	ErrObjectCorrupted = errors.New("object corrupted")
+
+	// ErrInvalidObjectSortParameters is returned when invalid sort parameters
+	// were provided
+	ErrInvalidObjectSortParameters = errors.New("invalid sort parameters")
 )
 
 type (
@@ -76,10 +86,12 @@ type (
 
 	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
 	ObjectsListRequest struct {
-		Bucket string `json:"bucket"`
-		Limit  int    `json:"limit"`
-		Prefix string `json:"prefix"`
-		Marker string `json:"marker"`
+		Bucket  string `json:"bucket"`
+		Limit   int    `json:"limit"`
+		SortBy  string `json:"sortBy"`
+		SortDir string `json:"sortDir"`
+		Prefix  string `json:"prefix"`
+		Marker  string `json:"marker"`
 	}
 
 	// ObjectsListResponse is the response type for the /bus/objects/list endpoint.
