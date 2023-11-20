@@ -54,8 +54,7 @@ type (
 	}
 
 	PackedSlabsRequestPOST struct {
-		Slabs         []UploadedPackedSlab                     `json:"slabs"`
-		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		Slabs []UploadedPackedSlab `json:"slabs"`
 	}
 
 	// UploadSectorRequest is the request type for the /upload/:id/sector endpoint.
@@ -70,8 +69,11 @@ type (
 
 	// UpdateSlabRequest is the request type for the /slab endpoint.
 	UpdateSlabRequest struct {
-		ContractSet   string                                   `json:"contractSet"`
-		Slab          object.Slab                              `json:"slab"`
-		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		ContractSet string      `json:"contractSet"`
+		Slab        object.Slab `json:"slab"`
 	}
 )
+
+func (s UploadedPackedSlab) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
+	return object.ContractsFromShards(s.Shards)
+}

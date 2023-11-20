@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"time"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
@@ -83,10 +82,9 @@ func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey,
 }
 
 // MarkPackedSlabsUploaded marks the given slabs as uploaded.
-func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) (err error) {
 	err = c.c.WithContext(ctx).POST("/slabbuffer/done", api.PackedSlabsRequestPOST{
-		Slabs:         slabs,
-		UsedContracts: usedContracts,
+		Slabs: slabs,
 	}, nil)
 	return
 }
@@ -133,11 +131,10 @@ func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, se
 }
 
 // UpdateSlab updates the given slab in the database.
-func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string) (err error) {
 	err = c.c.WithContext(ctx).PUT("/slab", api.UpdateSlabRequest{
-		ContractSet:   contractSet,
-		Slab:          slab,
-		UsedContracts: usedContracts,
+		ContractSet: contractSet,
+		Slab:        slab,
 	})
 	return
 }

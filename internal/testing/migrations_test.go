@@ -42,7 +42,7 @@ func TestMigrations(t *testing.T) {
 		used := make(map[types.PublicKey]struct{})
 		for _, slab := range res.Object.Slabs {
 			for _, sector := range slab.Shards {
-				used[sector.Host] = struct{}{}
+				used[sector.LatestHost] = struct{}{}
 			}
 		}
 		return used
@@ -55,10 +55,11 @@ func TestMigrations(t *testing.T) {
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
+	path := "foo"
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 	// assert amount of hosts used
-	used := usedHosts("foo")
+	used := usedHosts(path)
 	if len(used) != testRedundancySettings.TotalShards {
 		t.Fatal("unexpected amount of hosts used", len(used), testRedundancySettings.TotalShards)
 	}
@@ -69,36 +70,46 @@ func TestMigrations(t *testing.T) {
 		if _, ok := used[h.PublicKey()]; ok {
 			cluster.RemoveHost(h)
 			removed = h.PublicKey()
-
-			// find the contract
-			contracts, err := cluster.Bus.Contracts(context.Background())
-			tt.OK(err)
-			var contract *api.ContractMetadata
-			for _, c := range contracts {
-				if c.HostKey == removed {
-					contract = &c
-					break
-				}
-			}
-			if contract == nil {
-				t.Fatal("contract not found")
-			}
-
-			// mine until we archive the contract
-			endHeight := contract.WindowEnd
-			cs, err := cluster.Bus.ConsensusState(context.Background())
-			tt.OK(err)
-			cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1))
 			break
 		}
 	}
 
 	// assert we migrated away from the bad host
 	tt.Retry(300, 100*time.Millisecond, func() error {
-		if _, used := usedHosts("foo")[removed]; used {
-			cluster.MineBlocks(1)
+		if _, used := usedHosts(path)[removed]; used {
 			return errors.New("host is still used")
 		}
 		return nil
 	})
+
+	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+	tt.OK(err)
+
+	// check slabs
+	shardHosts := 0
+	for _, slab := range res.Object.Slabs {
+		hosts := make(map[types.PublicKey]struct{})
+		roots := make(map[types.Hash256]struct{})
+		for _, shard := range slab.Shards {
+			if shard.LatestHost == (types.PublicKey{}) {
+				t.Fatal("latest host should be set")
+			} else if len(shard.Contracts) == 0 {
+				t.Fatal("each shard should have > 0 hosts")
+			}
+			for hpk, contracts := range shard.Contracts {
+				if len(contracts) != 1 {
+					t.Fatal("each host should have one contract")
+				} else if _, found := hosts[hpk]; found {
+					t.Fatal("each host should only be used once per slab")
+				}
+				hosts[hpk] = struct{}{}
+			}
+			roots[shard.Root] = struct{}{}
+			shardHosts += len(shard.Contracts)
+		}
+	}
+	// all shards should have 1 host except for 1. So we end up with 4 in total.
+	if shardHosts != 4 {
+		t.Fatalf("expected 4 shard hosts, got %v", shardHosts)
+	}
 }

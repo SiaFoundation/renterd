@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
@@ -20,17 +19,16 @@ func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, 
 }
 
 // AddMultipartPart adds a part to a multipart upload.
-func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error) {
+func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab) (err error) {
 	err = c.c.WithContext(ctx).PUT("/multipart/part", api.MultipartAddPartRequest{
-		Bucket:        bucket,
-		ETag:          eTag,
-		Path:          path,
-		ContractSet:   contractSet,
-		UploadID:      uploadID,
-		PartNumber:    partNumber,
-		Slices:        slices,
-		PartialSlabs:  partialSlab,
-		UsedContracts: usedContracts,
+		Bucket:       bucket,
+		ETag:         eTag,
+		Path:         path,
+		ContractSet:  contractSet,
+		UploadID:     uploadID,
+		PartNumber:   partNumber,
+		Slices:       slices,
+		PartialSlabs: partialSlab,
 	})
 	return
 }

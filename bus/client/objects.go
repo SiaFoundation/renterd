@@ -5,21 +5,19 @@ import (
 	"fmt"
 	"net/url"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, opts api.AddObjectOptions) (err error) {
+func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error) {
 	path = api.ObjectPathEscape(path)
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
-		Bucket:        bucket,
-		ContractSet:   contractSet,
-		Object:        o,
-		UsedContracts: usedContracts,
-		MimeType:      opts.MimeType,
-		ETag:          opts.ETag,
+		Bucket:      bucket,
+		ContractSet: contractSet,
+		Object:      o,
+		MimeType:    opts.MimeType,
+		ETag:        opts.ETag,
 	})
 	return
 }
