@@ -1,11 +1,13 @@
 package stores
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -191,7 +193,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	if len(data) > 0 {
 		var sb *SlabBuffer
 		err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
-			sb, err = createSlabBuffer(mgr.s.db, contractSet, mgr.dir, minShards, totalShards)
+			sb, err = createSlabBuffer(tx, contractSet, mgr.dir, minShards, totalShards)
 			return err
 		})
 		if err != nil {
@@ -240,10 +242,6 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 
 	// Update size field in db. Since multiple threads might be trying to do
 	// this, the operation is associative.
-	maxOp := "GREATEST"
-	if isSQLite(mgr.s.db) {
-		maxOp = "MAX"
-	}
 	for _, update := range dbUpdates {
 		err = func() error {
 			// Make sure only one thread can update the entry for a buffer at a
@@ -258,16 +256,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 				return nil
 			}
 			err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
-				if err := tx.Model(&dbBufferedSlab{}).
-					Where("id", update.buffer.dbID).
-					Updates(map[string]interface{}{
-						"complete": gorm.Expr("complete OR ?", update.complete),
-						"size":     gorm.Expr(maxOp+"(size, ?)", update.syncSize),
-					}).
-					Error; err != nil {
-					return fmt.Errorf("failed to update buffered slab %v in database: %v", update.buffer.dbID, err)
-				}
-				return nil
+				return update.buffer.saveSize(tx, update.syncSize, update.complete)
 			})
 			if err != nil {
 				return err
@@ -283,6 +272,23 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	}
 
 	return slabs, mgr.BufferSize(gid), nil
+}
+
+func (b *SlabBuffer) saveSize(tx *gorm.DB, size int64, complete bool) error {
+	maxOp := "GREATEST"
+	if isSQLite(tx) {
+		maxOp = "MAX"
+	}
+	if err := tx.Model(&dbBufferedSlab{}).
+		Where("id", b.dbID).
+		Updates(map[string]interface{}{
+			"complete": gorm.Expr("complete OR ?", complete),
+			"size":     gorm.Expr(maxOp+"(size, ?)", size),
+		}).
+		Error; err != nil {
+		return fmt.Errorf("failed to update buffered slab %v in database: %v", b.dbID, err)
+	}
+	return nil
 }
 
 func (mgr *SlabBufferManager) BufferSize(gid bufferGroupID) (total int64) {
@@ -347,6 +353,164 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 	return sbs
 }
 
+func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards, totalShards uint8) (pruned bool, err error) {
+	// sanity check
+	if b.lockedUntil.Before(time.Now()) {
+		return false, errors.New("buffer is not locked")
+	}
+
+	// note: we don't lock the buffer since we don't update it and instead only
+	// copy it
+	var slices []dbSlice
+	if err := mgr.s.db.Model(&dbBufferedSlab{}).
+		Joins("DBSlab").
+		Joins("INNER JOIN slices s ON s.db_slab_id = DBSlab.id").
+		Order("s.offset ASC").
+		Order("s.length ASC").
+		Scan(&slices).
+		Error; err != nil {
+		return false, err
+	}
+
+	type gap struct {
+		start  uint32
+		length uint32
+	}
+
+	// loop through the slices and search for gaps by looking at their offsets
+	// and lengths. Then adjust the offsets of the slices to fill the gaps.
+	var shift uint32
+	var gaps []gap
+	var currentEnd uint32
+	for i, slice := range slices {
+		// adjust the shift if a gap is encountered
+		if slice.Offset > currentEnd {
+			shift += slice.Offset - currentEnd
+			gaps = append(gaps, gap{
+				start:  currentEnd,
+				length: slice.Offset - currentEnd,
+			})
+		}
+		// adjust the slice offset
+		slices[i].Offset -= shift
+		// adjust the currentEnd
+		if end := slice.Offset + slice.Length; end > currentEnd {
+			currentEnd = end
+		}
+	}
+
+	// if there was no shift, no pruning is required
+	if shift == 0 {
+		return false, nil
+	}
+
+	// prune the actual data
+	srcPath := filepath.Join(mgr.dir, b.filename)
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if pruned && err == nil {
+			err = os.Remove(srcPath)
+		} else if err != nil {
+			err = errors.Join(err, src.Close())
+		}
+	}()
+
+	currentOffset := uint32(0)
+	prunedData := bytes.NewBuffer(make([]byte, currentEnd))
+	for _, gap := range gaps {
+		if currentOffset < gap.start {
+			// copy data up to the gap
+			if _, err := io.CopyN(prunedData, src, int64(gap.start-currentOffset)); err != nil {
+				return false, err
+			}
+		}
+		// skip the gap
+		if _, err := io.CopyN(io.Discard, src, int64(gap.length)); err != nil {
+			return false, err
+		}
+	}
+	// copy the remaining data
+	if _, err := io.Copy(prunedData, src); err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+
+	// create a new buffer from the pruned data
+	prunedBuf, err := createSlabBuffer(mgr.s.db, set, mgr.dir, minShards, totalShards)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(prunedBuf.file.Close(), os.Remove(filepath.Join(mgr.dir, prunedBuf.filename)))
+		}
+	}()
+	_, data, _, err := prunedBuf.recordAppend(prunedData.Bytes())
+	if err != nil {
+		return false, err
+	} else if len(data) > 0 {
+		panic("remaining data after creating new buffer for pruned data")
+	}
+	syncSize, complete, err := prunedBuf.commitAppend(mgr.bufferedSlabCompletionThreshold)
+	if err != nil {
+		return false, err
+	}
+
+	// now that the data is safely on disk, update the db
+	err = mgr.s.db.Transaction(func(tx *gorm.DB) error {
+		if err := prunedBuf.saveSize(tx, syncSize, complete); err != nil {
+			return err
+		}
+		if err := tx.Model(&dbSlice{}).
+			Where("db_buffered_slab_id", b.dbID).
+			Update("db_buffered_slab_id", prunedBuf.dbID).
+			Error; err != nil {
+			return err
+		}
+		for _, slice := range slices {
+			if err := tx.Model(&dbSlice{}).
+				Where("id", slice.ID).
+				Updates(map[string]interface{}{
+					"offset": slice.Offset,
+					"length": slice.Length,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+
+	// update in-memory state
+	prunedBuf.updateDBSize(syncSize)
+
+	// swap out the old buffer for the new one
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	gid := bufferGID(minShards, totalShards, uint32(set))
+
+	// add the new buffer to either the list of complete ones or incomplete ones
+	if complete {
+		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], prunedBuf)
+	} else {
+		mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], prunedBuf)
+	}
+
+	// remove the old buffer from the list of complete buffers
+	for i, buffer := range mgr.completeBuffers[gid] {
+		if buffer.dbID == b.dbID {
+			mgr.completeBuffers[gid][i] = mgr.completeBuffers[gid][len(mgr.completeBuffers[gid])-1]
+			mgr.completeBuffers[gid] = mgr.completeBuffers[gid][:len(mgr.completeBuffers[gid])-1]
+			break
+		}
+	}
+	return true, nil
+}
+
 func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
 	mgr.mu.Lock()
 	buffers := mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]
@@ -354,6 +518,11 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 
 	for _, buffer := range buffers {
 		if !buffer.acquireForUpload(lockingDuration) {
+			continue
+		} else if pruned, err := mgr.tryPruneBuffer(buffer, set, minShards, totalShards); err != nil {
+			mgr.s.logger.Warnf("failed to prune buffer %v: %w", buffer.filename, err)
+			continue
+		} else if pruned {
 			continue
 		}
 		data := make([]byte, buffer.size)
@@ -505,6 +674,15 @@ func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferG
 	}
 }
 
+func bufferFilename(contractSetID uint, minShards, totalShards uint8) string {
+	identifier := frand.Entropy256()
+	return fmt.Sprintf("%v-%v-%v-%v", contractSetID, minShards, totalShards, hex.EncodeToString(identifier[:]))
+}
+
+func bufferedSlabSize(minShards uint8) int {
+	return int(rhpv2.SectorSize) * int(minShards)
+}
+
 func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
 	ec := object.GenerateEncryptionKey()
 	key, err := ec.MarshalText()
@@ -512,8 +690,7 @@ func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, to
 		return nil, err
 	}
 	// Create a new buffer and slab.
-	identifier := frand.Entropy256()
-	fileName := fmt.Sprintf("%v-%v-%v-%v", contractSetID, minShards, totalShards, hex.EncodeToString(identifier[:]))
+	fileName := bufferFilename(contractSetID, minShards, totalShards)
 	file, err := os.Create(filepath.Join(dir, fileName))
 	if err != nil {
 		return nil, err
@@ -538,8 +715,4 @@ func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, to
 		maxSize:  int64(bufferedSlabSize(minShards)),
 		file:     file,
 	}, err
-}
-
-func bufferedSlabSize(minShards uint8) int {
-	return int(rhpv2.SectorSize) * int(minShards)
 }
