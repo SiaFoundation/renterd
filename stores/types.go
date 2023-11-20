@@ -42,7 +42,7 @@ func (k secretKey) String() string {
 	return "*****"
 }
 
-// Scan scan value into address, implements sql.Scanner interface.
+// Scan scans value into key, implements sql.Scanner interface.
 func (k *secretKey) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
@@ -52,7 +52,7 @@ func (k *secretKey) Scan(value interface{}) error {
 	return nil
 }
 
-// Value returns an addr value, implements driver.Valuer interface.
+// Value returns an key value, implements driver.Valuer interface.
 func (k secretKey) Value() (driver.Value, error) {
 	return []byte(k), nil
 }
