@@ -330,6 +330,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00030_defaultMigrationSurchargeMultiplier(tx, logger)
 			},
 		},
+		{
+			ID: "00032_objectIndices",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00032_objectIndices(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1358,5 +1364,57 @@ func performMigration00030_defaultMigrationSurchargeMultiplier(txn *gorm.DB, log
 	}
 
 	logger.Info("migration 00030_defaultMigrationSurchargeMultiplier complete")
+	return nil
+}
+
+func performMigration00032_objectIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00032_objectIndices")
+
+	// create column
+	if err := txn.Table("slices").Migrator().AutoMigrate(&struct {
+		ObjectIndex uint `gorm:"index"`
+	}{}); err != nil {
+		return err
+	}
+
+	// populate the column
+	var err error
+	if isSQLite(txn) {
+		err = txn.Exec(`
+			UPDATE slices
+			SET
+				object_index = (
+					SELECT
+						COUNT(*) + 1
+					FROM
+						slices AS s2
+					WHERE
+						s2.db_object_id = slices.db_object_id AND s2.id < slices.id
+			)
+			WHERE
+				db_object_id IS NOT NULL;
+			`).Error
+	} else {
+		// Populate column.
+		err = txn.Exec(`
+			UPDATE slices
+			JOIN (
+			    SELECT
+			        id,
+			        ROW_NUMBER() OVER (PARTITION BY db_object_id ORDER BY id) AS new_index
+			    FROM
+			        slices
+				) AS RowNumbered ON slices.id = RowNumbered.id
+			SET
+			    slices.object_index = RowNumbered.new_index;
+			WHERE
+				db_object_id IS NOT NULL;
+		`).Error
+	}
+	if err != nil {
+		return err
+	}
+
+	logger.Info("migration 00032_objectIndices complete")
 	return nil
 }
