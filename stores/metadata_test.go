@@ -3955,7 +3955,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// refresh health
-		now := time.Now()
+		now := time.Now().Round(time.Second)
 		if err := ss.RefreshHealth(context.Background()); err != nil {
 			t.Fatal(err)
 		}
