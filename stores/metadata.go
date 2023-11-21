@@ -106,7 +106,7 @@ type (
 		DBBucket   dbBucket
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
-		Key   []byte
+		Key   secretKey
 		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 		Size  int64
 
@@ -124,6 +124,7 @@ type (
 	dbSlice struct {
 		Model
 		DBObjectID        *uint `gorm:"index"`
+		ObjectIndex       uint  `gorm:"index:idx_slices_object_index"`
 		DBMultipartPartID *uint `gorm:"index"`
 
 		// Slice related fields.
@@ -138,11 +139,11 @@ type (
 		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
-		Health           float64 `gorm:"index;default:1.0; NOT NULL"`
-		HealthValidUntil int64   `gorm:"index;default:0; NOT NULL"` // unix timestamp
-		Key              []byte  `gorm:"unique;NOT NULL;size:68"`   // json string
-		MinShards        uint8   `gorm:"index"`
-		TotalShards      uint8   `gorm:"index"`
+		Health           float64   `gorm:"index;default:1.0; NOT NULL"`
+		HealthValidUntil int64     `gorm:"index;default:0; NOT NULL"` // unix timestamp
+		Key              secretKey `gorm:"unique;NOT NULL;size:32"`   // json string
+		MinShards        uint8     `gorm:"index"`
+		TotalShards      uint8     `gorm:"index"`
 
 		Slices []dbSlice
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
@@ -357,7 +358,7 @@ func (c dbContract) convert() api.ContractMetadata {
 // convert turns a dbObject into a object.Slab.
 func (s dbSlab) convert() (slab object.Slab, err error) {
 	// unmarshal key
-	err = slab.Key.UnmarshalText(s.Key)
+	err = slab.Key.UnmarshalBinary(s.Key)
 	if err != nil {
 		return
 	}
@@ -402,7 +403,7 @@ func (raw rawObject) convert() (api.Object, error) {
 
 	// parse object key
 	var key object.EncryptionKey
-	if err := key.UnmarshalText(raw[0].ObjectKey); err != nil {
+	if err := key.UnmarshalBinary(raw[0].ObjectKey); err != nil {
 		return api.Object{}, err
 	}
 
@@ -465,7 +466,7 @@ func (raw rawObject) convert() (api.Object, error) {
 	var partialSlabs []object.PartialSlab
 	for _, pss := range partialSlabSectors {
 		var key object.EncryptionKey
-		if err := key.UnmarshalText(pss.SlabKey); err != nil {
+		if err := key.UnmarshalBinary(pss.SlabKey); err != nil {
 			return api.Object{}, err
 		}
 		partialSlabs = append(partialSlabs, object.PartialSlab{
@@ -499,7 +500,7 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	}
 
 	// unmarshal key
-	if err := slice.Slab.Key.UnmarshalText(raw[0].SlabKey); err != nil {
+	if err := slice.Slab.Key.UnmarshalBinary(raw[0].SlabKey); err != nil {
 		return object.SlabSlice{}, err
 	}
 
@@ -1577,7 +1578,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// Insert a new object.
-		objKey, err := o.Key.MarshalText()
+		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
@@ -1649,7 +1650,7 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 }
 
 func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
-	k, err := key.MarshalText()
+	k, err := key.MarshalBinary()
 	if err != nil {
 		return object.Slab{}, err
 	}
@@ -1682,7 +1683,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	}
 
 	// extract the slab key
-	key, err := s.Key.MarshalText()
+	key, err := s.Key.MarshalBinary()
 	if err != nil {
 		return err
 	}
@@ -1872,7 +1873,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	slabs := make([]api.UnhealthySlab, len(rows))
 	for i, row := range rows {
 		var key object.EncryptionKey
-		if err := key.UnmarshalText(row.Key); err != nil {
+		if err := key.UnmarshalBinary(row.Key); err != nil {
 			return nil, err
 		}
 		slabs[i] = api.UnhealthySlab{
@@ -1890,7 +1891,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 
 	for i, ss := range slices {
 		// Create Slab if it doesn't exist yet.
-		slabKey, err := ss.Key.MarshalText()
+		slabKey, err := ss.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal slab key: %w", err)
 		}
@@ -1912,6 +1913,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		slice := dbSlice{
 			DBSlabID:          slab.ID,
 			DBObjectID:        objID,
+			ObjectIndex:       uint(i + 1),
 			DBMultipartPartID: multiPartID,
 			Offset:            ss.Offset,
 			Length:            ss.Length,
@@ -1958,8 +1960,8 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		return nil
 	}
 
-	for _, partialSlab := range partialSlabs {
-		key, err := partialSlab.Key.MarshalText()
+	for i, partialSlab := range partialSlabs {
+		key, err := partialSlab.Key.MarshalBinary()
 		if err != nil {
 			return err
 		}
@@ -1973,6 +1975,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 
 		err = tx.Create(&dbSlice{
 			DBObjectID:        objID,
+			ObjectIndex:       uint(len(slices) + i + 1),
 			DBMultipartPartID: multiPartID,
 			DBSlabID:          buffer.DBSlab.ID,
 			Offset:            partialSlab.Offset,
@@ -1993,7 +1996,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -2005,7 +2008,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Joins("LEFT JOIN hosts h ON c.host_id = h.id").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
-		Order("sli.id ASC").
+		Order("sli.object_index ASC").
 		Order("sec.slab_index ASC").
 		Scan(&rows)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
@@ -2067,7 +2070,7 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 
 func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
 	var rows []rawObjectMetadata
-	key, err := slabKey.MarshalText()
+	key, err := slabKey.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}

@@ -27,6 +27,20 @@ func (k EncryptionKey) IsNoopKey() bool {
 	return bytes.Equal(k.entropy[:], NoOpKey.entropy[:])
 }
 
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (k EncryptionKey) MarshalBinary() ([]byte, error) {
+	return append([]byte{}, k.entropy[:]...), nil
+}
+
+func (k *EncryptionKey) UnmarshalBinary(b []byte) error {
+	k.entropy = new([32]byte)
+	if len(b) != len(k.entropy) {
+		return fmt.Errorf("wrong key length: expected %v, got %v", len(k.entropy), len(b))
+	}
+	copy(k.entropy[:], b)
+	return nil
+}
+
 // String implements fmt.Stringer.
 func (k EncryptionKey) String() string {
 	return "key:" + hex.EncodeToString(k.entropy[:])

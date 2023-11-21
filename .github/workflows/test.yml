@@ -34,6 +34,15 @@ jobs:
         uses: golangci/golangci-lint-action@v3
         with:
           args: --timeout=30m
+      - name: Jape Analyzer
+        uses: SiaFoundation/action-golang-analysis@HEAD
+        with:
+          analyzers: |
+            go.sia.tech/jape.Analyzer@master
+          directories: |
+            autopilot
+            bus bus/client
+            worker worker/client
       - name: Test
         uses: n8maninger/action-golang-test@v1
         with:
@@ -53,12 +62,5 @@ jobs:
         with:
           package: "./internal/testing/..."
           args: "-race;-tags='testing';-timeout=30m"
-      - name: Check Endpoints
-        uses: SiaFoundation/action-golang-analysis@HEAD
-        with:
-          analyzers: |
-            go.sia.tech/jape.Analyzer
-          directories: |
-            autopilot
       - name: Build
         run: go build -o bin/ ./cmd/renterd

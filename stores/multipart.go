@@ -21,7 +21,7 @@ type (
 	dbMultipartUpload struct {
 		Model
 
-		Key        []byte
+		Key        secretKey
 		UploadID   string            `gorm:"uniqueIndex;NOT NULL;size:64"`
 		ObjectID   string            `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
 		DBBucket   dbBucket          `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
@@ -51,7 +51,7 @@ func (dbMultipartPart) TableName() string {
 
 func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error) {
 	// Marshal key
-	key, err := ec.MarshalText()
+	key, err := ec.MarshalBinary()
 	if err != nil {
 		return api.MultipartCreateResponse{}, err
 	}
@@ -405,6 +405,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		for i := range slices {
 			slices[i].ID = 0
 			slices[i].DBObjectID = &obj.ID
+			slices[i].ObjectIndex = uint(i + 1)
 			slices[i].DBMultipartPartID = nil
 		}
 
@@ -429,7 +430,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 
 func (u dbMultipartUpload) convert() (api.MultipartUpload, error) {
 	var key object.EncryptionKey
-	if err := key.UnmarshalText(u.Key); err != nil {
+	if err := key.UnmarshalBinary(u.Key); err != nil {
 		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal key: %w", err)
 	}
 	return api.MultipartUpload{
