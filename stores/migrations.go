@@ -1420,17 +1420,15 @@ func performMigration00032_objectIndices(txn *gorm.DB, logger *zap.SugaredLogger
 	} else {
 		err = txn.Exec(`
 			UPDATE slices
-			JOIN (
+			INNER JOIN (
 			    SELECT
 			        id,
 			        ROW_NUMBER() OVER (PARTITION BY db_object_id ORDER BY id) AS new_index
 			    FROM
 			        slices
-				) AS RowNumbered ON slices.id = RowNumbered.id
+				) AS RowNumbered ON slices.id = RowNumbered.id AND slices.db_object_id IS NOT NULL
 			SET
 			    slices.object_index = RowNumbered.new_index;
-			WHERE
-				db_object_id IS NOT NULL;
 		`).Error
 	}
 	if err != nil {
