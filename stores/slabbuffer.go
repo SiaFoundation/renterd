@@ -391,17 +391,23 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 				length: slices[i].Offset - currentEnd,
 			})
 		}
-		// adjust the slice offset
-		slices[i].Offset -= shift
 		// adjust the currentEnd
 		if end := slices[i].Offset + slices[i].Length; end > currentEnd {
 			currentEnd = end
 		}
+		// adjust the slice offset
+		slices[i].Offset -= shift
+	}
+
+	// get the new size of the buffer
+	newSize := int64(0)
+	if len(slices) > 0 {
+		newSize = int64(slices[len(slices)-1].Offset + slices[len(slices)-1].Length)
 	}
 
 	// if the end of the buffer after pruning above the threshold, we don't
 	// prune.
-	if int64(currentEnd) >= b.maxSize-mgr.bufferedSlabCompletionThreshold {
+	if int64(newSize) >= b.maxSize-mgr.bufferedSlabCompletionThreshold {
 		return false, nil
 	}
 
@@ -418,21 +424,23 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 	}()
 
 	currentOffset := uint32(0)
-	prunedData := bytes.NewBuffer(make([]byte, 0, currentEnd))
+	prunedData := bytes.NewBuffer(make([]byte, 0, newSize))
 	for _, gap := range gaps {
 		if currentOffset < gap.start {
 			// copy data up to the gap
 			if _, err := io.CopyN(prunedData, src, int64(gap.start-currentOffset)); err != nil {
 				return false, err
 			}
+			currentOffset = gap.start
 		}
 		// skip the gap
 		if _, err := io.CopyN(io.Discard, src, int64(gap.length)); err != nil {
 			return false, err
 		}
+		currentOffset += gap.length
 	}
 	// copy the remaining data
-	if _, err := io.CopyN(prunedData, src, int64(currentEnd)-int64(prunedData.Len())); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := io.CopyN(prunedData, src, newSize-int64(prunedData.Len())); err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	}
 

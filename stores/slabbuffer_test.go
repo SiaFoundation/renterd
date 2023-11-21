@@ -70,6 +70,7 @@ func TestPruneSlabBuffer(t *testing.T) {
 		}
 	})
 
+	// Case 2: same as case 1 but the other slab gets replaced.
 	runCase("Case2", func(t *testing.T, s *testSQLStore) {
 		obj1, _ := newObjectWithPartialSlab(s, fullBufferSize/2)
 		_, data2 := newObjectWithPartialSlab(s, fullBufferSize/2)
@@ -93,4 +94,53 @@ func TestPruneSlabBuffer(t *testing.T) {
 			t.Fatal("packed slab data does not match")
 		}
 	})
+
+	// Case 3: 256 partial slabs and every other gets deleted.
+	runCase("Case3", func(t *testing.T, s *testSQLStore) {
+		nSlabs := 256
+		var toDelete []string
+		var prunedData []byte
+
+		// fill the buffer
+		for i := 0; i < nSlabs; i++ {
+			obj, data := newObjectWithPartialSlab(s, fullBufferSize/nSlabs)
+			if i%2 == 0 {
+				toDelete = append(toDelete, obj)
+			} else {
+				prunedData = append(prunedData, data...)
+			}
+		}
+
+		// remove every other slab
+		for _, obj := range toDelete {
+			if err := s.RemoveObject(context.Background(), api.DefaultBucketName, obj); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// trigger the pruning
+		ps, err := s.PackedSlabsForUpload(context.Background(), time.Minute, minShards, totalShards, testContractSet, math.MaxInt32)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) != 0 {
+			t.Fatal("expected 0 packed slab", len(ps))
+		}
+
+		// add new data to fill the buffer again
+		for i := 0; i < nSlabs/2; i++ {
+			_, data := newObjectWithPartialSlab(s, fullBufferSize/nSlabs)
+			prunedData = append(prunedData, data...)
+		}
+
+		ps, err = s.PackedSlabsForUpload(context.Background(), time.Minute, minShards, totalShards, testContractSet, math.MaxInt32)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) != 1 {
+			t.Fatal("expected 1 packed slab", len(ps))
+		} else if !bytes.Equal(ps[0].Data, prunedData) {
+			t.Fatal("packed slab data does not match")
+		}
+	})
+
+	// Case 4: all slabs get deleted
 }
