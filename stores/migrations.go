@@ -1372,7 +1372,7 @@ func performMigration00032_objectIndices(txn *gorm.DB, logger *zap.SugaredLogger
 
 	// create column
 	if err := txn.Table("slices").Migrator().AutoMigrate(&struct {
-		ObjectIndex uint `gorm:"index"`
+		ObjectIndex uint `gorm:"index:idx_slices_object_index"`
 	}{}); err != nil {
 		return err
 	}
@@ -1395,7 +1395,6 @@ func performMigration00032_objectIndices(txn *gorm.DB, logger *zap.SugaredLogger
 				db_object_id IS NOT NULL;
 			`).Error
 	} else {
-		// Populate column.
 		err = txn.Exec(`
 			UPDATE slices
 			JOIN (

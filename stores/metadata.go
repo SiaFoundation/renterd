@@ -124,7 +124,7 @@ type (
 	dbSlice struct {
 		Model
 		DBObjectID        *uint `gorm:"index"`
-		ObjectIndex       uint  `gorm:"index"`
+		ObjectIndex       uint  `gorm:"index:idx_slices_object_index"`
 		DBMultipartPartID *uint `gorm:"index"`
 
 		// Slice related fields.
