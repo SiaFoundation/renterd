@@ -18,6 +18,7 @@ var (
 	alertLostSectorsID   = frand.Entropy256() // constant until restarted
 	alertLowBalanceID    = frand.Entropy256() // constant until restarted
 	alertMigrationID     = frand.Entropy256() // constant until restarted
+	alertPruningID       = frand.Entropy256() // constant until restarted
 	alertRenewalFailedID = frand.Entropy256() // constant until restarted
 )
 
@@ -110,6 +111,20 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 			"renewalsInterrupted": interrupted,
 			"contractID":          contract.ID.String(),
 			"hostKey":             contract.HostKey.String(),
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newContractPruningFailedAlert(contract api.ContractMetadata, err error) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertIDForContract(alertPruningID, contract),
+		Severity: alerts.SeverityWarning,
+		Message:  "Contract pruning failed",
+		Data: map[string]interface{}{
+			"error":      err.Error(),
+			"contractID": contract.ID.String(),
+			"hostKey":    contract.HostKey.String(),
 		},
 		Timestamp: time.Now(),
 	}

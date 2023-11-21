@@ -52,6 +52,12 @@ func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string
 	return
 }
 
+// Pruning stats returns contract pruning statistics.
+func (c *Client) PruningStats() (resp api.PruningStatsResponse, err error) {
+	err = c.c.GET("/stats/pruning", &resp)
+	return
+}
+
 // State returns the current state of the autopilot.
 func (c *Client) State() (state api.AutopilotStateResponse, err error) {
 	err = c.c.GET("/state", &state)

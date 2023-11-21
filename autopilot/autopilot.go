@@ -47,10 +47,12 @@ type Bus interface {
 	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
 	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
@@ -98,6 +100,7 @@ type Worker interface {
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (hostdb.HostPriceTable, error)
+	RHPPruneContract(ctx context.Context, fcid types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error)
 	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, newCollateral types.Currency, windowSize uint64) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (err error)
@@ -180,6 +183,7 @@ func (ap *Autopilot) Handler() http.Handler {
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
+		"GET    /stats/pruning": ap.pruningStatsHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
 	}))
 }
@@ -298,6 +302,9 @@ func (ap *Autopilot) Run() error {
 
 			// migration
 			ap.m.tryPerformMigrations(ctx, ap.workers)
+
+			// pruning
+			ap.c.tryPerformPruning(ctx, ap.workers)
 		})
 
 		select {
@@ -638,6 +645,7 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
+	pruning, pLastStart := ap.c.Status()
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
 	_, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
@@ -650,6 +658,8 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 		Configured:         err == nil,
 		Migrating:          migrating,
 		MigratingLastStart: api.TimeRFC3339(mLastStart),
+		Pruning:            pruning,
+		PruningLastStart:   api.TimeRFC3339(pLastStart),
 		Scanning:           scanning,
 		ScanningLastStart:  api.TimeRFC3339(sLastStart),
 		UptimeMS:           api.DurationMS(ap.Uptime()),
@@ -662,6 +672,12 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 			OS:        runtime.GOOS,
 			BuildTime: build.BuildTime(),
 		},
+	})
+}
+
+func (ap *Autopilot) pruningStatsHandlerGET(jc jape.Context) {
+	jc.Encode(api.PruningStatsResponse{
+		AvgPruningSpeedMBPS: ap.c.PruningStats(),
 	})
 }
 
