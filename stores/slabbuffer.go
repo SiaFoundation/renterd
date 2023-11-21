@@ -362,12 +362,12 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 	// note: we don't lock the buffer since we don't update it and instead only
 	// copy it
 	var slices []dbSlice
-	if err := mgr.s.db.Model(&dbBufferedSlab{}).
-		Joins("DBSlab").
-		Joins("INNER JOIN slices s ON s.db_slab_id = DBSlab.id").
-		Order("s.offset ASC").
-		Order("s.length ASC").
-		Scan(&slices).
+	if err := mgr.s.db.Model(&dbSlice{}).
+		Joins("INNER JOIN slabs sla ON sla.id = slices.db_slab_id").
+		Where("sla.db_buffered_slab_id", b.dbID).
+		Order("offset ASC").
+		Order("length ASC").
+		Find(&slices).
 		Error; err != nil {
 		return false, err
 	}
@@ -399,8 +399,16 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		}
 	}
 
-	// if there was no shift, no pruning is required
-	if shift == 0 {
+	if gapLen := uint32(b.maxSize) - currentEnd; gapLen > 0 {
+		gaps = append(gaps, gap{
+			start:  currentEnd,
+			length: gapLen,
+		})
+	}
+
+	// if the end of the buffer after pruning above the threshold, we don't
+	// prune.
+	if int64(currentEnd) >= b.maxSize-mgr.bufferedSlabCompletionThreshold {
 		return false, nil
 	}
 
@@ -417,7 +425,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 	}()
 
 	currentOffset := uint32(0)
-	prunedData := bytes.NewBuffer(make([]byte, currentEnd))
+	prunedData := bytes.NewBuffer(make([]byte, 0, currentEnd))
 	for _, gap := range gaps {
 		if currentOffset < gap.start {
 			// copy data up to the gap
@@ -461,7 +469,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		if err := prunedBuf.saveSize(tx, syncSize, complete); err != nil {
 			return err
 		}
-		if err := tx.Model(&dbSlice{}).
+		if err := tx.Model(&dbSlab{}).
 			Where("db_buffered_slab_id", b.dbID).
 			Update("db_buffered_slab_id", prunedBuf.dbID).
 			Error; err != nil {
@@ -492,13 +500,15 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 	gid := bufferGID(minShards, totalShards, uint32(set))
 
 	// add the new buffer to either the list of complete ones or incomplete ones
+	// and the key map
 	if complete {
 		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], prunedBuf)
 	} else {
 		mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], prunedBuf)
 	}
+	mgr.buffersByKey[prunedBuf.slabKey.String()] = prunedBuf
 
-	// remove the old buffer from the list of complete buffers
+	// remove the old buffer from the list of complete buffers and the key map
 	for i, buffer := range mgr.completeBuffers[gid] {
 		if buffer.dbID == b.dbID {
 			mgr.completeBuffers[gid][i] = mgr.completeBuffers[gid][len(mgr.completeBuffers[gid])-1]
@@ -506,6 +516,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 			break
 		}
 	}
+	delete(mgr.buffersByKey, b.slabKey.String())
 
 	// delete the old buffer from disk.
 	if err := b.file.Close(); err != nil {
