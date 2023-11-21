@@ -124,6 +124,7 @@ type (
 	dbSlice struct {
 		Model
 		DBObjectID        *uint `gorm:"index"`
+		ObjectIndex       uint  `gorm:"index:idx_slices_object_index"`
 		DBMultipartPartID *uint `gorm:"index"`
 
 		// Slice related fields.
@@ -1912,6 +1913,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		slice := dbSlice{
 			DBSlabID:          slab.ID,
 			DBObjectID:        objID,
+			ObjectIndex:       uint(i + 1),
 			DBMultipartPartID: multiPartID,
 			Offset:            ss.Offset,
 			Length:            ss.Length,
@@ -1958,7 +1960,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		return nil
 	}
 
-	for _, partialSlab := range partialSlabs {
+	for i, partialSlab := range partialSlabs {
 		key, err := partialSlab.Key.MarshalBinary()
 		if err != nil {
 			return err
@@ -1973,6 +1975,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 
 		err = tx.Create(&dbSlice{
 			DBObjectID:        objID,
+			ObjectIndex:       uint(len(slices) + i + 1),
 			DBMultipartPartID: multiPartID,
 			DBSlabID:          buffer.DBSlab.ID,
 			Offset:            partialSlab.Offset,
@@ -1993,7 +1996,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
@@ -2005,7 +2008,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Joins("LEFT JOIN hosts h ON c.host_id = h.id").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
 		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
-		Order("sli.id ASC").
+		Order("sli.object_index ASC").
 		Order("sec.slab_index ASC").
 		Scan(&rows)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
