@@ -331,6 +331,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
+			ID: "00031_secretKey",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00031_secretKey(tx, logger)
+			},
+		},
+		{
 			ID: "00032_objectIndices",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00032_objectIndices(tx, logger)
@@ -1364,6 +1370,23 @@ func performMigration00030_defaultMigrationSurchargeMultiplier(txn *gorm.DB, log
 	}
 
 	logger.Info("migration 00030_defaultMigrationSurchargeMultiplier complete")
+	return nil
+}
+
+func performMigration00031_secretKey(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00031_secretKey")
+	err := txn.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE slabs SET `key` = unhex(substr(`key`, 5))").Error; err != nil {
+			return fmt.Errorf("failed to update slabs: %w", err)
+		} else if err := tx.Exec("UPDATE objects SET `key` = unhex(substr(`key`, 5))").Error; err != nil {
+			return fmt.Errorf("failed to update objects: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	logger.Info("migration 00031_secretKey complete")
 	return nil
 }
 
