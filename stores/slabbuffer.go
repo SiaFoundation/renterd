@@ -382,28 +382,21 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 	var shift uint32
 	var gaps []gap
 	var currentEnd uint32
-	for i, slice := range slices {
+	for i := range slices {
 		// adjust the shift if a gap is encountered
-		if slice.Offset > currentEnd {
-			shift += slice.Offset - currentEnd
+		if slices[i].Offset > currentEnd {
+			shift += slices[i].Offset - currentEnd
 			gaps = append(gaps, gap{
 				start:  currentEnd,
-				length: slice.Offset - currentEnd,
+				length: slices[i].Offset - currentEnd,
 			})
 		}
 		// adjust the slice offset
 		slices[i].Offset -= shift
 		// adjust the currentEnd
-		if end := slice.Offset + slice.Length; end > currentEnd {
+		if end := slices[i].Offset + slices[i].Length; end > currentEnd {
 			currentEnd = end
 		}
-	}
-
-	if gapLen := uint32(b.maxSize) - currentEnd; gapLen > 0 {
-		gaps = append(gaps, gap{
-			start:  currentEnd,
-			length: gapLen,
-		})
 	}
 
 	// if the end of the buffer after pruning above the threshold, we don't
@@ -439,7 +432,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		}
 	}
 	// copy the remaining data
-	if _, err := io.Copy(prunedData, src); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := io.CopyN(prunedData, src, int64(currentEnd)-int64(prunedData.Len())); err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	}
 
