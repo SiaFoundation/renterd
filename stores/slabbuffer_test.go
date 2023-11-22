@@ -44,6 +44,37 @@ func TestPruneSlabBuffer(t *testing.T) {
 		})
 	}
 
+	// assertSlicesNoGaps is a helper function to make sure that the slices had
+	// their offsets updated and that there are no more gaps between them. That
+	// means the offset of a slices should match the offset + length of the
+	// previous slice. We also expect all slices to have the same length since
+	// the tests evenly split the buffer.
+	assertSlicesNoGaps := func(t *testing.T, s *testSQLStore, ps api.PackedSlab) {
+		t.Helper()
+		var slices []dbSlice
+		err := s.db.
+			Model(&dbSlice{}).
+			Joins("INNER JOIN slabs ON slabs.id = db_slab_id").
+			Order("offset ASC").
+			Find(&slices).
+			Error
+		if err != nil {
+			t.Fatal(err)
+		} else if len(slices) == 0 {
+			t.Fatal("no slices found")
+		}
+		expectedOffset := uint32(0)
+		expectedLen := slices[0].Length
+		for i := 0; i < len(slices); i++ {
+			if slices[i].Offset != expectedOffset {
+				t.Fatalf("slice %d has offset %d, expected %d", i, slices[i].Offset, expectedOffset)
+			} else if slices[i].Length != expectedLen {
+				t.Fatal("slice length does not match", slices[i].Length, expectedLen)
+			}
+			expectedOffset += slices[i].Length
+		}
+	}
+
 	// Case 1: 2 partial slabs filling half the buffer The second one gets
 	// deleted and replaced by a third one.
 	runCase("Case1", func(t *testing.T, s *testSQLStore) {
@@ -68,6 +99,7 @@ func TestPruneSlabBuffer(t *testing.T) {
 		} else if !bytes.Equal(ps[0].Data, append(data1, data3...)) {
 			t.Fatal("packed slab data does not match")
 		}
+		assertSlicesNoGaps(t, s, ps[0])
 	})
 
 	// Case 2: same as case 1 but the other slab gets replaced.
@@ -93,6 +125,7 @@ func TestPruneSlabBuffer(t *testing.T) {
 		} else if !bytes.Equal(ps[0].Data, append(data2, data3...)) {
 			t.Fatal("packed slab data does not match")
 		}
+		assertSlicesNoGaps(t, s, ps[0])
 	})
 
 	// Case 3: 256 partial slabs and every other gets deleted.
@@ -140,6 +173,7 @@ func TestPruneSlabBuffer(t *testing.T) {
 		} else if !bytes.Equal(ps[0].Data, prunedData) {
 			t.Fatal("packed slab data does not match")
 		}
+		assertSlicesNoGaps(t, s, ps[0])
 	})
 
 	// Case 4: all slabs get deleted
@@ -171,5 +205,6 @@ func TestPruneSlabBuffer(t *testing.T) {
 		} else if !bytes.Equal(ps[0].Data, append(data3, data4...)) {
 			t.Fatal("packed slab data does not match")
 		}
+		assertSlicesNoGaps(t, s, ps[0])
 	})
 }
