@@ -143,4 +143,33 @@ func TestPruneSlabBuffer(t *testing.T) {
 	})
 
 	// Case 4: all slabs get deleted
+	runCase("Case4", func(t *testing.T, s *testSQLStore) {
+		obj1, _ := newObjectWithPartialSlab(s, fullBufferSize/2)
+		obj2, _ := newObjectWithPartialSlab(s, fullBufferSize/2)
+		if err := s.RemoveObject(context.Background(), api.DefaultBucketName, obj1); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RemoveObject(context.Background(), api.DefaultBucketName, obj2); err != nil {
+			t.Fatal(err)
+		}
+		ps, err := s.PackedSlabsForUpload(context.Background(), time.Minute, minShards, totalShards, testContractSet, math.MaxInt32)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) != 0 {
+			t.Fatal("expected 0 packed slab", len(ps))
+		}
+
+		// replace them
+		_, data3 := newObjectWithPartialSlab(s, fullBufferSize/2)
+		_, data4 := newObjectWithPartialSlab(s, fullBufferSize/2)
+
+		ps, err = s.PackedSlabsForUpload(context.Background(), time.Minute, minShards, totalShards, testContractSet, math.MaxInt32)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) != 1 {
+			t.Fatal("expected 1 packed slab", len(ps))
+		} else if !bytes.Equal(ps[0].Data, append(data3, data4...)) {
+			t.Fatal("packed slab data does not match")
+		}
+	})
 }
