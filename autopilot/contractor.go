@@ -86,11 +86,12 @@ const (
 )
 
 var (
-	errConnectionRefused  = errors.New("connection refused")
-	errConnectionTimedOut = errors.New("connection timed out")
-	errInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
-	errNoRouteToHost      = errors.New("no route to host")
-	errNoSuchHost         = errors.New("no such host")
+	errConnectionRefused         = errors.New("connection refused")
+	errConnectionTimedOut        = errors.New("connection timed out")
+	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
+	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
+	errNoRouteToHost             = errors.New("no route to host")
+	errNoSuchHost                = errors.New("no such host")
 )
 
 type (
@@ -1635,6 +1636,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			if err != nil {
 				if isErr(err, errConnectionRefused) ||
 					isErr(err, errConnectionTimedOut) ||
+					isErr(err, errInvalidHandshakeSignature) ||
 					isErr(err, errInvalidMerkleProof) ||
 					isErr(err, errNoRouteToHost) ||
 					isErr(err, errNoSuchHost) {
@@ -1677,7 +1679,11 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned 
 		}
 
 		// handle alert
-		if err != nil {
+		if err != nil && !(isErr(err, errConnectionRefused) ||
+			isErr(err, errConnectionTimedOut) ||
+			isErr(err, errInvalidHandshakeSignature) ||
+			isErr(err, errNoRouteToHost) ||
+			isErr(err, errNoSuchHost)) {
 			c.ap.RegisterAlert(ctx, newContractPruningFailedAlert(contract, err))
 		} else {
 			c.ap.DismissAlert(ctx, alertIDForContract(alertPruningID, contract))
