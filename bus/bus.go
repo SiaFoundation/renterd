@@ -147,17 +147,17 @@ type (
 		RenameObject(ctx context.Context, bucketName, from, to string) error
 		RenameObjects(ctx context.Context, bucketName, from, to string) error
 		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object) error
 
 		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlab []object.PartialSlab) (err error)
 		CompleteMultipartUpload(ctx context.Context, bucketName, path, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucketName, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
 		MultipartUploads(ctx context.Context, bucketName, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 		MultipartUploadParts(ctx context.Context, bucketName, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
-		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
@@ -166,7 +166,7 @@ type (
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts map[types.PublicKey]types.FileContractID) error
+		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -1243,7 +1243,7 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Object, aor.UsedContracts))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Object))
 }
 
 func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1374,7 +1374,7 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	if jc.Decode(&psrp) != nil {
 		return
 	}
-	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs, psrp.UsedContracts))
+	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs))
 }
 
 func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
@@ -1426,7 +1426,7 @@ func (b *bus) slabHandlerGET(jc jape.Context) {
 func (b *bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet, usr.UsedContracts))
+		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet))
 	}
 }
 
@@ -2009,10 +2009,7 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) metricsHandlerGET(jc jape.Context) {
-	key := jc.PathParam("key")
-
 	// parse mandatory query parameters
-	var err error
 	var start time.Time
 	var n uint64
 	var interval time.Duration
@@ -2025,31 +2022,30 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	}
 
 	// parse optional query parameters
-	switch key {
+	switch key := jc.PathParam("key"); key {
 	case api.MetricContract:
-		var metrics []api.ContractMetric
 		var opts api.ContractMetricsQueryOpts
 		if jc.DecodeForm("fcid", &opts.ContractID) != nil {
 			return
 		} else if jc.DecodeForm("host", &opts.HostKey) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
 			return
 		}
-		jc.Encode(metrics)
-		return
 	case api.MetricContractSet:
-		var metrics []api.ContractSetMetric
 		var opts api.ContractSetMetricsQueryOpts
 		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
 			return
 		}
-		jc.Encode(metrics)
-		return
 	case api.MetricContractSetChurn:
-		var metrics []api.ContractSetChurnMetric
 		var opts api.ContractSetChurnMetricsQueryOpts
 		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
@@ -2057,15 +2053,28 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
 			return
 		}
-		jc.Encode(metrics)
-		return
 	default:
 		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
+}
+
+func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64, interval time.Duration, opts interface{}) (interface{}, error) {
+	switch key {
+	case api.MetricContract:
+		return b.mtrcs.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
+	case api.MetricContractSet:
+		return b.mtrcs.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
+	case api.MetricContractSetChurn:
+		return b.mtrcs.ContractSetChurnMetrics(ctx, start, n, interval, opts.(api.ContractSetChurnMetricsQueryOpts))
+	}
+	return nil, nil
 }
 
 func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
@@ -2129,7 +2138,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs, req.UsedContracts)
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices, req.PartialSlabs)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}

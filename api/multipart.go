@@ -4,7 +4,6 @@ import (
 	"errors"
 	"time"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/object"
 )
 
@@ -61,15 +60,14 @@ type (
 	}
 
 	MultipartAddPartRequest struct {
-		Bucket        string                                   `json:"bucket"`
-		ETag          string                                   `json:"eTag"`
-		Path          string                                   `json:"path"`
-		ContractSet   string                                   `json:"contractSet"`
-		UploadID      string                                   `json:"uploadID"`
-		PartialSlabs  []object.PartialSlab                     `json:"partialSlabs"`
-		PartNumber    int                                      `json:"partNumber"`
-		Slices        []object.SlabSlice                       `json:"slices"`
-		UsedContracts map[types.PublicKey]types.FileContractID `json:"usedContracts"`
+		Bucket       string               `json:"bucket"`
+		ETag         string               `json:"eTag"`
+		Path         string               `json:"path"`
+		ContractSet  string               `json:"contractSet"`
+		UploadID     string               `json:"uploadID"`
+		PartialSlabs []object.PartialSlab `json:"partialSlabs"`
+		PartNumber   int                  `json:"partNumber"`
+		Slices       []object.SlabSlice   `json:"slices"`
 	}
 
 	MultipartCompleteResponse struct {

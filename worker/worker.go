@@ -143,10 +143,10 @@ type Bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 
 	Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, usedContracts map[types.PublicKey]types.FileContractID, opts api.AddObjectOptions) error
+	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
 	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
 
-	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab, usedContracts map[types.PublicKey]types.FileContractID) (err error)
+	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab) (err error)
 	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 
 	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
@@ -155,11 +155,11 @@ type Bus interface {
 
 	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 
-	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab, usedContracts map[types.PublicKey]types.FileContractID) error
+	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 	PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 
 	Accounts(ctx context.Context) ([]api.Account, error)
-	UpdateSlab(ctx context.Context, s object.Slab, contractSet string, goodContracts map[types.PublicKey]types.FileContractID) error
+	UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
 
 	TrackUpload(ctx context.Context, uID api.UploadID) error
 	AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
@@ -908,7 +908,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	used, numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
@@ -919,7 +919,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// update the slab
-	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet, used); err != nil {
+	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet); err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
 			SurchargeApplied:  surchargeApplied,

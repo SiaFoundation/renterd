@@ -28,7 +28,34 @@ type (
 	hostPriceTable rhpv3.HostPriceTable
 	balance        big.Int
 	unsigned64     uint64 // used for storing large uint64 values in sqlite
+	secretKey      []byte
 )
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (secretKey) GormDataType() string {
+	return "bytes"
+}
+
+// String implements fmt.Stringer to prevent the key from getting leaked in
+// logs.
+func (k secretKey) String() string {
+	return "*****"
+}
+
+// Scan scans value into key, implements sql.Scanner interface.
+func (k *secretKey) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal secretKey value:", value))
+	}
+	*k = secretKey(bytes)
+	return nil
+}
+
+// Value returns an key value, implements driver.Valuer interface.
+func (k secretKey) Value() (driver.Value, error) {
+	return []byte(k), nil
+}
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (hash256) GormDataType() string {
