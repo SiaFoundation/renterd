@@ -144,8 +144,8 @@ type (
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
-		RenameObject(ctx context.Context, bucketName, from, to string) error
-		RenameObjects(ctx context.Context, bucketName, from, to string) error
+		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
+		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
 		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object) error
 
@@ -1290,7 +1290,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To))
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
 		return
 	} else if orr.Mode == api.ObjectsRenameModeMulti {
 		// Multi object rename.
@@ -1298,7 +1298,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To))
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
 		return
 	} else {
 		// Invalid mode.

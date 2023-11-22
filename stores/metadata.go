@@ -1411,27 +1411,60 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string) error {
-	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
-	if tx.Error != nil {
-		return tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
-	}
-	return nil
+func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		if force {
+			// delete potentially existing object at destination
+			if _, err := deleteObject(tx, bucket, keyNew); err != nil {
+				return err
+			}
+		}
+		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
+		if tx.Error != nil &&
+			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
+			return api.ErrObjectExists
+		} else if tx.Error != nil {
+			return tx.Error
+		}
+		if tx.RowsAffected == 0 {
+			return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+		}
+		return nil
+	})
 }
 
-func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string) error {
-	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
-		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
-	if tx.Error != nil {
-		return tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
-	}
-	return nil
+func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		if force {
+			// delete potentially existing objects at destination
+			inner := tx.Raw("SELECT ? FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
+				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")),
+				prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+			resp := tx.Model(&dbObject{}).
+				Where("object_id IN (?)", inner).
+				Delete(&dbObject{})
+			if err := resp.Error; err != nil {
+				return err
+			}
+			if resp.RowsAffected > 0 {
+				if err := pruneSlabs(tx); err != nil {
+					return err
+				}
+			}
+		}
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+		if tx.Error != nil &&
+			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
+			return api.ErrObjectExists
+		} else if tx.Error != nil {
+			return tx.Error
+		}
+		if tx.RowsAffected == 0 {
+			return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
+		}
+		return nil
+	})
 }
 
 func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {

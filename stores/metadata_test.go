@@ -2282,6 +2282,8 @@ func TestRenameObjects(t *testing.T) {
 		"/foo",
 		"/bar",
 		"/baz",
+		"/baz2",
+		"/baz3",
 	}
 	ctx := context.Background()
 	for _, path := range objects {
@@ -2292,30 +2294,40 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Try renaming objects that don't exist.
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/fileś", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś1", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// Perform some renames.
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/"); err != nil {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/foo", "/fileś/foo"); err != nil {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/foo", "/fileś/foo", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/bar", "/fileś/bar"); err != nil {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/bar", "/fileś/bar", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz", "/fileś/baz"); err != nil {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz", "/fileś/baz", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1"); err != nil {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2"); err != nil {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal(err)
+	} else if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal(err)
+	} else if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3115,7 +3127,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz"); err != nil {
+	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3132,7 +3144,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam"); err != nil {
+	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)

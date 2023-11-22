@@ -87,13 +87,13 @@ func (c *Client) ObjectsStats() (osr api.ObjectsStatsResponse, err error) {
 }
 
 // RenameObject renames a single object.
-func (c *Client) RenameObject(ctx context.Context, bucket, from, to string) (err error) {
-	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeSingle)
+func (c *Client) RenameObject(ctx context.Context, bucket, from, to string, force bool) (err error) {
+	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeSingle, force)
 }
 
 // RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
-func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string) (err error) {
-	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeMulti)
+func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string, force bool) (err error) {
+	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeMulti, force)
 }
 
 // SearchObjects returns all objects that contains a sub-string in their key.
@@ -106,9 +106,10 @@ func (c *Client) SearchObjects(ctx context.Context, bucket string, opts api.Sear
 	return
 }
 
-func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string) (err error) {
+func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string, force bool) (err error) {
 	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
 		Bucket: bucket,
+		Force:  force,
 		From:   from,
 		To:     to,
 		Mode:   mode,

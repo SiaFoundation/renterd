@@ -25,6 +25,10 @@ const (
 )
 
 var (
+	// ErrObjectExists is returned when an operation fails because an object
+	// already exists.
+	ErrObjectExists = errors.New("object already exists")
+
 	// ErrObjectNotFound is returned when an object can't be retrieved from the
 	// database.
 	ErrObjectNotFound = errors.New("object not found")
@@ -102,6 +106,7 @@ type (
 	// ObjectsRenameRequest is the request type for the /bus/objects/rename endpoint.
 	ObjectsRenameRequest struct {
 		Bucket string `json:"bucket"`
+		Force  bool   `json:"force"`
 		From   string `json:"from"`
 		To     string `json:"to"`
 		Mode   string `json:"mode"`
