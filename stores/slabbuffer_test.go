@@ -51,10 +51,14 @@ func TestPruneSlabBuffer(t *testing.T) {
 	// the tests evenly split the buffer.
 	assertSlicesNoGaps := func(t *testing.T, s *testSQLStore, ps api.PackedSlab) {
 		t.Helper()
+
+		// check the slices for the packed slab
+		key, _ := ps.Key.MarshalBinary()
 		var slices []dbSlice
 		err := s.db.
 			Model(&dbSlice{}).
 			Joins("INNER JOIN slabs ON slabs.id = db_slab_id").
+			Where("key", secretKey(key)).
 			Order("offset ASC").
 			Find(&slices).
 			Error
@@ -63,6 +67,7 @@ func TestPruneSlabBuffer(t *testing.T) {
 		} else if len(slices) == 0 {
 			t.Fatal("no slices found")
 		}
+		slabID := slices[0].DBSlabID
 		expectedOffset := uint32(0)
 		expectedLen := slices[0].Length
 		for i := 0; i < len(slices); i++ {
@@ -72,6 +77,24 @@ func TestPruneSlabBuffer(t *testing.T) {
 				t.Fatal("slice length does not match", slices[i].Length, expectedLen)
 			}
 			expectedOffset += slices[i].Length
+		}
+
+		// make sure there are no other slices belonging to other slabs
+		var n int64
+		if err := s.db.Model(&dbSlice{}).Where("db_slab_id != ?", slabID).Count(&n).Error; err != nil {
+			t.Fatal(err)
+		} else if n != 0 {
+			t.Fatalf("expected 0 slices for other slabs, got %d", n)
+		}
+
+		// there should be only 1 buffer
+		var buffers []dbBufferedSlab
+		if err := s.db.Model(&dbBufferedSlab{}).Joins("DBSlab").Find(&buffers).Error; err != nil {
+			t.Fatal(err)
+		} else if len(buffers) != 1 {
+			t.Fatalf("expected 1 buffer, got %d", len(buffers))
+		} else if buffers[0].DBSlab.ID != slabID {
+			t.Fatalf("expected buffer to belong to slab %d, got %d", slabID, buffers[0].DBSlab.ID)
 		}
 	}
 
