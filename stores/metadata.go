@@ -1415,16 +1415,8 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if force {
 			// delete potentially existing object at destination
-			resp := tx.Model(&dbObject{}).
-				Where("object_id = ? AND ?", keyNew, sqlWhereBucket("objects", bucket)).
-				Delete(&dbObject{})
-			if err := resp.Error; err != nil {
+			if _, err := deleteObject(tx, bucket, keyNew); err != nil {
 				return err
-			}
-			if resp.RowsAffected > 0 {
-				if err := pruneSlabs(tx); err != nil {
-					return err
-				}
 			}
 		}
 		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
