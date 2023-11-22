@@ -2320,12 +2320,12 @@ func TestRenameObjects(t *testing.T) {
 	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal(err)
 	} else if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", false); err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal(err)
 	} else if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
 		t.Fatal(err)

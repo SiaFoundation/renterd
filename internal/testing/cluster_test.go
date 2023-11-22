@@ -452,6 +452,7 @@ func TestObjectsRename(t *testing.T) {
 		"/foo/bat",
 		"/foo/baz",
 		"/foo/baz/quuz",
+		"/bar2",
 	}
 	for _, path := range uploads {
 		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, path, api.UploadObjectOptions{}))
@@ -462,6 +463,11 @@ func TestObjectsRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := b.RenameObject(context.Background(), api.DefaultBucketName, "/baz/quuz", "/quuz", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RenameObject(context.Background(), api.DefaultBucketName, "/bar2", "/bar", false); err == nil || !strings.Contains(err.Error(), api.ErrObjectExists.Error()) {
+		t.Fatal(err)
+	} else if err := b.RenameObject(context.Background(), api.DefaultBucketName, "/bar2", "/bar", true); err != nil {
 		t.Fatal(err)
 	}
 

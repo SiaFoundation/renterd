@@ -25,6 +25,10 @@ const (
 )
 
 var (
+	// ErrObjectExists is returned when an operation fails because an object
+	// already exists.
+	ErrObjectExists = errors.New("object already exists")
+
 	// ErrObjectNotFound is returned when an object can't be retrieved from the
 	// database.
 	ErrObjectNotFound = errors.New("object not found")
