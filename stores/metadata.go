@@ -1063,10 +1063,10 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("INSTR(o.object_id, ?) > 0 AND ?", substring, sqlWhereBucket("o", bucket)).
+		Where("INSTR(o.object_id, ?) > 0 AND b.name = ?", substring, bucket).
 		Group("o.object_id").
 		Offset(offset).
 		Limit(limit).
@@ -1140,10 +1140,10 @@ SELECT
 FROM (
 	SELECT MAX(etag) AS etag, MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
 	FROM objects
-	INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
+	INNER JOIN buckets b ON objects.db_bucket_id = b.id
 	LEFT JOIN slices ON objects.id = slices.db_object_id
 	LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-	WHERE SUBSTR(object_id, 1, ?) = ? AND ?
+	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
 	GROUP BY object_id
 ) AS m
 GROUP BY name
@@ -1159,11 +1159,10 @@ HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 
 		utf8.RuneCountInString(path) + 1, // SUBSTR(object_id, ?)
 		utf8.RuneCountInString(path) + 1, // INSTR(SUBSTR(object_id, ?), "/")
-		bucket,                           // b.name = ?
 
-		utf8.RuneCountInString(path),      // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
-		path,                              // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
-		sqlWhereBucket("objects", bucket), // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
+		utf8.RuneCountInString(path), // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
+		path,                         // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
+		bucket,                       // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
 
 		utf8.RuneCountInString(path + prefix), // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 		path + prefix,                         // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
@@ -1178,7 +1177,7 @@ HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 		case api.ObjectSortByHealth:
 			var markerHealth float64
 			if err = s.db.
-				Raw(fmt.Sprintf(`SELECT health FROM (%s ORDER BY name) as n WHERE name >= ? LIMIT 1`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT health FROM (%s AND name >= ? ORDER BY name LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerHealth).
 				Error; err != nil {
 				return
@@ -2003,12 +2002,12 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.id as SliceID, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as SectorHost").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
-		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
+		Where("o.object_id = ? AND b.name = ?", path, bucket).
 		Order("sli.id ASC").
 		Order("sec.slab_index ASC").
 		Scan(&rows)
@@ -2437,10 +2436,10 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		Select("o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, MAX(o.mime_type) as mimeType, MAX(o.created_at) as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("? AND ? AND ?", sqlWhereBucket("o", bucket), prefixExpr, markerExpr).
+		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
 		Group("o.object_id").
 		Order(orderBy).
 		Order(markerOrderBy).
@@ -2590,10 +2589,10 @@ func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string
 				Select("MIN(sla.health)").
 				Model(&dbObject{}).
 				Table("objects o").
-				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 				Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 				Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-				Where("? AND ? AND ?", sqlWhereBucket("o", bucket), buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
+				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
 				Group("o.object_id").
 				Limit(1).
 				Scan(&markerHealth).
