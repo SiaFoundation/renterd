@@ -11,6 +11,7 @@ import (
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stats"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
@@ -26,6 +27,7 @@ type (
 		healthCutoff              float64
 		parallelSlabsPerWorker    uint64
 		signalMaintenanceFinished chan struct{}
+		statsSlabMigrationSpeedMS *stats.DataPoints
 
 		mu                 sync.Mutex
 		migrating          bool
@@ -65,6 +67,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uin
 		healthCutoff:              healthCutoff,
 		parallelSlabsPerWorker:    parallelSlabsPerWorker,
 		signalMaintenanceFinished: make(chan struct{}, 1),
+		statsSlabMigrationSpeedMS: stats.New(time.Hour),
 	}
 }
 
@@ -79,6 +82,20 @@ func (m *migrator) Status() (bool, time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.migrating, m.migratingLastStart
+}
+
+func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
+	// recompute p90
+	m.statsSlabMigrationSpeedMS.Recompute()
+
+	// return 0 if p90 is 0 (can happen if we haven't collected enough data points)
+	p90 := m.statsSlabMigrationSpeedMS.P90()
+	if p90 == 0 {
+		return 0
+	}
+
+	totalNumMS := float64(remaining) * p90 / float64(m.parallelSlabsPerWorker)
+	return time.Duration(totalNumMS) * time.Millisecond
 }
 
 func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
@@ -133,7 +150,10 @@ func (m *migrator) performMigrations(p *workerPool) {
 
 					// process jobs
 					for j := range jobs {
+						start := time.Now()
 						res, err := j.execute(ctx, w)
+						m.statsSlabMigrationSpeedMS.Track(float64(time.Since(start).Milliseconds()))
+
 						if err != nil {
 							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
 							if res.SurchargeApplied {
@@ -141,16 +161,16 @@ func (m *migrator) performMigrations(p *workerPool) {
 							} else {
 								m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
 							}
-							continue
-						}
-
-						m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
-						m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
-						if res.SurchargeApplied {
-							// this alert confirms the user his gouging settings
-							// are working, it will be dismissed automatically
-							// the next time this slab is successfully migrated
-							m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.Key))
+						} else {
+							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
+							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
+							if res.SurchargeApplied {
+								// this alert confirms the user his gouging
+								// settings are working, it will be dismissed
+								// automatically the next time this slab is
+								// successfully migrated
+								m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.Key))
+							}
 						}
 					}
 				}(w)
@@ -228,7 +248,7 @@ OUTER:
 
 		// register an alert to notify users about ongoing migrations.
 		if len(toMigrate) > 0 {
-			m.ap.RegisterAlert(ctx, newOngoingMigrationsAlert(len(toMigrate)))
+			m.ap.RegisterAlert(ctx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
 		}
 
 		// return if there are no slabs to migrate
