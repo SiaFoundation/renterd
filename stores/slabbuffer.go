@@ -470,21 +470,24 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		if err := prunedBuf.saveSize(tx, syncSize, complete); err != nil {
 			return err
 		}
-		if err := tx.Model(&dbSlab{}).
-			Where("db_buffered_slab_id", b.dbID).
-			Update("db_buffered_slab_id", prunedBuf.dbID).
-			Error; err != nil {
-			return err
-		}
+		// update slices with new offset, length and slab
 		for _, slice := range slices {
 			if err := tx.Model(&dbSlice{}).
 				Where("id", slice.ID).
 				Updates(map[string]interface{}{
-					"offset": slice.Offset,
-					"length": slice.Length,
+					"db_slab_id": prunedBuf.dbID,
+					"offset":     slice.Offset,
+					"length":     slice.Length,
 				}).Error; err != nil {
 				return err
 			}
+		}
+		// delete the old buffer and its slab from the db.
+		if err := tx.Model(&dbSlab{}).Where("db_buffered_slab_id", b.dbID).
+			Delete(&dbSlab{}).Error; err != nil {
+			return err
+		} else if err := tx.Delete(&dbBufferedSlab{Model: Model{ID: b.dbID}}).Error; err != nil {
+			return err
 		}
 		return nil
 	})

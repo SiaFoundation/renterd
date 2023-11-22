@@ -2276,3 +2276,113 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero ListSpending")
 	}
 }
+
+func TestSlabBufferPruning(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// sanity check the default settings
+	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// set the redundancy settings to 5 out of 6 to to make sure a slab is 5
+	// sectors large and we can evenly divide it by 5 for the test.
+	rs := api.RedundancySettings{
+		MinShards:   5,
+		TotalShards: 6,
+	}
+	apCfg := testAutopilotConfig
+	apCfg.Contracts.Amount = uint64(rs.TotalShards)
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		autopilotSettings: &apCfg,
+		hosts:             rs.TotalShards,
+		uploadPacking:     true,
+	})
+	defer cluster.Shutdown()
+
+	w := cluster.Worker
+	tt := cluster.tt
+
+	assertBuffer := func(size int) []api.SlabBuffer {
+		t.Helper()
+		buffers, err := cluster.Bus.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		} else if len(buffers) != 1 {
+			t.Fatalf("expected 1 slab buffer, got %v", len(buffers))
+		} else if buffers[0].Size != int64(size) {
+			t.Fatalf("expected buffer size of %v, got %v", size, buffers[0].Size)
+		}
+		return buffers
+	}
+
+	tt.OK(cluster.Bus.UpdateSetting(context.Background(), api.SettingRedundancy, rs))
+
+	// prepare 5 files which make up for a full slab.
+	slabSize := rhpv2.SectorSize * rs.MinShards
+	nObjects := 5
+	partSize := slabSize / nObjects
+	randData := func() []byte { return frand.Bytes(partSize) }
+	var data2, data4, data6, data7, data8 = randData(), randData(), randData(), randData(), randData()
+
+	// upload them and delete the files 1, 3 and 5 right after uploading again.
+	// There should always be 1 buffer up until the last upload.
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(randData()), api.DefaultBucketName, "1", api.UploadObjectOptions{}))
+	tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, "1", api.DeleteObjectOptions{}))
+	assertBuffer(1 * partSize)
+
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data2), api.DefaultBucketName, "2", api.UploadObjectOptions{}))
+	assertBuffer(2 * partSize)
+
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(randData()), api.DefaultBucketName, "3", api.UploadObjectOptions{}))
+	tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, "3", api.DeleteObjectOptions{}))
+	assertBuffer(3 * partSize)
+
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data4), api.DefaultBucketName, "4", api.UploadObjectOptions{}))
+	bufferName := assertBuffer(4 * partSize)[0].Filename
+
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(randData()), api.DefaultBucketName, "5", api.UploadObjectOptions{}))
+	tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, "5", api.DeleteObjectOptions{}))
+
+	// wait until the worker tries to upload the buffer and prunes it in the
+	// process
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buffers, err := cluster.Bus.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		} else if len(buffers) != 1 {
+			return fmt.Errorf("expected 1 slab buffer, got %v", len(buffers))
+		} else if buffers[0].Filename == bufferName {
+			return fmt.Errorf("expected buffer got pruned")
+		} else if buffers[0].Complete {
+			return fmt.Errorf("expected buffer to be incomplete")
+		} else if buffers[0].Size != int64(3*partSize) {
+			return fmt.Errorf("expected buffer size of %v, got %v", 3*partSize, buffers[0].Size)
+		}
+		return nil
+	})
+
+	// add 3 new objects to replace the deleted ones, this should fill the buffer
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data6), api.DefaultBucketName, "6", api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data7), api.DefaultBucketName, "7", api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data8), api.DefaultBucketName, "8", api.UploadObjectOptions{}))
+
+	// download data and check integrity
+	assertIntegrity := func(path string, expectedData []byte) {
+		t.Helper()
+		buffer := bytes.Buffer{}
+		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
+		if !bytes.Equal(buffer.Bytes(), expectedData) {
+			t.Fatalf("unexpected data for %v: %v", path, cmp.Diff(buffer.Bytes(), expectedData))
+		}
+	}
+	assertIntegrity("2", data2)
+	assertIntegrity("4", data4)
+	assertIntegrity("6", data6)
+	assertIntegrity("7", data7)
+	assertIntegrity("8", data8)
+}
