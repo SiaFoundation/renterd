@@ -102,6 +102,7 @@ type (
 	// ObjectsRenameRequest is the request type for the /bus/objects/rename endpoint.
 	ObjectsRenameRequest struct {
 		Bucket string `json:"bucket"`
+		Force  bool   `json:"force"`
 		From   string `json:"from"`
 		To     string `json:"to"`
 		Mode   string `json:"mode"`

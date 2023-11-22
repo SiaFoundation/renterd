@@ -1411,27 +1411,54 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string) error {
-	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
-	if tx.Error != nil {
-		return tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
-	}
-	return nil
+func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if force {
+			// delete potentially existing object at destination
+			err := tx.Model(&dbObject{}).
+				Where("object_id", keyNew).
+				Delete(&dbObject{}).
+				Error
+			if err != nil {
+				return err
+			}
+		}
+		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
+		if tx.Error != nil {
+			return tx.Error
+		}
+		if tx.RowsAffected == 0 {
+			return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+		}
+		return nil
+	})
 }
 
-func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string) error {
-	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
-		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
-	if tx.Error != nil {
-		return tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
-	}
-	return nil
+func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if force {
+			// delete potentially existing objects at destination
+			inner := tx.Raw("SELECT ? FROM objects WHERE SUBSTR(object_id, 1, ?) = ?",
+				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")),
+				prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
+			err := tx.Model(&dbObject{}).
+				Where("object_id IN (?)", inner).
+				Delete(&dbObject{}).
+				Error
+			if err != nil {
+				return err
+			}
+		}
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
+		if tx.Error != nil {
+			return tx.Error
+		}
+		if tx.RowsAffected == 0 {
+			return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
+		}
+		return nil
+	})
 }
 
 func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {

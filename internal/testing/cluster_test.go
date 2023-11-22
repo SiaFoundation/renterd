@@ -458,10 +458,10 @@ func TestObjectsRename(t *testing.T) {
 	}
 
 	// rename
-	if err := b.RenameObjects(context.Background(), api.DefaultBucketName, "/foo/", "/"); err != nil {
+	if err := b.RenameObjects(context.Background(), api.DefaultBucketName, "/foo/", "/", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.RenameObject(context.Background(), api.DefaultBucketName, "/baz/quuz", "/quuz"); err != nil {
+	if err := b.RenameObject(context.Background(), api.DefaultBucketName, "/baz/quuz", "/quuz", false); err != nil {
 		t.Fatal(err)
 	}
 
