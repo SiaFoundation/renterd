@@ -137,9 +137,9 @@ type (
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucketName, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
+		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
@@ -1203,6 +1203,16 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 		return
 	}
 
+	var sortBy string
+	if jc.DecodeForm("sortBy", &sortBy) != nil {
+		return
+	}
+
+	var sortDir string
+	if jc.DecodeForm("sortDir", &sortDir) != nil {
+		return
+	}
+
 	var marker string
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
@@ -1218,7 +1228,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	}
 
 	// look for object entries
-	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, marker, offset, limit)
+	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}
@@ -1256,10 +1266,11 @@ func (b *bus) objectsListHandlerPOST(jc jape.Context) {
 	var req api.ObjectsListRequest
 	if jc.Decode(&req) != nil {
 		return
-	} else if req.Bucket == "" {
+	}
+	if req.Bucket == "" {
 		req.Bucket = api.DefaultBucketName
 	}
-	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.Marker, req.Limit)
+	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.SortBy, req.SortDir, req.Marker, req.Limit)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
