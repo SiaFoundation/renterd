@@ -1693,11 +1693,16 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned 
 	// prune the contract
 	var remaining uint64
 	pruned, remaining, err = w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
-	if err != nil {
+	if err != nil && pruned == 0 {
 		return
 	}
 
-	c.logger.Debugf("pruned %v bytes from contract %v, %v bytes remaining", pruned, fcid, remaining)
+	// log the result
+	msg := fmt.Sprintf("pruned %v bytes from contract %v, %v bytes remaining", pruned, fcid, remaining)
+	if err != nil {
+		msg += fmt.Sprintf(", err: %v", err)
+	}
+	c.logger.Debugf(msg)
 	return
 }
 

@@ -657,25 +657,26 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't fetch contract size", err) != nil {
 		return
 	} else if size.Prunable == 0 {
-		jc.Encode(api.RHPPruneContractResponse{
-			Pruned:    0,
-			Remaining: 0,
-		})
+		jc.Encode(api.RHPPruneContractResponse{})
 		return
 	}
 
 	// prune the contract
 	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
-	if err == nil || pruned > 0 {
-		jc.Encode(api.RHPPruneContractResponse{
-			Pruned:    pruned,
-			Remaining: remaining,
-			Error:     err,
-		})
-	} else {
-		err = fmt.Errorf("failed to prune contract; %w", err)
+	if err != nil && pruned == 0 {
+		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
 		jc.Error(err, http.StatusInternalServerError)
+		return
 	}
+
+	res := api.RHPPruneContractResponse{
+		Pruned:    pruned,
+		Remaining: remaining,
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	jc.Encode(res)
 }
 
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
