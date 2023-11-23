@@ -2149,7 +2149,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 		Updates(map[string]interface{}{
 			"db_buffered_slab_id": nil,
 		}).Error; err != nil {
-		return "", fmt.Errorf("failed to set buffered slab NULL")
+		return "", fmt.Errorf("failed to set buffered slab NULL: %w", err)
 	}
 
 	// delete buffer

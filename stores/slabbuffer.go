@@ -405,7 +405,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		newSize = int64(slices[len(slices)-1].Offset + slices[len(slices)-1].Length)
 	}
 
-	// if the end of the buffer after pruning above the threshold, we don't
+	// if the end of the buffer after pruning is above the threshold, we don't
 	// prune.
 	if int64(newSize) >= b.maxSize-mgr.bufferedSlabCompletionThreshold {
 		return false, nil
@@ -418,12 +418,10 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		return false, err
 	}
 	defer func() {
-		if err != nil {
-			err = errors.Join(err, src.Close())
-		}
+		err = errors.Join(err, src.Close())
 	}()
 
-	currentOffset := uint32(0)
+	var currentOffset uint32
 	prunedData := bytes.NewBuffer(make([]byte, 0, newSize))
 	for _, gap := range gaps {
 		if currentOffset < gap.start {
@@ -500,7 +498,6 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 
 	// swap out the old buffer for the new one
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
 	gid := bufferGID(minShards, totalShards, uint32(set))
 
 	// add the new buffer to either the list of complete ones or incomplete ones
@@ -521,6 +518,7 @@ func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards,
 		}
 	}
 	delete(mgr.buffersByKey, b.slabKey.String())
+	mgr.mu.Unlock()
 
 	// delete the old buffer from disk.
 	if err := b.file.Close(); err != nil {
