@@ -407,15 +407,15 @@ LOOP:
 		go func(ps api.PackedSlab) {
 			defer wg.Done()
 			err := w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority, nextSlabChan)
-			mu.Lock()
-			defer mu.Unlock()
 			if err != nil {
 				select {
 				case errChan <- err:
 				default:
 				}
 			} else {
+				mu.Lock()
 				uploaded++
+				mu.Unlock()
 			}
 		}(ps)
 
