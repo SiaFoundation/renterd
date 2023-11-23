@@ -426,7 +426,7 @@ LOOP:
 			break LOOP
 		case err = <-errChan:
 			break LOOP
-		case <-nextSlabChan:
+		case nextSlabChan <- struct{}{}:
 		}
 	}
 
