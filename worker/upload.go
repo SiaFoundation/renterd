@@ -384,7 +384,6 @@ func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Dur
 	var mu sync.Mutex
 	errChan := make(chan error, 1)
 
-	var ps api.PackedSlab
 	var packedSlabs []api.PackedSlab
 	var wg sync.WaitGroup
 
@@ -400,13 +399,14 @@ LOOP:
 				break LOOP
 			}
 		}
+		var ps api.PackedSlab
 		ps, packedSlabs = packedSlabs[0], packedSlabs[1:]
 
 		// launch upload for slab
 		wg.Add(1)
 		go func(ps api.PackedSlab) {
 			defer wg.Done()
-			err = w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority, nextSlabChan)
+			err := w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority, nextSlabChan)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
