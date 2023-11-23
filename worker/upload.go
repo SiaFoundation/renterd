@@ -1597,6 +1597,9 @@ func (s *slabUpload) receive(resp sectorUploadResp) (finished bool, next bool) {
 	delete(s.remaining, resp.req.sectorIndex)
 	finished = len(s.remaining) == 0
 	next = len(s.remaining) <= int(s.mgr.maxOverdrive)
+
+	resp.req.sector = nil
+	s.shards[resp.req.sectorIndex] = nil
 	return
 }
 
