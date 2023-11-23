@@ -19,6 +19,7 @@ const (
 const (
 	S3MinAccessKeyLen = 16
 	S3MaxAccessKeyLen = 128
+	S3SecretKeyLen    = 40
 )
 
 var (
@@ -144,6 +145,8 @@ func (s3as S3AuthenticationSettings) Validate() error {
 			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(accessKeyID))
 		} else if len(secretAccessKey) == 0 {
 			return fmt.Errorf("SecretAccessKey cannot be empty")
+		} else if len(secretAccessKey) != S3SecretKeyLen {
+			return fmt.Errorf("SecretAccessKey must be %d characters long but was %d", S3SecretKeyLen, len(secretAccessKey))
 		}
 	}
 	return nil
