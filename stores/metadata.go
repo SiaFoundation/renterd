@@ -1088,10 +1088,10 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("INSTR(o.object_id, ?) > 0 AND ?", substring, sqlWhereBucket("o", bucket)).
+		Where("INSTR(o.object_id, ?) > 0 AND b.name = ?", substring, bucket).
 		Group("o.object_id").
 		Offset(offset).
 		Limit(limit).
@@ -1103,19 +1103,34 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return objects, nil
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
-	// convenience variables
-	usingMarker := marker != ""
-	usingOffset := offset > 0
-
+func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
 	}
 
+	// convenience variables
+	usingMarker := marker != ""
+	usingOffset := offset > 0
+
 	// sanity check we are passing sane paging parameters
 	if usingMarker && usingOffset {
 		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
+	}
+
+	// sanity check we are passing sane sorting parameters
+	if err := validateSort(sortBy, sortDir); err != nil {
+		return nil, false, err
+	}
+
+	// sanitize sorting parameters
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	} else {
+		sortDir = strings.ToLower(sortDir)
 	}
 
 	// ensure marker is '/' prefixed
@@ -1123,19 +1138,9 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		marker = fmt.Sprintf("/%s", marker)
 	}
 
-	// ensure limits are out of play
+	// ensure limit is out of play
 	if limit <= -1 {
 		limit = math.MaxInt
-	}
-
-	// figure out the HAVING CLAUSE and its parameters
-	havingClause := "1 = 1"
-	var havingParams []interface{}
-	if usingMarker {
-		havingClause = "name > ?"
-		havingParams = append(havingParams, marker)
-
-		offset = 0 // disable offset
 	}
 
 	// fetch one more to see if there are more entries
@@ -1143,49 +1148,98 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, mark
 		limit += 1
 	}
 
-	var rows []rawObjectMetadata
-	query := fmt.Sprintf(`
-	SELECT
-		MAX(etag) AS ETag,
-		MAX(created_at) AS ModTime,
-		CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
-		SUM(size) AS size,
-		MIN(health) as health,
-		MAX(mimeType) as MimeType
-	FROM (
-		SELECT MAX(etag) AS etag, MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
-		FROM objects
-		INNER JOIN buckets b ON objects.db_bucket_id = b.id AND b.name = ?
-		LEFT JOIN slices ON objects.id = slices.db_object_id 
-		LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-		WHERE SUBSTR(object_id, 1, ?) = ? AND ?
-		GROUP BY object_id
-	) AS m
-	GROUP BY name
-	HAVING SUBSTR(name, 1, ?) = ? AND name != ? AND %s
-	ORDER BY name ASC
-	LIMIT ?
-	OFFSET ?`,
+	// ensure offset is out of play
+	if usingMarker {
+		offset = 0
+	}
+
+	// build objects query & parameters
+	objectsQuery := fmt.Sprintf(`
+SELECT
+	MAX(etag) AS ETag,
+	MAX(created_at) AS ModTime,
+	CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
+	SUM(size) AS size,
+	MIN(health) as health,
+	MAX(mimeType) as MimeType
+FROM (
+	SELECT MAX(etag) AS etag, MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
+	FROM objects
+	INNER JOIN buckets b ON objects.db_bucket_id = b.id
+	LEFT JOIN slices ON objects.id = slices.db_object_id
+	LEFT JOIN slabs ON slices.db_slab_id = slabs.id
+	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
+	GROUP BY object_id
+) AS m
+GROUP BY name
+HAVING SUBSTR(name, 1, ?) = ? AND name != ?
+`,
 		sqlConcat(s.db, "?", "trimmed"),
 		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)"),
-		havingClause)
+	)
 
-	parameters := append(append([]interface{}{
+	objectsQueryParams := []interface{}{
 		path, // sqlConcat(s.db, "?", "trimmed"),
 		path, // sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")
 
 		utf8.RuneCountInString(path) + 1, // SUBSTR(object_id, ?)
 		utf8.RuneCountInString(path) + 1, // INSTR(SUBSTR(object_id, ?), "/")
-		bucket,                           // b.name = ?
 
-		utf8.RuneCountInString(path),      // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
-		path,                              // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
-		sqlWhereBucket("objects", bucket), // WHERE SUBSTR(object_id, 1, ?) = ? AND ?
+		utf8.RuneCountInString(path), // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
+		path,                         // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
+		bucket,                       // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
 
 		utf8.RuneCountInString(path + prefix), // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 		path + prefix,                         // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 		path,                                  // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
-	}, havingParams...), limit, offset)
+	}
+
+	// build marker expr
+	markerExpr := "1 = 1"
+	var markerParams []interface{}
+	if usingMarker {
+		switch sortBy {
+		case api.ObjectSortByHealth:
+			var markerHealth float64
+			if err = s.db.
+				Raw(fmt.Sprintf(`SELECT health FROM (%s AND name >= ? ORDER BY name LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Scan(&markerHealth).
+				Error; err != nil {
+				return
+			}
+
+			if sortDir == api.ObjectSortDirAsc {
+				markerExpr = "(health > ? OR (health = ? AND name > ?))"
+				markerParams = []interface{}{markerHealth, markerHealth, marker}
+			} else {
+				markerExpr = "(health = ? AND name > ?) OR health < ?"
+				markerParams = []interface{}{markerHealth, marker, markerHealth}
+			}
+		case api.ObjectSortByName:
+			if sortDir == api.ObjectSortDirAsc {
+				markerExpr = "name > ?"
+			} else {
+				markerExpr = "name < ?"
+			}
+			markerParams = []interface{}{marker}
+		default:
+			panic("unhandled sortBy") // developer error
+		}
+	}
+
+	// build order clause
+	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
+	if sortBy == api.ObjectSortByHealth {
+		orderByClause += ", name"
+	}
+
+	var rows []rawObjectMetadata
+	query := fmt.Sprintf(`SELECT * FROM (%s ORDER BY %s) AS n WHERE %s LIMIT ? OFFSET ?`,
+		objectsQuery,
+		orderByClause,
+		markerExpr,
+	)
+	parameters := append(append(objectsQueryParams, markerParams...), limit, offset)
 
 	if err = s.db.
 		Raw(query, parameters...).
@@ -1357,27 +1411,60 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types
 	return fetchedContracts, nil
 }
 
-func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string) error {
-	tx := s.db.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
-	if tx.Error != nil {
-		return tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
-	}
-	return nil
+func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		if force {
+			// delete potentially existing object at destination
+			if _, err := deleteObject(tx, bucket, keyNew); err != nil {
+				return err
+			}
+		}
+		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
+		if tx.Error != nil &&
+			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
+			return api.ErrObjectExists
+		} else if tx.Error != nil {
+			return tx.Error
+		}
+		if tx.RowsAffected == 0 {
+			return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+		}
+		return nil
+	})
 }
 
-func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string) error {
-	tx := s.db.Exec("UPDATE objects SET object_id = "+sqlConcat(s.db, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ?",
-		prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld)
-	if tx.Error != nil {
-		return tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
-	}
-	return nil
+func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
+		if force {
+			// delete potentially existing objects at destination
+			inner := tx.Raw("SELECT ? FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
+				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")),
+				prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+			resp := tx.Model(&dbObject{}).
+				Where("object_id IN (?)", inner).
+				Delete(&dbObject{})
+			if err := resp.Error; err != nil {
+				return err
+			}
+			if resp.RowsAffected > 0 {
+				if err := pruneSlabs(tx); err != nil {
+					return err
+				}
+			}
+		}
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+		if tx.Error != nil &&
+			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
+			return api.ErrObjectExists
+		} else if tx.Error != nil {
+			return tx.Error
+		}
+		if tx.RowsAffected == 0 {
+			return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
+		}
+		return nil
+	})
 }
 
 func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey, offset, length uint32) ([]byte, error) {
@@ -1999,7 +2086,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
@@ -2007,7 +2094,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Joins("LEFT JOIN contracts c ON cs.`db_contract_id` = c.`id`").
 		Joins("LEFT JOIN hosts h ON c.host_id = h.id").
 		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
-		Where("o.object_id = ? AND ?", path, sqlWhereBucket("o", bucket)).
+		Where("o.object_id = ? AND b.name = ?", path, bucket).
 		Order("sli.object_index ASC").
 		Order("sec.slab_index ASC").
 		Scan(&rows)
@@ -2415,7 +2502,7 @@ func sqlWhereBucket(objTable string, bucket string) clause.Expr {
 // TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
 // a delimiter for now (see backend.go) but it would be interesting to have
 // arbitrary 'delim' support in ListObjects.
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker string, limit int) (api.ObjectsListResponse, error) {
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -2423,29 +2510,35 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, marker strin
 		limit++
 	}
 
-	prefixExpr := exprTRUE
-	if prefix != "" {
-		prefixExpr = gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+	// build prefix expr
+	prefixExpr := buildPrefixExpr(prefix)
+
+	// build order clause
+	orderBy, err := buildOrderClause(sortBy, sortDir)
+	if err != nil {
+		return api.ObjectsListResponse{}, err
 	}
-	markerExpr := exprTRUE
-	if marker != "" {
-		markerExpr = gorm.Expr("o.object_id > ?", marker)
+
+	// build marker expr
+	markerExpr, markerOrderBy, err := buildMarkerExpr(s.db, bucket, prefix, marker, sortBy, sortDir)
+	if err != nil {
+		return api.ObjectsListResponse{}, err
 	}
 
 	var rows []rawObjectMetadata
-	err := s.db.
+	if err := s.db.
 		Select("o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, MAX(o.mime_type) as mimeType, MAX(o.created_at) as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id AND b.name = ?", bucket).
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
 		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("? AND ? AND ?", sqlWhereBucket("o", bucket), prefixExpr, markerExpr).
+		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
 		Group("o.object_id").
-		Order("o.object_id").
+		Order(orderBy).
+		Order(markerOrderBy).
 		Limit(int(limit)).
-		Scan(&rows).Error
-	if err != nil {
+		Scan(&rows).Error; err != nil {
 		return api.ObjectsListResponse{}, err
 	}
 
@@ -2556,4 +2649,104 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 		}
 		height++
 	}
+}
+
+func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string) (markerExpr clause.Expr, orderBy clause.OrderBy, err error) {
+	// no marker
+	if marker == "" {
+		return exprTRUE, clause.OrderBy{}, nil
+	}
+
+	// for markers to work we need to order by object_id
+	orderBy = clause.OrderBy{
+		Columns: []clause.OrderByColumn{
+			{
+				Column: clause.Column{Name: "object_id"},
+				Desc:   false,
+			},
+		},
+	}
+
+	desc := strings.EqualFold(sortDir, api.ObjectSortDirDesc)
+	switch sortBy {
+	case "", api.ObjectSortByName:
+		if desc {
+			markerExpr = gorm.Expr("object_id < ?", marker)
+		} else {
+			markerExpr = gorm.Expr("object_id > ?", marker)
+		}
+	case api.ObjectSortByHealth:
+		// fetch marker health
+		var markerHealth float64
+		if marker != "" && sortBy == api.ObjectSortByHealth {
+			if err := db.
+				Select("MIN(sla.health)").
+				Model(&dbObject{}).
+				Table("objects o").
+				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
+				Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
+				Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
+				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
+				Group("o.object_id").
+				Limit(1).
+				Scan(&markerHealth).
+				Error; err != nil {
+				return exprTRUE, clause.OrderBy{}, err
+			}
+		}
+
+		if desc {
+			markerExpr = gorm.Expr("(Health <= ? AND object_id > ?) OR Health < ?", markerHealth, marker, markerHealth)
+		} else {
+			markerExpr = gorm.Expr("Health > ? OR (Health >= ? AND object_id > ?)", markerHealth, markerHealth, marker)
+		}
+	default:
+		err = fmt.Errorf("unhandled sortBy parameter '%s'", sortBy)
+	}
+	return
+}
+
+func buildOrderClause(sortBy, sortDir string) (clause.OrderByColumn, error) {
+	if err := validateSort(sortBy, sortDir); err != nil {
+		return clause.OrderByColumn{}, err
+	}
+
+	orderByColumns := map[string]string{
+		"":                     "object_id",
+		api.ObjectSortByName:   "object_id",
+		api.ObjectSortByHealth: "Health",
+	}
+
+	return clause.OrderByColumn{
+		Column: clause.Column{Name: orderByColumns[sortBy]},
+		Desc:   strings.EqualFold(sortDir, api.ObjectSortDirDesc),
+	}, nil
+}
+
+func buildPrefixExpr(prefix string) clause.Expr {
+	if prefix != "" {
+		return gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+	} else {
+		return exprTRUE
+	}
+}
+
+func validateSort(sortBy, sortDir string) error {
+	allowed := func(s string, allowed ...string) bool {
+		for _, a := range allowed {
+			if strings.EqualFold(s, a) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !allowed(sortDir, "", api.ObjectSortDirAsc, api.ObjectSortDirDesc) {
+		return fmt.Errorf("invalid dir '%v', allowed values are '%v' and '%v'; %w", sortDir, api.ObjectSortDirAsc, api.ObjectSortDirDesc, api.ErrInvalidObjectSortParameters)
+	}
+
+	if !allowed(sortBy, "", api.ObjectSortByHealth, api.ObjectSortByName) {
+		return fmt.Errorf("invalid sort by '%v', allowed values are '%v' and '%v'; %w", sortBy, api.ObjectSortByHealth, api.ObjectSortByName, api.ErrInvalidObjectSortParameters)
+	}
+	return nil
 }
