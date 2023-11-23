@@ -342,6 +342,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00032_objectIndices(tx, logger)
 			},
 		},
+		{
+			ID: "00033_transactionsTimestampIndex",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00033_transactionsTimestampIndex(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1436,5 +1442,18 @@ func performMigration00032_objectIndices(txn *gorm.DB, logger *zap.SugaredLogger
 	}
 
 	logger.Info("migration 00032_objectIndices complete")
+	return nil
+}
+
+func performMigration00033_transactionsTimestampIndex(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00033_transactionsTimestampIndex")
+
+	if err := txn.Table("transactions").Migrator().AutoMigrate(&struct {
+		Timestamp int64 `gorm:"index:idx_transactions_timestamp"`
+	}{}); err != nil {
+		return err
+	}
+
+	logger.Info("migration 00033_transactionsTimestampIndex complete")
 	return nil
 }
