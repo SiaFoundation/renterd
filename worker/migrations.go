@@ -105,7 +105,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
+	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload, nil)
 	if err != nil {
 		return 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}

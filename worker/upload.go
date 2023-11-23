@@ -376,24 +376,73 @@ func (w *worker) tryUploadPackedSlabs(ctx context.Context, rs api.RedundancySett
 }
 
 func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Duration, rs api.RedundancySettings, contractSet string, limit, lockPriority int) (uploaded int, err error) {
-	// fetch packed slabs
-	packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, lockingDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, limit)
-	if err != nil {
-		return 0, fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
-	}
+	// create the next slab channel
+	nextSlabChan := make(chan struct{}, 1)
+	defer close(nextSlabChan)
 
 	// upload packed slabs
-	for _, ps := range packedSlabs {
-		err = w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority)
-		if err != nil {
-			return
+	var mu sync.Mutex
+	errChan := make(chan error, 1)
+
+	var ps api.PackedSlab
+	var packedSlabs []api.PackedSlab
+	var wg sync.WaitGroup
+
+LOOP:
+	for {
+		// fetch packed slabs to upload
+		if len(packedSlabs) == 0 {
+			packedSlabs, err = w.bus.PackedSlabsForUpload(ctx, lockingDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, limit)
+			if err != nil {
+				err = fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+				break LOOP
+			} else if len(packedSlabs) == 0 {
+				break LOOP
+			}
 		}
-		uploaded++
+		ps, packedSlabs = packedSlabs[0], packedSlabs[1:]
+
+		// launch upload for slab
+		wg.Add(1)
+		go func(ps api.PackedSlab) {
+			defer wg.Done()
+			err = w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority, nextSlabChan)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				select {
+				case errChan <- err:
+				default:
+				}
+			} else {
+				uploaded++
+			}
+		}(ps)
+
+		// block until either an error occurs or the next slab is ready to be
+		// uploaded
+		select {
+		case <-ctx.Done():
+			break LOOP
+		case err = <-errChan:
+			break LOOP
+		case <-nextSlabChan:
+		}
+	}
+
+	// wait for all threads to finish
+	wg.Wait()
+
+	// check for any last errors
+	select {
+	case uploadErr := <-errChan:
+		err = errors.Join(err, uploadErr)
+	default:
 	}
 	return
 }
 
-func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
+func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int, nextSlabChan chan struct{}) error {
 	// create a context with sane timeout
 	ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
 	defer cancel()
@@ -415,7 +464,7 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 
 	// upload packed slab
 	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-	sectors, err := w.uploadManager.UploadShards(ctx, shards, contracts, up.CurrentHeight, lockPriority)
+	sectors, err := w.uploadManager.UploadShards(ctx, shards, contracts, up.CurrentHeight, lockPriority, nextSlabChan)
 	if err != nil {
 		return fmt.Errorf("couldn't upload packed slab, err: %v", err)
 	}
@@ -627,7 +676,7 @@ loop:
 	return o, partialSlab, hr.Hash(), nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64, lockPriority int) ([]object.Sector, error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64, lockPriority int, nextSlabChan chan struct{}) ([]object.Sector, error) {
 	// initiate the upload
 	upload, finishFn, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
 	if err != nil {
@@ -636,7 +685,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, shards [][]byte, con
 	defer finishFn()
 
 	// upload the shards
-	sectors, err := upload.uploadShards(ctx, shards, nil)
+	sectors, err := upload.uploadShards(ctx, shards, nextSlabChan)
 	if err != nil {
 		return nil, err
 	}
