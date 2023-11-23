@@ -1032,16 +1032,7 @@ func performMigration00019_accountsShutdown(txn *gorm.DB, logger *zap.SugaredLog
 
 func performMigration00020_missingIndices(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info("performing migration 00020_missingIndices")
-	var err error
-	detectMissingIndices(txn, func(dst interface{}, name string) {
-		if err != nil {
-			return
-		}
-		err = txn.Migrator().CreateIndex(dst, name)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create missing indices: %w", err)
-	}
+	// removed since it caused issues when migrating old nodes
 	logger.Info("migration 00020_missingIndices complete")
 	return nil
 }
