@@ -2107,7 +2107,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 
 func (s *SQLStore) objectHealth(ctx context.Context, tx *gorm.DB, objectID uint) (health float64, err error) {
 	if err = tx.
-		Select("MIN(sla.health)").
+		Select("COALESCE(MIN(sla.health), 1)").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
