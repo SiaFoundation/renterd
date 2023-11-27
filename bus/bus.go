@@ -137,15 +137,15 @@ type (
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucketName, path, prefix, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
+		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
-		RenameObject(ctx context.Context, bucketName, from, to string) error
-		RenameObjects(ctx context.Context, bucketName, from, to string) error
+		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
+		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
 		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, o object.Object) error
 
@@ -1203,6 +1203,16 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 		return
 	}
 
+	var sortBy string
+	if jc.DecodeForm("sortBy", &sortBy) != nil {
+		return
+	}
+
+	var sortDir string
+	if jc.DecodeForm("sortDir", &sortDir) != nil {
+		return
+	}
+
 	var marker string
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
@@ -1218,7 +1228,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	}
 
 	// look for object entries
-	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, marker, offset, limit)
+	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
 	if jc.Check("couldn't list object entries", err) != nil {
 		return
 	}
@@ -1256,10 +1266,11 @@ func (b *bus) objectsListHandlerPOST(jc jape.Context) {
 	var req api.ObjectsListRequest
 	if jc.Decode(&req) != nil {
 		return
-	} else if req.Bucket == "" {
+	}
+	if req.Bucket == "" {
 		req.Bucket = api.DefaultBucketName
 	}
-	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.Marker, req.Limit)
+	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.SortBy, req.SortDir, req.Marker, req.Limit)
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
@@ -1279,7 +1290,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To))
+		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
 		return
 	} else if orr.Mode == api.ObjectsRenameModeMulti {
 		// Multi object rename.
@@ -1287,7 +1298,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To))
+		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
 		return
 	} else {
 		// Invalid mode.
@@ -1998,10 +2009,7 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) metricsHandlerGET(jc jape.Context) {
-	key := jc.PathParam("key")
-
 	// parse mandatory query parameters
-	var err error
 	var start time.Time
 	var n uint64
 	var interval time.Duration
@@ -2014,31 +2022,30 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	}
 
 	// parse optional query parameters
-	switch key {
+	switch key := jc.PathParam("key"); key {
 	case api.MetricContract:
-		var metrics []api.ContractMetric
 		var opts api.ContractMetricsQueryOpts
 		if jc.DecodeForm("fcid", &opts.ContractID) != nil {
 			return
 		} else if jc.DecodeForm("host", &opts.HostKey) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
 			return
 		}
-		jc.Encode(metrics)
-		return
 	case api.MetricContractSet:
-		var metrics []api.ContractSetMetric
 		var opts api.ContractSetMetricsQueryOpts
 		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
 			return
 		}
-		jc.Encode(metrics)
-		return
 	case api.MetricContractSetChurn:
-		var metrics []api.ContractSetChurnMetric
 		var opts api.ContractSetChurnMetricsQueryOpts
 		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
@@ -2046,15 +2053,28 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
 			return
-		} else if metrics, err = b.mtrcs.ContractSetChurnMetrics(jc.Request.Context(), start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
 			return
 		}
-		jc.Encode(metrics)
-		return
 	default:
 		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
+}
+
+func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64, interval time.Duration, opts interface{}) (interface{}, error) {
+	switch key {
+	case api.MetricContract:
+		return b.mtrcs.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
+	case api.MetricContractSet:
+		return b.mtrcs.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
+	case api.MetricContractSetChurn:
+		return b.mtrcs.ContractSetChurnMetrics(ctx, start, n, interval, opts.(api.ContractSetChurnMetricsQueryOpts))
+	}
+	return nil, nil
 }
 
 func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {

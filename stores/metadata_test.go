@@ -977,16 +977,18 @@ func TestSQLMetadataStore(t *testing.T) {
 		Size:       obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
-				DBObjectID: &one,
-				DBSlabID:   1,
-				Offset:     10,
-				Length:     100,
+				DBObjectID:  &one,
+				DBSlabID:    1,
+				ObjectIndex: 1,
+				Offset:      10,
+				Length:      100,
 			},
 			{
-				DBObjectID: &one,
-				DBSlabID:   2,
-				Offset:     20,
-				Length:     200,
+				DBObjectID:  &one,
+				DBSlabID:    2,
+				ObjectIndex: 2,
+				Offset:      20,
+				Length:      200,
 			},
 		},
 		MimeType: testMimeType,
@@ -1268,7 +1270,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	entries, _, err := ss.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", "", 0, -1)
+	entries, _, err := ss.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", "", "", "", 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1382,47 +1384,64 @@ func TestObjectEntries(t *testing.T) {
 		}
 	}
 
-	tests := []struct {
-		path   string
-		prefix string
-		want   []api.ObjectMetadata
-	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
-		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+	// override health of some slabs
+	if err := ss.overrideSlabHealth("/foo/baz/quuz", 0.5); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.overrideSlabHealth("/foo/baz/quux", 0.75); err != nil {
+		t.Fatal(err)
+	}
 
-		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
-		{"/", "F", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}}},
-		{"/foo/", "fo", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
-		{"/gab/", "/guub", []api.ObjectMetadata{}},
+	tests := []struct {
+		path    string
+		prefix  string
+		sortBy  string
+		sortDir string
+		want    []api.ObjectMetadata
+	}{
+		{"/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/foo/", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: .5}}},
+		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/gab/", "", "", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", "", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+
+		{"/", "f", "", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
+		{"/", "F", "", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}}},
+		{"/foo/", "fo", "", "", []api.ObjectMetadata{}},
+		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: .75}}},
+		{"/gab/", "/guub", "", "", []api.ObjectMetadata{}},
+
+		{"/", "", "name", "ASC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "name", "DESC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}}},
+
+		{"/", "", "health", "ASC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "health", "DESC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
 	}
 	for _, test := range tests {
-		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, "", 0, -1)
+		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
 		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
+
 		for offset := 0; offset < len(test.want); offset++ {
-			got, hasMore, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, "", offset, 1)
+			got, hasMore, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", offset, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset] {
-				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want[offset])
+				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", offset, test.path, test.prefix, got, test.want[offset])
 			}
 
 			moreRemaining := len(test.want)-offset-1 > 0
 			if hasMore != moreRemaining {
-				t.Errorf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
+				t.Fatalf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
 			}
 
 			// make sure we stay within bounds
@@ -1430,19 +1449,19 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			got, hasMore, err = ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.want[offset].Name, 0, 1)
+			got, hasMore, err = ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, 0, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset+1] {
-				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
+				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", offset+1, test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
 			}
 
 			moreRemaining = len(test.want)-offset-2 > 0
 			if hasMore != moreRemaining {
-				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
+				t.Fatalf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
 			}
 		}
 	}
@@ -2263,6 +2282,8 @@ func TestRenameObjects(t *testing.T) {
 		"/foo",
 		"/bar",
 		"/baz",
+		"/baz2",
+		"/baz3",
 	}
 	ctx := context.Background()
 	for _, path := range objects {
@@ -2273,30 +2294,40 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Try renaming objects that don't exist.
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/fileś", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś1", "/fileś2"); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// Perform some renames.
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/"); err != nil {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/foo", "/fileś/foo"); err != nil {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/foo", "/fileś/foo", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/bar", "/fileś/bar"); err != nil {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/bar", "/fileś/bar", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz", "/fileś/baz"); err != nil {
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz", "/fileś/baz", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1"); err != nil {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2"); err != nil {
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal(err)
+	} else if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal(err)
+	} else if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3066,13 +3097,13 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// List the objects in the buckets.
-	if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
+	if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3096,15 +3127,15 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz"); err != nil {
+	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3113,15 +3144,15 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam"); err != nil {
+	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3134,28 +3165,28 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.RemoveObject(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", 0, -1); err != nil {
+	if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if err := ss.RemoveObjects(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3209,7 +3240,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if om, err := ss.CopyObject(ctx, "src", "src", "/foo", "/bar", ""); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(ctx, "src", "/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(ctx, "src", "/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3222,7 +3253,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if om, err := ss.CopyObject(ctx, "src", "dst", "/foo", "/bar", ""); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(ctx, "dst", "/", "", "", 0, -1); err != nil {
+	} else if entries, _, err := ss.ObjectEntries(ctx, "dst", "/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3337,18 +3368,33 @@ func TestListObjects(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
+	// override health of some slabs
+	if err := ss.overrideSlabHealth("/foo/baz/quuz", 0.5); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.overrideSlabHealth("/foo/baz/quux", 0.75); err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
-		prefix string
-		marker string
-		want   []api.ObjectMetadata
+		prefix  string
+		sortBy  string
+		sortDir string
+		marker  string
+		want    []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/foo/b", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"o/baz/quu", "", []api.ObjectMetadata{}},
-		{"/foo", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", "ASC", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", "DESC", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/FOO/bar", Size: 6, Health: 1}}},
+		{"/", "health", "ASC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "health", "DESC", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo/b", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"o/baz/quu", "", "", "", []api.ObjectMetadata{}},
+		{"/foo", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
 	}
 	for _, test := range tests {
-		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", -1)
+		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3358,12 +3404,12 @@ func TestListObjects(t *testing.T) {
 
 		got := res.Objects
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.prefix, got, test.want)
+			t.Fatalf("\nkey: %v\ngot: %v\nwant: %v", test.prefix, got, test.want)
 		}
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, marker, 1)
+				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, marker, 1)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -3373,9 +3419,9 @@ func TestListObjects(t *testing.T) {
 
 				got := res.Objects
 				if len(got) != 1 {
-					t.Errorf("expected 1 object, got %v", len(got))
+					t.Fatalf("expected 1 object, got %v", len(got))
 				} else if got[0].Name != test.want[offset].Name {
-					t.Errorf("expected %v, got %v", test.want[offset].Name, got[0].Name)
+					t.Fatalf("expected %v, got %v, offset %v, marker %v", test.want[offset].Name, got[0].Name, offset, marker)
 				}
 				marker = res.NextMarker
 			}
@@ -3709,7 +3755,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// refresh health
-		now := time.Now()
+		now := time.Now().Round(time.Second)
 		if err := ss.RefreshHealth(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -3730,4 +3776,15 @@ func TestSlabHealthInvalidation(t *testing.T) {
 			t.Fatal("valid until not in boundaries", min, max, validUntil, now)
 		}
 	}
+}
+func (s *SQLStore) overrideSlabHealth(objectID string, health float64) (err error) {
+	err = s.db.Exec(fmt.Sprintf(`
+	UPDATE slabs SET health = %v WHERE id IN (
+		SELECT sla.id
+		FROM objects o
+		INNER JOIN slices sli ON o.id = sli.db_object_id
+		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
+		WHERE o.object_id = "%s"
+	)`, health, objectID)).Error
+	return
 }

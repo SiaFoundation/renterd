@@ -15,23 +15,23 @@ import (
 )
 
 // RHPBroadcast broadcasts the latest revision for a contract.
-func (c *Client) RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/broadcast", fcid), nil, nil)
+func (c *Client) RHPBroadcast(ctx context.Context, contractID types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/broadcast", contractID), nil, nil)
 	return
 }
 
 // RHPContractRoots fetches the roots of the contract with given id.
-func (c *Client) RHPContractRoots(ctx context.Context, fcid types.FileContractID) (roots []types.Hash256, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", fcid), &roots)
+func (c *Client) RHPContractRoots(ctx context.Context, contractID types.FileContractID) (roots []types.Hash256, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", contractID), &roots)
 	return
 }
 
 // RHPForm forms a contract with a host.
-func (c *Client) RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPForm(ctx context.Context, endHeight uint64, hostKey types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
-		HostKey:        hk,
+		HostKey:        hostKey,
 		HostIP:         hostIP,
 		RenterFunds:    renterFunds,
 		RenterAddress:  renterAddress,
@@ -65,9 +65,9 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 }
 
 // RHPPruneContract prunes deleted sectors from the contract with given id.
-func (c *Client) RHPPruneContract(ctx context.Context, fcid types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error) {
+func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error) {
 	var res api.RHPPruneContractResponse
-	if err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", fcid), api.RHPPruneContractRequest{
+	if err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", contractID), api.RHPPruneContractRequest{
 		Timeout: api.DurationMS(timeout),
 	}, &res); err != nil {
 		return
@@ -93,12 +93,12 @@ func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, s
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, newCollateral types.Currency, windowSize uint64) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, newCollateral types.Currency, windowSize uint64) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPRenewRequest{
-		ContractID:    fcid,
+		ContractID:    contractID,
 		EndHeight:     endHeight,
 		HostAddress:   hostAddress,
-		HostKey:       hk,
+		HostKey:       hostKey,
 		NewCollateral: newCollateral,
 		RenterAddress: renterAddress,
 		RenterFunds:   renterFunds,
