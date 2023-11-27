@@ -34,6 +34,9 @@ func newMemoryManager() *memoryManager {
 }
 
 func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) <-chan *acquiredMemory {
+	if amt == 0 {
+		panic("cannot acquire 0 memory")
+	}
 	memChan := make(chan *acquiredMemory, 1)
 	// block until enough memory is available
 	mm.sigNewMem.L.Lock()

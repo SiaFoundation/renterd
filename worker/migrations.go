@@ -84,7 +84,7 @@ SHARDS:
 	}
 
 	// acquire memory for the migration
-	mem := <-u.mm.AcquireMemory(ctx, uint64(missingShards)*rhpv2.SectorSize)
+	mem := <-u.mm.AcquireMemory(ctx, uint64(len(shardIndices))*rhpv2.SectorSize)
 	defer mem.Release()
 
 	// download the slab
