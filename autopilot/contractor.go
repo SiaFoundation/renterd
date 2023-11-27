@@ -1633,6 +1633,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	var total uint64
 	wp.withWorker(func(w Worker) {
 		for _, contract := range res.Contracts {
+			c.logger.Debugf("pruning %d bytes from contract %v", contract.Prunable, contract.ID)
 			pruned, err := c.pruneContract(w, contract.ID)
 			if err != nil {
 				if isErr(err, errConnectionRefused) ||
