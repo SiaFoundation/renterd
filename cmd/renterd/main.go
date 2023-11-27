@@ -218,51 +218,6 @@ func main() {
 	// overwrite anything set in the config file.
 	tryLoadConfig()
 
-	// TODO: the following flags will be deprecated in v1.0.0 in favor of
-	// environment variables to ensure we do not ask the user to pass sensitive
-	// information via CLI parameters.
-	var depDBPassword string
-	var depBusRemotePassword string
-	var depBusRemoteAddr string
-	var depWorkerRemotePassStr string
-	var depWorkerRemoteAddrsStr string
-	flag.StringVar(&depDBPassword, "db.password", "", "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
-	flag.StringVar(&depBusRemotePassword, "bus.apiPassword", "", "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
-	flag.StringVar(&depBusRemoteAddr, "bus.remoteAddr", "", "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
-	flag.StringVar(&depWorkerRemotePassStr, "worker.apiPassword", "", "[DEPRECATED] API password for remote worker service")
-	flag.StringVar(&depWorkerRemoteAddrsStr, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
-
-	for _, flag := range []struct {
-		input    string
-		name     string
-		env      string
-		insecure bool
-	}{
-		{depDBPassword, "db.password", "RENTERD_DB_PASSWORD", true},
-		{depBusRemotePassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
-		{depBusRemoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
-		{depWorkerRemotePassStr, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
-		{depWorkerRemoteAddrsStr, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
-	} {
-		if flag.input != "" {
-			if flag.insecure {
-				log.Printf("WARNING: usage of CLI flag '%s' is considered insecure and will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
-			} else {
-				log.Printf("WARNING: CLI flag '%s' will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
-			}
-		}
-	}
-
-	if depDBPassword != "" {
-		cfg.Database.MySQL.Password = depDBPassword
-	}
-	if depBusRemotePassword != "" {
-		cfg.Bus.RemotePassword = depBusRemotePassword
-	}
-	if depBusRemoteAddr != "" {
-		cfg.Bus.RemoteAddr = depBusRemoteAddr
-	}
-
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "address to serve API on")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "directory to store node state in")
@@ -353,6 +308,8 @@ func main() {
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
+	var depWorkerRemotePassStr string
+	var depWorkerRemoteAddrsStr string
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
