@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -82,6 +83,10 @@ SHARDS:
 		return 0, false, fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-missingShards, int(s.MinShards))
 	}
 
+	// acquire memory for the migration
+	mem := <-u.mm.AcquireMemory(ctx, uint64(missingShards)*rhpv2.SectorSize)
+	defer mem.Release()
+
 	// download the slab
 	shards, surchargeApplied, err := d.DownloadSlab(ctx, *s, dlContracts)
 	if err != nil {
@@ -105,7 +110,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload, nil)
+	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload, mem)
 	if err != nil {
 		return 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
