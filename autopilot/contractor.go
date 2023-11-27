@@ -103,8 +103,6 @@ type (
 
 		maintenanceTxnID types.TransactionID
 
-		pruningSpeedBytesPerMS map[string]*stats.DataPoints
-
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
 		revisionSubmissionBuffer  uint64
@@ -149,22 +147,12 @@ func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroad
 		ap:     ap,
 		logger: ap.logger.Named("contractor"),
 
-		pruningSpeedBytesPerMS: make(map[string]*stats.DataPoints),
-
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
 		resolver: newIPResolver(resolverLookupTimeout, ap.logger.Named("resolver")),
 	}
-}
-
-func (c *contractor) PruningStats() map[string]float64 {
-	stats := make(map[string]float64)
-	for version, datapoints := range c.pruningSpeedBytesPerMS {
-		stats[version] = datapoints.Average() * 0.008 // convert to mbps
-	}
-	return stats
 }
 
 func (c *contractor) Status() (bool, time.Time) {
@@ -1634,19 +1622,16 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	wp.withWorker(func(w Worker) {
 		for _, contract := range res.Contracts {
 			c.logger.Debugf("pruning %d bytes from contract %v", contract.Prunable, contract.ID)
-			pruned, err := c.pruneContract(w, contract.ID)
+			start := time.Now()
+			pruned, remaining, err := c.pruneContract(w, contract.ID)
 			if err != nil {
-				if isErr(err, errConnectionRefused) ||
-					isErr(err, errConnectionTimedOut) ||
-					isErr(err, errInvalidHandshakeSignature) ||
-					isErr(err, errInvalidMerkleProof) ||
-					isErr(err, errNoRouteToHost) ||
-					isErr(err, errNoSuchHost) {
-					c.logger.Debugf("pruning contract %v failed, err %v", contract.ID, err)
-					continue // known error, try next contract
+				if pruned == 0 {
+					c.logger.Errorf("pruning contract %v failed after %v, err: %v", contract.ID, time.Since(start), err)
+				} else {
+					c.logger.Debugf("pruning contract %v errored out, pruned %d bytes, remaining %d bytes, took %v", contract.ID, pruned, remaining, time.Since(start))
 				}
-				c.logger.Errorf("pruning contracts interrupted, pruning contract %v failed, err %v", contract.ID, err)
-				return
+			} else {
+				c.logger.Debugf("pruning contract %v succeeded, pruned %d bytes, remaining %d bytes, took %v", contract.ID, pruned, remaining, time.Since(start))
 			}
 			total += pruned
 		}
@@ -1655,7 +1640,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Infof("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(res.Contracts))
 }
 
-func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned uint64, err error) {
+func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned uint64, remaining uint64, err error) {
 	c.logger.Debugf("pruning contract %v", fcid)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*timeoutPruneContract)
@@ -1664,48 +1649,23 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned 
 	// fetch the host
 	host, contract, err := c.hostForContract(ctx, fcid)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-
-	// keep track of pruning performance
-	start := time.Now()
-	defer func() {
-		if _, ok := c.pruningSpeedBytesPerMS[host.Settings.Version]; !ok {
-			c.pruningSpeedBytesPerMS[host.Settings.Version] = stats.NoDecay()
-		}
-
-		// track performance
-		if pruned > 0 {
-			prunedBytesPerMS := int64(pruned) / time.Since(start).Milliseconds()
-			c.pruningSpeedBytesPerMS[host.Settings.Version].Track(float64(prunedBytesPerMS))
-		}
-
-		// handle alert
-		if err != nil && !((isErr(err, errInvalidMerkleProof) && build.VersionCmp(host.Settings.Version, "1.6.0") < 0) ||
-			isErr(err, errConnectionRefused) ||
-			isErr(err, errConnectionTimedOut) ||
-			isErr(err, errInvalidHandshakeSignature) ||
-			isErr(err, errNoRouteToHost) ||
-			isErr(err, errNoSuchHost)) {
-			c.ap.RegisterAlert(ctx, newContractPruningFailedAlert(contract, err))
-		} else {
-			c.ap.DismissAlert(ctx, alertIDForContract(alertPruningID, contract))
-		}
-	}()
 
 	// prune the contract
-	var remaining uint64
 	pruned, remaining, err = w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
-	if err != nil && pruned == 0 {
-		return
-	}
 
-	// log the result
-	msg := fmt.Sprintf("pruned %v bytes from contract %v, %v bytes remaining", pruned, fcid, remaining)
-	if err != nil {
-		msg += fmt.Sprintf(", err: %v", err)
+	// handle alert
+	if err != nil && !((isErr(err, errInvalidMerkleProof) && build.VersionCmp(host.Settings.Version, "1.6.0") < 0) ||
+		isErr(err, errConnectionRefused) ||
+		isErr(err, errConnectionTimedOut) ||
+		isErr(err, errInvalidHandshakeSignature) ||
+		isErr(err, errNoRouteToHost) ||
+		isErr(err, errNoSuchHost)) {
+		c.ap.RegisterAlert(ctx, newContractPruningFailedAlert(contract, err))
+	} else {
+		c.ap.DismissAlert(ctx, alertIDForContract(alertPruningID, contract))
 	}
-	c.logger.Debugf(msg)
 	return
 }
 

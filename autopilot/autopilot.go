@@ -183,7 +183,6 @@ func (ap *Autopilot) Handler() http.Handler {
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
-		"GET    /stats/pruning": ap.pruningStatsHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
 	}))
 }
@@ -715,12 +714,6 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 			OS:        runtime.GOOS,
 			BuildTime: build.BuildTime(),
 		},
-	})
-}
-
-func (ap *Autopilot) pruningStatsHandlerGET(jc jape.Context) {
-	jc.Encode(api.PruningStatsResponse{
-		AvgPruningSpeedMBPS: ap.c.PruningStats(),
 	})
 }
 

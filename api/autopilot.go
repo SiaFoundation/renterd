@@ -97,12 +97,6 @@ type (
 		StartTime time.Time `json:"startTime"`
 		BuildState
 	}
-
-	// PruningStatsResponse is the response type for the
-	// /autopilot/stats/pruning endpoint.
-	PruningStatsResponse struct {
-		AvgPruningSpeedMBPS map[string]float64 `json:"avgPruningSpeedMBPS"`
-	}
 )
 
 type (
