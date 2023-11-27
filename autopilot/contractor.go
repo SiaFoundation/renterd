@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/siad/build"
 	"go.uber.org/zap"
 )
 
@@ -1679,7 +1680,8 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned 
 		}
 
 		// handle alert
-		if err != nil && !(isErr(err, errConnectionRefused) ||
+		if err != nil && !((isErr(err, errInvalidMerkleProof) && build.VersionCmp(host.Settings.Version, "1.6.0") < 0) ||
+			isErr(err, errConnectionRefused) ||
 			isErr(err, errConnectionTimedOut) ||
 			isErr(err, errInvalidHandshakeSignature) ||
 			isErr(err, errNoRouteToHost) ||
