@@ -603,15 +603,6 @@ func TestS3SettingsValidate(t *testing.T) {
 		t.SkipNow()
 	}
 
-	charset := "doesntreallymatter"
-	stringOfLength := func(n int) string {
-		b := make([]byte, n)
-		for i := range b {
-			b[i] = charset[frand.Intn(len(charset))]
-		}
-		return string(b)
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 
@@ -621,38 +612,39 @@ func TestS3SettingsValidate(t *testing.T) {
 		shouldFail bool
 	}{
 		{
-			id:         stringOfLength(api.S3MinAccessKeyLen),
-			key:        stringOfLength(api.S3SecretKeyLen),
+
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: false,
 		},
 		{
-			id:         stringOfLength(api.S3MaxAccessKeyLen),
-			key:        stringOfLength(api.S3SecretKeyLen),
+			id:         strings.Repeat("a", api.S3MaxAccessKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: false,
 		},
 		{
-			id:         stringOfLength(api.S3MinAccessKeyLen - 1),
-			key:        stringOfLength(api.S3SecretKeyLen),
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen-1),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: true,
 		},
 		{
-			id:         stringOfLength(api.S3MaxAccessKeyLen + 1),
-			key:        stringOfLength(api.S3SecretKeyLen),
+			id:         strings.Repeat("a", api.S3MaxAccessKeyLen+1),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: true,
 		},
 		{
 			id:         "",
-			key:        stringOfLength(api.S3SecretKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: true,
 		},
 		{
-			id:         stringOfLength(api.S3MinAccessKeyLen),
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen),
 			key:        "",
 			shouldFail: true,
 		},
 		{
-			id:         stringOfLength(api.S3MinAccessKeyLen),
-			key:        stringOfLength(api.S3SecretKeyLen + 1),
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen+1),
 			shouldFail: true,
 		},
 	}
