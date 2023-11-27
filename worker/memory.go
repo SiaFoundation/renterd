@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -24,13 +25,16 @@ type (
 	}
 )
 
-func newMemoryManager() *memoryManager {
+func newMemoryManager(maxMemory uint64) (*memoryManager, error) {
+	if maxMemory == 0 {
+		return nil, fmt.Errorf("maxMemory cannot be 0")
+	}
 	mm := &memoryManager{
-		totalAvailable: 1 << 30, // 1 GB
+		totalAvailable: maxMemory,
 	}
 	mm.available = mm.totalAvailable
 	mm.sigNewMem = *sync.NewCond(&mm.mu)
-	return mm
+	return mm, nil
 }
 
 func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) <-chan *acquiredMemory {

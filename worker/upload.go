@@ -236,12 +236,12 @@ type (
 	}
 )
 
-func (w *worker) initUploadManager(maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *worker) initUploadManager(mm *memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w.bus, w, w, maxOverdrive, overdriveTimeout, logger)
+	w.uploadManager = newUploadManager(w.bus, w, w, mm, maxOverdrive, overdriveTimeout, logger)
 }
 
 func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, opts ...UploadOption) (string, error) {
@@ -490,13 +490,13 @@ func newDataPoints(halfLife time.Duration) *dataPoints {
 	}
 }
 
-func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, mm *memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		b:      b,
 		hp:     hp,
 		rl:     rl,
 		logger: logger,
-		mm:     newMemoryManager(),
+		mm:     mm,
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
