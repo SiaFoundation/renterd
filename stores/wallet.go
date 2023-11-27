@@ -29,7 +29,7 @@ type (
 		TransactionID hash256 `gorm:"unique;index;NOT NULL;size:32"`
 		Inflow        currency
 		Outflow       currency
-		Timestamp     int64
+		Timestamp     int64 `gorm:"index:idx_transactions_timestamp"`
 	}
 
 	outputChange struct {
