@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/montanaflynn/stats"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -22,13 +23,14 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 const (
+	statsDecayHalfTime        = 10 * time.Minute
+	statsDecayThreshold       = 5 * time.Minute
 	statsRecomputeMinInterval = 3 * time.Second
 
 	defaultPackedSlabsLockDuration  = 10 * time.Minute
@@ -116,8 +118,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrivePct              *stats.DataPoints
-		statsSlabUploadSpeedBytesPerMS *stats.DataPoints
+		statsOverdrivePct              *dataPoints
+		statsSlabUploadSpeedBytesPerMS *dataPoints
 		stopChan                       chan struct{}
 
 		mu            sync.Mutex
@@ -131,8 +133,8 @@ type (
 		hk         types.PublicKey
 		siamuxAddr string
 
-		statsSectorUploadEstimateInMS    *stats.DataPoints
-		statsSectorUploadSpeedBytesPerMS *stats.DataPoints // keep track of this separately for stats (no decay is applied)
+		statsSectorUploadEstimateInMS    *dataPoints
+		statsSectorUploadSpeedBytesPerMS *dataPoints // keep track of this separately for stats (no decay is applied)
 		signalNewUpload                  chan struct{}
 		stopChan                         chan struct{}
 
@@ -218,6 +220,18 @@ type (
 		healthyUploaders       uint64
 		numUploaders           uint64
 		uploadSpeedsMBPS       map[types.PublicKey]float64
+	}
+
+	dataPoints struct {
+		stats.Float64Data
+		halfLife time.Duration
+		size     int
+
+		mu            sync.Mutex
+		cnt           int
+		p90           float64
+		lastDatapoint time.Time
+		lastDecay     time.Time
 	}
 )
 
@@ -416,6 +430,15 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 	return nil
 }
 
+func newDataPoints(halfLife time.Duration) *dataPoints {
+	return &dataPoints{
+		size:        20,
+		Float64Data: make([]float64, 0),
+		halfLife:    halfLife,
+		lastDecay:   time.Now(),
+	}
+}
+
 func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		b:      b,
@@ -426,8 +449,8 @@ func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, maxOverdrive ui
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrivePct:              stats.NoDecay(),
-		statsSlabUploadSpeedBytesPerMS: stats.NoDecay(),
+		statsOverdrivePct:              newDataPoints(0),
+		statsSlabUploadSpeedBytesPerMS: newDataPoints(0),
 
 		stopChan: make(chan struct{}),
 
@@ -448,8 +471,8 @@ func (mgr *uploadManager) newUploader(c api.ContractMetadata) *uploader {
 		queue:           make([]*sectorUploadReq, 0),
 		signalNewUpload: make(chan struct{}, 1),
 
-		statsSectorUploadEstimateInMS:    stats.Default(),
-		statsSectorUploadSpeedBytesPerMS: stats.NoDecay(),
+		statsSectorUploadEstimateInMS:    newDataPoints(statsDecayHalfTime),
+		statsSectorUploadSpeedBytesPerMS: newDataPoints(0), // no decay for exposed stats
 		stopChan:                         make(chan struct{}),
 	}
 }
@@ -1526,6 +1549,80 @@ func (s *slabUpload) receive(resp sectorUploadResp) (finished bool, next bool) {
 	finished = len(s.remaining) == 0
 	next = len(s.remaining) <= int(s.mgr.maxOverdrive)
 	return
+}
+
+func (a *dataPoints) Average() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	avg, err := a.Mean()
+	if err != nil {
+		avg = 0
+	}
+	return avg
+}
+
+func (a *dataPoints) P90() float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.p90
+}
+
+func (a *dataPoints) Recompute() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// apply decay
+	a.tryDecay()
+
+	// recalculate the p90
+	p90, err := a.Percentile(90)
+	if err != nil {
+		p90 = 0
+	}
+	a.p90 = p90
+}
+
+func (a *dataPoints) Track(p float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.cnt < a.size {
+		a.Float64Data = append(a.Float64Data, p)
+	} else {
+		a.Float64Data[a.cnt%a.size] = p
+	}
+
+	a.lastDatapoint = time.Now()
+	a.cnt++
+}
+
+func (a *dataPoints) tryDecay() {
+	// return if decay is disabled
+	if a.halfLife == 0 {
+		return
+	}
+
+	// return if decay is not needed
+	if time.Since(a.lastDatapoint) < statsDecayThreshold {
+		return
+	}
+
+	// return if decay is not due
+	decayFreq := a.halfLife / 5
+	timePassed := time.Since(a.lastDecay)
+	if timePassed < decayFreq {
+		return
+	}
+
+	// calculate decay and apply it
+	strength := float64(timePassed) / float64(a.halfLife)
+	decay := math.Floor(math.Pow(0.5, strength)*100) / 100 // round down to 2 decimals
+	for i := range a.Float64Data {
+		a.Float64Data[i] *= decay
+	}
+
+	// update the last decay time
+	a.lastDecay = time.Now()
 }
 
 func (sID slabID) String() string {

@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -43,8 +42,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrivePct                *stats.DataPoints
-		statsSlabDownloadSpeedBytesPerMS *stats.DataPoints
+		statsOverdrivePct                *dataPoints
+		statsSlabDownloadSpeedBytesPerMS *dataPoints
 
 		stopChan chan struct{}
 
@@ -56,8 +55,8 @@ type (
 	downloader struct {
 		host hostV3
 
-		statsDownloadSpeedBytesPerMS    *stats.DataPoints // keep track of this separately for stats (no decay is applied)
-		statsSectorDownloadEstimateInMS *stats.DataPoints
+		statsDownloadSpeedBytesPerMS    *dataPoints // keep track of this separately for stats (no decay is applied)
+		statsSectorDownloadEstimateInMS *dataPoints
 
 		signalWorkChan chan struct{}
 		stopChan       chan struct{}
@@ -174,8 +173,8 @@ func newDownloadManager(hp hostProvider, pss partialSlabStore, slm sectorLostMar
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrivePct:                stats.NoDecay(),
-		statsSlabDownloadSpeedBytesPerMS: stats.NoDecay(),
+		statsOverdrivePct:                newDataPoints(0),
+		statsSlabDownloadSpeedBytesPerMS: newDataPoints(0),
 
 		stopChan: make(chan struct{}),
 
@@ -187,8 +186,8 @@ func newDownloader(host hostV3) *downloader {
 	return &downloader{
 		host: host,
 
-		statsSectorDownloadEstimateInMS: stats.Default(),
-		statsDownloadSpeedBytesPerMS:    stats.NoDecay(),
+		statsSectorDownloadEstimateInMS: newDataPoints(statsDecayHalfTime),
+		statsDownloadSpeedBytesPerMS:    newDataPoints(0), // no decay for exposed stats
 
 		signalWorkChan: make(chan struct{}, 1),
 		stopChan:       make(chan struct{}),
