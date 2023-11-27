@@ -298,7 +298,8 @@ func TestObjectEntries(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts:  testRedundancySettings.TotalShards,
+		logger: newTestLoggerCustom(zapcore.DebugLevel),
 	})
 	defer cluster.Shutdown()
 
@@ -1553,6 +1554,7 @@ func TestUploadPacking(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         testRedundancySettings.TotalShards,
+		logger:        newTestLoggerCustom(zapcore.DebugLevel),
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
