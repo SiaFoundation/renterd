@@ -396,7 +396,7 @@ LOOP:
 			break LOOP
 		case mem = <-w.uploadManager.mm.AcquireMemory(ctx, redundantSize):
 		}
-		if mem != nil {
+		if mem == nil {
 			break // interrupted
 		}
 
