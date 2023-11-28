@@ -107,9 +107,10 @@ type (
 		DBBucket   dbBucket
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
-		Key   secretKey
-		Slabs []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
-		Size  int64
+		Key    secretKey
+		Slabs  []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+		Health float64   `gorm:"index;default:1.0; NOT NULL"`
+		Size   int64
 
 		MimeType string `json:"index"`
 		Etag     string `gorm:"index"`
@@ -459,8 +460,6 @@ func (raw rawObject) convert() (api.Object, error) {
 		if err := addSlab(len(filtered)); err != nil {
 			return api.Object{}, err
 		}
-	} else {
-		minHealth = 1 // empty object
 	}
 
 	// fetch a potential partial slab from the buffer.
@@ -481,7 +480,7 @@ func (raw rawObject) convert() (api.Object, error) {
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
 			ETag:     raw[0].ObjectETag,
-			Health:   minHealth,
+			Health:   raw[0].ObjectHealth,
 			MimeType: raw[0].ObjectMimeType,
 			ModTime:  raw[0].ObjectModTime.UTC(),
 			Name:     raw[0].ObjectName,
@@ -1161,29 +1160,16 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 
 	// build objects query & parameters
 	objectsQuery := fmt.Sprintf(`
-SELECT
-	ANY_VALUE(etag) AS ETag,
-	ANY_VALUE(created_at) AS ModTime,
-	ANY_VALUE(name) AS name,
-	SUM(size) AS size,
-	MIN(health) as health,
-	ANY_VALUE(mimeType) as MimeType
-FROM (
-	SELECT ANY_VALUE(etag) AS etag,
-	ANY_VALUE(objects.created_at) AS created_at,
-	ANY_VALUE(size) AS size,
-	MIN(slabs.health) as health,
-	ANY_VALUE(objects.mime_type) as mimeType,
-	CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN %s ELSE %s END AS oname
-	FROM objects
-	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	LEFT JOIN slices ON objects.id = slices.db_object_id
-	LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-	WHERE SUBSTR(object_id, 1, ?) = ?
-	GROUP BY object_id
-	HAVING SUBSTR(oname, 1, ?) = ? AND oname != ?
-) AS m
-GROUP BY name
+SELECT ANY_VALUE(etag) AS ETag,
+MAX(created_at) AS ModTime,
+CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN %s ELSE %s END AS Name
+SUM(size) AS size,
+MIN(health) as health,
+ANY_VALUE(mimeType) as MimeType
+FROM objects
+INNER JOIN buckets b ON objects.db_bucket_id = b.id
+WHERE SUBSTR(Name, 1, ?) = ? AND Name != ?
+GROUP BY Name
 `,
 		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
 		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
@@ -1198,13 +1184,9 @@ GROUP BY name
 		path, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
 		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), "/"))")
 
-		utf8.RuneCountInString(path), // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
-		path,                         // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
-		bucket,                       // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
-
-		utf8.RuneCountInString(path + prefix), // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
-		path + prefix,                         // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
-		path,                                  // HAVING SUBSTR(name, 1, ?) = ? AND name != ?
+		utf8.RuneCountInString(path), // WHERE SUBSTR(Name, 1, ?) = ? AND Name = ?
+		path,                         // WHERE SUBSTR(Name, 1, ?) = ? AND Name = ?
+		bucket,                       // WHERE SUBSTR(Name, 1, ?) = ? AND Name = ?
 	}
 
 	// build marker expr
@@ -2096,7 +2078,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.health as ObjectHealth, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
@@ -2120,12 +2102,10 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 
 func (s *SQLStore) objectHealth(ctx context.Context, tx *gorm.DB, objectID uint) (health float64, err error) {
 	if err = tx.
-		Select("COALESCE(MIN(sla.health), 1)").
+		Select("objects.health").
 		Model(&dbObject{}).
-		Table("objects o").
-		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Where("o.id = ?", objectID).
+		Table("objects").
+		Where("id", objectID).
 		Scan(&health).
 		Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		err = api.ErrObjectNotFound
