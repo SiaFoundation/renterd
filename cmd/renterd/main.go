@@ -548,6 +548,17 @@ func main() {
 		} else if as.V4Keypairs == nil {
 			as.V4Keypairs = make(map[string]string)
 		}
+
+		// S3 key pair validation was broken at one point, we need to remove the
+		// invalid key pairs here to ensure we don't fail when we update the
+		// setting below.
+		for k, v := range as.V4Keypairs {
+			if err := (api.S3AuthenticationSettings{V4Keypairs: map[string]string{k: v}}).Validate(); err != nil {
+				logger.Sugar().Infof("removing invalid S3 keypair for AccessKeyID %s, reason: %v", k, err)
+				delete(as.V4Keypairs, k)
+			}
+		}
+
 		// merge keys
 		for k, v := range cfg.S3.KeypairsV4 {
 			as.V4Keypairs[k] = v

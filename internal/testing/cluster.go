@@ -92,8 +92,9 @@ var (
 		TotalShards: 3,
 	}
 
-	testS3Credentials = credentials.NewStaticV4("myaccesskeyidentifier", "mysupersecretkey", "")
-	testS3AuthPairs   = map[string]string{"myaccesskeyidentifier": "mysupersecretkey"}
+	testS3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"
+	testS3SecretAccessKey = "Rh30BNyj+qNI4ftYRteoZbHJ3X4Ln71QtZkRXzJ9"
+	testS3Credentials     = credentials.NewStaticV4(testS3AccessKeyID, testS3SecretAccessKey, "")
 )
 
 type TT struct {
@@ -521,7 +522,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings))
 	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings))
 	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
-		V4Keypairs: testS3AuthPairs,
+		V4Keypairs: map[string]string{testS3AccessKeyID: testS3SecretAccessKey},
 	}))
 	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
 
