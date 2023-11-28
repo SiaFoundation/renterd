@@ -1392,6 +1392,12 @@ func TestObjectEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// update health of objects to match the overridden health of the slabs
+	err := ss.db.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices)").Error
+	if err != nil {
+		t.Fatal()
+	}
+
 	tests := []struct {
 		path    string
 		prefix  string

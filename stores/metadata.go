@@ -1160,16 +1160,19 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 
 	// build objects query & parameters
 	objectsQuery := fmt.Sprintf(`
-SELECT ANY_VALUE(etag) AS ETag,
-MAX(created_at) AS ModTime,
-CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN %s ELSE %s END AS Name
-SUM(size) AS size,
-MIN(health) as health,
-ANY_VALUE(mimeType) as MimeType
-FROM objects
-INNER JOIN buckets b ON objects.db_bucket_id = b.id
-WHERE SUBSTR(Name, 1, ?) = ? AND Name != ?
-GROUP BY Name
+SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
+FROM (
+	SELECT ANY_VALUE(etag) AS ETag,
+	MAX(objects.created_at) AS ModTime,
+	CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN %s ELSE %s END AS oname,
+	SUM(size) AS Size,
+	MIN(health) as Health,
+	ANY_VALUE(mime_type) as MimeType
+	FROM objects
+	INNER JOIN buckets b ON objects.db_bucket_id = b.id
+	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(oname, 1, ?) = ? AND oname != ?
+	GROUP BY oname
+) baseQuery
 `,
 		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
 		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
@@ -1184,9 +1187,13 @@ GROUP BY Name
 		path, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
 		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), "/"))")
 
-		utf8.RuneCountInString(path), // WHERE SUBSTR(Name, 1, ?) = ? AND Name = ?
-		path,                         // WHERE SUBSTR(Name, 1, ?) = ? AND Name = ?
-		bucket,                       // WHERE SUBSTR(Name, 1, ?) = ? AND Name = ?
+		utf8.RuneCountInString(path), // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+		path,                         // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+		bucket,                       // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+
+		utf8.RuneCountInString(path + prefix), // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+		path + prefix,                         // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+		path,                                  // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
 	}
 
 	// build marker expr
@@ -1197,24 +1204,24 @@ GROUP BY Name
 		case api.ObjectSortByHealth:
 			var markerHealth float64
 			if err = s.db.
-				Raw(fmt.Sprintf(`SELECT health FROM (%s AND name >= ? ORDER BY name LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Health FROM (%s WHERE Name >= ? ORDER BY Name LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerHealth).
 				Error; err != nil {
 				return
 			}
 
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(health > ? OR (health = ? AND name > ?))"
+				markerExpr = "(Health > ? OR (Health = ? AND Name > ?))"
 				markerParams = []interface{}{markerHealth, markerHealth, marker}
 			} else {
-				markerExpr = "(health = ? AND name > ?) OR health < ?"
+				markerExpr = "(Health = ? AND Name > ?) OR Health < ?"
 				markerParams = []interface{}{markerHealth, marker, markerHealth}
 			}
 		case api.ObjectSortByName:
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "name > ?"
+				markerExpr = "Name > ?"
 			} else {
-				markerExpr = "name < ?"
+				markerExpr = "Name < ?"
 			}
 			markerParams = []interface{}{marker}
 		default:
@@ -1225,7 +1232,7 @@ GROUP BY Name
 	// build order clause
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
 	if sortBy == api.ObjectSortByHealth {
-		orderByClause += ", name"
+		orderByClause += ", Name"
 	}
 
 	var rows []rawObjectMetadata
@@ -1912,7 +1919,9 @@ LIMIT ?
 				return res.Error
 			}
 			rowsAffected = res.RowsAffected
-			return nil
+
+			// Update the health of the objects associated with the updated slabs.
+			return tx.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices WHERE db_slab_id IN (?))", healthQuery).Error
 		})
 		if err != nil {
 			return err
