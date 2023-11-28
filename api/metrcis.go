@@ -13,6 +13,7 @@ const (
 	MetricContractSet      = "contractset"
 	MetricContractSetChurn = "churn"
 	MetricContract         = "contract"
+	MetricWallet           = "wallet"
 )
 
 type (
@@ -74,6 +75,20 @@ type (
 	ContractMetricsQueryOpts struct {
 		ContractID types.FileContractID
 		HostKey    types.PublicKey
+	}
+
+	WalletMetric struct {
+		Timestamp time.Time `json:"timestamp"`
+
+		Address types.Address `json:"address"`
+
+		ConfirmedBalance   types.Currency `json:"confirmedBalance"`
+		SpendableBalance   types.Currency `json:"spendableBalance"`
+		UnconfirmedBalance types.Currency `json:"unconfirmedBalance"`
+	}
+
+	WalletMetricsQueryOpts struct {
+		Address types.Address
 	}
 )
 

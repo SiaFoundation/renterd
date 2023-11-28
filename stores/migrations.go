@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
-	"strings"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.sia.tech/renterd/api"
@@ -52,90 +50,43 @@ var (
 		// webhooks.WebhookStore tables
 		&dbWebhook{},
 	}
-	metricsTables = []interface{}{
-		&dbContractMetric{},
-		&dbContractSetMetric{},
-		&dbContractSetChurnMetric{},
-		&dbPerformanceMetric{},
-	}
 )
 
-// migrateShards performs the migrations necessary for removing the 'shards'
-// table.
-func migrateShards(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger) error {
-	m := db.Migrator()
-
-	// add columns
-	if !m.HasColumn(&dbSlice{}, "db_slab_id") {
-		logger.Info(ctx, "adding column db_slab_id to table 'slices'")
-		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
-			return err
-		}
-		logger.Info(ctx, "done adding column db_slab_id to table 'slices'")
-	}
-	if !m.HasColumn(&dbSector{}, "db_slab_id") {
-		logger.Info(ctx, "adding column db_slab_id to table 'sectors'")
-		if err := m.AddColumn(&dbSector{}, "db_slab_id"); err != nil {
-			return err
-		}
-		logger.Info(ctx, "done adding column db_slab_id to table 'sectors'")
-	}
-
-	// populate new columns
-	var err error
-	if m.HasColumn(&dbSlab{}, "db_slice_id") {
-		logger.Info(ctx, "populating column 'db_slab_id' in table 'slices'")
-		if isSQLite(db) {
-			err = db.Exec(`UPDATE slices SET db_slab_id = (SELECT slabs.id FROM slabs WHERE slabs.db_slice_id = slices.id)`).Error
-		} else {
-			err = db.Exec(`UPDATE slices sli
-			INNER JOIN slabs sla ON sli.id=sla.db_slice_id
-			SET sli.db_slab_id=sla.id`).Error
-		}
-		if err != nil {
-			return err
-		}
-		logger.Info(ctx, "done populating column 'db_slab_id' in table 'slices'")
-	}
-	logger.Info(ctx, "populating column 'db_slab_id' in table 'sectors'")
-	if isSQLite(db) {
-		err = db.Exec(`UPDATE sectors SET db_slab_id = (SELECT shards.db_slab_id FROM shards WHERE shards.db_sector_id = sectors.id)`).Error
-	} else {
-		err = db.Exec(`UPDATE sectors sec
-			INNER JOIN shards sha ON sec.id=sha.db_sector_id
-			SET sec.db_slab_id=sha.db_slab_id`).Error
-	}
+// initSchema is executed only on a clean database. Otherwise the individual
+// migrations are executed.
+func initSchema(tx *gorm.DB) error {
+	// Setup join tables.
+	err := setupJoinTables(tx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to setup join tables: %w", err)
 	}
-	logger.Info(ctx, "done populating column 'db_slab_id' in table 'sectors'")
 
-	// drop column db_slice_id from slabs
-	logger.Info(ctx, "dropping constraint 'fk_slices_slab' from table 'slabs'")
-	if err := m.DropConstraint(&dbSlab{}, "fk_slices_slab"); err != nil {
-		return err
+	// Run auto migrations.
+	err = tx.AutoMigrate(tables...)
+	if err != nil {
+		return fmt.Errorf("failed to init schema: %w", err)
 	}
-	logger.Info(ctx, "done dropping constraint 'fk_slices_slab' from table 'slabs'")
-	logger.Info(ctx, "dropping column 'db_slice_id' from table 'slabs'")
-	if err := m.DropColumn(&dbSlab{}, "db_slice_id"); err != nil {
-		return err
-	}
-	logger.Info(ctx, "done dropping column 'db_slice_id' from table 'slabs'")
 
-	// delete any sectors that are not referenced by a slab
-	logger.Info(ctx, "pruning dangling sectors")
-	if err := db.Exec(`DELETE FROM sectors WHERE db_slab_id IS NULL`).Error; err != nil {
-		return err
+	// Change the collation of columns that we need to be case sensitive.
+	if !isSQLite(tx) {
+		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
+		err = tx.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change buckets_name collation: %w", err)
+		}
+		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
+		if err != nil {
+			return fmt.Errorf("failed to change object_id collation: %w", err)
+		}
 	}
-	logger.Info(ctx, "done pruning dangling sectors")
 
-	// drop table shards
-	logger.Info(ctx, "dropping table 'shards'")
-	if err := m.DropTable("shards"); err != nil {
-		return err
-	}
-	logger.Info(ctx, "done dropping table 'shards'")
-	return nil
+	// Add default bucket.
+	return tx.Create(&dbBucket{
+		Name: api.DefaultBucketName,
+	}).Error
 }
 
 func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
@@ -367,131 +318,6 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	return nil
 }
 
-func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
-	migrations := []*gormigrate.Migration{}
-	// Create migrator.
-	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
-
-	// Set init function.
-	m.InitSchema(initMetricsSchema)
-
-	// Perform migrations.
-	if err := m.Migrate(); err != nil {
-		return fmt.Errorf("failed to migrate: %v", err)
-	}
-	return nil
-}
-
-// initSchema is executed only on a clean database. Otherwise the individual
-// migrations are executed.
-func initSchema(tx *gorm.DB) error {
-	// Setup join tables.
-	err := setupJoinTables(tx)
-	if err != nil {
-		return fmt.Errorf("failed to setup join tables: %w", err)
-	}
-
-	// Run auto migrations.
-	err = tx.AutoMigrate(tables...)
-	if err != nil {
-		return fmt.Errorf("failed to init schema: %w", err)
-	}
-
-	// Change the collation of columns that we need to be case sensitive.
-	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change object_id collation: %w", err)
-		}
-		err = tx.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change buckets_name collation: %w", err)
-		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change object_id collation: %w", err)
-		}
-	}
-
-	// Add default bucket.
-	return tx.Create(&dbBucket{
-		Name: api.DefaultBucketName,
-	}).Error
-}
-
-// initMetricsSchema is executed only on a clean database. Otherwise the individual
-// migrations are executed.
-func initMetricsSchema(tx *gorm.DB) error {
-	// Run auto migrations.
-	err := tx.AutoMigrate(metricsTables...)
-	if err != nil {
-		return fmt.Errorf("failed to init schema: %w", err)
-	}
-	return nil
-}
-
-func detectMissingIndicesOnType(tx *gorm.DB, table interface{}, t reflect.Type, f func(dst interface{}, name string)) {
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if field.Anonymous {
-			detectMissingIndicesOnType(tx, table, field.Type, f)
-			continue
-		}
-		if !strings.Contains(field.Tag.Get("gorm"), "index") {
-			continue // no index tag
-		}
-		if !tx.Migrator().HasIndex(table, field.Name) {
-			f(table, field.Name)
-		}
-	}
-}
-
-func detectMissingIndices(tx *gorm.DB, f func(dst interface{}, name string)) {
-	for _, table := range tables {
-		detectMissingIndicesOnType(tx, table, reflect.TypeOf(table), f)
-	}
-}
-
-func setupJoinTables(tx *gorm.DB) error {
-	jointables := []struct {
-		model     interface{}
-		joinTable interface{ TableName() string }
-		field     string
-	}{
-		{
-			&dbAllowlistEntry{},
-			&dbHostAllowlistEntryHost{},
-			"Hosts",
-		},
-		{
-			&dbBlocklistEntry{},
-			&dbHostBlocklistEntryHost{},
-			"Hosts",
-		},
-		{
-			&dbSector{},
-			&dbContractSector{},
-			"Contracts",
-		},
-		{
-			&dbContractSet{},
-			&dbContractSetContract{},
-			"Contracts",
-		},
-	}
-	for _, t := range jointables {
-		if err := tx.SetupJoinTable(t.model, t.field, t.joinTable); err != nil {
-			return fmt.Errorf("failed to setup join table '%s': %w", t.joinTable.TableName(), err)
-		}
-	}
-	return nil
-}
-
-// performMigration00001_gormigrate performs the first migration before
-// introducing gormigrate.
 func performMigration00001_gormigrate(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	ctx := context.Background()
 	m := txn.Migrator()
@@ -590,6 +416,84 @@ func performMigration00001_gormigrate(txn *gorm.DB, logger *zap.SugaredLogger) e
 			return err
 		}
 	}
+	return nil
+}
+
+// migrateShards performs the migrations necessary for removing the 'shards'
+// table.
+func migrateShards(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger) error {
+	m := db.Migrator()
+
+	// add columns
+	if !m.HasColumn(&dbSlice{}, "db_slab_id") {
+		logger.Info(ctx, "adding column db_slab_id to table 'slices'")
+		if err := m.AddColumn(&dbSlice{}, "db_slab_id"); err != nil {
+			return err
+		}
+		logger.Info(ctx, "done adding column db_slab_id to table 'slices'")
+	}
+	if !m.HasColumn(&dbSector{}, "db_slab_id") {
+		logger.Info(ctx, "adding column db_slab_id to table 'sectors'")
+		if err := m.AddColumn(&dbSector{}, "db_slab_id"); err != nil {
+			return err
+		}
+		logger.Info(ctx, "done adding column db_slab_id to table 'sectors'")
+	}
+
+	// populate new columns
+	var err error
+	if m.HasColumn(&dbSlab{}, "db_slice_id") {
+		logger.Info(ctx, "populating column 'db_slab_id' in table 'slices'")
+		if isSQLite(db) {
+			err = db.Exec(`UPDATE slices SET db_slab_id = (SELECT slabs.id FROM slabs WHERE slabs.db_slice_id = slices.id)`).Error
+		} else {
+			err = db.Exec(`UPDATE slices sli
+			INNER JOIN slabs sla ON sli.id=sla.db_slice_id
+			SET sli.db_slab_id=sla.id`).Error
+		}
+		if err != nil {
+			return err
+		}
+		logger.Info(ctx, "done populating column 'db_slab_id' in table 'slices'")
+	}
+	logger.Info(ctx, "populating column 'db_slab_id' in table 'sectors'")
+	if isSQLite(db) {
+		err = db.Exec(`UPDATE sectors SET db_slab_id = (SELECT shards.db_slab_id FROM shards WHERE shards.db_sector_id = sectors.id)`).Error
+	} else {
+		err = db.Exec(`UPDATE sectors sec
+			INNER JOIN shards sha ON sec.id=sha.db_sector_id
+			SET sec.db_slab_id=sha.db_slab_id`).Error
+	}
+	if err != nil {
+		return err
+	}
+	logger.Info(ctx, "done populating column 'db_slab_id' in table 'sectors'")
+
+	// drop column db_slice_id from slabs
+	logger.Info(ctx, "dropping constraint 'fk_slices_slab' from table 'slabs'")
+	if err := m.DropConstraint(&dbSlab{}, "fk_slices_slab"); err != nil {
+		return err
+	}
+	logger.Info(ctx, "done dropping constraint 'fk_slices_slab' from table 'slabs'")
+	logger.Info(ctx, "dropping column 'db_slice_id' from table 'slabs'")
+	if err := m.DropColumn(&dbSlab{}, "db_slice_id"); err != nil {
+		return err
+	}
+	logger.Info(ctx, "done dropping column 'db_slice_id' from table 'slabs'")
+
+	// delete any sectors that are not referenced by a slab
+	logger.Info(ctx, "pruning dangling sectors")
+	if err := db.Exec(`DELETE FROM sectors WHERE db_slab_id IS NULL`).Error; err != nil {
+		return err
+	}
+	logger.Info(ctx, "done pruning dangling sectors")
+
+	// drop table shards
+	logger.Info(ctx, "dropping table 'shards'")
+	if err := m.DropTable("shards"); err != nil {
+		return err
+	}
+	logger.Info(ctx, "done dropping table 'shards'")
 	return nil
 }
 

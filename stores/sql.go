@@ -346,7 +346,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 
 	// Try to apply the updates.
-	if err := ss.applyUpdates(false); err != nil {
+	if err := ss.applyUpdates(false, cc.Synced); err != nil {
 		ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 	}
 
@@ -368,14 +368,14 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 		ss.persistMu.Lock()
 		defer ss.persistMu.Unlock()
-		if err := ss.applyUpdates(true); err != nil {
+		if err := ss.applyUpdates(true, cc.Synced); err != nil {
 			ss.logger.Error(fmt.Sprintf("failed to apply updates, err: %v", err))
 		}
 	})
 }
 
 // applyUpdates applies all unapplied updates to the database.
-func (ss *SQLStore) applyUpdates(force bool) (err error) {
+func (ss *SQLStore) applyUpdates(force, synced bool) (err error) {
 	// Check if we need to apply changes
 	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval                           // enough time has passed since last persist
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated

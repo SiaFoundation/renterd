@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -112,6 +114,7 @@ type SingleAddressStore interface {
 	Height() uint64
 	UnspentSiacoinElements(matured bool) ([]SiacoinElement, error)
 	Transactions(before, since time.Time, offset, limit int) ([]Transaction, error)
+	RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
 }
 
 // A TransactionPool contains transactions that have not yet been included in a
@@ -416,6 +419,37 @@ func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {
 		return !lastUsed.IsZero() || inPool
 	}
 	return time.Since(lastUsed) <= w.usedUTXOExpiry || inPool
+}
+
+// ProcessConsensusChange implements modules.ConsensusSetSubscriber.
+func (w *SingleAddressWallet) ProcessConsensusChange(cc modules.ConsensusChange) {
+	// only record when we are synced
+	if !cc.Synced {
+		return
+	}
+
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	// fetch balance
+	spendable, confirmed, unconfirmed, err := w.Balance()
+	if err != nil {
+		w.log.Errorf("failed to fetch wallet balance, err: %v", err)
+		return
+	}
+
+	// record wallet metric
+	if err := w.store.RecordWalletMetric(ctx, api.WalletMetric{
+		Timestamp:          time.Now().UTC(),
+		Address:            w.addr,
+		ConfirmedBalance:   confirmed,
+		UnconfirmedBalance: unconfirmed,
+		SpendableBalance:   spendable,
+	}); err != nil {
+		w.log.Errorf("failed to record wallet metric, err: %v", err)
+		return
+	}
 }
 
 // ReceiveUpdatedUnconfirmedTransactions implements modules.TransactionPoolSubscriber.

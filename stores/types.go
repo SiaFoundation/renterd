@@ -18,6 +18,7 @@ import (
 var zeroCurrency = currency(types.ZeroCurrency)
 
 type (
+	address        types.Address
 	unixTimeMS     time.Time
 	datetime       time.Time
 	currency       types.Currency
@@ -30,6 +31,29 @@ type (
 	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
 )
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (address) GormDataType() string {
+	return "bytes"
+}
+
+// Scan scan value into address, implements sql.Scanner interface.
+func (a *address) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal address value:", value))
+	}
+	if len(bytes) < len(address{}) {
+		return fmt.Errorf("failed to unmarshal address value due to insufficient bytes %v < %v: %v", len(bytes), len(address{}), value)
+	}
+	*a = *(*address)(bytes)
+	return nil
+}
+
+// Value returns an address value, implements driver.Valuer interface.
+func (a address) Value() (driver.Value, error) {
+	return a[:], nil
+}
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (secretKey) GormDataType() string {
@@ -98,7 +122,7 @@ func (fcid *fileContractID) Scan(value interface{}) error {
 	return nil
 }
 
-// Value returns a currency value, implements driver.Valuer interface.
+// Value returns a fileContractID value, implements driver.Valuer interface.
 func (fcid fileContractID) Value() (driver.Value, error) {
 	return fcid[:], nil
 }

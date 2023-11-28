@@ -1104,7 +1104,7 @@ func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 		announcement: hostdb.Announcement{NetAddress: na},
 	}}...)
 	s.lastSave = time.Now().Add(s.persistInterval * -2)
-	return s.applyUpdates(false)
+	return s.applyUpdates(false, false)
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all

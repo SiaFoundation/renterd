@@ -303,3 +303,50 @@ func TestContractMetrics(t *testing.T) {
 		}
 	})
 }
+
+func TestWalletMetrics(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// Create metrics to query.
+	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
+	for _, recordedTime := range times {
+		metric := api.WalletMetric{
+			Timestamp:          recordedTime,
+			Address:            types.Address{1},
+			ConfirmedBalance:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			UnconfirmedBalance: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			SpendableBalance:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+		}
+		if err := ss.RecordWalletMetric(context.Background(), metric); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch all metrcis
+	metrics, err := ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 3 {
+		t.Fatalf("expected 3 metrics, got %v", len(metrics))
+	} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
+		return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
+	}) {
+		t.Fatal("expected metrics to be sorted by time")
+	}
+
+	// Query by address
+	metrics, err = ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{Address: types.Address{1}})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 3 {
+		t.Fatalf("expected 3 metrics, got %v", len(metrics))
+	}
+
+	metrics, err = ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{Address: types.Address{2}})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 0 {
+		t.Fatalf("expected 0 metrics, got %v", len(metrics))
+	}
+}

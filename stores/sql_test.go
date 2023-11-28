@@ -41,8 +41,6 @@ type testSQLStore struct {
 type testSQLStoreConfig struct {
 	dbName          string
 	dbMetricsName   string
-	dbConn          gorm.Dialector
-	dbMetricsConn   gorm.Dialector
 	dir             string
 	persistent      bool
 	skipMigrate     bool
