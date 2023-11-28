@@ -1921,7 +1921,7 @@ LIMIT ?
 			rowsAffected = res.RowsAffected
 
 			// Update the health of the objects associated with the updated slabs.
-			return tx.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices WHERE db_slab_id IN (?))", healthQuery).Error
+			return tx.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices WHERE db_slab_id IN (SELECT id FROM (?)))", healthQuery).Error
 		})
 		if err != nil {
 			return err
@@ -2526,16 +2526,14 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 
 	var rows []rawObjectMetadata
 	if err := s.db.
-		Select("o.object_id as Name, MAX(o.size) as Size, MIN(sla.health) as Health, MAX(o.mime_type) as mimeType, MAX(o.created_at) as ModTime").
+		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as mimeType, o.created_at as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
-		Group("o.object_id").
 		Order(orderBy).
 		Order(markerOrderBy).
+		Order("Name ASC").
 		Limit(int(limit)).
 		Scan(&rows).Error; err != nil {
 		return api.ObjectsListResponse{}, err
@@ -2679,14 +2677,11 @@ func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string
 		var markerHealth float64
 		if marker != "" && sortBy == api.ObjectSortByHealth {
 			if err := db.
-				Select("MIN(sla.health)").
+				Select("o.health").
 				Model(&dbObject{}).
 				Table("objects o").
 				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-				Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
-				Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
-				Group("o.object_id").
 				Limit(1).
 				Scan(&markerHealth).
 				Error; err != nil {
