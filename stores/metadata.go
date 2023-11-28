@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1103,6 +1104,11 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return objects, nil
 }
 
+func replaceAnyValue(query string) string {
+	re := regexp.MustCompile(`ANY_VALUE\((.*?)\)`)
+	return re.ReplaceAllString(query, "$1")
+}
+
 func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -1156,34 +1162,41 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 	// build objects query & parameters
 	objectsQuery := fmt.Sprintf(`
 SELECT
-	MAX(etag) AS ETag,
-	MAX(created_at) AS ModTime,
-	CASE slashindex WHEN 0 THEN %s ELSE %s END AS name,
+	ANY_VALUE(etag) AS ETag,
+	ANY_VALUE(created_at) AS ModTime,
+	ANY_VALUE(name) AS name,
 	SUM(size) AS size,
 	MIN(health) as health,
-	MAX(mimeType) as MimeType
+	ANY_VALUE(mimeType) as MimeType
 FROM (
-	SELECT MAX(etag) AS etag, MAX(objects.created_at) AS created_at, MAX(size) AS size, MIN(slabs.health) as health, MAX(objects.mime_type) as mimeType, SUBSTR(object_id, ?) AS trimmed , INSTR(SUBSTR(object_id, ?), "/") AS slashindex
+	SELECT ANY_VALUE(etag) AS etag,
+	ANY_VALUE(objects.created_at) AS created_at,
+	ANY_VALUE(size) AS size,
+	MIN(slabs.health) as health,
+	ANY_VALUE(objects.mime_type) as mimeType,
+	CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN %s ELSE %s END AS oname
 	FROM objects
 	INNER JOIN buckets b ON objects.db_bucket_id = b.id
 	LEFT JOIN slices ON objects.id = slices.db_object_id
 	LEFT JOIN slabs ON slices.db_slab_id = slabs.id
-	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
+	WHERE SUBSTR(object_id, 1, ?) = ?
 	GROUP BY object_id
+	HAVING SUBSTR(oname, 1, ?) = ? AND oname != ?
 ) AS m
 GROUP BY name
-HAVING SUBSTR(name, 1, ?) = ? AND name != ?
 `,
-		sqlConcat(s.db, "?", "trimmed"),
-		sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)"),
+		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
+		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
 	)
 
-	objectsQueryParams := []interface{}{
-		path, // sqlConcat(s.db, "?", "trimmed"),
-		path, // sqlConcat(s.db, "?", "substr(trimmed, 1, slashindex)")
+	if isSQLite(s.db) {
+		objectsQuery = replaceAnyValue(objectsQuery)
+	}
 
-		utf8.RuneCountInString(path) + 1, // SUBSTR(object_id, ?)
-		utf8.RuneCountInString(path) + 1, // INSTR(SUBSTR(object_id, ?), "/")
+	objectsQueryParams := []interface{}{
+		utf8.RuneCountInString(path) + 1,       // CASE INSTRU(SUBSTR(object_id, ?), "/")
+		path, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
+		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), "/"))")
 
 		utf8.RuneCountInString(path), // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
 		path,                         // WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ?
