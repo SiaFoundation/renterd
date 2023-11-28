@@ -1885,7 +1885,7 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	now := time.Now()
 
 	for {
-		healthQuery := s.db.Raw(`
+		healthQuery := gorm.Expr(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 THEN
     CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
@@ -1909,11 +1909,18 @@ LIMIT ?
 			s.objectsMu.Lock()
 			defer s.objectsMu.Unlock()
 
+			// create temp table from the health query since we will reuse it
+			if err := tx.Exec("DROP TABLE IF EXISTS src").Error; err != nil {
+				return err
+			} else if err = tx.Exec("CREATE TEMP TABLE src AS ?", healthQuery).Error; err != nil {
+				return err
+			}
+
 			var res *gorm.DB
 			if isSQLite(s.db) {
-				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid_until = (?) FROM (?) AS src WHERE slabs.id=src.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity), healthQuery)
+				res = tx.Exec("UPDATE slabs SET health = src.health, health_valid_until = (?) FROM src WHERE slabs.id=src.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
 			} else {
-				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (?)", healthQuery, sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
+				res = tx.Exec("UPDATE slabs sla INNER JOIN src h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (?)", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
 			}
 			if res.Error != nil {
 				return res.Error
@@ -1921,7 +1928,9 @@ LIMIT ?
 			rowsAffected = res.RowsAffected
 
 			// Update the health of the objects associated with the updated slabs.
-			return tx.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices WHERE db_slab_id IN (SELECT id FROM (?)))", healthQuery).Error
+			return tx.Exec(`UPDATE objects SET health = src.health FROM src
+								INNER JOIN slices ON slices.db_slab_id = src.id
+								WHERE slices.db_object_id = objects.id`).Error
 		})
 		if err != nil {
 			return err
