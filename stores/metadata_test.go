@@ -972,6 +972,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	one := uint(1)
 	expectedObj := dbObject{
 		DBBucketID: 1,
+		Health:     1,
 		ObjectID:   objID,
 		Key:        obj1Key,
 		Size:       obj1.TotalSize(),
