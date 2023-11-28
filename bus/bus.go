@@ -196,6 +196,9 @@ type (
 	MetricsStore interface {
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
+		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
+		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
+
 		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
@@ -1993,11 +1996,24 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 }
 
 func (b *bus) metricsHandlerPUT(jc jape.Context) {
+	jc.Custom((*interface{})(nil), nil)
+
 	key := jc.PathParam("key")
 	switch key {
+	case api.MetricContractPrune:
+		// TODO: jape hack - remove once jape can handle decoding multiple different request types
+		var req api.ContractPruneMetricRequestPUT
+		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
+			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
+			return
+		} else if jc.Check("failed to record contract prune metric", b.mtrcs.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...)) != nil {
+			return
+		}
 	case api.MetricContractSetChurn:
+		// TODO: jape hack - remove once jape can handle decoding multiple different request types
 		var req api.ContractSetChurnMetricRequestPUT
-		if jc.Decode(&req) != nil {
+		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
+			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
 			return
 		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
 			return
@@ -2025,11 +2041,25 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	switch key := jc.PathParam("key"); key {
 	case api.MetricContract:
 		var opts api.ContractMetricsQueryOpts
-		if jc.DecodeForm("fcid", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("host", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
 			return
 		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
+			return
+		}
+	case api.MetricContractPrune:
+		var opts api.ContractPruneMetricsQueryOpts
+		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+			return
+		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+			return
+		} else if jc.DecodeForm("hostVersion", &opts.HostVersion) != nil {
+			return
+		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract prune metrics", err) != nil {
 			return
 		} else {
 			jc.Encode(metrics)

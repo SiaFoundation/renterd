@@ -26,8 +26,8 @@ func alertIDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
 	return types.HashBytes(append(alertID[:], id[:]...))
 }
 
-func alertIDForContract(alertID [32]byte, contract api.ContractMetadata) types.Hash256 {
-	return types.HashBytes(append(alertID[:], contract.ID[:]...))
+func alertIDForContract(alertID [32]byte, fcid types.FileContractID) types.Hash256 {
+	return types.HashBytes(append(alertID[:], fcid[:]...))
 }
 
 func alertIDForHost(alertID [32]byte, hk types.PublicKey) types.Hash256 {
@@ -103,7 +103,7 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 	}
 
 	return alerts.Alert{
-		ID:       alertIDForContract(alertRenewalFailedID, contract),
+		ID:       alertIDForContract(alertRenewalFailedID, contract.ID),
 		Severity: severity,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
@@ -116,15 +116,15 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 	}
 }
 
-func newContractPruningFailedAlert(contract api.ContractMetadata, err error) alerts.Alert {
-	return alerts.Alert{
-		ID:       alertIDForContract(alertPruningID, contract),
+func newContractPruningFailedAlert(hk types.PublicKey, fcid types.FileContractID, err error) *alerts.Alert {
+	return &alerts.Alert{
+		ID:       alertIDForContract(alertPruningID, fcid),
 		Severity: alerts.SeverityWarning,
 		Message:  "Contract pruning failed",
 		Data: map[string]interface{}{
 			"error":      err.Error(),
-			"contractID": contract.ID.String(),
-			"hostKey":    contract.HostKey.String(),
+			"contractID": fcid.String(),
+			"hostKey":    hk.String(),
 		},
 		Timestamp: time.Now(),
 	}

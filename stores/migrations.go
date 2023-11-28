@@ -54,6 +54,7 @@ var (
 	}
 	metricsTables = []interface{}{
 		&dbContractMetric{},
+		&dbContractPruneMetric{},
 		&dbContractSetMetric{},
 		&dbContractSetChurnMetric{},
 		&dbPerformanceMetric{},
@@ -368,7 +369,16 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 }
 
 func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
-	migrations := []*gormigrate.Migration{}
+	migrations := []*gormigrate.Migration{
+		{
+			ID: "00001_contract_prune_metrics",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00001_contract_prune_metrics(tx, logger)
+			},
+			Rollback: nil,
+		},
+	}
+
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
 
@@ -379,6 +389,15 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate: %v", err)
 	}
+	return nil
+}
+
+func performMigration00001_contract_prune_metrics(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00001_contract_prune_metrics")
+	if err := txn.Migrator().AutoMigrate(&dbContractPruneMetric{}); err != nil {
+		return err
+	}
+	logger.Info("migration 00001_contract_prune_metrics complete")
 	return nil
 }
 

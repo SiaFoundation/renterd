@@ -21,7 +21,6 @@ import (
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
-	"go.sia.tech/siad/build"
 	"go.uber.org/zap"
 )
 
@@ -84,15 +83,6 @@ const (
 	// timeoutPruneContract is the amount of time we wait for a contract to get
 	// pruned.
 	timeoutPruneContract = 10 * time.Minute
-)
-
-var (
-	errConnectionRefused         = errors.New("connection refused")
-	errConnectionTimedOut        = errors.New("connection timed out")
-	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
-	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
-	errNoRouteToHost             = errors.New("no route to host")
-	errNoSuchHost                = errors.New("no such host")
 )
 
 type (
@@ -1043,7 +1033,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 				toKeep = append(toKeep, toRenew[i])
 			}
 		} else {
-			c.ap.DismissAlert(ctx, alertIDForContract(alertRenewalFailedID, contract))
+			c.ap.DismissAlert(ctx, alertIDForContract(alertRenewalFailedID, contract.ID))
 			renewals = append(renewals, renewal{from: contract.ID, to: renewed.ID, ci: toRenew[i]})
 		}
 
@@ -1595,80 +1585,6 @@ func (c *contractor) tryPerformPruning(ctx context.Context, wp *workerPool) {
 	}()
 }
 
-func (c *contractor) performContractPruning(wp *workerPool) {
-	c.logger.Info("performing contract pruning")
-
-	// fetch prunable data
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	res, err := c.ap.bus.PrunableData(ctx)
-	cancel()
-
-	// return early if we couldn't fetch the prunable data
-	if err != nil {
-		c.logger.Error(err)
-		return
-	}
-
-	// return early if there's no prunable data
-	if res.TotalPrunable == 0 {
-		c.logger.Info("no contracts to prune")
-		return
-	}
-
-	// prune every contract individually, one at a time and for a maximum
-	// duration of 'timeoutPruneContract' to limit the amount of time we lock
-	// the contract as contracts on old hosts can take a long time to prune
-	var total uint64
-	wp.withWorker(func(w Worker) {
-		for _, contract := range res.Contracts {
-			c.logger.Debugf("pruning %d bytes from contract %v", contract.Prunable, contract.ID)
-			start := time.Now()
-			pruned, remaining, err := c.pruneContract(w, contract.ID)
-			if err != nil {
-				if pruned == 0 {
-					c.logger.Errorf("pruning contract %v failed after %v, err: %v", contract.ID, time.Since(start), err)
-				} else {
-					c.logger.Debugf("pruning contract %v errored out, pruned %d bytes, remaining %d bytes, took %v", contract.ID, pruned, remaining, time.Since(start))
-				}
-			} else {
-				c.logger.Debugf("pruning contract %v succeeded, pruned %d bytes, remaining %d bytes, took %v", contract.ID, pruned, remaining, time.Since(start))
-			}
-			total += pruned
-		}
-	})
-
-	c.logger.Infof("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(res.Contracts))
-}
-
-func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) (pruned uint64, remaining uint64, err error) {
-	c.logger.Debugf("pruning contract %v", fcid)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*timeoutPruneContract)
-	defer cancel()
-
-	// fetch the host
-	host, contract, err := c.hostForContract(ctx, fcid)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// prune the contract
-	pruned, remaining, err = w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
-
-	// handle alert
-	if err != nil && !((isErr(err, errInvalidMerkleProof) && build.VersionCmp(host.Settings.Version, "1.6.0") < 0) ||
-		isErr(err, errConnectionRefused) ||
-		isErr(err, errConnectionTimedOut) ||
-		isErr(err, errInvalidHandshakeSignature) ||
-		isErr(err, errNoRouteToHost) ||
-		isErr(err, errNoSuchHost)) {
-		c.ap.RegisterAlert(ctx, newContractPruningFailedAlert(contract, err))
-	} else {
-		c.ap.DismissAlert(ctx, alertIDForContract(alertPruningID, contract))
-	}
-	return
-}
-
 func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host hostdb.HostInfo, metadata api.ContractMetadata, err error) {
 	// fetch the contract
 	metadata, err = c.ap.bus.Contract(ctx, fcid)
@@ -1690,20 +1606,6 @@ func addLeeway(n uint64, pct float64) uint64 {
 
 func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
 	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-}
-
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
