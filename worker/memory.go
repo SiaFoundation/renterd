@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"go.sia.tech/renterd/api"
 )
 
 type (
@@ -35,6 +37,15 @@ func newMemoryManager(maxMemory uint64) (*memoryManager, error) {
 	mm.available = mm.totalAvailable
 	mm.sigNewMem = *sync.NewCond(&mm.mu)
 	return mm, nil
+}
+
+func (mm *memoryManager) Status() api.MemoryStatus {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	return api.MemoryStatus{
+		Available: mm.available,
+		Total:     mm.totalAvailable,
+	}
 }
 
 func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) <-chan *acquiredMemory {

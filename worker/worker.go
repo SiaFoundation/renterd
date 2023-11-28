@@ -1340,6 +1340,12 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
+func (w *worker) memoryGET(jc jape.Context) {
+	jc.Encode(api.MemoryResponse{
+		Upload: w.uploadManager.mm.Status(),
+	})
+}
+
 func (w *worker) accountHandlerGET(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
@@ -1408,6 +1414,8 @@ func (w *worker) Handler() http.Handler {
 	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
+
+		"GET /memory": w.memoryGET,
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
