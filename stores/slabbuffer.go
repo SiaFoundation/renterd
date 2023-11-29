@@ -175,17 +175,15 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	var slabs []object.PartialSlab
 	var err error
 	var usedBuffers []*SlabBuffer
-	var mustFit bool
 	for _, buffer := range buffers {
 		var used bool
-		slab, data, used, err = buffer.recordAppend(data, mustFit)
+		slab, data, used, err = buffer.recordAppend(data, len(usedBuffers) > 0)
 		if err != nil {
 			return nil, 0, err
 		}
 		if used {
 			usedBuffers = append(usedBuffers, buffer)
 			slabs = append(slabs, slab)
-			mustFit = true // make sure the next buffer can contain the remainder
 		}
 		if len(data) == 0 {
 			break // done
