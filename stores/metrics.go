@@ -81,8 +81,6 @@ type (
 		Model
 		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
-		Address address `gorm:"index;size:32;NOT NULL"`
-
 		ConfirmedLo   unsigned64 `gorm:"index:idx_confirmed;NOT NULL"`
 		ConfirmedHi   unsigned64 `gorm:"index:idx_confirmed;NOT NULL"`
 		SpendableLo   unsigned64 `gorm:"index:idx_spendable;NOT NULL"`
@@ -235,7 +233,6 @@ func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.Wallet
 	for i, metric := range metrics {
 		dbMetrics[i] = dbWalletMetric{
 			Timestamp:     unixTimeMS(metric.Timestamp),
-			Address:       address(metric.Address),
 			ConfirmedLo:   unsigned64(metric.Confirmed.Lo),
 			ConfirmedHi:   unsigned64(metric.Confirmed.Hi),
 			SpendableLo:   unsigned64(metric.Spendable.Lo),
@@ -273,7 +270,6 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 	for i := range resp {
 		resp[i] = api.WalletMetric{
 			Timestamp:   time.Time(metrics[i].Timestamp).UTC(),
-			Address:     types.Address(metrics[i].Address),
 			Confirmed:   toCurr(metrics[i].ConfirmedLo, metrics[i].ConfirmedHi),
 			Spendable:   toCurr(metrics[i].SpendableLo, metrics[i].SpendableHi),
 			Unconfirmed: toCurr(metrics[i].UnconfirmedLo, metrics[i].UnconfirmedHi),
@@ -361,19 +357,12 @@ func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, start time.Time, n 
 		Error
 }
 
-func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]dbWalletMetric, error) {
-	tx := s.dbMetrics
-	if opts.Address != (types.Address{}) {
-		tx = tx.Where("address", address(opts.Address))
-	}
-
-	var metrics []dbWalletMetric
-	err := s.findPeriods(tx, &metrics, start, n, interval)
+func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
+	err = s.findPeriods(s.dbMetrics, &metrics, start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
-
-	return metrics, nil
+	return
 }
 
 func (s *SQLStore) performanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]dbPerformanceMetric, error) {

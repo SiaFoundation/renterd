@@ -2063,9 +2063,7 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 		}
 	case api.MetricWallet:
 		var opts api.WalletMetricsQueryOpts
-		if jc.DecodeForm("address", &opts.Address) != nil {
-			return
-		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get wallet metrics", err) != nil {
+		if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get wallet metrics", err) != nil {
 			return
 		} else {
 			jc.Encode(metrics)

@@ -313,7 +313,6 @@ func TestWalletMetrics(t *testing.T) {
 	for _, recordedTime := range times {
 		metric := api.WalletMetric{
 			Timestamp:   recordedTime,
-			Address:     types.Address{1},
 			Confirmed:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Unconfirmed: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Spendable:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
@@ -333,20 +332,5 @@ func TestWalletMetrics(t *testing.T) {
 		return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
 	}) {
 		t.Fatal("expected metrics to be sorted by time")
-	}
-
-	// Query by address
-	metrics, err = ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{Address: types.Address{1}})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 3 {
-		t.Fatalf("expected 3 metrics, got %v", len(metrics))
-	}
-
-	metrics, err = ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{Address: types.Address{2}})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 0 {
-		t.Fatalf("expected 0 metrics, got %v", len(metrics))
 	}
 }

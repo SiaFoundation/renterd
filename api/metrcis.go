@@ -80,16 +80,12 @@ type (
 	WalletMetric struct {
 		Timestamp time.Time `json:"timestamp"`
 
-		Address types.Address `json:"address"`
-
 		Confirmed   types.Currency `json:"confirmed"`
 		Spendable   types.Currency `json:"spendable"`
 		Unconfirmed types.Currency `json:"unconfirmed"`
 	}
 
-	WalletMetricsQueryOpts struct {
-		Address types.Address
-	}
+	WalletMetricsQueryOpts struct{}
 )
 
 type (

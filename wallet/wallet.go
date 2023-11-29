@@ -442,7 +442,6 @@ func (w *SingleAddressWallet) ProcessConsensusChange(cc modules.ConsensusChange)
 	// record wallet metric
 	if err := w.store.RecordWalletMetric(ctx, api.WalletMetric{
 		Timestamp:   time.Now().UTC(),
-		Address:     w.addr,
 		Confirmed:   confirmed,
 		Unconfirmed: unconfirmed,
 		Spendable:   spendable,
