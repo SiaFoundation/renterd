@@ -368,7 +368,7 @@ func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Dur
 	errChan := make(chan error, 1)
 
 	var wg sync.WaitGroup
-	redundantSize := uint64(rs.TotalShards) * rhpv2.SectorSize
+	totalSize := uint64(rs.TotalShards) * rhpv2.SectorSize
 
 LOOP:
 	for {
@@ -380,7 +380,7 @@ LOOP:
 			break LOOP
 		case err = <-errChan:
 			break LOOP
-		case mem = <-w.uploadManager.mm.AcquireMemory(ctx, redundantSize):
+		case mem = <-w.uploadManager.mm.AcquireMemory(ctx, totalSize):
 		}
 		if mem == nil {
 			break // interrupted

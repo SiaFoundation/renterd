@@ -1401,7 +1401,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
 	w.initDownloadManager(downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
-	mm, err := newMemoryManager(uploadMaxMemory)
+	mm, err := newMemoryManager(w.logger, uploadMaxMemory)
 	if err != nil {
 		return nil, err
 	}

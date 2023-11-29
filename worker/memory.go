@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"go.sia.tech/renterd/api"
+	"go.uber.org/zap"
 )
 
 type (
@@ -13,6 +14,7 @@ type (
 	// uploads and downloads.
 	memoryManager struct {
 		totalAvailable uint64
+		logger         *zap.SugaredLogger
 
 		mu        sync.Mutex
 		sigNewMem sync.Cond
@@ -27,11 +29,12 @@ type (
 	}
 )
 
-func newMemoryManager(maxMemory uint64) (*memoryManager, error) {
+func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) (*memoryManager, error) {
 	if maxMemory == 0 {
 		return nil, fmt.Errorf("maxMemory cannot be 0")
 	}
 	mm := &memoryManager{
+		logger:         logger,
 		totalAvailable: maxMemory,
 	}
 	mm.available = mm.totalAvailable
@@ -49,10 +52,14 @@ func (mm *memoryManager) Status() api.MemoryStatus {
 }
 
 func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) <-chan *acquiredMemory {
-	if amt == 0 {
-		panic("cannot acquire 0 memory")
-	}
 	memChan := make(chan *acquiredMemory, 1)
+	if amt == 0 {
+		mm.logger.Fatal("cannot acquire 0 memory")
+	} else if mm.totalAvailable < amt {
+		mm.logger.Errorf("cannot acquire %v memory with only %v available", amt, mm.totalAvailable)
+		close(memChan)
+		return memChan
+	}
 	// block until enough memory is available
 	mm.sigNewMem.L.Lock()
 	for mm.available < amt {
