@@ -2267,7 +2267,7 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 		Updates(map[string]interface{}{
 			"db_buffered_slab_id": nil,
 		}).Error; err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to set buffered slab NULL: %w", err)
 	}
 
 	// delete buffer
@@ -2300,7 +2300,10 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 		}
 		shards = append(shards, sector)
 	}
-	return fileName, tx.Create(shards).Error
+	if err := tx.Create(&shards).Error; err != nil {
+		return "", fmt.Errorf("failed to create shards: %w", err)
+	}
+	return fileName, nil
 }
 
 // contract retrieves a contract from the store.
