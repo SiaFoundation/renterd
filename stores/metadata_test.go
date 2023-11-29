@@ -2383,7 +2383,7 @@ func TestObjectsStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(info, api.ObjectsStatsResponse{}) {
+	if !reflect.DeepEqual(info, api.ObjectsStatsResponse{MinHealth: 1}) {
 		t.Fatal("unexpected stats", info)
 	}
 
