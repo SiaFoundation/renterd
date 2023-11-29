@@ -348,6 +348,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00033_transactionsTimestampIndex(tx, logger)
 			},
 		},
+		{
+			ID: "00034_objectHealth",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00034_objectHealth(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1446,5 +1452,24 @@ func performMigration00033_transactionsTimestampIndex(txn *gorm.DB, logger *zap.
 	}
 
 	logger.Info("migration 00033_transactionsTimestampIndex complete")
+	return nil
+}
+
+func performMigration00034_objectHealth(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00034_objectHealth")
+
+	// add health column
+	if err := txn.Table("objects").Migrator().AutoMigrate(&struct {
+		Health float64 `gorm:"index;default:1.0; NOT NULL"`
+	}{}); err != nil {
+		return err
+	}
+
+	// update health for all objects
+	if err := updateAllObjectsHealth(txn); err != nil {
+		return err
+	}
+
+	logger.Info("migration 00034_objectHealth complete")
 	return nil
 }
