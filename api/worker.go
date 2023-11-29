@@ -92,6 +92,7 @@ type (
 	// RHPPruneContractResponse is the response type for the /rhp/contract/:id/prune
 	// endpoint.
 	RHPPruneContractResponse struct {
+		Prunable  uint64 `json:"prunable"`
 		Pruned    uint64 `json:"pruned"`
 		Remaining uint64 `json:"remaining"`
 		Error     string `json:"error,omitempty"`

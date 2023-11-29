@@ -663,13 +663,14 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
-	if err != nil && pruned == 0 {
+	if err != nil && !errors.Is(err, ErrNoSectorsToPrune) && pruned == 0 {
 		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 
 	res := api.RHPPruneContractResponse{
+		Prunable:  size.Prunable,
 		Pruned:    pruned,
 		Remaining: remaining,
 	}
