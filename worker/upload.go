@@ -365,23 +365,18 @@ func (w *worker) tryUploadPackedSlabs(ctx context.Context, rs api.RedundancySett
 func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Duration, rs api.RedundancySettings, contractSet string, lockPriority int) (uploaded int, err error) {
 	// upload packed slabs
 	var mu sync.Mutex
-	errChan := make(chan error, 1)
+	var errs error
 
 	var wg sync.WaitGroup
 	totalSize := uint64(rs.TotalShards) * rhpv2.SectorSize
 
-LOOP:
+	// derive a context that we can use as an interrupt in case of an error.
+	interruptCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	for {
-		// block until either an error occurs or the next slab is ready to be
-		// uploaded
-		var mem *acquiredMemory
-		select {
-		case <-ctx.Done():
-			break LOOP
-		case err = <-errChan:
-			break LOOP
-		case mem = <-w.uploadManager.mm.AcquireMemory(ctx, totalSize):
-		}
+		// block until we have memory for a slab or until we are interrupted
+		mem := w.uploadManager.mm.AcquireMemory(interruptCtx, totalSize)
 		if mem == nil {
 			break // interrupted
 		}
@@ -392,10 +387,10 @@ LOOP:
 		if err != nil {
 			err = fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			mem.Release()
-			break LOOP
+			break
 		} else if len(packedSlabs) == 0 {
 			mem.Release()
-			break LOOP // no more slabs
+			break // no more slabs
 		}
 		ps := packedSlabs[0]
 
@@ -405,28 +400,22 @@ LOOP:
 			defer mem.Release()
 			defer wg.Done()
 			err := w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority, mem)
+			mu.Lock()
 			if err != nil {
-				select {
-				case errChan <- err:
-				default:
-				}
+				errs = errors.Join(errs, err)
+				cancel() // prevent new uploads from being launched
 			} else {
-				mu.Lock()
 				uploaded++
-				mu.Unlock()
 			}
+			mu.Unlock()
 		}(ps)
 	}
 
 	// wait for all threads to finish
 	wg.Wait()
 
-	// check for any last errors
-	select {
-	case uploadErr := <-errChan:
-		err = errors.Join(err, uploadErr)
-	default:
-	}
+	// return collected errors
+	err = errors.Join(err, errs)
 	return
 }
 
@@ -582,24 +571,28 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	// create the response channel
 	respChan := make(chan slabUploadResponse)
 
-	// collect the responses
-	var responses []slabUploadResponse
-	var slabIndex int
-	numSlabs := -1
+	// channel to notify main thread of the number of slabs to wait for
+	numSlabsChan := make(chan int)
 
 	// prepare slab size
 	size := int64(up.rs.MinShards) * rhpv2.SectorSize
 	redundantSize := uint64(up.rs.TotalShards) * rhpv2.SectorSize
 
-	// launch uploads and collect responses
-loop:
-	for {
-		select {
-		case <-mgr.stopChan:
-			return object.Object{}, nil, "", errors.New("manager was stopped")
-		case mem := <-mgr.mm.AcquireMemory(ctx, redundantSize):
+	// launch uploads in a separate goroutine
+	stopCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		var slabIndex int
+		for {
+			select {
+			case <-mgr.stopChan:
+				return // interrupted
+			default:
+			}
+			// acquire memory
+			mem := mgr.mm.AcquireMemory(stopCtx, redundantSize)
 			if mem == nil {
-				return object.Object{}, nil, "", errors.New("upload timed out")
+				return // interrupted
 			}
 			// read next slab's data
 			data := make([]byte, size)
@@ -607,18 +600,25 @@ loop:
 			if err == io.EOF {
 				if slabIndex == 0 {
 					mem.Release()
-					break loop
+					return
 				}
-				numSlabs = slabIndex
+				numSlabs := slabIndex
 				if partialSlab != nil {
 					numSlabs-- // don't wait on partial slab
 				}
 				mem.Release()
-				// no more data to upload
-				break loop
+				// no more data to upload, notify main thread of the number of
+				// slabs to wait for
+				numSlabsChan <- numSlabs
+				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				mem.Release()
-				return object.Object{}, nil, "", err
+				select {
+				case respChan <- slabUploadResponse{err: err}:
+					// notify main thread
+				case <-stopCtx.Done():
+				}
+				return
 			}
 			if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
 				// If uploadPacking is true, we return the partial slab without
@@ -633,22 +633,17 @@ loop:
 				}(up.rs, data, length, slabIndex)
 			}
 			slabIndex++
-		case res := <-respChan:
-			if res.err != nil {
-				return object.Object{}, nil, "", res.err
-			}
-			responses = append(responses, res)
-			if len(responses) == numSlabs {
-				break loop
-			}
 		}
-	}
+	}()
 
-	// keep collecting responses
+	// collect responses
+	var responses []slabUploadResponse
+	numSlabs := math.MaxInt32
 	for len(responses) < numSlabs {
 		select {
 		case <-mgr.stopChan:
 			return object.Object{}, nil, "", errors.New("manager was stopped")
+		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
 				return object.Object{}, nil, "", res.err

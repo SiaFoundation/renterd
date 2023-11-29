@@ -51,14 +51,12 @@ func (mm *memoryManager) Status() api.MemoryStatus {
 	}
 }
 
-func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) <-chan *acquiredMemory {
-	memChan := make(chan *acquiredMemory, 1)
+func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory {
 	if amt == 0 {
 		mm.logger.Fatal("cannot acquire 0 memory")
 	} else if mm.totalAvailable < amt {
 		mm.logger.Errorf("cannot acquire %v memory with only %v available", amt, mm.totalAvailable)
-		close(memChan)
-		return memChan
+		return nil
 	}
 	// block until enough memory is available
 	mm.sigNewMem.L.Lock()
@@ -69,22 +67,18 @@ func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) <-chan *
 		select {
 		case <-ctx.Done():
 			mm.sigNewMem.L.Unlock()
-			close(memChan)
-			return memChan
+			return nil
 		default:
 		}
 	}
 	mm.available -= amt
 	mm.sigNewMem.L.Unlock()
 
-	memChan <- &acquiredMemory{
+	mm.sigNewMem.Signal() // wake next goroutine
+	return &acquiredMemory{
 		mm:        mm,
 		remaining: amt,
 	}
-	close(memChan)
-
-	mm.sigNewMem.Signal() // wake next goroutine
-	return memChan
 }
 
 // release returns all the remaining memory to the memory manager. Should always
