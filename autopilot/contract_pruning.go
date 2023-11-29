@@ -65,7 +65,7 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 		isErr(pr.err, errInvalidHandshakeSignature) ||
 		isErr(pr.err, errNoRouteToHost) ||
 		isErr(pr.err, errNoSuchHost)); shouldTrigger {
-		alert = newContractPruningFailedAlert(pr.hk, pr.fcid, pr.err)
+		alert = newContractPruningFailedAlert(pr.hk, pr.version, pr.fcid, pr.err)
 	}
 	return
 }
@@ -171,14 +171,22 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	// fetch the host
 	host, contract, err := c.hostForContract(ctx, fcid)
 	if err != nil {
-		return pruneResult{err: err}
+		return pruneResult{
+			fcid: fcid,
+			err:  err,
+		}
 	}
 
 	// prune the contract
 	start := time.Now()
 	prunable, pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil && pruned == 0 {
-		return pruneResult{err: err}
+		return pruneResult{
+			fcid:    fcid,
+			hk:      contract.HostKey,
+			version: host.Settings.Version,
+			err:     err,
+		}
 	} else if err != nil && isErr(err, context.DeadlineExceeded) {
 		err = nil
 	}
@@ -186,7 +194,7 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	return pruneResult{
 		ts: start,
 
-		fcid:    contract.ID,
+		fcid:    fcid,
 		hk:      contract.HostKey,
 		version: host.Settings.Version,
 

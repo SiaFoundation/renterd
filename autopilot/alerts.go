@@ -116,16 +116,23 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 	}
 }
 
-func newContractPruningFailedAlert(hk types.PublicKey, fcid types.FileContractID, err error) *alerts.Alert {
+func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid types.FileContractID, err error) *alerts.Alert {
+	data := map[string]interface{}{"error": err.Error()}
+	if hk != (types.PublicKey{}) {
+		data["hostKey"] = hk.String()
+	}
+	if version != "" {
+		data["hostVersion"] = version
+	}
+	if fcid != (types.FileContractID{}) {
+		data["contractID"] = fcid.String()
+	}
+
 	return &alerts.Alert{
-		ID:       alertIDForContract(alertPruningID, fcid),
-		Severity: alerts.SeverityWarning,
-		Message:  "Contract pruning failed",
-		Data: map[string]interface{}{
-			"error":      err.Error(),
-			"contractID": fcid.String(),
-			"hostKey":    hk.String(),
-		},
+		ID:        alertIDForContract(alertPruningID, fcid),
+		Severity:  alerts.SeverityWarning,
+		Message:   "Contract pruning failed",
+		Data:      data,
 		Timestamp: time.Now(),
 	}
 }
