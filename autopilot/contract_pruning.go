@@ -137,6 +137,8 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil && pruned == 0 {
 		return pruneResult{err: err}
+	} else if err != nil && isErr(err, context.DeadlineExceeded) {
+		err = nil
 	}
 
 	return pruneResult{
