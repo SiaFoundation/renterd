@@ -83,12 +83,12 @@ type (
 
 		Address address `gorm:"index;size:32;NOT NULL"`
 
-		ConfirmedBalanceLo   unsigned64 `gorm:"index:idx_confirmed_balance;NOT NULL"`
-		ConfirmedBalanceHi   unsigned64 `gorm:"index:idx_confirmed_balance;NOT NULL"`
-		SpendableBalanceLo   unsigned64 `gorm:"index:idx_spendable_balance;NOT NULL"`
-		SpendableBalanceHi   unsigned64 `gorm:"index:idx_spendable_balance;NOT NULL"`
-		UnconfirmedBalanceLo unsigned64 `gorm:"index:idx_unconfirmed_balance;NOT NULL"`
-		UnconfirmedBalanceHi unsigned64 `gorm:"index:idx_unconfirmed_balance;NOT NULL"`
+		ConfirmedLo   unsigned64 `gorm:"index:idx_confirmed;NOT NULL"`
+		ConfirmedHi   unsigned64 `gorm:"index:idx_confirmed;NOT NULL"`
+		SpendableLo   unsigned64 `gorm:"index:idx_spendable;NOT NULL"`
+		SpendableHi   unsigned64 `gorm:"index:idx_spendable;NOT NULL"`
+		UnconfirmedLo unsigned64 `gorm:"index:idx_unconfirmed;NOT NULL"`
+		UnconfirmedHi unsigned64 `gorm:"index:idx_unconfirmed;NOT NULL"`
 	}
 )
 
@@ -234,14 +234,14 @@ func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.Wallet
 	dbMetrics := make([]dbWalletMetric, len(metrics))
 	for i, metric := range metrics {
 		dbMetrics[i] = dbWalletMetric{
-			Timestamp:            unixTimeMS(metric.Timestamp),
-			Address:              address(metric.Address),
-			ConfirmedBalanceLo:   unsigned64(metric.ConfirmedBalance.Lo),
-			ConfirmedBalanceHi:   unsigned64(metric.ConfirmedBalance.Hi),
-			SpendableBalanceLo:   unsigned64(metric.SpendableBalance.Lo),
-			SpendableBalanceHi:   unsigned64(metric.SpendableBalance.Hi),
-			UnconfirmedBalanceLo: unsigned64(metric.UnconfirmedBalance.Lo),
-			UnconfirmedBalanceHi: unsigned64(metric.UnconfirmedBalance.Hi),
+			Timestamp:     unixTimeMS(metric.Timestamp),
+			Address:       address(metric.Address),
+			ConfirmedLo:   unsigned64(metric.Confirmed.Lo),
+			ConfirmedHi:   unsigned64(metric.Confirmed.Hi),
+			SpendableLo:   unsigned64(metric.Spendable.Lo),
+			SpendableHi:   unsigned64(metric.Spendable.Hi),
+			UnconfirmedLo: unsigned64(metric.Unconfirmed.Lo),
+			UnconfirmedHi: unsigned64(metric.Unconfirmed.Hi),
 		}
 	}
 	return s.dbMetrics.Create(&dbMetrics).Error
@@ -272,11 +272,11 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 	}
 	for i := range resp {
 		resp[i] = api.WalletMetric{
-			Timestamp:          time.Time(metrics[i].Timestamp).UTC(),
-			Address:            types.Address(metrics[i].Address),
-			ConfirmedBalance:   toCurr(metrics[i].ConfirmedBalanceLo, metrics[i].ConfirmedBalanceHi),
-			SpendableBalance:   toCurr(metrics[i].SpendableBalanceLo, metrics[i].SpendableBalanceHi),
-			UnconfirmedBalance: toCurr(metrics[i].UnconfirmedBalanceLo, metrics[i].UnconfirmedBalanceHi),
+			Timestamp:   time.Time(metrics[i].Timestamp).UTC(),
+			Address:     types.Address(metrics[i].Address),
+			Confirmed:   toCurr(metrics[i].ConfirmedLo, metrics[i].ConfirmedHi),
+			Spendable:   toCurr(metrics[i].SpendableLo, metrics[i].SpendableHi),
+			Unconfirmed: toCurr(metrics[i].UnconfirmedLo, metrics[i].UnconfirmedHi),
 		}
 	}
 	return resp, nil

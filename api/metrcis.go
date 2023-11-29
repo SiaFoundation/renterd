@@ -82,9 +82,9 @@ type (
 
 		Address types.Address `json:"address"`
 
-		ConfirmedBalance   types.Currency `json:"confirmedBalance"`
-		SpendableBalance   types.Currency `json:"spendableBalance"`
-		UnconfirmedBalance types.Currency `json:"unconfirmedBalance"`
+		Confirmed   types.Currency `json:"confirmed"`
+		Spendable   types.Currency `json:"spendable"`
+		Unconfirmed types.Currency `json:"unconfirmed"`
 	}
 
 	WalletMetricsQueryOpts struct {

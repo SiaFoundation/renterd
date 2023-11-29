@@ -312,11 +312,11 @@ func TestWalletMetrics(t *testing.T) {
 	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
 	for _, recordedTime := range times {
 		metric := api.WalletMetric{
-			Timestamp:          recordedTime,
-			Address:            types.Address{1},
-			ConfirmedBalance:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
-			UnconfirmedBalance: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
-			SpendableBalance:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			Timestamp:   recordedTime,
+			Address:     types.Address{1},
+			Confirmed:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			Unconfirmed: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			Spendable:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 		}
 		if err := ss.RecordWalletMetric(context.Background(), metric); err != nil {
 			t.Fatal(err)

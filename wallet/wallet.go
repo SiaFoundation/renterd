@@ -441,11 +441,11 @@ func (w *SingleAddressWallet) ProcessConsensusChange(cc modules.ConsensusChange)
 
 	// record wallet metric
 	if err := w.store.RecordWalletMetric(ctx, api.WalletMetric{
-		Timestamp:          time.Now().UTC(),
-		Address:            w.addr,
-		ConfirmedBalance:   confirmed,
-		UnconfirmedBalance: unconfirmed,
-		SpendableBalance:   spendable,
+		Timestamp:   time.Now().UTC(),
+		Address:     w.addr,
+		Confirmed:   confirmed,
+		Unconfirmed: unconfirmed,
+		Spendable:   spendable,
 	}); err != nil {
 		w.log.Errorf("failed to record wallet metric, err: %v", err)
 		return
