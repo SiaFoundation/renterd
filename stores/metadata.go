@@ -1085,12 +1085,10 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 
 	var objects []api.ObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, MAX(o.size) as size, MIN(sla.health) as health").
+		Select("o.object_id as name, MAX(o.size) as size, o.health as health").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
 		Where("INSTR(o.object_id, ?) > 0 AND b.name = ?", substring, bucket).
 		Group("o.object_id").
 		Offset(offset).
@@ -2758,7 +2756,14 @@ func buildPrefixExpr(prefix string) clause.Expr {
 }
 
 func updateAllObjectsHealth(tx *gorm.DB) error {
-	return tx.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices)").Error
+	return tx.Exec(`
+UPDATE objects
+SET health = (
+	SELECT COALESCE(MIN(slabs.health), 1)
+	FROM slabs
+	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
+	WHERE sli.db_object_id = objects.id)
+`).Error
 }
 
 func validateSort(sortBy, sortDir string) error {
