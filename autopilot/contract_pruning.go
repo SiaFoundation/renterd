@@ -124,6 +124,12 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	var metrics pruneMetrics
 	wp.withWorker(func(w Worker) {
 		for _, contract := range res.Contracts {
+			// skip if there's nothing to prune
+			if contract.Prunable == 0 {
+				continue
+			}
+
+			// prune contract
 			result := c.pruneContract(w, contract.ID)
 			if result.err != nil {
 				c.logger.Error(result)
