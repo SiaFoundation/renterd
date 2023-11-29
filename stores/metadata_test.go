@@ -972,6 +972,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	one := uint(1)
 	expectedObj := dbObject{
 		DBBucketID: 1,
+		Health:     1,
 		ObjectID:   objID,
 		Key:        obj1Key,
 		Size:       obj1.TotalSize(),
@@ -1390,6 +1391,11 @@ func TestObjectEntries(t *testing.T) {
 	}
 	if err := ss.overrideSlabHealth("/foo/baz/quux", 0.75); err != nil {
 		t.Fatal(err)
+	}
+
+	// update health of objects to match the overridden health of the slabs
+	if err := updateAllObjectsHealth(ss.db); err != nil {
+		t.Fatal()
 	}
 
 	tests := []struct {
@@ -2377,7 +2383,7 @@ func TestObjectsStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(info, api.ObjectsStatsResponse{}) {
+	if !reflect.DeepEqual(info, api.ObjectsStatsResponse{MinHealth: 1}) {
 		t.Fatal("unexpected stats", info)
 	}
 
@@ -3385,6 +3391,11 @@ func TestListObjects(t *testing.T) {
 	}
 	if err := ss.overrideSlabHealth("/foo/baz/quux", 0.75); err != nil {
 		t.Fatal(err)
+	}
+
+	// update health of objects to match the overridden health of the slabs
+	if err := updateAllObjectsHealth(ss.db); err != nil {
+		t.Fatal()
 	}
 
 	tests := []struct {
