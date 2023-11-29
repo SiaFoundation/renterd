@@ -654,7 +654,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	}
 	err := s.db.
 		Model(&dbObject{}).
-		Select("COUNT(*) AS NumObjects, COALESCE(Min(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
+		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
 		Scan(&objInfo).
 		Error
 	if err != nil {
@@ -1087,12 +1087,12 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 
 	var objects []api.ObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, MAX(o.size) as size, o.health as health").
+		Select("o.object_id as name, o.size as size, o.health as health").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Where("INSTR(o.object_id, ?) > 0 AND b.name = ?", substring, bucket).
-		Group("o.object_id").
+		Order("o.object_id ASC").
 		Offset(offset).
 		Limit(limit).
 		Scan(&objects).Error
