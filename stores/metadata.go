@@ -1941,9 +1941,16 @@ LIMIT ?
 			rowsAffected = res.RowsAffected
 
 			// Update the health of the objects associated with the updated slabs.
-			return tx.Exec(`UPDATE objects SET health = src.health FROM src
+			if isSQLite(s.db) {
+				return tx.Exec(`UPDATE objects SET health = src.health FROM src
 								INNER JOIN slices ON slices.db_slab_id = src.id
 								WHERE slices.db_object_id = objects.id`).Error
+			} else {
+				return tx.Exec(`UPDATE objects
+								INNER JOIN slices sli ON sli.db_object_id = objects.id
+								INNER JOIN src s ON s.id = sli.db_slab_id
+								SET objects.health = s.health`).Error
+			}
 		})
 		if err != nil {
 			return err
