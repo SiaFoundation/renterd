@@ -35,8 +35,6 @@ func TestContractPruneMetrics(t *testing.T) {
 				Pruned:    math.MaxUint64,
 				Remaining: math.MaxUint64,
 				Duration:  time.Second,
-
-				Error: "a",
 			}
 			fcid2Metric[metric.ContractID] = metric
 			if err := ss.RecordContractPruneMetric(context.Background(), metric); err != nil {

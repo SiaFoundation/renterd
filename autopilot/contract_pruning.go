@@ -70,8 +70,8 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 	return
 }
 
-func (pr pruneResult) toMetric() (metric api.ContractPruneMetric) {
-	metric = api.ContractPruneMetric{
+func (pr pruneResult) toMetric() api.ContractPruneMetric {
+	return api.ContractPruneMetric{
 		Timestamp:  pr.ts,
 		ContractID: pr.fcid,
 		HostKey:    pr.hk,
@@ -79,10 +79,6 @@ func (pr pruneResult) toMetric() (metric api.ContractPruneMetric) {
 		Remaining:  pr.remaining,
 		Duration:   pr.duration,
 	}
-	if pr.err != nil {
-		metric.Error = pr.err.Error()
-	}
-	return
 }
 
 func humanReadableSize(b int) string {
@@ -134,9 +130,11 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			if contract.Prunable == 0 {
 				continue
 			}
+			fmt.Printf("DEBUG PJ: contract %v has %d bytes to prune\n", contract.ID, contract.Prunable)
 
 			// prune contract
 			result := c.pruneContract(w, contract.ID)
+			fmt.Printf("DEBUG PJ: res %+v", result)
 			if result.err != nil {
 				c.logger.Error(result)
 			} else {

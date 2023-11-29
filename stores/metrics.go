@@ -55,8 +55,6 @@ type (
 		Pruned    unsigned64    `gorm:"index;NOT NULL"`
 		Remaining unsigned64    `gorm:"index;NOT NULL"`
 		Duration  time.Duration `gorm:"index;NOT NULL"`
-
-		Error string `gorm:"index"`
 	}
 
 	// dbContractSetMetric tracks information about a specific contract set.
@@ -367,8 +365,6 @@ func (s *SQLStore) ContractPruneMetrics(ctx context.Context, start time.Time, n 
 			Pruned:    uint64(metrics[i].Pruned),
 			Remaining: uint64(metrics[i].Remaining),
 			Duration:  metrics[i].Duration,
-
-			Error: metrics[i].Error,
 		}
 	}
 	return resp, nil
@@ -387,8 +383,6 @@ func (s *SQLStore) RecordContractPruneMetric(ctx context.Context, metrics ...api
 			Pruned:    unsigned64(metric.Pruned),
 			Remaining: unsigned64(metric.Remaining),
 			Duration:  metric.Duration,
-
-			Error: metric.Error,
 		}
 	}
 	return s.dbMetrics.Create(&dbMetrics).Error

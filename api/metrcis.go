@@ -87,8 +87,6 @@ type (
 		Pruned    uint64        `json:"pruned"`
 		Remaining uint64        `json:"remaining"`
 		Duration  time.Duration `json:"duration"`
-
-		Error string `json:"error,omitempty"`
 	}
 
 	ContractPruneMetricsQueryOpts struct {
