@@ -919,26 +919,38 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 }
 
 func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error) {
-	rows := make([]struct {
+	type size struct {
 		Fcid     fileContractID `json:"fcid"`
 		Size     uint64         `json:"size"`
 		Prunable uint64         `json:"prunable"`
-	}, 0)
+	}
 
-	if err := s.db.
-		Raw(`
-SELECT fcid, MAX(c.size) as size, CASE WHEN MAX(c.size)>COUNT(cs.db_sector_id) * ? THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
-FROM contracts c
-LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-GROUP BY c.fcid
-	`, rhpv2.SectorSize, rhpv2.SectorSize).
-		Scan(&rows).
-		Error; err != nil {
+	var nullContracts []size
+	var dataContracts []size
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		// use WHERE NOT EXISTS to catch contracts that would otherwise have been caught by a LEFT JOIN
+		if err := tx.
+			Raw(`
+SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SELECT 1 FROM contract_sectors cs WHERE cs.db_contract_id = c.id)`).
+			Scan(&nullContracts).
+			Error; err != nil {
+			return err
+		}
+
+		// with those out of the way, we can use an INNER JOIN to get the rest
+		return tx.
+			Raw(`
+SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
+SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
+) i`, rhpv2.SectorSize).
+			Scan(&dataContracts).
+			Error
+	}); err != nil {
 		return nil, err
 	}
 
 	sizes := make(map[types.FileContractID]api.ContractSize)
-	for _, row := range rows {
+	for _, row := range append(nullContracts, dataContracts...) {
 		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
 			return nil, errors.New("invalid file contract id")
 		}
@@ -962,11 +974,10 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 
 	if err := s.db.
 		Raw(`
-SELECT MAX(c.size) as size, CASE WHEN MAX(c.size)>(COUNT(cs.db_sector_id) * ?) THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
-FROM contracts c
-LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-WHERE c.fcid = ?
-`, rhpv2.SectorSize, rhpv2.SectorSize, fileContractID(id)).
+SELECT contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
+SELECT MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id WHERE c.fcid = ?
+) i
+`, rhpv2.SectorSize, fileContractID(id)).
 		Take(&size).
 		Error; err != nil {
 		return api.ContractSize{}, err
