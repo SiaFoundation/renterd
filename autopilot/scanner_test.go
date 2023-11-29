@@ -140,9 +140,10 @@ func (s *scanner) isScanning() bool {
 }
 
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
-	ap := &Autopilot{
-		stopChan: make(chan struct{}),
-	}
+	ap := &Autopilot{}
+	ap.stopChan = make(chan struct{})
+	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
+
 	return &scanner{
 		ap:     ap,
 		bus:    b,

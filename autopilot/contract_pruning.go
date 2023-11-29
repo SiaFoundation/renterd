@@ -125,6 +125,11 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	var metrics pruneMetrics
 	wp.withWorker(func(w Worker) {
 		for _, contract := range res.Contracts {
+			// return if we're stopped
+			if c.ap.isStopped() {
+				return
+			}
+
 			// skip if there's nothing to prune
 			if contract.Prunable == 0 {
 				continue
@@ -165,7 +170,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 
 func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
 	// create a sane timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*timeoutPruneContract)
+	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 2*timeoutPruneContract)
 	defer cancel()
 
 	// fetch the host
