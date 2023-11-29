@@ -1158,24 +1158,30 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		offset = 0
 	}
 
+	onameExpr := fmt.Sprintf("CASE INSTR(SUBSTR(object_id, ?), '/') WHEN 0 THEN %s ELSE %s END",
+		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
+		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
+	)
+
 	// build objects query & parameters
 	objectsQuery := fmt.Sprintf(`
 SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
 FROM (
 	SELECT ANY_VALUE(etag) AS ETag,
 	MAX(objects.created_at) AS ModTime,
-	CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN %s ELSE %s END AS oname,
+	%s AS oname,
 	SUM(size) AS Size,
 	MIN(health) as Health,
 	ANY_VALUE(mime_type) as MimeType
 	FROM objects
 	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(oname, 1, ?) = ? AND oname != ?
+	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
 	GROUP BY oname
 ) baseQuery
 `,
-		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
-		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
+		onameExpr,
+		onameExpr,
+		onameExpr,
 	)
 
 	if isSQLite(s.db) {
@@ -1183,17 +1189,24 @@ FROM (
 	}
 
 	objectsQueryParams := []interface{}{
-		utf8.RuneCountInString(path) + 1,       // CASE INSTRU(SUBSTR(object_id, ?), "/")
-		path, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), "/"))")
+		utf8.RuneCountInString(path) + 1,       // onameExpr
+		path, utf8.RuneCountInString(path) + 1, // onameExpr
+		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
 
-		utf8.RuneCountInString(path), // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
-		path,                         // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
-		bucket,                       // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+		utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		bucket,                       // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
 
-		utf8.RuneCountInString(path + prefix), // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
-		path + prefix,                         // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
-		path,                                  // WHERE SUBSTR(Name, 1, ?) = ? AND Name != ? AND b.name = ?
+		utf8.RuneCountInString(path) + 1,       // onameExpr
+		path, utf8.RuneCountInString(path) + 1, // onameExpr
+		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+
+		utf8.RuneCountInString(path + prefix),  // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		path + prefix,                          // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		utf8.RuneCountInString(path) + 1,       // onameExpr
+		path, utf8.RuneCountInString(path) + 1, // onameExpr
+		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+		path, // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
 	}
 
 	// build marker expr
