@@ -1898,7 +1898,7 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	now := time.Now()
 
 	for {
-		healthQuery := gorm.Expr(`
+		healthQuery := s.db.Raw(`
 SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 THEN
     CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
@@ -2745,6 +2745,10 @@ func buildPrefixExpr(prefix string) clause.Expr {
 	} else {
 		return exprTRUE
 	}
+}
+
+func updateAllObjectsHealth(tx *gorm.DB) error {
+	return tx.Exec("UPDATE objects SET health = (SELECT MIN(health) FROM slabs WHERE slabs.id IN (SELECT db_slab_id FROM slices WHERE db_object_id = objects.id)) WHERE id IN (SELECT DISTINCT(db_object_id) FROM slices)").Error
 }
 
 func validateSort(sortBy, sortDir string) error {
