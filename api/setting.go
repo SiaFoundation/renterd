@@ -18,7 +18,8 @@ const (
 
 const (
 	S3MinAccessKeyLen = 16
-	S3MaxAccessKeyLen = 40
+	S3MaxAccessKeyLen = 128
+	S3SecretKeyLen    = 40
 )
 
 var (
@@ -137,11 +138,15 @@ func (rs RedundancySettings) Validate() error {
 // Validate returns an error if the authentication settings are not considered
 // valid.
 func (s3as S3AuthenticationSettings) Validate() error {
-	for id, key := range s3as.V4Keypairs {
-		if len(id) == 0 {
+	for accessKeyID, secretAccessKey := range s3as.V4Keypairs {
+		if len(accessKeyID) == 0 {
 			return fmt.Errorf("AccessKeyID cannot be empty")
-		} else if len(key) < S3MinAccessKeyLen || len(key) > S3MaxAccessKeyLen {
-			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(key))
+		} else if len(accessKeyID) < S3MinAccessKeyLen || len(accessKeyID) > S3MaxAccessKeyLen {
+			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(accessKeyID))
+		} else if len(secretAccessKey) == 0 {
+			return fmt.Errorf("SecretAccessKey cannot be empty")
+		} else if len(secretAccessKey) != S3SecretKeyLen {
+			return fmt.Errorf("SecretAccessKey must be %d characters long but was %d", S3SecretKeyLen, len(secretAccessKey))
 		}
 	}
 	return nil

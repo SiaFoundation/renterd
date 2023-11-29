@@ -612,33 +612,39 @@ func TestS3SettingsValidate(t *testing.T) {
 		shouldFail bool
 	}{
 		{
-			// Min length
-			id:         "id",
-			key:        "aaaaaaaaaaaaaaaa",
+
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: false,
 		},
 		{
-			// Max length
-			id:         "id",
-			key:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			id:         strings.Repeat("a", api.S3MaxAccessKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: false,
 		},
 		{
-			// Min length - 1
-			id:         "id",
-			key:        "aaaaaaaaaaaaaaa",
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen-1),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: true,
 		},
 		{
-			// Max length + 1
-			id:         "id",
-			key:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			id:         strings.Repeat("a", api.S3MaxAccessKeyLen+1),
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
 			shouldFail: true,
 		},
 		{
-			// No ID
 			id:         "",
-			key:        "aaaaaaaaaaaaaaaa",
+			key:        strings.Repeat("a", api.S3SecretKeyLen),
+			shouldFail: true,
+		},
+		{
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen),
+			key:        "",
+			shouldFail: true,
+		},
+		{
+			id:         strings.Repeat("a", api.S3MinAccessKeyLen),
+			key:        strings.Repeat("a", api.S3SecretKeyLen+1),
 			shouldFail: true,
 		},
 	}

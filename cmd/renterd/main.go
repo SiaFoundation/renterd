@@ -94,6 +94,7 @@ var (
 			DownloadMaxOverdrive:     5,
 			DownloadOverdriveTimeout: 3 * time.Second,
 
+			UploadMaxMemory:        1 << 30, // 1 GiB
 			UploadMaxOverdrive:     5,
 			UploadOverdriveTimeout: 3 * time.Second,
 		},
@@ -218,51 +219,6 @@ func main() {
 	// overwrite anything set in the config file.
 	tryLoadConfig()
 
-	// TODO: the following flags will be deprecated in v1.0.0 in favor of
-	// environment variables to ensure we do not ask the user to pass sensitive
-	// information via CLI parameters.
-	var depDBPassword string
-	var depBusRemotePassword string
-	var depBusRemoteAddr string
-	var depWorkerRemotePassStr string
-	var depWorkerRemoteAddrsStr string
-	flag.StringVar(&depDBPassword, "db.password", "", "[DEPRECATED] password for the database to use for the bus - can be overwritten using RENTERD_DB_PASSWORD environment variable")
-	flag.StringVar(&depBusRemotePassword, "bus.apiPassword", "", "[DEPRECATED] API password for remote bus service - can be overwritten using RENTERD_BUS_API_PASSWORD environment variable")
-	flag.StringVar(&depBusRemoteAddr, "bus.remoteAddr", "", "[DEPRECATED] URL of remote bus service - can be overwritten using RENTERD_BUS_REMOTE_ADDR environment variable")
-	flag.StringVar(&depWorkerRemotePassStr, "worker.apiPassword", "", "[DEPRECATED] API password for remote worker service")
-	flag.StringVar(&depWorkerRemoteAddrsStr, "worker.remoteAddrs", "", "[DEPRECATED] URL of remote worker service(s). Multiple addresses can be provided by separating them with a semicolon. Can be overwritten using the RENTERD_WORKER_REMOTE_ADDRS environment variable")
-
-	for _, flag := range []struct {
-		input    string
-		name     string
-		env      string
-		insecure bool
-	}{
-		{depDBPassword, "db.password", "RENTERD_DB_PASSWORD", true},
-		{depBusRemotePassword, "bus.apiPassword", "RENTERD_BUS_API_PASSWORD", true},
-		{depBusRemoteAddr, "bus.remoteAddr", "RENTERD_BUS_REMOTE_ADDR", false},
-		{depWorkerRemotePassStr, "worker.apiPassword", "RENTERD_WORKER_API_PASSWORDS", true},
-		{depWorkerRemoteAddrsStr, "worker.remoteAddrs", "RENTERD_WORKER_REMOTE_ADDRS", false},
-	} {
-		if flag.input != "" {
-			if flag.insecure {
-				log.Printf("WARNING: usage of CLI flag '%s' is considered insecure and will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
-			} else {
-				log.Printf("WARNING: CLI flag '%s' will be deprecated in v1.0.0, please use the environment variable '%s' instead\n", flag.name, flag.env)
-			}
-		}
-	}
-
-	if depDBPassword != "" {
-		cfg.Database.MySQL.Password = depDBPassword
-	}
-	if depBusRemotePassword != "" {
-		cfg.Bus.RemotePassword = depBusRemotePassword
-	}
-	if depBusRemoteAddr != "" {
-		cfg.Bus.RemoteAddr = depBusRemoteAddr
-	}
-
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
@@ -295,6 +251,7 @@ func main() {
 	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
 	flag.StringVar(&cfg.Worker.ID, "worker.id", cfg.Worker.ID, "Unique ID for worker (overrides with RENTERD_WORKER_ID)")
 	flag.DurationVar(&cfg.Worker.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", cfg.Worker.DownloadOverdriveTimeout, "Timeout for overdriving slab downloads")
+	flag.Uint64Var(&cfg.Worker.UploadMaxMemory, "worker.uploadMaxMemory", cfg.Worker.UploadMaxMemory, "Max amount of RAM the worker allocates for slabs when uploading (overrides with RENTERD_WORKER_UPLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.UploadMaxOverdrive, "worker.uploadMaxOverdrive", cfg.Worker.UploadMaxOverdrive, "Max overdrive workers for uploads")
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
@@ -353,11 +310,14 @@ func main() {
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
+	var depWorkerRemotePassStr string
+	var depWorkerRemoteAddrsStr string
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
+	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
@@ -591,6 +551,17 @@ func main() {
 		} else if as.V4Keypairs == nil {
 			as.V4Keypairs = make(map[string]string)
 		}
+
+		// S3 key pair validation was broken at one point, we need to remove the
+		// invalid key pairs here to ensure we don't fail when we update the
+		// setting below.
+		for k, v := range as.V4Keypairs {
+			if err := (api.S3AuthenticationSettings{V4Keypairs: map[string]string{k: v}}).Validate(); err != nil {
+				logger.Sugar().Infof("removing invalid S3 keypair for AccessKeyID %s, reason: %v", k, err)
+				delete(as.V4Keypairs, k)
+			}
+		}
+
 		// merge keys
 		for k, v := range cfg.S3.KeypairsV4 {
 			as.V4Keypairs[k] = v

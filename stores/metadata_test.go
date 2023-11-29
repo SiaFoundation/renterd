@@ -3283,7 +3283,17 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
-	_, _, err = ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	ps, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add it to an object to prevent it from getting pruned.
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, "", "", object.Object{
+		Key:          object.GenerateEncryptionKey(),
+		Slabs:        nil,
+		PartialSlabs: ps,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3769,8 +3779,8 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// assert it's validity is within expected bounds
-		min := now.Add(refreshHealthMinHealthValidity)
-		max := now.Add(refreshHealthMaxHealthValidity)
+		min := now.Add(refreshHealthMinHealthValidity).Add(-time.Second) // avoid NDF
+		max := now.Add(refreshHealthMaxHealthValidity).Add(time.Second)  // avoid NDF
 		validUntil := time.Unix(slab.HealthValidUntil, 0)
 		if !(min.Before(validUntil) && max.After(validUntil)) {
 			t.Fatal("valid until not in boundaries", min, max, validUntil, now)
