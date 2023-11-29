@@ -76,7 +76,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Info("performing contract pruning")
 
 	// fetch prunable data
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	res, err := c.ap.bus.PrunableData(ctx)
 	cancel()
 
