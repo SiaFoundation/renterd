@@ -20,7 +20,7 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 	values.Set("n", fmt.Sprint(n))
 	values.Set("interval", api.DurationMS(interval).String())
 	if opts.ContractID != (types.FileContractID{}) {
-		values.Set("fcid", opts.ContractID.String())
+		values.Set("contractID", opts.ContractID.String())
 	}
 	if opts.HostKey != (types.PublicKey{}) {
 		values.Set("hostKey", opts.HostKey.String())

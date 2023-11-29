@@ -2027,9 +2027,9 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	switch key := jc.PathParam("key"); key {
 	case api.MetricContract:
 		var opts api.ContractMetricsQueryOpts
-		if jc.DecodeForm("fcid", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("host", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
 			return
 		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
 			return
