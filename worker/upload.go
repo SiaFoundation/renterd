@@ -572,7 +572,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	respChan := make(chan slabUploadResponse)
 
 	// channel to notify main thread of the number of slabs to wait for
-	numSlabsChan := make(chan int)
+	numSlabsChan := make(chan int, 1)
 
 	// prepare slab size
 	size := int64(up.rs.MinShards) * rhpv2.SectorSize
@@ -598,35 +598,33 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 			data := make([]byte, size)
 			length, err := io.ReadFull(io.LimitReader(cr, size), data)
 			if err == io.EOF {
-				if slabIndex == 0 {
-					mem.Release()
-					return
-				}
-				numSlabs := slabIndex
-				if partialSlab != nil {
-					numSlabs-- // don't wait on partial slab
-				}
 				mem.Release()
+
 				// no more data to upload, notify main thread of the number of
 				// slabs to wait for
+				numSlabs := slabIndex
+				if partialSlab != nil && slabIndex > 0 {
+					numSlabs-- // don't wait on partial slab
+				}
 				numSlabsChan <- numSlabs
 				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				mem.Release()
+
+				// unexpected error, notify main thread
 				select {
 				case respChan <- slabUploadResponse{err: err}:
-					// notify main thread
 				case <-stopCtx.Done():
 				}
 				return
-			}
-			if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
-				// If uploadPacking is true, we return the partial slab without
+			} else if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
+				mem.Release()
+
+				// uploadPacking is true, we return the partial slab without
 				// uploading.
 				partialSlab = data[:length]
-				mem.Release() // trigger next iteration
 			} else {
-				// Otherwise we upload it.
+				// regular upload
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
 					u.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mem)
 					mem.Release()
