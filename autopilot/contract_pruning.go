@@ -28,8 +28,8 @@ type (
 		fcid    types.FileContractID
 		hk      types.PublicKey
 		version string
+		size    api.ContractSize
 
-		prunable  uint64
 		pruned    uint64
 		remaining uint64
 		duration  time.Duration
@@ -41,7 +41,7 @@ type (
 )
 
 func (pr pruneResult) String() string {
-	msg := fmt.Sprintf("contract %v, prunable %d bytes, pruned %d bytes, remaining %d bytes, elapsed %v, host version %v", pr.fcid, pr.prunable, pr.pruned, pr.remaining, pr.duration, pr.version)
+	msg := fmt.Sprintf("contract %v, size %d bytes, prunable %d bytes, pruned %d bytes, remaining %d bytes, elapsed %v, host version %v", pr.fcid, pr.size.Size, pr.size.Prunable, pr.pruned, pr.remaining, pr.duration, pr.version)
 	if pr.err != nil {
 		msg += fmt.Sprintf(", err: %v", pr.err)
 	}
@@ -133,7 +133,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			fmt.Printf("DEBUG PJ: contract %v has %d bytes to prune\n", contract.ID, contract.Prunable)
 
 			// prune contract
-			result := c.pruneContract(w, contract.ID)
+			result := c.pruneContract(w, contract)
 			fmt.Printf("DEBUG PJ: res %+v", result)
 			if result.err != nil {
 				c.logger.Error(result)
@@ -166,27 +166,29 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Info(metrics)
 }
 
-func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
+func (c *contractor) pruneContract(w Worker, contract api.ContractPrunableData) pruneResult {
 	// create a sane timeout
 	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 2*timeoutPruneContract)
 	defer cancel()
 
 	// fetch the host
-	host, contract, err := c.hostForContract(ctx, fcid)
+	host, _, err := c.hostForContract(ctx, contract.ID)
 	if err != nil {
 		return pruneResult{
-			fcid: fcid,
+			size: contract.ContractSize,
+			fcid: contract.ID,
 			err:  err,
 		}
 	}
 
 	// prune the contract
 	start := time.Now()
-	prunable, pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
+	pruned, remaining, err := w.RHPPruneContract(ctx, contract.ID, timeoutPruneContract)
 	if err != nil && pruned == 0 {
 		return pruneResult{
-			fcid:    fcid,
-			hk:      contract.HostKey,
+			size:    contract.ContractSize,
+			fcid:    contract.ID,
+			hk:      host.PublicKey,
 			version: host.Settings.Version,
 			err:     err,
 		}
@@ -197,11 +199,11 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	return pruneResult{
 		ts: start,
 
-		fcid:    fcid,
-		hk:      contract.HostKey,
+		fcid:    contract.ID,
+		hk:      host.PublicKey,
 		version: host.Settings.Version,
+		size:    contract.ContractSize,
 
-		prunable:  prunable,
 		pruned:    pruned,
 		remaining: remaining,
 		duration:  time.Since(start),

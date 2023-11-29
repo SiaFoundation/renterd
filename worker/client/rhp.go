@@ -65,7 +65,7 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 }
 
 // RHPPruneContract prunes deleted sectors from the contract with given id.
-func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (prunable, pruned, remaining uint64, err error) {
+func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error) {
 	var res api.RHPPruneContractResponse
 	if err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", contractID), api.RHPPruneContractRequest{
 		Timeout: api.DurationMS(timeout),
@@ -75,7 +75,6 @@ func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileCont
 		err = errors.New(res.Error)
 	}
 
-	prunable = res.Prunable
 	pruned = res.Pruned
 	remaining = res.Remaining
 	return

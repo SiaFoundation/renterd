@@ -670,7 +670,6 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	}
 
 	res := api.RHPPruneContractResponse{
-		Prunable:  size.Prunable,
 		Pruned:    pruned,
 		Remaining: remaining,
 	}
