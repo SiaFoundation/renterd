@@ -1925,7 +1925,7 @@ LIMIT ?
 			// create temp table from the health query since we will reuse it
 			if err := tx.Exec("DROP TABLE IF EXISTS src").Error; err != nil {
 				return err
-			} else if err = tx.Exec("CREATE TEMP TABLE src AS ?", healthQuery).Error; err != nil {
+			} else if err = tx.Exec("CREATE TEMPORARY TABLE src AS ?", healthQuery).Error; err != nil {
 				return err
 			}
 
