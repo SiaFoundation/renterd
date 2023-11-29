@@ -649,11 +649,12 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	// Number of objects.
 	var objInfo struct {
 		NumObjects       uint64
+		MinHealth        float64
 		TotalObjectsSize uint64
 	}
 	err := s.db.
 		Model(&dbObject{}).
-		Select("COUNT(*) AS NumObjects, SUM(size) AS TotalObjectsSize").
+		Select("COUNT(*) AS NumObjects, COALESCE(Min(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
 		Scan(&objInfo).
 		Error
 	if err != nil {
@@ -692,6 +693,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	}
 
 	return api.ObjectsStatsResponse{
+		MinHealth:         objInfo.MinHealth,
 		NumObjects:        objInfo.NumObjects,
 		TotalObjectsSize:  objInfo.TotalObjectsSize,
 		TotalSectorsSize:  totalSectors * rhpv2.SectorSize,
