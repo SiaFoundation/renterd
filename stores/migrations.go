@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.sia.tech/renterd/api"
@@ -394,7 +395,20 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 
 func performMigration00001_contract_prune_metrics(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info("performing migration 00001_contract_prune_metrics")
-	if err := txn.Migrator().AutoMigrate(&dbContractPruneMetric{}); err != nil {
+	if err := txn.Table("contract_prunes").Migrator().AutoMigrate(&struct {
+		ID        uint `gorm:"primarykey"`
+		CreatedAt time.Time
+
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
+
+		FCID        fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
+		Host        publicKey      `gorm:"index;size:32;NOT NULL"`
+		HostVersion string         `gorm:"index"`
+
+		Pruned    unsigned64    `gorm:"index;NOT NULL"`
+		Remaining unsigned64    `gorm:"index;NOT NULL"`
+		Duration  time.Duration `gorm:"index;NOT NULL"`
+	}{}); err != nil {
 		return err
 	}
 	logger.Info("migration 00001_contract_prune_metrics complete")
