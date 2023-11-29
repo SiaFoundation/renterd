@@ -168,8 +168,9 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	buffers := append([]*SlabBuffer{}, mgr.incompleteBuffers[gid]...)
 	mgr.mu.Unlock()
 
-	// Find a buffer to use. We use at most 1 existing buffer + 1 new buffer to
-	// avoid splitting the data over too many slabs.
+	// Find a buffer to use. We use at most 1 existing buffer + either 1 buffer
+	// that can fit the remainder of the data or 1 new buffer to avoid splitting
+	// the data over too many slabs.
 	var slab object.PartialSlab
 	var slabs []object.PartialSlab
 	var err error
