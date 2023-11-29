@@ -1,13 +1,11 @@
 package stores
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -176,16 +174,20 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	var slabs []object.PartialSlab
 	var err error
 	var usedBuffers []*SlabBuffer
+	var mustFit bool
 	for _, buffer := range buffers {
 		var used bool
-		slab, data, used, err = buffer.recordAppend(data)
+		slab, data, used, err = buffer.recordAppend(data, mustFit)
 		if err != nil {
 			return nil, 0, err
 		}
 		if used {
 			usedBuffers = append(usedBuffers, buffer)
 			slabs = append(slabs, slab)
-			break
+			mustFit = true // make sure the next buffer can contain the remainder
+		}
+		if len(data) == 0 {
+			break // done
 		}
 	}
 
@@ -199,11 +201,12 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		if err != nil {
 			return nil, 0, err
 		}
-		slab, data, _, err = sb.recordAppend(data)
+		var used bool
+		slab, data, used, err = sb.recordAppend(data, true)
 		if err != nil {
 			return nil, 0, err
 		}
-		if len(data) > 0 {
+		if len(data) > 0 || !used {
 			panic("remaining data after creating new buffer")
 		}
 		usedBuffers = append(usedBuffers, sb)
@@ -353,183 +356,6 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 	return sbs
 }
 
-func (mgr *SlabBufferManager) tryPruneBuffer(b *SlabBuffer, set uint, minShards, totalShards uint8) (pruned bool, err error) {
-	// sanity check
-	if b.lockedUntil.Before(time.Now()) {
-		return false, errors.New("buffer is not locked")
-	}
-
-	// note: we don't lock the buffer since we don't update it and instead only
-	// copy it
-	var slices []dbSlice
-	if err := mgr.s.db.Model(&dbSlice{}).
-		Joins("INNER JOIN slabs sla ON sla.id = slices.db_slab_id").
-		Where("sla.db_buffered_slab_id", b.dbID).
-		Order("offset ASC").
-		Order("length ASC").
-		Find(&slices).
-		Error; err != nil {
-		return false, err
-	}
-
-	type gap struct {
-		start  uint32
-		length uint32
-	}
-
-	// loop through the slices and search for gaps by looking at their offsets
-	// and lengths. Then adjust the offsets of the slices to fill the gaps.
-	var shift uint32
-	var gaps []gap
-	var currentEnd uint32
-	for i := range slices {
-		// adjust the shift if a gap is encountered
-		if slices[i].Offset > currentEnd {
-			shift += slices[i].Offset - currentEnd
-			gaps = append(gaps, gap{
-				start:  currentEnd,
-				length: slices[i].Offset - currentEnd,
-			})
-		}
-		// adjust the currentEnd
-		if end := slices[i].Offset + slices[i].Length; end > currentEnd {
-			currentEnd = end
-		}
-		// adjust the slice offset
-		slices[i].Offset -= shift
-	}
-
-	// get the new size of the buffer
-	newSize := int64(0)
-	if len(slices) > 0 {
-		newSize = int64(slices[len(slices)-1].Offset + slices[len(slices)-1].Length)
-	}
-
-	// if the end of the buffer after pruning is above the threshold, we don't
-	// prune.
-	if int64(newSize) >= b.maxSize-mgr.bufferedSlabCompletionThreshold {
-		return false, nil
-	}
-
-	// prune the actual data
-	srcPath := filepath.Join(mgr.dir, b.filename)
-	src, err := os.Open(srcPath)
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		err = errors.Join(err, src.Close())
-	}()
-
-	var currentOffset uint32
-	prunedData := bytes.NewBuffer(make([]byte, 0, newSize))
-	for _, gap := range gaps {
-		if currentOffset < gap.start {
-			// copy data up to the gap
-			if _, err := io.CopyN(prunedData, src, int64(gap.start-currentOffset)); err != nil {
-				return false, err
-			}
-			currentOffset = gap.start
-		}
-		// skip the gap
-		if _, err := io.CopyN(io.Discard, src, int64(gap.length)); err != nil {
-			return false, err
-		}
-		currentOffset += gap.length
-	}
-	// copy the remaining data
-	if _, err := io.CopyN(prunedData, src, newSize-int64(prunedData.Len())); err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-
-	// create a new buffer from the pruned data
-	prunedBuf, err := createSlabBuffer(mgr.s.db, set, mgr.dir, minShards, totalShards)
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		if err != nil {
-			err = errors.Join(prunedBuf.file.Close(), os.Remove(filepath.Join(mgr.dir, prunedBuf.filename)))
-		}
-	}()
-	_, data, _, err := prunedBuf.recordAppend(prunedData.Bytes())
-	if err != nil {
-		return false, err
-	} else if len(data) > 0 {
-		panic("remaining data after creating new buffer for pruned data")
-	}
-	syncSize, complete, err := prunedBuf.commitAppend(mgr.bufferedSlabCompletionThreshold)
-	if err != nil {
-		return false, err
-	}
-
-	// now that the data is safely on disk, update the db
-	err = mgr.s.db.Transaction(func(tx *gorm.DB) error {
-		if err := prunedBuf.saveSize(tx, syncSize, complete); err != nil {
-			return err
-		}
-		// update slices with new offset, length and slab
-		for _, slice := range slices {
-			if err := tx.Model(&dbSlice{}).
-				Where("id", slice.ID).
-				Updates(map[string]interface{}{
-					"db_slab_id": prunedBuf.dbID,
-					"offset":     slice.Offset,
-					"length":     slice.Length,
-				}).Error; err != nil {
-				return err
-			}
-		}
-		// delete the old buffer and its slab from the db.
-		if err := tx.Model(&dbSlab{}).Where("db_buffered_slab_id", b.dbID).
-			Delete(&dbSlab{}).Error; err != nil {
-			return err
-		} else if err := tx.Delete(&dbBufferedSlab{Model: Model{ID: b.dbID}}).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-
-	// update in-memory state
-	prunedBuf.updateDBSize(syncSize)
-
-	// swap out the old buffer for the new one
-	mgr.mu.Lock()
-	gid := bufferGID(minShards, totalShards, uint32(set))
-
-	// add the new buffer to either the list of complete ones or incomplete ones
-	// and the key map
-	if complete {
-		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], prunedBuf)
-	} else {
-		mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], prunedBuf)
-	}
-	mgr.buffersByKey[prunedBuf.slabKey.String()] = prunedBuf
-
-	// remove the old buffer from the list of complete buffers and the key map
-	for i, buffer := range mgr.completeBuffers[gid] {
-		if buffer.dbID == b.dbID {
-			mgr.completeBuffers[gid][i] = mgr.completeBuffers[gid][len(mgr.completeBuffers[gid])-1]
-			mgr.completeBuffers[gid] = mgr.completeBuffers[gid][:len(mgr.completeBuffers[gid])-1]
-			break
-		}
-	}
-	delete(mgr.buffersByKey, b.slabKey.String())
-	mgr.mu.Unlock()
-
-	// delete the old buffer from disk.
-	if err := b.file.Close(); err != nil {
-		mgr.s.logger.Errorf("failed to close old buffer after pruning %v: %v", b.filename, err)
-	} else if err := os.Remove(srcPath); err != nil {
-		mgr.s.logger.Errorf("failed to remove old buffer after pruning %v: %v", b.filename, err)
-	}
-
-	return true, nil
-}
-
 func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
 	mgr.mu.Lock()
 	buffers := mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]
@@ -537,11 +363,6 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 
 	for _, buffer := range buffers {
 		if !buffer.acquireForUpload(lockingDuration) {
-			continue
-		} else if pruned, err := mgr.tryPruneBuffer(buffer, set, minShards, totalShards); err != nil {
-			mgr.s.logger.Warnf("failed to prune buffer %v: %w", buffer.filename, err)
-			continue
-		} else if pruned {
 			continue
 		}
 		data := make([]byte, buffer.size)
@@ -612,7 +433,7 @@ func (buf *SlabBuffer) acquireForUpload(lockingDuration time.Duration) bool {
 	return true
 }
 
-func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bool, error) {
+func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.PartialSlab, []byte, bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	remainingSpace := buf.maxSize - buf.size
@@ -630,7 +451,7 @@ func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bo
 		}
 		buf.size += int64(len(data))
 		return slab, nil, true, nil
-	} else {
+	} else if !mustFit {
 		_, err := buf.file.WriteAt(data[:remainingSpace], buf.size)
 		if err != nil {
 			return object.PartialSlab{}, nil, true, err
@@ -642,6 +463,8 @@ func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bo
 		}
 		buf.size += remainingSpace
 		return slab, data[remainingSpace:], true, nil
+	} else {
+		return object.PartialSlab{}, data, false, nil
 	}
 }
 
