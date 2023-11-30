@@ -1,12 +1,14 @@
 package wallet_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -25,6 +27,9 @@ func (s *mockStore) UnspentSiacoinElements(bool) ([]wallet.SiacoinElement, error
 }
 func (s *mockStore) Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error) {
 	return nil, nil
+}
+func (s *mockStore) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
+	return nil
 }
 
 var cs = consensus.State{

@@ -71,6 +71,19 @@ func (c *Client) ContractSetMetrics(ctx context.Context, start time.Time, n uint
 	return resp, nil
 }
 
+func (c *Client) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	values := url.Values{}
+	values.Set("start", api.TimeRFC3339(start).String())
+	values.Set("n", fmt.Sprint(n))
+	values.Set("interval", api.DurationMS(interval).String())
+
+	var resp []api.WalletMetric
+	if err := c.metric(ctx, api.MetricWallet, values, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (c *Client) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
 	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/metric/%s", api.MetricContractSetChurn), api.ContractSetChurnMetricRequestPUT{
 		Metrics: metrics,

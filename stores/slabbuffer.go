@@ -168,22 +168,25 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	buffers := append([]*SlabBuffer{}, mgr.incompleteBuffers[gid]...)
 	mgr.mu.Unlock()
 
-	// Find a buffer to use. We use at most 1 existing buffer + 1 new buffer to
-	// avoid splitting the data over too many slabs.
+	// Find a buffer to use. We use at most 1 existing buffer + either 1 buffer
+	// that can fit the remainder of the data or 1 new buffer to avoid splitting
+	// the data over too many slabs.
 	var slab object.PartialSlab
 	var slabs []object.PartialSlab
 	var err error
 	var usedBuffers []*SlabBuffer
 	for _, buffer := range buffers {
 		var used bool
-		slab, data, used, err = buffer.recordAppend(data)
+		slab, data, used, err = buffer.recordAppend(data, len(usedBuffers) > 0)
 		if err != nil {
 			return nil, 0, err
 		}
 		if used {
 			usedBuffers = append(usedBuffers, buffer)
 			slabs = append(slabs, slab)
-			break
+		}
+		if len(data) == 0 {
+			break // done
 		}
 	}
 
@@ -191,17 +194,18 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	if len(data) > 0 {
 		var sb *SlabBuffer
 		err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
-			sb, err = createSlabBuffer(mgr.s.db, contractSet, mgr.dir, minShards, totalShards)
+			sb, err = createSlabBuffer(tx, contractSet, mgr.dir, minShards, totalShards)
 			return err
 		})
 		if err != nil {
 			return nil, 0, err
 		}
-		slab, data, _, err = sb.recordAppend(data)
+		var used bool
+		slab, data, used, err = sb.recordAppend(data, true)
 		if err != nil {
 			return nil, 0, err
 		}
-		if len(data) > 0 {
+		if len(data) > 0 || !used {
 			panic("remaining data after creating new buffer")
 		}
 		usedBuffers = append(usedBuffers, sb)
@@ -240,10 +244,6 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 
 	// Update size field in db. Since multiple threads might be trying to do
 	// this, the operation is associative.
-	maxOp := "GREATEST"
-	if isSQLite(mgr.s.db) {
-		maxOp = "MAX"
-	}
 	for _, update := range dbUpdates {
 		err = func() error {
 			// Make sure only one thread can update the entry for a buffer at a
@@ -258,16 +258,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 				return nil
 			}
 			err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
-				if err := tx.Model(&dbBufferedSlab{}).
-					Where("id", update.buffer.dbID).
-					Updates(map[string]interface{}{
-						"complete": gorm.Expr("complete OR ?", update.complete),
-						"size":     gorm.Expr(maxOp+"(size, ?)", update.syncSize),
-					}).
-					Error; err != nil {
-					return fmt.Errorf("failed to update buffered slab %v in database: %v", update.buffer.dbID, err)
-				}
-				return nil
+				return update.buffer.saveSize(tx, update.syncSize, update.complete)
 			})
 			if err != nil {
 				return err
@@ -283,6 +274,23 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	}
 
 	return slabs, mgr.BufferSize(gid), nil
+}
+
+func (b *SlabBuffer) saveSize(tx *gorm.DB, size int64, complete bool) error {
+	maxOp := "GREATEST"
+	if isSQLite(tx) {
+		maxOp = "MAX"
+	}
+	if err := tx.Model(&dbBufferedSlab{}).
+		Where("id", b.dbID).
+		Updates(map[string]interface{}{
+			"complete": gorm.Expr("complete OR ?", complete),
+			"size":     gorm.Expr(maxOp+"(size, ?)", size),
+		}).
+		Error; err != nil {
+		return fmt.Errorf("failed to update buffered slab %v in database: %v", b.dbID, err)
+	}
+	return nil
 }
 
 func (mgr *SlabBufferManager) BufferSize(gid bufferGroupID) (total int64) {
@@ -424,7 +432,7 @@ func (buf *SlabBuffer) acquireForUpload(lockingDuration time.Duration) bool {
 	return true
 }
 
-func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bool, error) {
+func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.PartialSlab, []byte, bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	remainingSpace := buf.maxSize - buf.size
@@ -442,7 +450,7 @@ func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bo
 		}
 		buf.size += int64(len(data))
 		return slab, nil, true, nil
-	} else {
+	} else if !mustFit {
 		_, err := buf.file.WriteAt(data[:remainingSpace], buf.size)
 		if err != nil {
 			return object.PartialSlab{}, nil, true, err
@@ -454,6 +462,8 @@ func (buf *SlabBuffer) recordAppend(data []byte) (object.PartialSlab, []byte, bo
 		}
 		buf.size += remainingSpace
 		return slab, data[remainingSpace:], true, nil
+	} else {
+		return object.PartialSlab{}, data, false, nil
 	}
 }
 
@@ -505,6 +515,15 @@ func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferG
 	}
 }
 
+func bufferFilename(contractSetID uint, minShards, totalShards uint8) string {
+	identifier := frand.Entropy256()
+	return fmt.Sprintf("%v-%v-%v-%v", contractSetID, minShards, totalShards, hex.EncodeToString(identifier[:]))
+}
+
+func bufferedSlabSize(minShards uint8) int {
+	return int(rhpv2.SectorSize) * int(minShards)
+}
+
 func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
 	ec := object.GenerateEncryptionKey()
 	key, err := ec.MarshalBinary()
@@ -512,8 +531,7 @@ func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, to
 		return nil, err
 	}
 	// Create a new buffer and slab.
-	identifier := frand.Entropy256()
-	fileName := fmt.Sprintf("%v-%v-%v-%v", contractSetID, minShards, totalShards, hex.EncodeToString(identifier[:]))
+	fileName := bufferFilename(contractSetID, minShards, totalShards)
 	file, err := os.Create(filepath.Join(dir, fileName))
 	if err != nil {
 		return nil, err
@@ -538,8 +556,4 @@ func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, to
 		maxSize:  int64(bufferedSlabSize(minShards)),
 		file:     file,
 	}, err
-}
-
-func bufferedSlabSize(minShards uint8) int {
-	return int(rhpv2.SectorSize) * int(minShards)
 }

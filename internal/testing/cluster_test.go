@@ -716,6 +716,9 @@ func TestUploadDownloadExtended(t *testing.T) {
 	if info.NumObjects != 4 {
 		t.Error("wrong number of objects", info.NumObjects, 4)
 	}
+	if info.MinHealth != 1 {
+		t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+	}
 
 	// download the data
 	for _, data := range [][]byte{small, large} {
@@ -1689,6 +1692,9 @@ func TestUploadPacking(t *testing.T) {
 		if os.TotalUploadedSize != uint64(totalRedundantSize) {
 			return fmt.Errorf("expected totalUploadedSize of %v, got %v", totalRedundantSize, os.TotalUploadedSize)
 		}
+		if os.MinHealth != 1 {
+			return fmt.Errorf("expected minHealth of 1, got %v", os.MinHealth)
+		}
 		return nil
 	})
 
@@ -1846,6 +1852,9 @@ func TestSlabBufferStats(t *testing.T) {
 		if os.TotalUploadedSize != 0 {
 			return fmt.Errorf("expected totalUploadedSize of 0, got %d", os.TotalUploadedSize)
 		}
+		if os.MinHealth != 1 {
+			t.Errorf("expected minHealth of 1, got %v", os.MinHealth)
+		}
 		return nil
 	})
 
@@ -1897,6 +1906,9 @@ func TestSlabBufferStats(t *testing.T) {
 		}
 		if os.TotalUploadedSize != 3*rhpv2.SectorSize {
 			return fmt.Errorf("expected totalUploadedSize of %d, got %d", 3*rhpv2.SectorSize, os.TotalUploadedSize)
+		}
+		if os.MinHealth != 1 {
+			t.Errorf("expected minHealth of 1, got %v", os.MinHealth)
 		}
 		return nil
 	})

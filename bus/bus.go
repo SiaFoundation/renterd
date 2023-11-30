@@ -201,6 +201,8 @@ type (
 
 		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+
+		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 	}
 )
 
@@ -2059,6 +2061,14 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			jc.Encode(metrics)
 			return
 		}
+	case api.MetricWallet:
+		var opts api.WalletMetricsQueryOpts
+		if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get wallet metrics", err) != nil {
+			return
+		} else {
+			jc.Encode(metrics)
+			return
+		}
 	default:
 		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
@@ -2073,6 +2083,8 @@ func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 		return b.mtrcs.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
 	case api.MetricContractSetChurn:
 		return b.mtrcs.ContractSetChurnMetrics(ctx, start, n, interval, opts.(api.ContractSetChurnMetricsQueryOpts))
+	case api.MetricWallet:
+		return b.mtrcs.WalletMetrics(ctx, start, n, interval, opts.(api.WalletMetricsQueryOpts))
 	}
 	return nil, nil
 }

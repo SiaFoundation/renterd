@@ -136,6 +136,12 @@ func (c *Client) ID(ctx context.Context) (id string, err error) {
 	return
 }
 
+// Memory requests the /memory endpoint.
+func (c *Client) Memory(ctx context.Context) (resp api.MemoryResponse, err error) {
+	err = c.c.WithContext(ctx).GET("/memory", &resp)
+	return
+}
+
 // MigrateSlab migrates the specified slab.
 func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) (res api.MigrateSlabResponse, err error) {
 	values := make(url.Values)
