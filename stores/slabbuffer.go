@@ -149,7 +149,7 @@ func (mgr *SlabBufferManager) Close() error {
 	return errors.Join(errs...)
 }
 
-func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.PartialSlab, int64, error) {
+func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.SlabSlice, int64, error) {
 	gid := bufferGID(minShards, totalShards, uint32(contractSet))
 
 	// Sanity check input.
@@ -171,8 +171,8 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// Find a buffer to use. We use at most 1 existing buffer + either 1 buffer
 	// that can fit the remainder of the data or 1 new buffer to avoid splitting
 	// the data over too many slabs.
-	var slab object.PartialSlab
-	var slabs []object.PartialSlab
+	var slab object.SlabSlice
+	var slabs []object.SlabSlice
 	var err error
 	var usedBuffers []*SlabBuffer
 	for _, buffer := range buffers {
@@ -432,19 +432,22 @@ func (buf *SlabBuffer) acquireForUpload(lockingDuration time.Duration) bool {
 	return true
 }
 
-func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.PartialSlab, []byte, bool, error) {
+func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.SlabSlice, []byte, bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	remainingSpace := buf.maxSize - buf.size
 	if remainingSpace == 0 {
-		return object.PartialSlab{}, data, false, nil
+		return object.SlabSlice{}, data, false, nil
 	} else if int64(len(data)) <= remainingSpace {
 		_, err := buf.file.WriteAt(data, buf.size)
 		if err != nil {
-			return object.PartialSlab{}, nil, true, err
+			return object.SlabSlice{}, nil, true, err
 		}
-		slab := object.PartialSlab{
-			Key:    buf.slabKey,
+		slab := object.SlabSlice{
+			Slab: object.Slab{
+				Health: 1,
+				Key:    buf.slabKey,
+			},
 			Offset: uint32(buf.size),
 			Length: uint32(len(data)),
 		}
@@ -453,17 +456,20 @@ func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.PartialSl
 	} else if !mustFit {
 		_, err := buf.file.WriteAt(data[:remainingSpace], buf.size)
 		if err != nil {
-			return object.PartialSlab{}, nil, true, err
+			return object.SlabSlice{}, nil, true, err
 		}
-		slab := object.PartialSlab{
-			Key:    buf.slabKey,
+		slab := object.SlabSlice{
+			Slab: object.Slab{
+				Health: 1,
+				Key:    buf.slabKey,
+			},
 			Offset: uint32(buf.size),
 			Length: uint32(remainingSpace),
 		}
 		buf.size += remainingSpace
 		return slab, data[remainingSpace:], true, nil
 	} else {
-		return object.PartialSlab{}, data, false, nil
+		return object.SlabSlice{}, data, false, nil
 	}
 }
 

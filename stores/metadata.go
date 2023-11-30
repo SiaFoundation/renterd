@@ -412,16 +412,13 @@ func (raw rawObject) convert() (api.Object, error) {
 	// filter out slabs without slab ID and buffered slabs - this is expected
 	// for an empty object or objects that end with a partial slab.
 	var filtered rawObject
-	var partialSlabSectors []*rawObjectSector
 	minHealth := math.MaxFloat64
-	for i, sector := range raw {
-		if sector.SlabID != 0 && !sector.SlabBuffered {
+	for _, sector := range raw {
+		if sector.SlabID != 0 {
 			filtered = append(filtered, sector)
 			if sector.SlabHealth < minHealth {
 				minHealth = sector.SlabHealth
 			}
-		} else if sector.SlabBuffered {
-			partialSlabSectors = append(partialSlabSectors, &raw[i])
 		}
 	}
 
@@ -462,20 +459,6 @@ func (raw rawObject) convert() (api.Object, error) {
 		}
 	}
 
-	// fetch a potential partial slab from the buffer.
-	var partialSlabs []object.PartialSlab
-	for _, pss := range partialSlabSectors {
-		var key object.EncryptionKey
-		if err := key.UnmarshalBinary(pss.SlabKey); err != nil {
-			return api.Object{}, err
-		}
-		partialSlabs = append(partialSlabs, object.PartialSlab{
-			Key:    key,
-			Offset: pss.SliceOffset,
-			Length: pss.SliceLength,
-		})
-	}
-
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
@@ -487,9 +470,8 @@ func (raw rawObject) convert() (api.Object, error) {
 			Size:     raw[0].ObjectSize,
 		},
 		Object: object.Object{
-			Key:          key,
-			PartialSlabs: partialSlabs,
-			Slabs:        slabs,
+			Key:   key,
+			Slabs: slabs,
 		},
 	}, nil
 }
@@ -1486,7 +1468,7 @@ func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey
 	return s.slabBufferMgr.FetchPartialSlab(ctx, ec, offset, length)
 }
 
-func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.PartialSlab, int64, error) {
+func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.SlabSlice, int64, error) {
 	var contractSetID uint
 	if err := s.db.Raw("SELECT id FROM contract_sets WHERE name = ?", contractSet).Scan(&contractSetID).Error; err != nil {
 		return nil, 0, err
@@ -1712,7 +1694,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// Create all slices. This also creates any missing slabs or sectors.
-		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs, o.PartialSlabs); err != nil {
+		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
 		return nil
@@ -2004,12 +1986,18 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice, partialSlabs []object.PartialSlab) error {
+func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
 	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
 		return fmt.Errorf("either objID or multiPartID must be set")
 	}
 
+	var partialSlabs []object.SlabSlice
 	for i, ss := range slices {
+		// Handle the partial slabs later.
+		if ss.IsPartial() {
+			partialSlabs = append(partialSlabs, ss)
+			continue
+		}
 		// Create Slab if it doesn't exist yet.
 		slabKey, err := ss.Key.MarshalBinary()
 		if err != nil {

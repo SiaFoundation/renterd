@@ -34,8 +34,8 @@ type (
 
 type (
 	AddPartialSlabResponse struct {
-		SlabBufferMaxSizeSoftReached bool                 `json:"slabBufferMaxSizeSoftReached"`
-		Slabs                        []object.PartialSlab `json:"slabs"`
+		SlabBufferMaxSizeSoftReached bool               `json:"slabBufferMaxSizeSoftReached"`
+		Slabs                        []object.SlabSlice `json:"slabs"`
 	}
 
 	// MigrationSlabsRequest is the request type for the /slabs/migration endpoint.

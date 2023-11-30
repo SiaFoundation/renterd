@@ -85,7 +85,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	// collect all used contracts
 	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
 	for _, s := range slices {
@@ -131,9 +131,6 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 		for _, slice := range slices {
 			size += uint64(slice.Length)
 		}
-		for _, ps := range partialSlabs {
-			size += uint64(ps.Length)
-		}
 		// Create a new part.
 		part := dbMultipartPart{
 			Etag:                eTag,
@@ -146,7 +143,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 			return fmt.Errorf("failed to create part: %w", err)
 		}
 		// Create the slices.
-		err = s.createSlices(tx, nil, &part.ID, cs.ID, contracts, slices, partialSlabs)
+		err = s.createSlices(tx, nil, &part.ID, cs.ID, contracts, slices)
 		if err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}

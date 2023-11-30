@@ -58,7 +58,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		etag := hex.EncodeToString(frand.Bytes(16))
-		err = ss.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, []object.SlabSlice{}, partialSlabs)
+		err = ss.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, partialSlabs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,10 +132,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatalf("expected object size to be %v, got %v", totalSize, obj.Size)
 	} else if obj.TotalSize() != totalSize {
 		for _, f := range obj.Slabs {
-			fmt.Println("slice", f.Length)
-		}
-		for _, f := range obj.PartialSlabs {
-			fmt.Println("ps", f.Length)
+			fmt.Println("slice", f.Length, f.IsPartial())
 		}
 		t.Fatalf("expected object total size to be %v, got %v", totalSize, obj.TotalSize())
 	}
