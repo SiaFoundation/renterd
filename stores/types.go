@@ -75,7 +75,7 @@ func (h *hash256) Scan(value interface{}) error {
 		return errors.New(fmt.Sprint("failed to unmarshal hash256 value:", value))
 	}
 	if len(bytes) != len(hash256{}) {
-		return fmt.Errorf("failed to unmarshal hash256 value due to insufficient bytes %v < %v: %v", len(bytes), len(fileContractID{}), value)
+		return fmt.Errorf("failed to unmarshal hash256 value due to invalid number of bytes %v != %v: %v", len(bytes), len(fileContractID{}), value)
 	}
 	*h = *(*hash256)(bytes)
 	return nil
@@ -97,8 +97,8 @@ func (fcid *fileContractID) Scan(value interface{}) error {
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal fcid value:", value))
 	}
-	if len(bytes) < len(fileContractID{}) {
-		return fmt.Errorf("failed to unmarshal fcid value due to insufficient bytes %v < %v: %v", len(bytes), len(fileContractID{}), value)
+	if len(bytes) != len(fileContractID{}) {
+		return fmt.Errorf("failed to unmarshal fcid value due to invalid number of bytes %v != %v: %v", len(bytes), len(fileContractID{}), value)
 	}
 	*fcid = *(*fileContractID)(bytes)
 	return nil
@@ -147,8 +147,8 @@ func (pk *publicKey) Scan(value interface{}) error {
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal publicKey value:", value))
 	}
-	if len(bytes) < len(types.PublicKey{}) {
-		return fmt.Errorf("failed to unmarshal publicKey value due to insufficient bytes %v < %v: %v", len(bytes), len(publicKey{}), value)
+	if len(bytes) != len(types.PublicKey{}) {
+		return fmt.Errorf("failed to unmarshal publicKey value due invalid number of bytes %v != %v: %v", len(bytes), len(publicKey{}), value)
 	}
 	*pk = *(*publicKey)(bytes)
 	return nil
