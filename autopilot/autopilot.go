@@ -246,16 +246,6 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// block until the autopilot is funded
-			if funded, interrupted := ap.blockUntilFunded(ap.ticker.C); !funded {
-				if interrupted {
-					close(tickerFired)
-					return
-				}
-				ap.logger.Error("autopilot stopped before wallet got funded")
-				return
-			}
-
 			// Trace/Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ctx)
 			if err != nil {
@@ -402,39 +392,6 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 	}
 }
 
-func (ap *Autopilot) blockUntilFunded(interrupt <-chan time.Time) (funded, interrupted bool) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	var once sync.Once
-
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		wallet, err := ap.bus.Wallet(ctx)
-		funded := !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero()
-		cancel()
-
-		// if an error occurred, or if we're not funded, we continue
-		if err != nil {
-			ap.logger.Errorf("failed to get wallet info, err: %v", err)
-		} else if wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
-			once.Do(func() { ap.logger.Info("autopilot is waiting for wallet to get funded...") })
-		}
-
-		if err != nil || !funded {
-			select {
-			case <-ap.stopChan:
-				return false, false
-			case <-interrupt:
-				return false, true
-			case <-ticker.C:
-				continue
-			}
-		}
-		return true, false
-	}
-}
-
 func (ap *Autopilot) blockUntilOnline() (online bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -450,7 +407,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 		if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
-			once.Do(func() { ap.logger.Info("autopilot is waiting to come online...") })
+			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
 		}
 
 		if err != nil || !online {
