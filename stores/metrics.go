@@ -360,7 +360,7 @@ func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, start time.Time, n 
 func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
 	err = s.findPeriods(s.dbMetrics, &metrics, start, n, interval)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
+		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
 	}
 	return
 }
