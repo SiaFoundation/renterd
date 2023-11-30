@@ -177,7 +177,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	var usedBuffers []*SlabBuffer
 	for _, buffer := range buffers {
 		var used bool
-		slab, data, used, err = buffer.recordAppend(data, len(usedBuffers) > 0)
+		slab, data, used, err = buffer.recordAppend(data, len(usedBuffers) > 0, minShards)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -201,7 +201,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 			return nil, 0, err
 		}
 		var used bool
-		slab, data, used, err = sb.recordAppend(data, true)
+		slab, data, used, err = sb.recordAppend(data, true, minShards)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -432,7 +432,7 @@ func (buf *SlabBuffer) acquireForUpload(lockingDuration time.Duration) bool {
 	return true
 }
 
-func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.SlabSlice, []byte, bool, error) {
+func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool, minShards uint8) (object.SlabSlice, []byte, bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	remainingSpace := buf.maxSize - buf.size
@@ -444,10 +444,7 @@ func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.SlabSlice
 			return object.SlabSlice{}, nil, true, err
 		}
 		slab := object.SlabSlice{
-			Slab: object.Slab{
-				Health: 1,
-				Key:    buf.slabKey,
-			},
+			Slab:   object.NewPartialSlab(buf.slabKey, minShards),
 			Offset: uint32(buf.size),
 			Length: uint32(len(data)),
 		}
@@ -459,10 +456,7 @@ func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool) (object.SlabSlice
 			return object.SlabSlice{}, nil, true, err
 		}
 		slab := object.SlabSlice{
-			Slab: object.Slab{
-				Health: 1,
-				Key:    buf.slabKey,
-			},
+			Slab:   object.NewPartialSlab(buf.slabKey, minShards),
 			Offset: uint32(buf.size),
 			Length: uint32(remainingSpace),
 		}

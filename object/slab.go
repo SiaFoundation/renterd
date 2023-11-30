@@ -40,6 +40,16 @@ func NewSlab(minShards uint8) Slab {
 	}
 }
 
+// NewPartialSlab returns a new partial slab.
+func NewPartialSlab(ec EncryptionKey, minShards uint8) Slab {
+	return Slab{
+		Health:    1,
+		Key:       ec,
+		MinShards: minShards,
+		Shards:    nil,
+	}
+}
+
 // ContractsFromShards is a helper to extract all contracts used by a set of
 // shards.
 func ContractsFromShards(shards []Sector) map[types.PublicKey]map[types.FileContractID]struct{} {

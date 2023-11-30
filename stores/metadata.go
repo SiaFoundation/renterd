@@ -186,6 +186,7 @@ type (
 	rawObjectSector struct {
 		// object
 		ObjectID       uint
+		ObjectIndex    uint64
 		ObjectKey      []byte
 		ObjectName     string
 		ObjectSize     int64
@@ -428,9 +429,6 @@ func (raw rawObject) convert() (api.Object, error) {
 		var start int
 		// create a helper function to add a slab and update the state
 		addSlab := func(end int) error {
-			if filtered[start].SlabBuffered {
-				return nil // ignore partial slabs
-			}
 			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
 				return err
 			} else {
@@ -442,12 +440,10 @@ func (raw rawObject) convert() (api.Object, error) {
 
 		curr := filtered[0]
 		for j, sector := range filtered {
-			if sector.SectorIndex == 0 {
+			if sector.ObjectIndex == 0 {
 				return api.Object{}, api.ErrObjectCorrupted
 			}
-			if sector.SlabID != curr.SlabID ||
-				sector.SliceOffset != curr.SliceOffset ||
-				sector.SliceLength != curr.SliceLength {
+			if sector.ObjectIndex != curr.ObjectIndex {
 				if err := addSlab(j); err != nil {
 					return api.Object{}, err
 				}
@@ -479,11 +475,22 @@ func (raw rawObject) convert() (api.Object, error) {
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	if len(raw) == 0 {
 		return object.SlabSlice{}, errors.New("no sectors found")
+	} else if raw[0].SlabBuffered && len(raw) != 1 {
+		return object.SlabSlice{}, errors.New("buffered slab with multiple sectors")
 	}
 
 	// unmarshal key
 	if err := slice.Slab.Key.UnmarshalBinary(raw[0].SlabKey); err != nil {
 		return object.SlabSlice{}, err
+	}
+
+	// handle partial slab
+	if raw[0].SlabBuffered {
+		slice.Offset = raw[0].SliceOffset
+		slice.Length = raw[0].SliceLength
+		slice.Slab.MinShards = raw[0].SlabMinShards
+		slice.Slab.Health = raw[0].SlabHealth
+		return
 	}
 
 	// hydrate all sectors
@@ -2104,7 +2111,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.health as ObjectHealth, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.health as ObjectHealth, sli.object_index as ObjectIndex, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
