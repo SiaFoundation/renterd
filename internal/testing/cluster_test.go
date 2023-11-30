@@ -2294,3 +2294,69 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero ListSpending")
 	}
 }
+
+func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
+	defer cluster.Shutdown()
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	w := cluster.Worker
+	slabSize := testRedundancySettings.SlabSizeNoRedundancy()
+	tt := cluster.tt
+
+	// Start a new multipart upload.
+	objPath := "/foo"
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	tt.OK(err)
+	if mpr.UploadID == "" {
+		t.Fatal("expected non-empty upload ID")
+	}
+
+	// Upload a part that is a partial slab.
+	part1Data := frand.Bytes(int(slabSize / 4))
+	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{})
+	tt.OK(err)
+
+	// Upload a part that is exactly a full slab.
+	part2Data := frand.Bytes(int(slabSize))
+	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{})
+	tt.OK(err)
+
+	// Upload another part the same size as the first one.
+	part3Data := frand.Bytes(int(slabSize / 4))
+	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{})
+	tt.OK(err)
+
+	// Finish the upload.
+	tt.OKAll(b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
+		{
+			PartNumber: 1,
+			ETag:       resp1.ETag,
+		},
+		{
+			PartNumber: 2,
+			ETag:       resp2.ETag,
+		},
+		{
+			PartNumber: 3,
+			ETag:       resp3.ETag,
+		},
+	}))
+
+	// Download the object and verify its integrity.
+	dst := new(bytes.Buffer)
+	expectedData := append(part1Data, append(part2Data, part3Data...)...)
+	tt.OK(w.DownloadObject(context.Background(), dst, api.DefaultBucketName, objPath, api.DownloadObjectOptions{}))
+	if dst.Len() != len(expectedData) {
+		t.Fatalf("expected %v bytes, got %v", len(expectedData), dst.Len())
+	} else if !bytes.Equal(dst.Bytes(), expectedData) {
+		t.Fatal("unexpected data")
+	}
+}
