@@ -82,5 +82,4 @@ func TestMetrics(t *testing.T) {
 
 		return nil
 	})
-
 }
