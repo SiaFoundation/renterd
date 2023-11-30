@@ -53,7 +53,7 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 		isErr(pr.err, errInvalidHandshakeSignature) ||
 		isErr(pr.err, errNoRouteToHost) ||
 		isErr(pr.err, errNoSuchHost)); shouldTrigger {
-		alert = newContractPruningFailedAlert(pr.hk, pr.fcid, pr.err)
+		alert = newContractPruningFailedAlert(pr.hk, pr.version, pr.fcid, pr.err)
 	}
 	return
 }
@@ -76,7 +76,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Info("performing contract pruning")
 
 	// fetch prunable data
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 5*time.Minute)
 	res, err := c.ap.bus.PrunableData(ctx)
 	cancel()
 
@@ -130,7 +130,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 
 func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
 	// create a sane timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*timeoutPruneContract)
+	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 2*timeoutPruneContract)
 	defer cancel()
 
 	// fetch the host

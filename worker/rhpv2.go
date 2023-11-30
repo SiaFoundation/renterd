@@ -48,6 +48,10 @@ var (
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
 	ErrContractFinalized = errors.New("contract cannot be revised further")
+
+	// ErrNoSectorsToPrune is returned when we try to prune a contract that has
+	// no sectors to prune.
+	ErrNoSectorsToPrune = errors.New("no sectors to prune")
 )
 
 // A HostErrorSet is a collection of errors from various hosts.
@@ -300,7 +304,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 					indices = append(indices, uint64(i))
 				}
 				if len(indices) == 0 {
-					return fmt.Errorf("no sectors to prune, database holds %d (%d pending), contract contains %d", len(want)+len(pending), len(pending), len(got))
+					return fmt.Errorf("%w: database holds %d (%d pending), contract contains %d", ErrNoSectorsToPrune, len(want)+len(pending), len(pending), len(got))
 				}
 
 				// delete the roots from the contract

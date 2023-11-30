@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 type Bus interface {
@@ -90,22 +89,6 @@ type Bus interface {
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)
 }
 
-type Worker interface {
-	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
-	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
-	ID(ctx context.Context) (string, error)
-	MigrateSlab(ctx context.Context, s object.Slab, set string) (api.MigrateSlabResponse, error)
-
-	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
-	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error)
-	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (hostdb.HostPriceTable, error)
-	RHPPruneContract(ctx context.Context, fcid types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error)
-	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, newCollateral types.Currency, windowSize uint64) (rhpv2.ContractRevision, []types.Transaction, error)
-	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
-	RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (err error)
-}
-
 type Autopilot struct {
 	id string
 
@@ -125,11 +108,12 @@ type Autopilot struct {
 	stateMu sync.Mutex
 	state   state
 
-	startStopMu sync.Mutex
-	startTime   time.Time
-	stopChan    chan struct{}
-	ticker      *time.Ticker
-	triggerChan chan bool
+	startStopMu   sync.Mutex
+	startTime     time.Time
+	stopCtx       context.Context
+	stopCtxCancel context.CancelFunc
+	ticker        *time.Ticker
+	triggerChan   chan bool
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -141,38 +125,6 @@ type state struct {
 	address types.Address
 	fee     types.Currency
 	period  uint64
-}
-
-// workerPool contains all workers known to the autopilot.  Users can call
-// withWorker to execute a function with a worker of the pool or withWorkers to
-// sequentially run a function on all workers.  Due to the RWMutex this will
-// never block during normal operations. However, during an update of the
-// workerpool, this allows us to guarantee that all workers have finished their
-// tasks by calling  acquiring an exclusive lock on the pool before updating it.
-// That way the caller who updated the pool can rely on the autopilot not using
-// a worker that was removed during the update after the update operation
-// returns.
-type workerPool struct {
-	mu      sync.RWMutex
-	workers []Worker
-}
-
-func newWorkerPool(workers []Worker) *workerPool {
-	return &workerPool{
-		workers: workers,
-	}
-}
-
-func (wp *workerPool) withWorker(workerFunc func(Worker)) {
-	wp.mu.RLock()
-	defer wp.mu.RUnlock()
-	workerFunc(wp.workers[frand.Intn(len(wp.workers))])
-}
-
-func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
-	wp.mu.RLock()
-	defer wp.mu.RUnlock()
-	workerFunc(wp.workers)
 }
 
 // Handler returns an HTTP handler that serves the autopilot api.
@@ -194,7 +146,7 @@ func (ap *Autopilot) Run() error {
 		return errors.New("already running")
 	}
 	ap.startTime = time.Now()
-	ap.stopChan = make(chan struct{})
+	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
 	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
@@ -303,7 +255,7 @@ func (ap *Autopilot) Run() error {
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
 					ap.logger.Debug("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.stopChan)
+					go ap.a.refillWorkersAccountsLoop(ap.stopCtx)
 				})
 			} else {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
@@ -317,7 +269,7 @@ func (ap *Autopilot) Run() error {
 		})
 
 		select {
-		case <-ap.stopChan:
+		case <-ap.stopCtx.Done():
 			return nil
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
@@ -335,7 +287,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 
 	if ap.isRunning() {
 		ap.ticker.Stop()
-		close(ap.stopChan)
+		ap.stopCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
 		ap.startTime = time.Time{}
@@ -384,7 +336,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 
 	for {
 		// try and fetch the config
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		_, err := ap.bus.Autopilot(ctx, ap.id)
 		cancel()
 
@@ -396,7 +348,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 		}
 		if err != nil {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return false, false
 			case <-interrupt:
 				return false, true
@@ -415,7 +367,7 @@ func (ap *Autopilot) blockUntilFunded(interrupt <-chan time.Time) (funded, inter
 	var once sync.Once
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		wallet, err := ap.bus.Wallet(ctx)
 		funded := !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero()
 		cancel()
@@ -429,7 +381,7 @@ func (ap *Autopilot) blockUntilFunded(interrupt <-chan time.Time) (funded, inter
 
 		if err != nil || !funded {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return false, false
 			case <-interrupt:
 				return false, true
@@ -448,7 +400,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 	var once sync.Once
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		peers, err := ap.bus.SyncerPeers(ctx)
 		online = len(peers) > 0
 		cancel()
@@ -461,7 +413,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 
 		if err != nil || !online {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return
 			case <-ticker.C:
 				continue
@@ -479,7 +431,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 
 	for {
 		// try and fetch consensus
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
 		synced = cs.Synced
 		cancel()
@@ -494,7 +446,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		if err != nil || !synced {
 			blocked = true
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return
 			case <-interrupt:
 				interrupted = true
@@ -586,7 +538,7 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 
 func (ap *Autopilot) isStopped() bool {
 	select {
-	case <-ap.stopChan:
+	case <-ap.stopCtx.Done():
 		return true
 	default:
 		return false

@@ -516,7 +516,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	)
 	hasChanged := len(added)+len(removed) > 0
 	if hasChanged {
-		c.ap.RegisterAlert(context.Background(), newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
+		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
 	}
 	return hasChanged
 }

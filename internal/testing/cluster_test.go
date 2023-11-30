@@ -1160,8 +1160,7 @@ func TestParallelDownload(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  testRedundancySettings.TotalShards,
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
+		hosts: testRedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
