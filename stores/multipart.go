@@ -396,9 +396,9 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			return fmt.Errorf("failed to create object: %w", err)
 		}
 
-		// Assign the right object id and unassign the multipart upload.  Also
-		// clear the ID to make sure new slices are created with IDs in
-		// ascending order.
+		// Assign the right object id and unassign the multipart upload. Also
+		// set the right object_index to make sure the slices are sorted
+		// correctly when retrieving the object later.
 		for i := range slices {
 			err = tx.Model(&dbSlice{}).
 				Where("id", slices[i].ID).
