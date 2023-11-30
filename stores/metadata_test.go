@@ -3474,10 +3474,11 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// create a healthy slab with one sector that is uploaded to all contracts.
+	key, _ := object.GenerateEncryptionKey().MarshalBinary()
 	root := types.Hash256{1, 2, 3}
 	slab := dbSlab{
 		DBContractSetID:  1,
-		Key:              []byte(object.GenerateEncryptionKey().String()),
+		Key:              key,
 		Health:           1.0,
 		HealthValidUntil: time.Now().Add(time.Hour).Unix(),
 		TotalShards:      1,
