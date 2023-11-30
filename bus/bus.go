@@ -497,7 +497,7 @@ func (b *bus) bucketHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("name", &name) != nil {
 		return
 	} else if name == "" {
-		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
+		jc.Error(errors.New("parameter 'name' is required"), http.StatusBadRequest)
 		return
 	}
 	bucket, err := b.ms.Bucket(jc.Request.Context(), name)
@@ -935,7 +935,7 @@ func (b *bus) contractsSetsHandlerGET(jc jape.Context) {
 func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
-		jc.Error(errors.New("param 'set' can not be empty"), http.StatusBadRequest)
+		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
 	} else if jc.Decode(&contractIds) == nil {
 		jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds))
 	}
@@ -1491,15 +1491,15 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 		return
 	}
 	if minShards <= 0 || totalShards <= minShards {
-		jc.Error(errors.New("min_shards must be positive and total_shards must be greater than min_shards"), http.StatusBadRequest)
+		jc.Error(errors.New("minShards must be positive and totalShards must be greater than minShards"), http.StatusBadRequest)
 		return
 	}
 	if totalShards > math.MaxUint8 {
-		jc.Error(fmt.Errorf("total_shards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("totalShards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
 		return
 	}
 	if contractSet == "" {
-		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
+		jc.Error(errors.New("parameter 'contractSet' is required"), http.StatusBadRequest)
 		return
 	}
 	data, err := io.ReadAll(jc.Request.Body)
@@ -1530,7 +1530,7 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
 	if key == "" {
-		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
 
@@ -1557,7 +1557,7 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	key := jc.PathParam("key")
 	if key == "" {
-		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
 
@@ -1608,7 +1608,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	key := jc.PathParam("key")
 	if key == "" {
-		jc.Error(errors.New("param 'key' can not be empty"), http.StatusBadRequest)
+		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
 	jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key))
@@ -2013,13 +2013,26 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 func (b *bus) metricsHandlerGET(jc jape.Context) {
 	// parse mandatory query parameters
 	var start time.Time
-	var n uint64
-	var interval time.Duration
 	if jc.DecodeForm("start", (*api.TimeRFC3339)(&start)) != nil {
 		return
-	} else if jc.DecodeForm("n", &n) != nil {
+	} else if start.IsZero() {
+		jc.Error(errors.New("parameter 'start' is required"), http.StatusBadRequest)
 		return
-	} else if jc.DecodeForm("interval", (*api.DurationMS)(&interval)) != nil {
+	}
+
+	var n uint64
+	if jc.DecodeForm("n", &n) != nil {
+		return
+	} else if n == 0 {
+		jc.Error(errors.New("parameter 'n' is required"), http.StatusBadRequest)
+		return
+	}
+
+	var interval time.Duration
+	if jc.DecodeForm("interval", (*api.DurationMS)(&interval)) != nil {
+		return
+	} else if interval == 0 {
+		jc.Error(errors.New("parameter 'interval' is required"), http.StatusBadRequest)
 		return
 	}
 
