@@ -2311,7 +2311,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	slabSize := testRedundancySettings.SlabSizeNoRedundancy()
 	tt := cluster.tt
 
-	// Start a new multipart upload.
+	// start a new multipart upload. We upload the parts in reverse order
 	objPath := "/foo"
 	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
 	tt.OK(err)
@@ -2319,22 +2319,28 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		t.Fatal("expected non-empty upload ID")
 	}
 
-	// Upload a part that is a partial slab.
-	part1Data := frand.Bytes(int(slabSize / 4))
-	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{})
+	// upload a part that is a partial slab
+	part3Data := bytes.Repeat([]byte{3}, int(slabSize)/4)
+	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{
+		EncryptionOffset: int(slabSize + slabSize/4),
+	})
 	tt.OK(err)
 
-	// Upload a part that is exactly a full slab.
-	part2Data := frand.Bytes(int(slabSize))
-	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{})
+	// upload a part that is exactly a full slab
+	part2Data := bytes.Repeat([]byte{2}, int(slabSize))
+	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{
+		EncryptionOffset: int(slabSize / 4),
+	})
 	tt.OK(err)
 
-	// Upload another part the same size as the first one.
-	part3Data := frand.Bytes(int(slabSize / 4))
-	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{})
+	// upload another part the same size as the first one
+	part1Data := bytes.Repeat([]byte{1}, int(slabSize)/4)
+	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{
+		EncryptionOffset: 0,
+	})
 	tt.OK(err)
 
-	// Finish the upload.
+	// finish the upload
 	tt.OKAll(b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
 		{
 			PartNumber: 1,
@@ -2350,7 +2356,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		},
 	}))
 
-	// Download the object and verify its integrity.
+	// download the object and verify its integrity
 	dst := new(bytes.Buffer)
 	tt.OK(w.DownloadObject(context.Background(), dst, api.DefaultBucketName, objPath, api.DownloadObjectOptions{}))
 	expectedData := append(part1Data, append(part2Data, part3Data...)...)
