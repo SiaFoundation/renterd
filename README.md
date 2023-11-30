@@ -9,49 +9,60 @@
 to cater to both casual users seeking straightforward data storage and
 developers requiring a robust API for building apps on Sia.
 
-The high-level "autopilot" feature automates host scanning and ranking, contract
-management, and file migration. While most users will find this useful, those
-desiring full control can disable autopilot via a CLI flag. Importantly,
-autopilot is built atop the public `renterd` HTTP API, enabling easy
-customization or language porting.
+`renterd` is now in beta, achieving feature parity with siad. It introduces an
+enhanced web UI and the autopilot functionality. While it mirrors most siad
+capabilities, renterd does not support backwards compatibility with siad
+metadata. Consequently, files uploaded via siad cannot currently be migrated to
+renterd. Our immediate focus is on refining renterd to enhance its stability,
+scalability, and performance, ensuring it serves as a robust foundation for new
+Sia applications.
 
-`renterd` also ships with an embedded web UI, rather than yet another Electron
-app bundle. Developers and power users that don't want the UI can compile
-`renterd` without it, reducing bloat and simplifying the build process.
+## Useful Links
 
-## Current Status
-
-`renterd` is in beta, featuring most functionalities from `siad`. It introduces
-a new and improved web UI, as well as the autopilot functionality, but lacks
-backwards compatibility with `siad` metadata. This means that, while `renterd`
-is already capable of serving as the backbone for new Sia applications, there is
-currently no way to migrate files uploaded through `siad` to `renterd`. Going
-forward, our immediate priority is continuously improving `renterd` to become
-more stable, scalable and performant.
-
-## Documentation
-
-`renterd` and its API are documentend [here](https://api.sia.tech/renterd).
+API documentation can be found [here](https://api.sia.tech/renterd).<br>
+Setup guides are available on our [website](https://docs.sia.tech/renting/setting-up-renterd).<br>
+A project roadmap is available on [GitHub](https://github.com/orgs/SiaFoundation/projects/5).
 
 ## Docker Support
 
 `renterd` includes a `Dockerfile` which can be used for building and running
 renterd within a docker container. For the time being it is provided as-is
 without any compatibility guarantees as it will change over time and be extended
-with more configuration options.
+with more configuration options. The image can also be pulled from
+ghcr.io/siafoundation/renterd.
+
+### Docker Compose
+
+```docker
+version: "3.9"
+services:
+  renterd:
+    image: ghcr.io/siafoundation/renterd:master-zen
+    environment:
+      - RENTERD_SEED=put your seed here
+      - RENTERD_API_PASSWORD=test
+    ports:
+      - 9880:9880
+      - 9881:9881
+      - 7070:7070
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    stop_grace_period: 5m
+```
 
 ### Build Image
 
 From within the root of the repo run the following command to build an image of
 `renterd` tagged `renterd`.
 
-### Production
+#### Mainnet
 
 ```sh
 docker build -t renterd:master -f ./docker/Dockerfile .
 ```
 
-### Testnet
+#### Testnet
 
 ```sh
 docker build --build-arg BUILD_TAGS='netgo testnet' -t renterd:master-zen -f ./docker/Dockerfile .
@@ -62,23 +73,67 @@ docker build --build-arg BUILD_TAGS='netgo testnet' -t renterd:master-zen -f ./d
 Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
 
-### Production
+#### Mainnet
 
 ```bash
 docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp ghcr.io/siafoundation/renterd:master
 ```
 
-### Testnet
+#### Testnet
 
 ```bash
 docker run -d --name renterd-testnet -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9880:9880/tcp -p :9881:9881/tcp ghcr.io/siafoundation/renterd:master-zen
 ```
 
-## Usage Guidelines
+## Architecture
+
+`renterd` distinguishes itself from its predecessor, `siad`, through a unique
+architecture comprised of three main components: the autopilot, the bus, and one
+or more workers.
+
+Instead of adopting another Electron app bundle, `renterd` incorporates an
+embedded web UI. This approach caters to developers and power users who prefer a
+streamlined experience. For those who do not require the UI, `renterd` can be
+compiled without it, which reduces software bloat and simplifies the build
+process.
+
+### Autopilot
+
+The autopilot in `renterd` automates high-level functions like host scanning,
+ranking, and the management of contracts and data. This ensures efficient host
+selection for data storage. While it offers convenience for most users, those
+desiring full control can disable the autopilot via a CLI flag. Remarkably, the
+autopilot is designed over the public `renterd` HTTP API, allowing for
+straightforward customization and language porting.
+
+### Bus
+
+Serving as the central nervous system of `renterd`, the bus handles data
+persistence and connections with Sia's peer-to-peer network. While `renterd`
+defaults to an SQLite database, users have the option to configure it for MySQL
+use. SQLite is the default choice due to its seamless initial experience, but
+switching to MySQL is recommended for enhanced performance.
+
+### Worker(s)
+
+Workers are the direct interface for users, managing tasks such as file
+uploads/downloads and contract handling. They depend on the bus for consistent
+data persistence.
+
+## Usage
+
+`renterd` can be configured in various ways, through the use of a yaml file, CLI
+flags or environment variables. Settings that are configured multiple times will
+be evaluated in this order. Use the `help` command to see an overview of all
+settings.
+
+```sh
+renterd --help
+```
 
 The Web UI streamlines the initial setup and configuration for newcomers.
 However, if manual configuration is necessary, the subsequent sections outline a
-step-by-step guide to achieving a functional renterd instance.
+step-by-step guide to achieving a functional `renterd` instance.
 
 ### Wallet
 
@@ -126,7 +181,9 @@ formed.
 		"defragThreshold": 1000
 	},
 	"hosts": {
-		"ignoreRedundantIPs": false,
+		"allowRedundantIPs": false,
+		"maxDowntimeHours": 1440,
+		"minRecentScanFailures": 20,
 		"scoreOverrides": {}
 	},
 	"contracts": {
@@ -194,6 +251,7 @@ updated using the settings API:
 	"maxRPCPrice": "1000000000000000000000",                      // 1mS per RPC
 	"maxStoragePrice": "631593542824",                            // 3000 SC per TiB per month
 	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TiB
+	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
 	"minAccountExpiry": 86400000000000,                           // 1 day
 	"minMaxCollateral": "10000000000000000000000000",             // at least up to 10 SC per contract
 	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
@@ -203,11 +261,10 @@ updated using the settings API:
 
 ### Blocklist
 
-Unfortunately the Sia blockchain contains a large amount of hosts that announced
-themselves with faulty parameters and/or bad intentions, something which is
-unavoidable of course in a decentralized environment. To make sure the autopilot
-does not have to scan/loop through all ~80.000 hosts on every iteration of the
-loop, we added a blocklist.
+Unfortunately the Sia blockchain is subject to hosts that announced themselves
+with faulty parameters and/or bad intentions, something which is unavoidable of
+course in a decentralized environment. We added a blocklist to give users the
+power to block hosts by IP or domain.
 
 - `GET /api/bus/hosts/blocklist`
 - `PUT /api/bus/hosts/blocklist`

@@ -450,7 +450,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 		if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
-			once.Do(func() { ap.logger.Info("autopilot is waiting to come online...") })
+			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
 		}
 
 		if err != nil || !online {
