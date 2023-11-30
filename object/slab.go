@@ -29,7 +29,7 @@ type Slab struct {
 }
 
 func (s Slab) IsPartial() bool {
-	return s.MinShards == 0 && len(s.Shards) == 0
+	return len(s.Shards) == 0
 }
 
 // NewSlab returns a new slab for the shards.

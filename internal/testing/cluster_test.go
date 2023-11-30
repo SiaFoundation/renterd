@@ -2352,11 +2352,12 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// Download the object and verify its integrity.
 	dst := new(bytes.Buffer)
-	expectedData := append(part1Data, append(part2Data, part3Data...)...)
 	tt.OK(w.DownloadObject(context.Background(), dst, api.DefaultBucketName, objPath, api.DownloadObjectOptions{}))
-	if dst.Len() != len(expectedData) {
-		t.Fatalf("expected %v bytes, got %v", len(expectedData), dst.Len())
-	} else if !bytes.Equal(dst.Bytes(), expectedData) {
+	expectedData := append(part1Data, append(part2Data, part3Data...)...)
+	receivedData := dst.Bytes()
+	if len(receivedData) != len(expectedData) {
+		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))
+	} else if !bytes.Equal(receivedData, expectedData) {
 		t.Fatal("unexpected data")
 	}
 }
