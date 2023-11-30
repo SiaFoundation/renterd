@@ -3290,7 +3290,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
-	ps, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	slabs, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3298,7 +3298,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	// add it to an object to prevent it from getting pruned.
 	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, "", "", object.Object{
 		Key:   object.GenerateEncryptionKey(),
-		Slabs: ps,
+		Slabs: slabs,
 	})
 	if err != nil {
 		t.Fatal(err)

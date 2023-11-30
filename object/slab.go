@@ -24,7 +24,7 @@ type Sector struct {
 type Slab struct {
 	Health    float64       `json:"health"`
 	Key       EncryptionKey `json:"key"`
-	MinShards uint8         `json:"minShards,omitempty"`
+	MinShards uint8         `json:"minShards"`
 	Shards    []Sector      `json:"shards,omitempty"`
 }
 

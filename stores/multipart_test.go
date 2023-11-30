@@ -3,7 +3,6 @@ package stores
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 	"testing"
 	"time"
 
@@ -132,7 +131,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatalf("expected object size to be %v, got %v", totalSize, obj.Size)
 	} else if obj.TotalSize() != totalSize {
 		for _, f := range obj.Slabs {
-			fmt.Println("slice", f.Length, f.IsPartial())
+			t.Log("slice", f.Length, f.IsPartial())
 		}
 		t.Fatalf("expected object total size to be %v, got %v", totalSize, obj.TotalSize())
 	}
