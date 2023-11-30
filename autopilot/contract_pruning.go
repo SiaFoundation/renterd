@@ -28,7 +28,6 @@ type (
 		fcid    types.FileContractID
 		hk      types.PublicKey
 		version string
-		size    api.ContractSize
 
 		pruned    uint64
 		remaining uint64
@@ -41,7 +40,7 @@ type (
 )
 
 func (pr pruneResult) String() string {
-	msg := fmt.Sprintf("contract %v, size %d bytes, prunable %d bytes, pruned %d bytes, remaining %d bytes, elapsed %v, host version %v", pr.fcid, pr.size.Size, pr.size.Prunable, pr.pruned, pr.remaining, pr.duration, pr.version)
+	msg := fmt.Sprintf("contract %v, pruned %d bytes, remaining %d bytes, elapsed %v, host version %v", pr.fcid, pr.pruned, pr.remaining, pr.duration, pr.version)
 	if pr.err != nil {
 		msg += fmt.Sprintf(", err: %v", pr.err)
 	}

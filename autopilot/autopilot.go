@@ -321,7 +321,6 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 		ap.ticker.Stop()
 		ap.stopCtxCancel()
 		close(ap.triggerChan)
-		ap.stopCtxCancel()
 		ap.wg.Wait()
 		ap.startTime = time.Time{}
 	}
@@ -567,12 +566,6 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 	}
 	ap.stateMu.Unlock()
 	return nil
-}
-
-func (ap *Autopilot) withTimeout(fn func(ctx context.Context), timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(ap.stopCtx, timeout)
-	defer cancel()
-	fn(ctx)
 }
 
 func (ap *Autopilot) isStopped() bool {
