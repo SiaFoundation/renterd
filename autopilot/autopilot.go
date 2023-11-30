@@ -113,7 +113,6 @@ type Autopilot struct {
 	startTime     time.Time
 	stopCtx       context.Context
 	stopCtxCancel context.CancelFunc
-	stopChan      chan struct{}
 	ticker        *time.Ticker
 	triggerChan   chan bool
 }
@@ -178,9 +177,8 @@ func (ap *Autopilot) Run() error {
 		ap.startStopMu.Unlock()
 		return errors.New("already running")
 	}
-	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
 	ap.startTime = time.Now()
-	ap.stopChan = make(chan struct{})
+	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
 	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
@@ -289,7 +287,7 @@ func (ap *Autopilot) Run() error {
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
 					ap.logger.Debug("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.stopChan)
+					go ap.a.refillWorkersAccountsLoop(ap.stopCtx)
 				})
 			} else {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
@@ -303,7 +301,7 @@ func (ap *Autopilot) Run() error {
 		})
 
 		select {
-		case <-ap.stopChan:
+		case <-ap.stopCtx.Done():
 			return nil
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
@@ -321,7 +319,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 
 	if ap.isRunning() {
 		ap.ticker.Stop()
-		close(ap.stopChan)
+		ap.stopCtxCancel()
 		close(ap.triggerChan)
 		ap.stopCtxCancel()
 		ap.wg.Wait()
@@ -371,7 +369,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 
 	for {
 		// try and fetch the config
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		_, err := ap.bus.Autopilot(ctx, ap.id)
 		cancel()
 
@@ -383,7 +381,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 		}
 		if err != nil {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return false, false
 			case <-interrupt:
 				return false, true
@@ -402,7 +400,7 @@ func (ap *Autopilot) blockUntilFunded(interrupt <-chan time.Time) (funded, inter
 	var once sync.Once
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		wallet, err := ap.bus.Wallet(ctx)
 		funded := !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero()
 		cancel()
@@ -416,7 +414,7 @@ func (ap *Autopilot) blockUntilFunded(interrupt <-chan time.Time) (funded, inter
 
 		if err != nil || !funded {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return false, false
 			case <-interrupt:
 				return false, true
@@ -435,7 +433,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 	var once sync.Once
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		peers, err := ap.bus.SyncerPeers(ctx)
 		online = len(peers) > 0
 		cancel()
@@ -443,12 +441,12 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 		if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
-			once.Do(func() { ap.logger.Info("autopilot is waiting to come online...") })
+			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
 		}
 
 		if err != nil || !online {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return
 			case <-ticker.C:
 				continue
@@ -466,7 +464,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 
 	for {
 		// try and fetch consensus
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
 		synced = cs.Synced
 		cancel()
@@ -481,7 +479,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		if err != nil || !synced {
 			blocked = true
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return
 			case <-interrupt:
 				interrupted = true
@@ -579,7 +577,7 @@ func (ap *Autopilot) withTimeout(fn func(ctx context.Context), timeout time.Dura
 
 func (ap *Autopilot) isStopped() bool {
 	select {
-	case <-ap.stopChan:
+	case <-ap.stopCtx.Done():
 		return true
 	default:
 		return false

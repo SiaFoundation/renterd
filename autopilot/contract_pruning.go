@@ -99,7 +99,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Info("performing contract pruning")
 
 	// fetch prunable data
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 5*time.Minute)
 	res, err := c.ap.bus.PrunableData(ctx)
 	cancel()
 
@@ -130,11 +130,9 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			if contract.Prunable == 0 {
 				continue
 			}
-			fmt.Printf("DEBUG PJ: contract %v has %d bytes to prune\n", contract.ID, contract.Prunable)
 
 			// prune contract
-			result := c.pruneContract(w, contract)
-			fmt.Printf("DEBUG PJ: res %+v", result)
+			result := c.pruneContract(w, contract.ID)
 			if result.err != nil {
 				c.logger.Error(result)
 			} else {
@@ -166,32 +164,22 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Info(metrics)
 }
 
-func (c *contractor) pruneContract(w Worker, contract api.ContractPrunableData) pruneResult {
+func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
 	// create a sane timeout
 	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 2*timeoutPruneContract)
 	defer cancel()
 
 	// fetch the host
-	host, _, err := c.hostForContract(ctx, contract.ID)
+	host, _, err := c.hostForContract(ctx, fcid)
 	if err != nil {
-		return pruneResult{
-			size: contract.ContractSize,
-			fcid: contract.ID,
-			err:  err,
-		}
+		return pruneResult{fcid: fcid, err: err}
 	}
 
 	// prune the contract
 	start := time.Now()
-	pruned, remaining, err := w.RHPPruneContract(ctx, contract.ID, timeoutPruneContract)
+	pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil && pruned == 0 {
-		return pruneResult{
-			size:    contract.ContractSize,
-			fcid:    contract.ID,
-			hk:      host.PublicKey,
-			version: host.Settings.Version,
-			err:     err,
-		}
+		return pruneResult{fcid: fcid, hk: host.PublicKey, version: host.Settings.Version, err: err}
 	} else if err != nil && isErr(err, context.DeadlineExceeded) {
 		err = nil
 	}
@@ -199,10 +187,9 @@ func (c *contractor) pruneContract(w Worker, contract api.ContractPrunableData) 
 	return pruneResult{
 		ts: start,
 
-		fcid:    contract.ID,
+		fcid:    fcid,
 		hk:      host.PublicKey,
 		version: host.Settings.Version,
-		size:    contract.ContractSize,
 
 		pruned:    pruned,
 		remaining: remaining,

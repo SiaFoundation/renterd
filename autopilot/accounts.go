@@ -84,12 +84,12 @@ func (a *accounts) markRefillDone(workerID string, hk types.PublicKey) {
 	delete(a.inProgressRefills, k)
 }
 
-func (a *accounts) refillWorkersAccountsLoop(stopChan <-chan struct{}) {
+func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 	ticker := time.NewTicker(a.refillInterval)
 
 	for {
 		select {
-		case <-stopChan:
+		case <-ctx.Done():
 			return // shutdown
 		case <-ticker.C:
 		}

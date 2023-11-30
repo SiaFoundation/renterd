@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -121,8 +122,11 @@ func TestSectorPruning(t *testing.T) {
 		t.SkipNow()
 	}
 
+	opts := clusterOptsDefault
+	opts.logger = newTestLoggerCustom(zapcore.DebugLevel)
+
 	// create a cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 
 	// add a helper to check whether a root is in a given slice

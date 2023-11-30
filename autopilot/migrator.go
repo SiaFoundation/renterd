@@ -198,7 +198,7 @@ OUTER:
 		start := time.Now()
 		if err := b.RefreshHealth(ctx); err != nil {
 			m.ap.RegisterAlert(ctx, newRefreshHealthFailedAlert(err))
-			m.logger.Errorf("failed to recompute cached health before migration", err)
+			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
 			return
 		}
 		m.logger.Debugf("recomputed slab health in %v", time.Since(start))
@@ -258,7 +258,7 @@ OUTER:
 
 		for i, slab := range toMigrate {
 			select {
-			case <-m.ap.stopChan:
+			case <-m.ap.stopCtx.Done():
 				return
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")

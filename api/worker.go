@@ -51,6 +51,15 @@ type (
 		Error     string     `json:"error,omitempty"`
 	}
 
+	MemoryResponse struct {
+		Upload MemoryStatus `json:"upload"`
+	}
+
+	MemoryStatus struct {
+		Available uint64 `json:"available"`
+		Total     uint64 `json:"total"`
+	}
+
 	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
 	MigrateSlabResponse struct {
 		NumShardsMigrated int    `json:"numShardsMigrated"`

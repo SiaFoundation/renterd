@@ -264,7 +264,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 		cutoff := time.Now().Add(-s.scanMinInterval)
 		for !s.ap.isStopped() && !exhausted {
 			// fetch next batch
-			hosts, err := s.bus.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+			hosts, err := s.bus.HostsForScanning(s.ap.stopCtx, api.HostsForScanningOptions{
 				MaxLastScan: cutoff,
 				Offset:      offset,
 				Limit:       int(s.scanBatchSize),
@@ -286,7 +286,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 			// add batch to scan queue
 			for _, h := range hosts {
 				select {
-				case <-s.ap.stopChan:
+				case <-s.ap.stopCtx.Done():
 					return
 				case reqChan <- scanReq{
 					hostKey: h.PublicKey,

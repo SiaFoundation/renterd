@@ -14,6 +14,7 @@ const (
 	MetricContractSet      = "contractset"
 	MetricContractSetChurn = "churn"
 	MetricContract         = "contract"
+	MetricWallet           = "wallet"
 )
 
 type (
@@ -94,6 +95,16 @@ type (
 		HostKey     types.PublicKey
 		HostVersion string
 	}
+
+	WalletMetric struct {
+		Timestamp time.Time `json:"timestamp"`
+
+		Confirmed   types.Currency `json:"confirmed"`
+		Spendable   types.Currency `json:"spendable"`
+		Unconfirmed types.Currency `json:"unconfirmed"`
+	}
+
+	WalletMetricsQueryOpts struct{}
 )
 
 type (
