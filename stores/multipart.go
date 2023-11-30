@@ -85,7 +85,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	// collect all used contracts
 	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
 	for _, s := range slices {
@@ -131,9 +131,6 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 		for _, slice := range slices {
 			size += uint64(slice.Length)
 		}
-		for _, ps := range partialSlabs {
-			size += uint64(ps.Length)
-		}
 		// Create a new part.
 		part := dbMultipartPart{
 			Etag:                eTag,
@@ -146,7 +143,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 			return fmt.Errorf("failed to create part: %w", err)
 		}
 		// Create the slices.
-		err = s.createSlices(tx, nil, &part.ID, cs.ID, contracts, slices, partialSlabs)
+		err = s.createSlices(tx, nil, &part.ID, cs.ID, contracts, slices)
 		if err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
@@ -399,19 +396,20 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			return fmt.Errorf("failed to create object: %w", err)
 		}
 
-		// Assign the right object id and unassign the multipart upload.  Also
-		// clear the ID to make sure new slices are created with IDs in
-		// ascending order.
+		// Assign the right object id and unassign the multipart upload. Also
+		// set the right object_index to make sure the slices are sorted
+		// correctly when retrieving the object later.
 		for i := range slices {
-			slices[i].ID = 0
-			slices[i].DBObjectID = &obj.ID
-			slices[i].ObjectIndex = uint(i + 1)
-			slices[i].DBMultipartPartID = nil
-		}
-
-		// Save updated slices.
-		if err := tx.CreateInBatches(slices, 100).Error; err != nil {
-			return fmt.Errorf("failed to save slices: %w", err)
+			err = tx.Model(&dbSlice{}).
+				Where("id", slices[i].ID).
+				Updates(map[string]interface{}{
+					"db_object_id":         obj.ID,
+					"object_index":         uint(i + 1),
+					"db_multipart_part_id": nil,
+				}).Error
+			if err != nil {
+				return fmt.Errorf("failed to update slice %v: %w", i, err)
+			}
 		}
 
 		// Delete the multipart upload.

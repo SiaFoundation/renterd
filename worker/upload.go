@@ -261,10 +261,12 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	// add partial slabs
 	var bufferSizeLimitReached bool
 	if len(partialSlabData) > 0 {
-		obj.PartialSlabs, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		var pss []object.SlabSlice
+		pss, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return "", err
 		}
+		obj.Slabs = append(obj.Slabs, pss...)
 	}
 
 	// persist the object
@@ -298,14 +300,16 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	// add parital slabs
 	var bufferSizeLimitReached bool
 	if len(partialSlabData) > 0 {
-		obj.PartialSlabs, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		var pss []object.SlabSlice
+		pss, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return "", err
 		}
+		obj.Slabs = append(obj.Slabs, pss...)
 	}
 
 	// persist the part
-	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, eTag, uploadID, partNumber, obj.Slabs, obj.PartialSlabs)
+	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, eTag, uploadID, partNumber, obj.Slabs)
 	if err != nil {
 		return "", fmt.Errorf("couldn't add multi part: %w", err)
 	}

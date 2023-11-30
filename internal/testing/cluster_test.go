@@ -31,18 +31,12 @@ import (
 	"lukechampine.com/frand"
 )
 
-const (
-	testEtag     = "d34db33f"
-	testMimeType = "application/octet-stream"
-)
-
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.
 func TestNewTestCluster(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
-	w := cluster.Worker
 	tt := cluster.tt
 
 	// Upload packing should be disabled by default.
@@ -51,27 +45,6 @@ func TestNewTestCluster(t *testing.T) {
 	if ups.Enabled {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
-
-	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    []object.Sector{}, // slab without sectors
-				},
-				Offset: 0,
-				Length: 0,
-			},
-		},
-	}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
-	tt.OK(err)
-
-	// Try talking to the worker and request the object.
-	err = w.DeleteObject(context.Background(), api.DefaultBucketName, "foo", api.DeleteObjectOptions{})
-	tt.OK(err)
 
 	// See if autopilot is running by triggering the loop.
 	_, err = cluster.Autopilot.Trigger(false)
@@ -2292,5 +2265,78 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero DeleteSpending")
 	} else if !m.ListSpending.IsZero() {
 		t.Fatal("expected zero ListSpending")
+	}
+}
+
+func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         testRedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
+	defer cluster.Shutdown()
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	w := cluster.Worker
+	slabSize := testRedundancySettings.SlabSizeNoRedundancy()
+	tt := cluster.tt
+
+	// start a new multipart upload. We upload the parts in reverse order
+	objPath := "/foo"
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	tt.OK(err)
+	if mpr.UploadID == "" {
+		t.Fatal("expected non-empty upload ID")
+	}
+
+	// upload a part that is a partial slab
+	part3Data := bytes.Repeat([]byte{3}, int(slabSize)/4)
+	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{
+		EncryptionOffset: int(slabSize + slabSize/4),
+	})
+	tt.OK(err)
+
+	// upload a part that is exactly a full slab
+	part2Data := bytes.Repeat([]byte{2}, int(slabSize))
+	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{
+		EncryptionOffset: int(slabSize / 4),
+	})
+	tt.OK(err)
+
+	// upload another part the same size as the first one
+	part1Data := bytes.Repeat([]byte{1}, int(slabSize)/4)
+	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{
+		EncryptionOffset: 0,
+	})
+	tt.OK(err)
+
+	// finish the upload
+	tt.OKAll(b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
+		{
+			PartNumber: 1,
+			ETag:       resp1.ETag,
+		},
+		{
+			PartNumber: 2,
+			ETag:       resp2.ETag,
+		},
+		{
+			PartNumber: 3,
+			ETag:       resp3.ETag,
+		},
+	}))
+
+	// download the object and verify its integrity
+	dst := new(bytes.Buffer)
+	tt.OK(w.DownloadObject(context.Background(), dst, api.DefaultBucketName, objPath, api.DownloadObjectOptions{}))
+	expectedData := append(part1Data, append(part2Data, part3Data...)...)
+	receivedData := dst.Bytes()
+	if len(receivedData) != len(expectedData) {
+		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))
+	} else if !bytes.Equal(receivedData, expectedData) {
+		t.Fatal("unexpected data")
 	}
 }

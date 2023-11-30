@@ -16,7 +16,7 @@ import (
 )
 
 // AddPartialSlab adds a partial slab to the bus.
-func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error) {
+func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
 	c.c.Custom("POST", "/slabs/partial", nil, &api.AddPartialSlabResponse{})
 	values := url.Values{}
 	values.Set("minShards", fmt.Sprint(minShards))
