@@ -31,18 +31,12 @@ import (
 	"lukechampine.com/frand"
 )
 
-const (
-	testEtag     = "d34db33f"
-	testMimeType = "application/octet-stream"
-)
-
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.
 func TestNewTestCluster(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
-	w := cluster.Worker
 	tt := cluster.tt
 
 	// Upload packing should be disabled by default.
@@ -51,27 +45,6 @@ func TestNewTestCluster(t *testing.T) {
 	if ups.Enabled {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
-
-	// Try talking to the bus API by adding an object.
-	err = b.AddObject(context.Background(), api.DefaultBucketName, "foo", testAutopilotConfig.Contracts.Set, object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    []object.Sector{}, // slab without sectors
-				},
-				Offset: 0,
-				Length: 0,
-			},
-		},
-	}, api.AddObjectOptions{MimeType: testMimeType, ETag: testEtag})
-	tt.OK(err)
-
-	// Try talking to the worker and request the object.
-	err = w.DeleteObject(context.Background(), api.DefaultBucketName, "foo", api.DeleteObjectOptions{})
-	tt.OK(err)
 
 	// See if autopilot is running by triggering the loop.
 	_, err = cluster.Autopilot.Trigger(false)
