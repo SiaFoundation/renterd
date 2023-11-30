@@ -928,7 +928,8 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 	var nullContracts []size
 	var dataContracts []size
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		// use WHERE NOT EXISTS to catch contracts that would otherwise have been caught by a LEFT JOIN
+		// first, we fetch all contracts without sectors and consider their
+		// entire size as prunable
 		if err := tx.
 			Raw(`
 SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SELECT 1 FROM contract_sectors cs WHERE cs.db_contract_id = c.id)`).
@@ -937,7 +938,10 @@ SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SEL
 			return err
 		}
 
-		// with those out of the way, we can use an INNER JOIN to get the rest
+		// second, we fetch how much data can be pruned from all contracts that
+		// do have sectors, we take a two-step approach because it allows us to
+		// use an INNER JOIN on contract_sectors, drastically improving the
+		// performance of the query
 		return tx.
 			Raw(`
 SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
