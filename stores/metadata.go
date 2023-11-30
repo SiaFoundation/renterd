@@ -442,6 +442,8 @@ func (raw rawObject) convert() (api.Object, error) {
 		for j, sector := range filtered {
 			if sector.ObjectIndex == 0 {
 				return api.Object{}, api.ErrObjectCorrupted
+			} else if sector.SectorIndex == 0 && !sector.SlabBuffered {
+				return api.Object{}, api.ErrObjectCorrupted
 			}
 			if sector.ObjectIndex != curr.ObjectIndex {
 				if err := addSlab(j); err != nil {
