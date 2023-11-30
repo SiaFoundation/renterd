@@ -104,7 +104,7 @@ func (fcid *fileContractID) Scan(value interface{}) error {
 	return nil
 }
 
-// Value returns a currency value, implements driver.Valuer interface.
+// Value returns a fileContractID value, implements driver.Valuer interface.
 func (fcid fileContractID) Value() (driver.Value, error) {
 	return fcid[:], nil
 }

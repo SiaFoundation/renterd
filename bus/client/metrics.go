@@ -20,7 +20,7 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 	values.Set("n", fmt.Sprint(n))
 	values.Set("interval", api.DurationMS(interval).String())
 	if opts.ContractID != (types.FileContractID{}) {
-		values.Set("fcid", opts.ContractID.String())
+		values.Set("contractID", opts.ContractID.String())
 	}
 	if opts.HostKey != (types.PublicKey{}) {
 		values.Set("hostKey", opts.HostKey.String())
@@ -66,6 +66,19 @@ func (c *Client) ContractSetMetrics(ctx context.Context, start time.Time, n uint
 
 	var resp []api.ContractSetMetric
 	if err := c.metric(ctx, api.MetricContractSet, values, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *Client) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	values := url.Values{}
+	values.Set("start", api.TimeRFC3339(start).String())
+	values.Set("n", fmt.Sprint(n))
+	values.Set("interval", api.DurationMS(interval).String())
+
+	var resp []api.WalletMetric
+	if err := c.metric(ctx, api.MetricWallet, values, &resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
