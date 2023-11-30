@@ -403,15 +403,16 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		// clear the ID to make sure new slices are created with IDs in
 		// ascending order.
 		for i := range slices {
-			slices[i].ID = 0
-			slices[i].DBObjectID = &obj.ID
-			slices[i].ObjectIndex = uint(i + 1)
-			slices[i].DBMultipartPartID = nil
-		}
-
-		// Save updated slices.
-		if err := tx.CreateInBatches(slices, 100).Error; err != nil {
-			return fmt.Errorf("failed to save slices: %w", err)
+			err = tx.Model(&dbSlice{}).
+				Where("id", slices[i].ID).
+				Updates(map[string]interface{}{
+					"db_object_id":         obj.ID,
+					"object_index":         uint(i + 1),
+					"db_multipart_part_id": nil,
+				}).Error
+			if err != nil {
+				return fmt.Errorf("failed to update slice %v: %w", i, err)
+			}
 		}
 
 		// Delete the multipart upload.
