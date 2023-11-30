@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (int, bool, error) {
+func migrateSlab(ctx context.Context, d *downloadManager, u *uploadManager, s *object.Slab, contractSet string, dlContracts, ulContracts []api.ContractMetadata, bh uint64, logger *zap.SugaredLogger) (int, bool, error) {
 	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
 	defer span.End()
 
@@ -105,31 +105,10 @@ SHARDS:
 	}
 
 	// migrate the shards
-	uploaded, err := u.UploadShards(ctx, shards, allowed, bh, lockingPriorityUpload)
+	err = u.MigrateShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, lockingPriorityUpload)
 	if err != nil {
 		return 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
 
-	// overwrite the unhealthy shards with the newly migrated ones
-	for i, si := range shardIndices {
-		s.Shards[si].LatestHost = uploaded[i].LatestHost
-
-		knownContracts := make(map[types.FileContractID]struct{})
-		for _, fcids := range s.Shards[si].Contracts {
-			for _, fcid := range fcids {
-				knownContracts[fcid] = struct{}{}
-			}
-		}
-		for hk, fcids := range uploaded[i].Contracts {
-			for _, fcid := range fcids {
-				if _, exists := knownContracts[fcid]; !exists {
-					if s.Shards[si].Contracts == nil {
-						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
-					}
-					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
-				}
-			}
-		}
-	}
 	return len(shards), surchargeApplied, nil
 }

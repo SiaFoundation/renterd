@@ -136,14 +136,14 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	// fetch the host
 	host, contract, err := c.hostForContract(ctx, fcid)
 	if err != nil {
-		return pruneResult{err: err}
+		return pruneResult{fcid: fcid, err: err}
 	}
 
 	// prune the contract
 	start := time.Now()
 	pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil && pruned == 0 {
-		return pruneResult{err: err}
+		return pruneResult{fcid: fcid, hk: host.PublicKey, err: err}
 	} else if err != nil && isErr(err, context.DeadlineExceeded) {
 		err = nil
 	}
@@ -152,7 +152,7 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 		ts: start,
 
 		fcid:    contract.ID,
-		hk:      contract.HostKey,
+		hk:      host.PublicKey,
 		version: host.Settings.Version,
 
 		pruned:    pruned,

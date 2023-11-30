@@ -909,18 +909,8 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if err != nil {
-		jc.Encode(api.MigrateSlabResponse{
-			NumShardsMigrated: numShardsMigrated,
-			SurchargeApplied:  surchargeApplied,
-			Error:             err.Error(),
-		})
-		return
-	}
-
-	// update the slab
-	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet); err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
 			SurchargeApplied:  surchargeApplied,
@@ -1145,7 +1135,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the object
-	eTag, err := w.upload(ctx, jc.Request.Body, bucket, jc.PathParam("path"), opts...)
+	params := defaultParameters(bucket, jc.PathParam("path"))
+	eTag, err := w.upload(ctx, jc.Request.Body, params, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
@@ -1265,8 +1256,9 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload the multipart
-	eTag, err := w.uploadMultiPart(ctx, jc.Request.Body, bucket, jc.PathParam("path"), uploadID, partNumber, opts...)
-	if jc.Check("couldn't upload object", err) != nil {
+	params := multipartParameters(bucket, jc.PathParam("path"), uploadID, partNumber)
+	eTag, err := w.upload(ctx, jc.Request.Body, params, opts...)
+	if jc.Check("couldn't upload multipart", err) != nil {
 		return
 	}
 
