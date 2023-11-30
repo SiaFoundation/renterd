@@ -2109,6 +2109,8 @@ func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 	switch key {
 	case api.MetricContract:
 		return b.mtrcs.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
+	case api.MetricContractPrune:
+		return b.mtrcs.ContractPruneMetrics(ctx, start, n, interval, opts.(api.ContractPruneMetricsQueryOpts))
 	case api.MetricContractSet:
 		return b.mtrcs.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
 	case api.MetricContractSetChurn:
@@ -2116,7 +2118,7 @@ func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 	case api.MetricWallet:
 		return b.mtrcs.WalletMetrics(ctx, start, n, interval, opts.(api.WalletMetricsQueryOpts))
 	}
-	return nil, nil
+	return nil, fmt.Errorf("unknown metric '%s'", key)
 }
 
 func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
