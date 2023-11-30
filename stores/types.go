@@ -15,6 +15,10 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	secretKeySize = 32
+)
+
 var zeroCurrency = currency(types.ZeroCurrency)
 
 type (
@@ -47,8 +51,10 @@ func (k *secretKey) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal secretKey value:", value))
+	} else if len(bytes) != secretKeySize {
+		return fmt.Errorf("failed to unmarshal secretKey value due to invalid number of bytes %v != %v: %v", len(bytes), secretKeySize, value)
 	}
-	*k = secretKey(bytes)
+	*k = append(secretKey{}, secretKey(bytes)...)
 	return nil
 }
 
@@ -68,7 +74,7 @@ func (h *hash256) Scan(value interface{}) error {
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal hash256 value:", value))
 	}
-	if len(bytes) < len(hash256{}) {
+	if len(bytes) != len(hash256{}) {
 		return fmt.Errorf("failed to unmarshal hash256 value due to insufficient bytes %v < %v: %v", len(bytes), len(fileContractID{}), value)
 	}
 	*h = *(*hash256)(bytes)
