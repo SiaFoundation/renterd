@@ -2000,30 +2000,24 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		return fmt.Errorf("either objID or multiPartID must be set")
 	}
 
-	var partialSlabs []object.SlabSlice
 	for i, ss := range slices {
-		// Handle the partial slabs later.
-		if ss.IsPartial() {
-			partialSlabs = append(partialSlabs, ss)
-			continue
-		}
 		// Create Slab if it doesn't exist yet.
 		slabKey, err := ss.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal slab key: %w", err)
 		}
 		slab := &dbSlab{
-			Key:         slabKey,
-			MinShards:   ss.MinShards,
-			TotalShards: uint8(len(ss.Shards)),
+			Key:             slabKey,
+			DBContractSetID: contractSetID,
+			MinShards:       ss.MinShards,
+			TotalShards:     uint8(len(ss.Shards)),
 		}
 		err = tx.Where(dbSlab{Key: slabKey}).
-			Assign(dbSlab{
-				DBContractSetID: contractSetID,
-			}).
 			FirstOrCreate(&slab).Error
 		if err != nil {
 			return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(slices), err)
+		} else if slab.DBContractSetID != contractSetID {
+			return fmt.Errorf("slab already exists in another contract set %v != %v", slab.DBContractSetID, contractSetID)
 		}
 
 		// Create Slice.
@@ -2069,37 +2063,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 				Append(&associatedContracts); err != nil {
 				return err
 			}
-		}
-	}
-
-	// Handle partial slabs. We create a slice for each partial slab.
-	if len(partialSlabs) == 0 {
-		return nil
-	}
-
-	for i, partialSlab := range partialSlabs {
-		key, err := partialSlab.Key.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		var buffer dbBufferedSlab
-		err = tx.Joins("DBSlab").
-			Take(&buffer, "DBSlab.key = ?", key).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch buffered slab: %w", err)
-		}
-
-		err = tx.Create(&dbSlice{
-			DBObjectID:        objID,
-			ObjectIndex:       uint(len(slices) + i + 1),
-			DBMultipartPartID: multiPartID,
-			DBSlabID:          buffer.DBSlab.ID,
-			Offset:            partialSlab.Offset,
-			Length:            partialSlab.Length,
-		}).Error
-		if err != nil {
-			return fmt.Errorf("failed to create slice for partial slab: %w", err)
 		}
 	}
 	return nil
