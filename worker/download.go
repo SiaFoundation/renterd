@@ -27,7 +27,6 @@ const (
 	downloadOverheadB              = 284
 	downloadOverpayHealthThreshold = 0.25
 	maxConcurrentSectorsPerHost    = 3
-	maxConcurrentSlabsPerDownload  = 3
 )
 
 type (
@@ -35,6 +34,7 @@ type (
 	id [8]byte
 
 	downloadManager struct {
+		mm     *memoryManager
 		hp     hostProvider
 		pss    partialSlabStore
 		slm    sectorLostMarker
@@ -111,6 +111,7 @@ type (
 	}
 
 	slabDownloadResponse struct {
+		mem              *acquiredMemory
 		surchargeApplied bool
 		shards           [][]byte
 		index            int
@@ -156,17 +157,18 @@ type (
 	}
 )
 
-func (w *worker) initDownloadManager(maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *worker) initDownloadManager(mm *memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
 
-	w.downloadManager = newDownloadManager(w, w, w.bus, maxOverdrive, overdriveTimeout, logger)
+	w.downloadManager = newDownloadManager(w, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, pss partialSlabStore, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(hp hostProvider, pss partialSlabStore, mm *memoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
 		hp:     hp,
+		mm:     mm,
 		pss:    pss,
 		slm:    slm,
 		logger: logger,
@@ -265,22 +267,19 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	}()
 
 	// launch a goroutine to launch consecutive slab downloads
-	var concurrentSlabs uint64
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
 		var slabIndex int
 		for {
-			if slabIndex < len(slabs) && atomic.LoadUint64(&concurrentSlabs) < maxConcurrentSlabsPerDownload {
+			if slabIndex < len(slabs) {
 				next := slabs[slabIndex]
 
 				// check if the next slab is a partial slab.
 				if next.PartialSlab {
 					responseChan <- &slabDownloadResponse{index: slabIndex}
 					slabIndex++
-					atomic.AddUint64(&concurrentSlabs, 1)
 					continue // handle partial slab separately
 				}
 
@@ -296,13 +295,15 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 					return
 				}
 
+				// acquire memory
+				mem := mgr.mm.AcquireMemory(ctx, uint64(next.Length))
+
 				// launch the download
 				wg.Add(1)
 				go func(index int) {
-					mgr.downloadSlab(ctx, id, next.SlabSlice, index, false, responseChan, nextSlabChan)
+					mgr.downloadSlab(ctx, id, next.SlabSlice, index, false, mem, responseChan, nextSlabChan)
 					wg.Done()
 				}(slabIndex)
-				atomic.AddUint64(&concurrentSlabs, 1)
 				slabIndex++
 			}
 
@@ -321,13 +322,20 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	var respIndex int
 outer:
 	for {
+		var resp *slabDownloadResponse
 		select {
 		case <-mgr.stopChan:
 			return errors.New("manager was stopped")
 		case <-ctx.Done():
 			return errors.New("download timed out")
-		case resp := <-responseChan:
-			atomic.AddUint64(&concurrentSlabs, ^uint64(0))
+		case resp = <-responseChan:
+		}
+
+		// handle response
+		err := func() error {
+			if resp.mem != nil {
+				defer resp.mem.Release()
+			}
 
 			if resp.err != nil {
 				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
@@ -371,11 +379,15 @@ outer:
 					break
 				}
 			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
 
-			// exit condition
-			if respIndex == len(slabs) {
-				break outer
-			}
+		// exit condition
+		if respIndex == len(slabs) {
+			break outer
 		}
 	}
 
@@ -405,6 +417,10 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		return nil, false, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
 	}
 
+	// acquire memory
+	mem := mgr.mm.AcquireMemory(ctx, uint64(slab.MinShards)*rhpv2.SectorSize)
+	defer mem.Release()
+
 	// create identifier
 	id := newID()
 
@@ -417,7 +433,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
 	}
 	go func() {
-		mgr.downloadSlab(ctx, id, slice, 0, true, responseChan, nextSlabChan)
+		mgr.downloadSlab(ctx, id, slice, 0, true, mem, responseChan, nextSlabChan)
 		// NOTE: when downloading 1 slab we can simply close both channels
 		close(responseChan)
 		close(nextSlabChan)
@@ -558,7 +574,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	}
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, index int, migration bool, responseChan chan *slabDownloadResponse, nextSlabChan chan struct{}) {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, index int, migration bool, mem *acquiredMemory, responseChan chan *slabDownloadResponse, nextSlabChan chan struct{}) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
@@ -567,7 +583,10 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice obje
 	slab := mgr.newSlabDownload(ctx, dID, slice, index, migration, nextSlabChan)
 
 	// execute download
-	resp := &slabDownloadResponse{index: index}
+	resp := &slabDownloadResponse{
+		index: index,
+		mem:   mem,
+	}
 	resp.shards, resp.surchargeApplied, resp.err = slab.download(ctx)
 
 	// send the response
