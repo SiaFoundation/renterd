@@ -82,7 +82,6 @@ type (
 		mgr *downloadManager
 		slm sectorLostMarker
 
-		index     int
 		minShards int
 		offset    uint32
 		length    uint32
@@ -254,8 +253,23 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	responseChan := make(chan *slabDownloadResponse)
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
+		// cancel the remaining downloads
 		cancel()
+
+		// drain the channel
+		for {
+			select {
+			case <-responseChan:
+				continue
+			default:
+			}
+			break
+		}
+
+		// wait for sending goroutines to finish
 		wg.Wait()
+
+		// close the channel
 		close(responseChan)
 	}()
 
@@ -297,11 +311,17 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				// launch the download
 				wg.Add(1)
 				go func(index int) {
-					resp := mgr.downloadSlab(ctx, id, next.SlabSlice, index, false, mem)
+					shards, surchargeApplied, err := mgr.downloadSlab(ctx, id, next.SlabSlice, false)
 					select {
+					case responseChan <- &slabDownloadResponse{
+						mem:              mem,
+						surchargeApplied: surchargeApplied,
+						shards:           shards,
+						index:            index,
+						err:              err,
+					}:
 					case <-ctx.Done():
-						mem.Release()
-					case responseChan <- resp:
+						mem.Release() // relase memory if we're interrupted
 					}
 					wg.Done()
 				}(slabIndex)
@@ -419,19 +439,19 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		Offset: 0,
 		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
 	}
-	resp := mgr.downloadSlab(ctx, id, slice, 0, true, mem)
-	if resp.err != nil {
-		return nil, false, resp.err
-	}
-
-	// decrypt and recover
-	slice.Decrypt(resp.shards)
-	err := slice.Reconstruct(resp.shards)
+	shards, surchargeApplied, err := mgr.downloadSlab(ctx, id, slice, true)
 	if err != nil {
 		return nil, false, err
 	}
 
-	return resp.shards, resp.surchargeApplied, err
+	// decrypt and recover
+	slice.Decrypt(shards)
+	err = slice.Reconstruct(shards)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return shards, surchargeApplied, err
 }
 
 func (mgr *downloadManager) Stats() downloadManagerStats {
@@ -515,7 +535,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	}
 }
 
-func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice object.SlabSlice, slabIndex int, migration bool) *slabDownload {
+func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice object.SlabSlice, migration bool) *slabDownload {
 	// calculate the offset and length
 	offset, length := slice.SectorRegion()
 
@@ -530,7 +550,6 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 		mgr: mgr,
 		slm: mgr.slm,
 
-		index:     slabIndex,
 		minShards: int(slice.MinShards),
 		offset:    offset,
 		length:    length,
@@ -546,21 +565,16 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	}
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, index int, migration bool, mem *acquiredMemory) *slabDownloadResponse {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
 
 	// prepare new download
-	slab := mgr.newSlabDownload(ctx, dID, slice, index, migration)
+	slab := mgr.newSlabDownload(ctx, dID, slice, migration)
 
 	// execute download
-	resp := &slabDownloadResponse{
-		index: index,
-		mem:   mem,
-	}
-	resp.shards, resp.surchargeApplied, resp.err = slab.download(ctx)
-	return resp
+	return slab.download(ctx)
 }
 
 func (d *downloader) stats() downloaderStats {
