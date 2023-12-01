@@ -36,8 +36,9 @@ const (
 )
 
 var (
-	errNoCandidateUploader = errors.New("no candidate uploader found")
-	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
+	errUploadManagerStopped = errors.New("upload manager stopped")
+	errNoCandidateUploader  = errors.New("no candidate uploader found")
+	errNotEnoughContracts   = errors.New("not enough contracts to support requested redundancy")
 )
 
 type uploadParameters struct {
@@ -230,7 +231,7 @@ func (w *worker) initUploadManager(mm *memoryManager, maxOverdrive uint64, overd
 	w.uploadManager = newUploadManager(w.bus, w, w, mm, maxOverdrive, overdriveTimeout, logger)
 }
 
-func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, opts ...UploadOption) (string, error) {
+func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, bucket, path string, opts ...UploadOption) (string, error) {
 	//  build upload parameters
 	up := defaultParameters()
 	for _, opt := range opts {
@@ -253,7 +254,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	}
 
 	// perform the upload
-	obj, partialSlabData, eTag, err := w.uploadManager.Upload(ctx, r, up, lockingPriorityUpload)
+	obj, partialSlabData, eTag, err := w.uploadManager.Upload(ctx, r, contracts, up, lockingPriorityUpload)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -284,7 +285,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, bucket, path string, o
 	return eTag, nil
 }
 
-func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts ...UploadOption) (string, error) {
+func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, bucket, path, uploadID string, partNumber int, opts ...UploadOption) (string, error) {
 	//  build upload parameters
 	up := defaultParameters()
 	for _, opt := range opts {
@@ -292,7 +293,7 @@ func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, bucket, path,
 	}
 
 	// upload the part
-	obj, partialSlabData, eTag, err := w.uploadManager.Upload(ctx, r, up, lockingPriorityUpload)
+	obj, partialSlabData, eTag, err := w.uploadManager.Upload(ctx, r, contracts, up, lockingPriorityUpload)
 	if err != nil {
 		return "", fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -535,7 +536,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadParameters, lockPriority int) (_ object.Object, partialSlab []byte, eTag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, lockPriority int) (_ object.Object, partialSlab []byte, eTag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -557,12 +558,6 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	cr, err := o.Encrypt(hr, up.encryptionOffset)
 	if err != nil {
 		return object.Object{}, nil, "", err
-	}
-
-	// fetch contracts
-	contracts, err := mgr.b.ContractSetContracts(ctx, up.contractSet)
-	if err != nil {
-		return object.Object{}, nil, "", fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
 
 	// create the upload
@@ -644,7 +639,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	for len(responses) < numSlabs {
 		select {
 		case <-mgr.stopChan:
-			return object.Object{}, nil, "", errors.New("manager was stopped")
+			return object.Object{}, nil, "", errUploadManagerStopped
 		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
@@ -687,6 +682,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, shards [][]byte, con
 	}
 	return sectors, nil
 }
+
 func (mgr *uploadManager) launch(req *sectorUploadReq) error {
 	// recompute stats
 	mgr.tryRecomputeStats()
