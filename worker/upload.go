@@ -36,8 +36,9 @@ const (
 )
 
 var (
-	errNoCandidateUploader = errors.New("no candidate uploader found")
-	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
+	errUploadManagerStopped = errors.New("upload manager stopped")
+	errNoCandidateUploader  = errors.New("no candidate uploader found")
+	errNotEnoughContracts   = errors.New("not enough contracts to support requested redundancy")
 )
 
 type uploadParameters struct {
@@ -257,7 +258,7 @@ func (w *worker) initUploadManager(mm *memoryManager, maxOverdrive uint64, overd
 	w.uploadManager = newUploadManager(w.bus, w, w, mm, maxOverdrive, overdriveTimeout, logger)
 }
 
-func (w *worker) upload(ctx context.Context, r io.Reader, up uploadParameters, opts ...UploadOption) (_ string, err error) {
+func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
 	// apply the options
 	for _, opt := range opts {
 		opt(&up)
@@ -277,7 +278,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, up uploadParameters, o
 	}
 
 	// perform the upload
-	bufferSizeLimitReached, eTag, err := w.uploadManager.Upload(ctx, r, up, lockingPriorityUpload)
+	bufferSizeLimitReached, eTag, err := w.uploadManager.Upload(ctx, r, contracts, up, lockingPriorityUpload)
 	if err != nil {
 		return "", err
 	}
@@ -494,7 +495,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadParameters, lockPriority int) (bufferSizeLimitReached bool, eTag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, lockPriority int) (bufferSizeLimitReached bool, eTag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -516,12 +517,6 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	cr, err := o.Encrypt(hr, up.encryptionOffset)
 	if err != nil {
 		return false, "", err
-	}
-
-	// fetch contracts
-	contracts, err := mgr.b.ContractSetContracts(ctx, up.contractSet)
-	if err != nil {
-		return false, "", fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
 
 	// create the upload
@@ -604,7 +599,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 	for len(responses) < numSlabs {
 		select {
 		case <-mgr.stopChan:
-			return false, "", errors.New("manager was stopped")
+			return false, "", errUploadManagerStopped
 		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
@@ -629,15 +624,17 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
-		o.PartialSlabs, bufferSizeLimitReached, err = u.mgr.b.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		var pss []object.SlabSlice
+		pss, bufferSizeLimitReached, err = u.mgr.b.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return false, "", err
 		}
+		o.Slabs = append(o.Slabs, pss...)
 	}
 
 	if up.multipart {
 		// persist the part
-		err = u.mgr.b.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs, o.PartialSlabs)
+		err = u.mgr.b.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}

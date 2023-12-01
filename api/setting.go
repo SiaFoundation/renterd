@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
 
@@ -118,6 +119,11 @@ func (gs GougingSettings) Validate() error {
 // RedundancySettings.
 func (rs RedundancySettings) Redundancy() float64 {
 	return float64(rs.TotalShards) / float64(rs.MinShards)
+}
+
+// SlabSizeNoRedundancy returns the size of a slab without added redundancy.
+func (rs RedundancySettings) SlabSizeNoRedundancy() uint64 {
+	return uint64(rs.MinShards) * rhpv2.SectorSize
 }
 
 // Validate returns an error if the redundancy settings are not considered

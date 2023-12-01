@@ -146,10 +146,10 @@ type Bus interface {
 	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
 	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
 
-	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab) (err error)
+	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 
-	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
+	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
@@ -341,6 +341,14 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, c
 		}
 		return fn(rev)
 	})
+}
+
+func (w *worker) registerAlert(a alerts.Alert) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	if err := w.alerts.RegisterAlert(ctx, a); err != nil {
+		w.logger.Error("failed to register alert", err)
+	}
+	cancel()
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -1026,7 +1034,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// return early if the object is empty
-	if len(res.Object.Slabs) == 0 && len(res.Object.PartialSlabs) == 0 {
+	if len(res.Object.Slabs) == 0 {
 		return
 	}
 
@@ -1044,9 +1052,13 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// create a download function
-	downloadFn := func(wr io.Writer, offset, length int64) error {
+	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
-		return w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
+		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
+		if err != nil && !errors.Is(err, errDownloadManagerStopped) {
+			w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
+		}
+		return
 	}
 
 	// serve the content
@@ -1063,6 +1075,9 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
+
+	// grab the path
+	path := jc.PathParam("path")
 
 	// fetch the upload parameters
 	up, err := w.bus.UploadParams(ctx)
@@ -1134,10 +1149,19 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
+	// fetch contracts
+	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
 	// upload the object
-	params := defaultParameters(bucket, jc.PathParam("path"))
-	eTag, err := w.upload(ctx, jc.Request.Body, params, opts...)
-	if jc.Check("couldn't upload object", err) != nil {
+	params := defaultParameters(bucket, path)
+	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
+	if err := jc.Check("couldn't upload object", err); err != nil {
+		if !errors.Is(err, errUploadManagerStopped) {
+			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
+		}
 		return
 	}
 
@@ -1148,6 +1172,9 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
+
+	// grab the path
+	path := jc.PathParam("path")
 
 	// fetch the upload parameters
 	up, err := w.bus.UploadParams(ctx)
@@ -1255,10 +1282,19 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
+	// fetch contracts
+	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
+	}
+
 	// upload the multipart
-	params := multipartParameters(bucket, jc.PathParam("path"), uploadID, partNumber)
-	eTag, err := w.upload(ctx, jc.Request.Body, params, opts...)
-	if jc.Check("couldn't upload multipart", err) != nil {
+	params := multipartParameters(bucket, path, uploadID, partNumber)
+	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
+	if jc.Check("couldn't upload object", err) != nil {
+		if !errors.Is(err, errUploadManagerStopped) {
+			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
+		}
 		return
 	}
 
