@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/build"
 )
 
@@ -58,36 +59,49 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 	return
 }
 
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
+func (c *contractor) fetchPrunableContracts() (prunable []api.ContractPrunableData, _ error) {
+	// use a sane timeout
+	ctx, cancel := context.WithTimeout(c.ap.stopCtx, time.Minute)
+	defer cancel()
+
+	// fetch prunable data
+	res, err := c.ap.bus.PrunableData(ctx)
+	if err != nil {
+		return nil, err
+	} else if res.TotalPrunable == 0 {
+		return nil, nil
 	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
+
+	// fetch contract set contracts
+	csc, err := c.ap.bus.ContractSetContracts(ctx, c.ap.state.cfg.Contracts.Set)
+	if err != nil {
+		return nil, err
 	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
+
+	// build a map of in-set contracts
+	contracts := make(map[types.FileContractID]struct{})
+	for _, contract := range csc {
+		contracts[contract.ID] = struct{}{}
+	}
+
+	// filter out contracts that are not in the set
+	for _, contract := range res.Contracts {
+		if _, ok := contracts[contract.ID]; ok && contract.Prunable > 0 {
+			prunable = append(prunable, contract)
+		}
+	}
+	return
 }
 
 func (c *contractor) performContractPruning(wp *workerPool) {
 	c.logger.Info("performing contract pruning")
 
-	// fetch prunable data
-	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 5*time.Minute)
-	res, err := c.ap.bus.PrunableData(ctx)
-	cancel()
-
-	// return early if we couldn't fetch the prunable data
+	// fetch prunable contracts
+	prunable, err := c.fetchPrunableContracts()
 	if err != nil {
 		c.logger.Error(err)
 		return
-	}
-
-	// return early if there's no prunable data
-	if res.TotalPrunable == 0 {
+	} else if len(prunable) == 0 {
 		c.logger.Info("no contracts to prune")
 		return
 	}
@@ -97,12 +111,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	// the contract as contracts on old hosts can take a long time to prune
 	var total uint64
 	wp.withWorker(func(w Worker) {
-		for _, contract := range res.Contracts {
-			// skip if there's nothing to prune
-			if contract.Prunable == 0 {
-				continue
-			}
-
+		for _, contract := range prunable {
 			// prune contract
 			result := c.pruneContract(w, contract.ID)
 			if result.err != nil {
@@ -125,7 +134,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 		}
 	})
 
-	c.logger.Infof("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(res.Contracts))
+	c.logger.Infof("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable))
 }
 
 func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
@@ -161,4 +170,18 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 
 		err: err,
 	}
+}
+
+func humanReadableSize(b int) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB",
+		float64(b)/float64(div), "KMGTPE"[exp])
 }

@@ -265,7 +265,11 @@ func (ap *Autopilot) Run() error {
 			ap.m.tryPerformMigrations(ctx, ap.workers)
 
 			// pruning
-			ap.c.tryPerformPruning(ctx, ap.workers)
+			if ap.state.cfg.Contracts.Prune {
+				ap.c.tryPerformPruning(ctx, ap.workers)
+			} else {
+				ap.logger.Debug("pruning disabled")
+			}
 		})
 
 		select {
