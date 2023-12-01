@@ -25,7 +25,7 @@ func newDownloadFailedAlert(bucket, path, prefix, marker string, offset, length,
 			"offset":    offset,
 			"length":    length,
 			"contracts": contracts,
-			"err":       err,
+			"error":     err.Error(),
 		},
 		Timestamp: time.Now(),
 	}
@@ -40,7 +40,7 @@ func newUploadFailedAlert(bucket, path, contractSet, mimeType string, minShards,
 		"totalShards": totalShards,
 		"packing":     packing,
 		"contracts":   contracts,
-		"err":         err,
+		"error":       err.Error(),
 	}
 	if mimeType != "" {
 		data["mimeType"] = mimeType
