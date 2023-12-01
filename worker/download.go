@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -245,31 +246,20 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		hosts[c.HostKey] = struct{}{}
 	}
 
+	// buffer the writer
+	bw := bufio.NewWriter(w)
+	defer bw.Flush()
+
 	// create the cipher writer
-	cw := o.Key.Decrypt(w, offset)
+	cw := o.Key.Decrypt(bw, offset)
 
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
 	responseChan := make(chan *slabDownloadResponse)
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
-		// cancel the remaining downloads
 		cancel()
-
-		// drain the channel
-		for {
-			select {
-			case <-responseChan:
-				continue
-			default:
-			}
-			break
-		}
-
-		// wait for sending goroutines to finish
 		wg.Wait()
-
-		// close the channel
 		close(responseChan)
 	}()
 
@@ -279,54 +269,59 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		defer wg.Done()
 
 		var slabIndex int
-		for {
-			if slabIndex < len(slabs) {
-				next := slabs[slabIndex]
+		for slabIndex = 0; slabIndex < len(slabs); slabIndex++ {
+			next := slabs[slabIndex]
 
-				// check if the next slab is a partial slab.
-				if next.PartialSlab {
-					responseChan <- &slabDownloadResponse{index: slabIndex}
-					slabIndex++
-					continue // handle partial slab separately
-				}
-
-				// check if we have enough downloaders
-				var available uint8
-				for _, s := range next.Shards {
-					if _, exists := hosts[s.LatestHost]; exists {
-						available++
-					}
-				}
-				if available < next.MinShards {
-					responseChan <- &slabDownloadResponse{err: fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, next.MinShards)}
-					return
-				}
-
-				// acquire memory
-				mem := mgr.mm.AcquireMemory(ctx, uint64(next.Length))
-				if mem == nil {
-					return // interrupted
-				}
-
-				// launch the download
-				wg.Add(1)
-				go func(index int) {
-					shards, surchargeApplied, err := mgr.downloadSlab(ctx, id, next.SlabSlice, false)
-					select {
-					case responseChan <- &slabDownloadResponse{
-						mem:              mem,
-						surchargeApplied: surchargeApplied,
-						shards:           shards,
-						index:            index,
-						err:              err,
-					}:
-					case <-ctx.Done():
-						mem.Release() // relase memory if we're interrupted
-					}
-					wg.Done()
-				}(slabIndex)
-				slabIndex++
+			// check if we need to abort
+			select {
+			case <-ctx.Done():
+				return
+			case <-mgr.stopChan:
+				return
+			default:
 			}
+
+			// check if the next slab is a partial slab.
+			if next.PartialSlab {
+				responseChan <- &slabDownloadResponse{index: slabIndex}
+				continue // handle partial slab separately
+			}
+
+			// check if we have enough downloaders
+			var available uint8
+			for _, s := range next.Shards {
+				if _, exists := hosts[s.LatestHost]; exists {
+					available++
+				}
+			}
+			if available < next.MinShards {
+				responseChan <- &slabDownloadResponse{err: fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, next.MinShards)}
+				return
+			}
+
+			// acquire memory
+			mem := mgr.mm.AcquireMemory(ctx, uint64(next.Length))
+			if mem == nil {
+				return // interrupted
+			}
+
+			// launch the download
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				shards, surchargeApplied, err := mgr.downloadSlab(ctx, id, next.SlabSlice, false)
+				select {
+				case responseChan <- &slabDownloadResponse{
+					mem:              mem,
+					surchargeApplied: surchargeApplied,
+					shards:           shards,
+					index:            index,
+					err:              err,
+				}:
+				case <-ctx.Done():
+					mem.Release() // relase memory if we're interrupted
+				}
+			}(slabIndex)
 		}
 	}()
 
@@ -426,9 +421,8 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		return nil, false, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
 	}
 
-	// acquire memory
-	mem := mgr.mm.AcquireMemory(ctx, uint64(slab.MinShards)*rhpv2.SectorSize)
-	defer mem.Release()
+	// NOTE: we don't acquire memory here since DownloadSlab is only used for
+	// migrations which already have memory acquired
 
 	// create identifier
 	id := newID()
