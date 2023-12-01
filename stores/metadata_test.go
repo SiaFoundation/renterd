@@ -2561,8 +2561,8 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer1Name, 4, false, false)
 
 	// Use the added partial slab to create an object.
-	testObject := func(partialSlabs []object.PartialSlab) object.Object {
-		return object.Object{
+	testObject := func(partialSlabs []object.SlabSlice) object.Object {
+		obj := object.Object{
 			Key: object.GenerateEncryptionKey(),
 			Slabs: []object.SlabSlice{
 				{
@@ -2579,8 +2579,9 @@ func TestPartialSlab(t *testing.T) {
 					Length: rhpv2.SectorSize,
 				},
 			},
-			PartialSlabs: slabs,
 		}
+		obj.Slabs = append(obj.Slabs, partialSlabs...)
+		return obj
 	}
 	obj := testObject(slabs)
 	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key", testContractSet, testETag, testMimeType, obj)
@@ -3289,16 +3290,15 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
-	ps, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	slabs, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// add it to an object to prevent it from getting pruned.
 	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, "", "", object.Object{
-		Key:          object.GenerateEncryptionKey(),
-		Slabs:        nil,
-		PartialSlabs: ps,
+		Key:   object.GenerateEncryptionKey(),
+		Slabs: slabs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3777,7 +3777,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// refresh health
-		now := time.Now().Round(time.Second)
+		now := time.Now()
 		if err := ss.RefreshHealth(context.Background()); err != nil {
 			t.Fatal(err)
 		}

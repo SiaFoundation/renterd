@@ -146,10 +146,10 @@ type Bus interface {
 	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
 	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
 
-	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice, partialSlabs []object.PartialSlab) (err error)
+	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 
-	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.PartialSlab, slabBufferMaxSizeSoftReached bool, err error)
+	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
@@ -1026,7 +1026,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// return early if the object is empty
-	if len(res.Object.Slabs) == 0 && len(res.Object.PartialSlabs) == 0 {
+	if len(res.Object.Slabs) == 0 {
 		return
 	}
 
