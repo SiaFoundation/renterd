@@ -186,6 +186,7 @@ type (
 	rawObjectSector struct {
 		// object
 		ObjectID       uint
+		ObjectIndex    uint64
 		ObjectKey      []byte
 		ObjectName     string
 		ObjectSize     int64
@@ -412,16 +413,13 @@ func (raw rawObject) convert() (api.Object, error) {
 	// filter out slabs without slab ID and buffered slabs - this is expected
 	// for an empty object or objects that end with a partial slab.
 	var filtered rawObject
-	var partialSlabSectors []*rawObjectSector
 	minHealth := math.MaxFloat64
-	for i, sector := range raw {
-		if sector.SlabID != 0 && !sector.SlabBuffered {
+	for _, sector := range raw {
+		if sector.SlabID != 0 {
 			filtered = append(filtered, sector)
 			if sector.SlabHealth < minHealth {
 				minHealth = sector.SlabHealth
 			}
-		} else if sector.SlabBuffered {
-			partialSlabSectors = append(partialSlabSectors, &raw[i])
 		}
 	}
 
@@ -431,9 +429,6 @@ func (raw rawObject) convert() (api.Object, error) {
 		var start int
 		// create a helper function to add a slab and update the state
 		addSlab := func(end int) error {
-			if filtered[start].SlabBuffered {
-				return nil // ignore partial slabs
-			}
 			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
 				return err
 			} else {
@@ -445,12 +440,12 @@ func (raw rawObject) convert() (api.Object, error) {
 
 		curr := filtered[0]
 		for j, sector := range filtered {
-			if sector.SectorIndex == 0 {
+			if sector.ObjectIndex == 0 {
+				return api.Object{}, api.ErrObjectCorrupted
+			} else if sector.SectorIndex == 0 && !sector.SlabBuffered {
 				return api.Object{}, api.ErrObjectCorrupted
 			}
-			if sector.SlabID != curr.SlabID ||
-				sector.SliceOffset != curr.SliceOffset ||
-				sector.SliceLength != curr.SliceLength {
+			if sector.ObjectIndex != curr.ObjectIndex {
 				if err := addSlab(j); err != nil {
 					return api.Object{}, err
 				}
@@ -460,20 +455,6 @@ func (raw rawObject) convert() (api.Object, error) {
 		if err := addSlab(len(filtered)); err != nil {
 			return api.Object{}, err
 		}
-	}
-
-	// fetch a potential partial slab from the buffer.
-	var partialSlabs []object.PartialSlab
-	for _, pss := range partialSlabSectors {
-		var key object.EncryptionKey
-		if err := key.UnmarshalBinary(pss.SlabKey); err != nil {
-			return api.Object{}, err
-		}
-		partialSlabs = append(partialSlabs, object.PartialSlab{
-			Key:    key,
-			Offset: pss.SliceOffset,
-			Length: pss.SliceLength,
-		})
 	}
 
 	// return object
@@ -487,9 +468,8 @@ func (raw rawObject) convert() (api.Object, error) {
 			Size:     raw[0].ObjectSize,
 		},
 		Object: object.Object{
-			Key:          key,
-			PartialSlabs: partialSlabs,
-			Slabs:        slabs,
+			Key:   key,
+			Slabs: slabs,
 		},
 	}, nil
 }
@@ -497,11 +477,22 @@ func (raw rawObject) convert() (api.Object, error) {
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	if len(raw) == 0 {
 		return object.SlabSlice{}, errors.New("no sectors found")
+	} else if raw[0].SlabBuffered && len(raw) != 1 {
+		return object.SlabSlice{}, errors.New("buffered slab with multiple sectors")
 	}
 
 	// unmarshal key
 	if err := slice.Slab.Key.UnmarshalBinary(raw[0].SlabKey); err != nil {
 		return object.SlabSlice{}, err
+	}
+
+	// handle partial slab
+	if raw[0].SlabBuffered {
+		slice.Offset = raw[0].SliceOffset
+		slice.Length = raw[0].SliceLength
+		slice.Slab.MinShards = raw[0].SlabMinShards
+		slice.Slab.Health = raw[0].SlabHealth
+		return
 	}
 
 	// hydrate all sectors
@@ -921,26 +912,42 @@ func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 }
 
 func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error) {
-	rows := make([]struct {
+	type size struct {
 		Fcid     fileContractID `json:"fcid"`
 		Size     uint64         `json:"size"`
 		Prunable uint64         `json:"prunable"`
-	}, 0)
+	}
 
-	if err := s.db.
-		Raw(`
-SELECT fcid, MAX(c.size) as size, CASE WHEN MAX(c.size)>COUNT(cs.db_sector_id) * ? THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
-FROM contracts c
-LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-GROUP BY c.fcid
-	`, rhpv2.SectorSize, rhpv2.SectorSize).
-		Scan(&rows).
-		Error; err != nil {
+	var nullContracts []size
+	var dataContracts []size
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		// first, we fetch all contracts without sectors and consider their
+		// entire size as prunable
+		if err := tx.
+			Raw(`
+SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SELECT 1 FROM contract_sectors cs WHERE cs.db_contract_id = c.id)`).
+			Scan(&nullContracts).
+			Error; err != nil {
+			return err
+		}
+
+		// second, we fetch how much data can be pruned from all contracts that
+		// do have sectors, we take a two-step approach because it allows us to
+		// use an INNER JOIN on contract_sectors, drastically improving the
+		// performance of the query
+		return tx.
+			Raw(`
+SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
+SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
+) i`, rhpv2.SectorSize).
+			Scan(&dataContracts).
+			Error
+	}); err != nil {
 		return nil, err
 	}
 
 	sizes := make(map[types.FileContractID]api.ContractSize)
-	for _, row := range rows {
+	for _, row := range append(nullContracts, dataContracts...) {
 		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
 			return nil, errors.New("invalid file contract id")
 		}
@@ -964,11 +971,10 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (a
 
 	if err := s.db.
 		Raw(`
-SELECT MAX(c.size) as size, CASE WHEN MAX(c.size)>(COUNT(cs.db_sector_id) * ?) THEN MAX(c.size)-(COUNT(cs.db_sector_id) * ?) ELSE 0 END as prunable
-FROM contracts c
-LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id
-WHERE c.fcid = ?
-`, rhpv2.SectorSize, rhpv2.SectorSize, fileContractID(id)).
+SELECT contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
+SELECT MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id WHERE c.fcid = ?
+) i
+`, rhpv2.SectorSize, fileContractID(id)).
 		Take(&size).
 		Error; err != nil {
 		return api.ContractSize{}, err
@@ -1486,7 +1492,7 @@ func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey
 	return s.slabBufferMgr.FetchPartialSlab(ctx, ec, offset, length)
 }
 
-func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.PartialSlab, int64, error) {
+func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.SlabSlice, int64, error) {
 	var contractSetID uint
 	if err := s.db.Raw("SELECT id FROM contract_sets WHERE name = ?", contractSet).Scan(&contractSetID).Error; err != nil {
 		return nil, 0, err
@@ -1712,7 +1718,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// Create all slices. This also creates any missing slabs or sectors.
-		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs, o.PartialSlabs); err != nil {
+		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
 		return nil
@@ -2004,7 +2010,7 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice, partialSlabs []object.PartialSlab) error {
+func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
 	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
 		return fmt.Errorf("either objID or multiPartID must be set")
 	}
@@ -2016,17 +2022,17 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			return fmt.Errorf("failed to marshal slab key: %w", err)
 		}
 		slab := &dbSlab{
-			Key:         slabKey,
-			MinShards:   ss.MinShards,
-			TotalShards: uint8(len(ss.Shards)),
+			Key:             slabKey,
+			DBContractSetID: contractSetID,
+			MinShards:       ss.MinShards,
+			TotalShards:     uint8(len(ss.Shards)),
 		}
 		err = tx.Where(dbSlab{Key: slabKey}).
-			Assign(dbSlab{
-				DBContractSetID: contractSetID,
-			}).
 			FirstOrCreate(&slab).Error
 		if err != nil {
 			return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(slices), err)
+		} else if slab.DBContractSetID != contractSetID {
+			return fmt.Errorf("slab already exists in another contract set %v != %v", slab.DBContractSetID, contractSetID)
 		}
 
 		// Create Slice.
@@ -2074,37 +2080,6 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			}
 		}
 	}
-
-	// Handle partial slabs. We create a slice for each partial slab.
-	if len(partialSlabs) == 0 {
-		return nil
-	}
-
-	for i, partialSlab := range partialSlabs {
-		key, err := partialSlab.Key.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		var buffer dbBufferedSlab
-		err = tx.Joins("DBSlab").
-			Take(&buffer, "DBSlab.key = ?", key).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch buffered slab: %w", err)
-		}
-
-		err = tx.Create(&dbSlice{
-			DBObjectID:        objID,
-			ObjectIndex:       uint(len(slices) + i + 1),
-			DBMultipartPartID: multiPartID,
-			DBSlabID:          buffer.DBSlab.ID,
-			Offset:            partialSlab.Offset,
-			Length:            partialSlab.Length,
-		}).Error
-		if err != nil {
-			return fmt.Errorf("failed to create slice for partial slab: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -2116,7 +2091,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.health as ObjectHealth, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.health as ObjectHealth, sli.object_index as ObjectIndex, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").

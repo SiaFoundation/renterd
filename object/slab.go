@@ -25,13 +25,11 @@ type Slab struct {
 	Health    float64       `json:"health"`
 	Key       EncryptionKey `json:"key"`
 	MinShards uint8         `json:"minShards"`
-	Shards    []Sector      `json:"shards"`
+	Shards    []Sector      `json:"shards,omitempty"`
 }
 
-type PartialSlab struct {
-	Key    EncryptionKey `json:"key"`
-	Offset uint32        `json:"offset"`
-	Length uint32        `json:"length"`
+func (s Slab) IsPartial() bool {
+	return len(s.Shards) == 0
 }
 
 // NewSlab returns a new slab for the shards.
@@ -39,6 +37,16 @@ func NewSlab(minShards uint8) Slab {
 	return Slab{
 		Key:       GenerateEncryptionKey(),
 		MinShards: minShards,
+	}
+}
+
+// NewPartialSlab returns a new partial slab.
+func NewPartialSlab(ec EncryptionKey, minShards uint8) Slab {
+	return Slab{
+		Health:    1,
+		Key:       ec,
+		MinShards: minShards,
+		Shards:    nil,
 	}
 }
 

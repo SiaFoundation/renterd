@@ -629,15 +629,17 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, up uploadPara
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
-		o.PartialSlabs, bufferSizeLimitReached, err = u.mgr.b.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		var pss []object.SlabSlice
+		pss, bufferSizeLimitReached, err = u.mgr.b.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return false, "", err
 		}
+		o.Slabs = append(o.Slabs, pss...)
 	}
 
 	if up.multipart {
 		// persist the part
-		err = u.mgr.b.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs, o.PartialSlabs)
+		err = u.mgr.b.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}
