@@ -30,6 +30,10 @@ const (
 	maxConcurrentSlabsPerDownload  = 3
 )
 
+var (
+	errDownloadManagerStopped = errors.New("download manager stopped")
+)
+
 type (
 	// id is a unique identifier used for debugging
 	id [8]byte
@@ -323,7 +327,7 @@ outer:
 	for {
 		select {
 		case <-mgr.stopChan:
-			return errors.New("manager was stopped")
+			return errDownloadManagerStopped
 		case <-ctx.Done():
 			return errors.New("download timed out")
 		case resp := <-responseChan:
