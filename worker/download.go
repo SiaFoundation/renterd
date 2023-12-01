@@ -87,9 +87,6 @@ type (
 		offset    uint32
 		length    uint32
 
-		nextSlabChan      chan struct{}
-		nextSlabTriggered bool
-
 		created time.Time
 		overpay bool
 
@@ -252,10 +249,6 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	// create the cipher writer
 	cw := o.Key.Decrypt(w, offset)
 
-	// create next slab chan
-	nextSlabChan := make(chan struct{})
-	defer close(nextSlabChan)
-
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
 	responseChan := make(chan *slabDownloadResponse)
@@ -297,21 +290,22 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 
 				// acquire memory
 				mem := mgr.mm.AcquireMemory(ctx, uint64(next.Length))
+				if mem == nil {
+					return // interrupted
+				}
 
 				// launch the download
 				wg.Add(1)
 				go func(index int) {
-					mgr.downloadSlab(ctx, id, next.SlabSlice, index, false, mem, responseChan, nextSlabChan)
+					resp := mgr.downloadSlab(ctx, id, next.SlabSlice, index, false, mem)
+					select {
+					case <-ctx.Done():
+						mem.Release()
+					case responseChan <- resp:
+					}
 					wg.Done()
 				}(slabIndex)
 				slabIndex++
-			}
-
-			// block until we are ready for the next slab
-			select {
-			case <-ctx.Done():
-				return
-			case nextSlabChan <- struct{}{}:
 			}
 		}
 	}()
@@ -369,11 +363,6 @@ outer:
 					delete(responses, respIndex)
 					respIndex++
 
-					select {
-					case <-nextSlabChan:
-					default:
-					}
-
 					continue
 				} else {
 					break
@@ -425,29 +414,14 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	id := newID()
 
 	// download the slab
-	responseChan := make(chan *slabDownloadResponse)
-	nextSlabChan := make(chan struct{})
 	slice := object.SlabSlice{
 		Slab:   slab,
 		Offset: 0,
 		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
 	}
-	go func() {
-		mgr.downloadSlab(ctx, id, slice, 0, true, mem, responseChan, nextSlabChan)
-		// NOTE: when downloading 1 slab we can simply close both channels
-		close(responseChan)
-		close(nextSlabChan)
-	}()
-
-	// await the response
-	var resp *slabDownloadResponse
-	select {
-	case <-ctx.Done():
-		return nil, false, ctx.Err()
-	case resp = <-responseChan:
-		if resp.err != nil {
-			return nil, false, resp.err
-		}
+	resp := mgr.downloadSlab(ctx, id, slice, 0, true, mem)
+	if resp.err != nil {
+		return nil, false, resp.err
 	}
 
 	// decrypt and recover
@@ -541,7 +515,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	}
 }
 
-func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice object.SlabSlice, slabIndex int, migration bool, nextSlabChan chan struct{}) *slabDownload {
+func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice object.SlabSlice, slabIndex int, migration bool) *slabDownload {
 	// calculate the offset and length
 	offset, length := slice.SectorRegion()
 
@@ -555,8 +529,6 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	return &slabDownload{
 		mgr: mgr,
 		slm: mgr.slm,
-
-		nextSlabChan: nextSlabChan,
 
 		index:     slabIndex,
 		minShards: int(slice.MinShards),
@@ -574,13 +546,13 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	}
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, index int, migration bool, mem *acquiredMemory, responseChan chan *slabDownloadResponse, nextSlabChan chan struct{}) {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, index int, migration bool, mem *acquiredMemory) *slabDownloadResponse {
 	// add tracing
 	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
 	defer span.End()
 
 	// prepare new download
-	slab := mgr.newSlabDownload(ctx, dID, slice, index, migration, nextSlabChan)
+	slab := mgr.newSlabDownload(ctx, dID, slice, index, migration)
 
 	// execute download
 	resp := &slabDownloadResponse{
@@ -588,12 +560,7 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice obje
 		mem:   mem,
 	}
 	resp.shards, resp.surchargeApplied, resp.err = slab.download(ctx)
-
-	// send the response
-	select {
-	case <-ctx.Done():
-	case responseChan <- resp:
-	}
+	return resp
 }
 
 func (d *downloader) stats() downloaderStats {
@@ -1194,15 +1161,6 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool) {
 	if resp.err != nil {
 		s.errs[resp.req.hk] = resp.err
 		return false
-	}
-
-	// try trigger next slab read
-	if !s.nextSlabTriggered && s.numCompleted+int(s.mgr.maxOverdrive) >= s.minShards {
-		select {
-		case <-s.nextSlabChan:
-			s.nextSlabTriggered = true
-		default:
-		}
 	}
 
 	// update num overpaid
