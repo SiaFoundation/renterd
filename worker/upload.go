@@ -576,7 +576,6 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	redundantSize := uint64(up.rs.TotalShards) * rhpv2.SectorSize
 
 	// launch uploads in a separate goroutine
-	defer cancel()
 	go func() {
 		var slabIndex int
 		for {
@@ -760,7 +759,7 @@ func (mgr *uploadManager) candidate(req *sectorUploadReq) *uploader {
 			candidate = uploader
 		}
 	}
-	return nil
+	return candidate
 }
 
 func (mgr *uploadManager) renewUploader(u *uploader) {
