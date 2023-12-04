@@ -40,7 +40,7 @@ func TestContractSetMetrics(t *testing.T) {
 		if err := ss.RecordContractSetMetric(context.Background(), api.ContractSetMetric{
 			Contracts: i + 1,
 			Name:      cs,
-			Timestamp: recordedTime,
+			Timestamp: api.TimeRFC3339(recordedTime),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -97,7 +97,7 @@ func TestContractChurnSetMetrics(t *testing.T) {
 				for _, recordedTime := range times {
 					fcid := types.FileContractID{i}
 					if err := ss.RecordContractSetChurnMetric(context.Background(), api.ContractSetChurnMetric{
-						Timestamp:  recordedTime,
+						Timestamp:  api.TimeRFC3339(recordedTime),
 						Name:       set,
 						Direction:  dir,
 						Reason:     reason,
@@ -173,7 +173,7 @@ func TestPerformanceMetrics(t *testing.T) {
 					for _, recordedTime := range times {
 						if err := ss.RecordPerformanceMetric(context.Background(), api.PerformanceMetric{
 							Action:    action,
-							Timestamp: recordedTime,
+							Timestamp: api.TimeRFC3339(recordedTime),
 							Duration:  duration,
 							HostKey:   host,
 							Origin:    origin,
@@ -243,7 +243,7 @@ func TestContractMetrics(t *testing.T) {
 	for _, host := range hosts {
 		for _, recordedTime := range times {
 			metric := api.ContractMetric{
-				Timestamp:           recordedTime,
+				Timestamp:           api.TimeRFC3339(recordedTime),
 				ContractID:          types.FileContractID{i},
 				HostKey:             host,
 				RemainingCollateral: types.MaxCurrency,
@@ -312,7 +312,7 @@ func TestWalletMetrics(t *testing.T) {
 	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
 	for _, recordedTime := range times {
 		metric := api.WalletMetric{
-			Timestamp:   recordedTime,
+			Timestamp:   api.TimeRFC3339(recordedTime),
 			Confirmed:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Unconfirmed: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Spendable:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),

@@ -1369,7 +1369,7 @@ func TestObjectEntries(t *testing.T) {
 			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
 				t.Fatal("mod time should be set")
 			}
-			entries[i].ModTime = time.Time{}
+			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
 			if entries[i].MimeType != testMimeType {
@@ -3371,7 +3371,7 @@ func TestListObjects(t *testing.T) {
 			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
 				t.Fatal("mod time should be set")
 			}
-			entries[i].ModTime = time.Time{}
+			entries[i].ModTime = api.TimeRFC3339{}
 		}
 	}
 

@@ -1395,13 +1395,13 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 func (w *worker) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.WorkerStateResponse{
 		ID:        w.id,
-		StartTime: w.startTime,
+		StartTime: api.TimeRFC3339(w.startTime),
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
-			BuildTime: build.BuildTime(),
+			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 	})
 }

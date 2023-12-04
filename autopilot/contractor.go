@@ -462,7 +462,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	}
 
 	// record churn metrics
-	now := time.Now()
+	now := api.TimeNow()
 	var metrics []api.ContractSetChurnMetric
 	for _, fcid := range added {
 		metrics = append(metrics, api.ContractSetChurnMetric{

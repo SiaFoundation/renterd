@@ -6,7 +6,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -213,8 +212,8 @@ type (
 
 	// WorkerStateResponse is the response type for the /worker/state endpoint.
 	WorkerStateResponse struct {
-		ID        string    `json:"id"`
-		StartTime time.Time `json:"startTime"`
+		ID        string      `json:"id"`
+		StartTime TimeRFC3339 `json:"startTime"`
 		BuildState
 	}
 
@@ -229,7 +228,7 @@ type (
 	GetObjectResponse struct {
 		Content     io.ReadCloser  `json:"content"`
 		ContentType string         `json:"contentType"`
-		ModTime     time.Time      `json:"modTime"`
+		ModTime     TimeRFC3339    `json:"modTime"`
 		Range       *DownloadRange `json:"range,omitempty"`
 		Size        int64          `json:"size"`
 	}

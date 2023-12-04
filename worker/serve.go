@@ -92,7 +92,7 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	rw.Header().Set("ETag", api.FormatETag(obj.ETag))
 	rw.Header().Set("Content-Type", contentType)
 
-	http.ServeContent(rw, req, obj.Name, obj.ModTime, rs)
+	http.ServeContent(rw, req, obj.Name, obj.ModTime.Std(), rs)
 	return http.StatusOK, nil
 }
 

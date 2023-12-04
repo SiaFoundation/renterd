@@ -72,11 +72,30 @@ func (s *ParamString) UnmarshalText(b []byte) error {
 	return nil
 }
 
+func TimeNow() TimeRFC3339 {
+	return TimeRFC3339(time.Now())
+}
+
+// Std converts a TimeRFC3339 to a time.Time.
+func (t TimeRFC3339) Std() time.Time { return time.Time(t).UTC() }
+
+// IsZero reports whether t represents the zero time instant, January 1, year 1,
+// 00:00:00 UTC.
+func (t TimeRFC3339) IsZero() bool { return (time.Time)(t).IsZero() }
+
 // String implements fmt.Stringer.
 func (t TimeRFC3339) String() string { return (time.Time)(t).UTC().Format(time.RFC3339Nano) }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (t *TimeRFC3339) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
+func (t *TimeRFC3339) UnmarshalText(b []byte) error {
+	var stdTime time.Time
+	err := stdTime.UnmarshalText(b)
+	if err != nil {
+		return err
+	}
+	*t = TimeRFC3339(stdTime.UTC())
+	return nil
+}
 
 // MarshalJSON implements json.Marshaler.
 func (t TimeRFC3339) MarshalJSON() ([]byte, error) {

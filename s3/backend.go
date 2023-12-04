@@ -43,7 +43,7 @@ func (s *s3) ListBuckets(ctx context.Context) ([]gofakes3.BucketInfo, error) {
 	for i, bucket := range buckets {
 		bucketInfos[i] = gofakes3.BucketInfo{
 			Name:         bucket.Name,
-			CreationDate: gofakes3.NewContentTime(bucket.CreatedAt),
+			CreationDate: gofakes3.NewContentTime(bucket.CreatedAt.Std()),
 		}
 	}
 	return bucketInfos, nil
@@ -153,7 +153,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 
 		item := &gofakes3.Content{
 			Key:          key,
-			LastModified: gofakes3.NewContentTime(object.ModTime),
+			LastModified: gofakes3.NewContentTime(object.ModTime.Std()),
 			ETag:         hex.EncodeToString(frand.Bytes(32)), // TODO: don't have that
 			Size:         object.Size,
 			StorageClass: gofakes3.StorageStandard,
@@ -260,7 +260,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
 		"Content-Type":  res.ContentType,
-		"Last-Modified": res.ModTime.UTC().Format(http.TimeFormat),
+		"Last-Modified": res.ModTime.Std().Format(http.TimeFormat),
 	}
 
 	return &gofakes3.Object{
@@ -384,7 +384,7 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 	}
 	return gofakes3.CopyObjectResult{
 		ETag:         api.FormatETag(obj.ETag),
-		LastModified: gofakes3.NewContentTime(obj.ModTime.UTC()),
+		LastModified: gofakes3.NewContentTime(obj.ModTime.Std()),
 	}, nil
 }
 
@@ -429,7 +429,7 @@ func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *go
 		uploads = append(uploads, gofakes3.ListMultipartUploadItem{
 			Key:       upload.Path[1:],
 			UploadID:  gofakes3.UploadID(upload.UploadID),
-			Initiated: gofakes3.NewContentTime(upload.CreatedAt),
+			Initiated: gofakes3.NewContentTime(upload.CreatedAt.Std()),
 		})
 	}
 	return &gofakes3.ListMultipartUploadsResult{
@@ -456,7 +456,7 @@ func (s *s3) ListParts(ctx context.Context, bucket, object string, uploadID gofa
 	for _, part := range resp.Parts {
 		parts = append(parts, gofakes3.ListMultipartUploadPartItem{
 			PartNumber:   part.PartNumber,
-			LastModified: gofakes3.NewContentTime(part.LastModified),
+			LastModified: gofakes3.NewContentTime(part.LastModified.Std()),
 			ETag:         part.ETag,
 			Size:         part.Size,
 		})
