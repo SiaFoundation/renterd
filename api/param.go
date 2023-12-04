@@ -73,14 +73,14 @@ func (s *ParamString) UnmarshalText(b []byte) error {
 }
 
 // String implements fmt.Stringer.
-func (t TimeRFC3339) String() string { return (time.Time)(t).Format(time.RFC3339Nano) }
+func (t TimeRFC3339) String() string { return (time.Time)(t).UTC().Format(time.RFC3339Nano) }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (t *TimeRFC3339) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
 
 // MarshalJSON implements json.Marshaler.
 func (t TimeRFC3339) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%s"`, (time.Time)(t).Format(time.RFC3339))), nil
+	return []byte(fmt.Sprintf(`"%s"`, (time.Time)(t).UTC().Format(time.RFC3339))), nil
 }
 
 // String implements fmt.Stringer.
