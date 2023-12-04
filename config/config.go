@@ -98,6 +98,7 @@ type (
 		DownloadOverdriveTimeout      time.Duration  `yaml:"downloadOverdriveTimeout"`
 		UploadOverdriveTimeout        time.Duration  `yaml:"uploadOverdriveTimeout"`
 		DownloadMaxOverdrive          uint64         `yaml:"downloadMaxOverdrive"`
+		DownloadMaxMemory             uint64         `yaml:"downloadMaxMemory"`
 		UploadMaxMemory               uint64         `yaml:"uploadMaxMemory"`
 		UploadMaxOverdrive            uint64         `yaml:"uploadMaxOverdrive"`
 		AllowUnauthenticatedDownloads bool           `yaml:"allowUnauthenticatedDownloads"`
