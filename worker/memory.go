@@ -24,7 +24,6 @@ type (
 	acquiredMemory struct {
 		mm *memoryManager
 
-		mu        sync.Mutex
 		remaining uint64
 	}
 )
@@ -66,15 +65,16 @@ func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) *acquire
 		// check if the context was canceled in the meantime
 		select {
 		case <-ctx.Done():
+			mm.sigNewMem.Broadcast() // flush out other cancelled goroutines
 			mm.sigNewMem.L.Unlock()
 			return nil
 		default:
 		}
 	}
 	mm.available -= amt
+	mm.sigNewMem.Signal() // wake next goroutine
 	mm.sigNewMem.L.Unlock()
 
-	mm.sigNewMem.Signal() // wake next goroutine
 	return &acquiredMemory{
 		mm:        mm,
 		remaining: amt,
@@ -86,13 +86,9 @@ func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) *acquire
 func (am *acquiredMemory) Release() {
 	am.mm.sigNewMem.L.Lock()
 	am.mm.available += am.remaining
-	am.mm.sigNewMem.L.Unlock()
-
-	am.mu.Lock()
 	am.remaining = 0
-	am.mu.Unlock()
-
 	am.mm.sigNewMem.Signal() // wake next goroutine
+	am.mm.sigNewMem.L.Unlock()
 }
 
 // ReleaseSome releases some of the remaining memory to the memory manager.
@@ -100,14 +96,11 @@ func (am *acquiredMemory) Release() {
 func (am *acquiredMemory) ReleaseSome(amt uint64) {
 	am.mm.sigNewMem.L.Lock()
 	if amt > am.remaining {
+		am.mm.sigNewMem.L.Unlock()
 		panic("releasing more memory than remaining")
 	}
 	am.mm.available += amt
-	am.mm.sigNewMem.L.Unlock()
-
-	am.mu.Lock()
 	am.remaining -= amt
-	am.mu.Unlock()
-
 	am.mm.sigNewMem.Signal() // wake next goroutine
+	am.mm.sigNewMem.L.Unlock()
 }
