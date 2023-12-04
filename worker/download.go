@@ -28,6 +28,7 @@ const (
 	downloadOverheadB              = 284
 	downloadOverpayHealthThreshold = 0.25
 	maxConcurrentSectorsPerHost    = 3
+	maxConcurrentSlabsPerDownload  = 3
 )
 
 type (
@@ -256,14 +257,26 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
 	responseChan := make(chan *slabDownloadResponse)
+	concurrentSlabsChan := make(chan struct{}, maxConcurrentSlabsPerDownload)
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
 		wg.Wait()
 		close(responseChan)
+
+	DRAIN_LOOP:
+		for {
+			select {
+			case <-concurrentSlabsChan:
+			default:
+				break DRAIN_LOOP
+			}
+		}
+		close(concurrentSlabsChan)
 	}()
 
 	// launch a goroutine to launch consecutive slab downloads
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -278,7 +291,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				return
 			case <-mgr.stopChan:
 				return
-			default:
+			case concurrentSlabsChan <- struct{}{}:
 			}
 
 			// check if the next slab is a partial slab.
@@ -345,6 +358,12 @@ outer:
 			if resp.mem != nil {
 				defer resp.mem.Release()
 			}
+			defer func() {
+				select {
+				case <-concurrentSlabsChan:
+				default:
+				}
+			}()
 
 			if resp.err != nil {
 				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
