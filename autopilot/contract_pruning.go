@@ -38,7 +38,10 @@ type (
 )
 
 func (pr pruneResult) String() string {
-	msg := fmt.Sprintf("contract %v, pruned %d bytes, remaining %d bytes, elapsed %v", pr.fcid, pr.pruned, pr.remaining, pr.duration)
+	msg := fmt.Sprintf("contract %v, pruned %d bytes", pr.fcid, pr.pruned)
+	if pr.pruned > 0 {
+		msg += fmt.Sprintf(", remaining %d bytes, elapsed %v", pr.remaining, pr.duration)
+	}
 	if pr.err != nil {
 		msg += fmt.Sprintf(", err: %v", pr.err)
 	}
