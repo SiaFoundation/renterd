@@ -94,6 +94,7 @@ var (
 			DownloadMaxOverdrive:     5,
 			DownloadOverdriveTimeout: 3 * time.Second,
 
+			DownloadMaxMemory:      1 << 30, // 1 GiB
 			UploadMaxMemory:        1 << 30, // 1 GiB
 			UploadMaxOverdrive:     5,
 			UploadOverdriveTimeout: 3 * time.Second,

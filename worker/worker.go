@@ -1371,7 +1371,8 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 
 func (w *worker) memoryGET(jc jape.Context) {
 	jc.Encode(api.MemoryResponse{
-		Upload: w.uploadManager.mm.Status(),
+		Download: w.downloadManager.mm.Status(),
+		Upload:   w.uploadManager.mm.Status(),
 	})
 }
 
@@ -1399,7 +1400,7 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxMemory, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, downloadMaxMemory, uploadMaxMemory, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1429,12 +1430,16 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
 	w.initPriceTables()
-	w.initDownloadManager(downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
-	mm, err := newMemoryManager(w.logger, uploadMaxMemory)
+	dmm, err := newMemoryManager(w.logger, downloadMaxMemory)
 	if err != nil {
 		return nil, err
 	}
-	w.initUploadManager(mm, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
+	w.initDownloadManager(dmm, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
+	umm, err := newMemoryManager(w.logger, uploadMaxMemory)
+	if err != nil {
+		return nil, err
+	}
+	w.initUploadManager(umm, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 	return w, nil
 }
 

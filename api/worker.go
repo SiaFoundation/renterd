@@ -52,7 +52,8 @@ type (
 	}
 
 	MemoryResponse struct {
-		Upload MemoryStatus `json:"upload"`
+		Download MemoryStatus `json:"download"`
+		Upload   MemoryStatus `json:"upload"`
 	}
 
 	MemoryStatus struct {
