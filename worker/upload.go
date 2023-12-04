@@ -751,15 +751,13 @@ func (mgr *uploadManager) candidate(req *sectorUploadReq) *uploader {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
-	// sort the uploaders by their estimate
-	sort.Slice(mgr.uploaders, func(i, j int) bool {
-		return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
-	})
-
-	// select top ten candidates
+	// select candidate with the best estimate
+	var candidate *uploader
 	for _, uploader := range mgr.uploaders {
-		if req.upload.canUseUploader(req.sID, uploader) {
-			return uploader
+		if !req.upload.canUseUploader(req.sID, uploader) {
+			continue // ignore
+		} else if candidate == nil || uploader.estimate() < candidate.estimate() {
+			candidate = uploader
 		}
 	}
 	return nil
