@@ -21,7 +21,6 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -206,12 +205,6 @@ func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicK
 }
 
 func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
-	var mr ephemeralMetricsRecorder
-	defer func() {
-		// TODO: record metrics
-	}()
-	ctx = metrics.WithRecorder(ctx, &mr)
-
 	// Create or fetch transport.
 	p.mu.Lock()
 	t, found := p.pool[siamuxAddr]
@@ -425,7 +418,6 @@ type (
 		contractSpendingRecorder *contractSpendingRecorder
 		fcid                     types.FileContractID
 		logger                   *zap.SugaredLogger
-		mr                       *ephemeralMetricsRecorder
 		siamuxAddr               string
 		renterKey                types.PrivateKey
 		accountKey               types.PrivateKey
@@ -961,7 +953,14 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			defer recordPriceTableUpdate(ctx, h.siamuxAddr, h.HostKey(), &hpt, &err)()
+			defer func() {
+				InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+					HostKey:    h.HostKey(),
+					Success:    isSuccessfulInteraction(err),
+					Timestamp:  time.Now(),
+					PriceTable: hpt,
+				})
+			}()
 
 			pt, err := RPCPriceTable(ctx, t, paymentFn)
 			if err != nil {

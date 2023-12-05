@@ -233,7 +233,7 @@ type bus struct {
 
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("bus", map[string]jape.Handler{
+	return jape.Mux(tracing.TracingMiddleware("bus", map[string]jape.Handler{
 		"GET    /accounts":                 b.accountsHandlerGET,
 		"POST   /account/:id":              b.accountHandlerGET,
 		"POST   /account/:id/add":          b.accountsAddHandlerPOST,

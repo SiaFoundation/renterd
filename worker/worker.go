@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/metrics"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/webhooks"
@@ -271,11 +270,6 @@ func dial(ctx context.Context, hostIP string) (net.Conn, error) {
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
-	var mr ephemeralMetricsRecorder
-	defer func() {
-		// TODO record metrics
-	}()
-	ctx = metrics.WithRecorder(ctx, &mr)
 	conn, err := dial(ctx, hostIP)
 	if err != nil {
 		return err
@@ -307,7 +301,6 @@ func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.Public
 		acc:                      w.accounts.ForHost(hostKey),
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
-		mr:                       &ephemeralMetricsRecorder{},
 		logger:                   w.logger.Named(hostKey.String()[:4]),
 		fcid:                     contractID,
 		siamuxAddr:               siamuxAddr,
@@ -352,20 +345,23 @@ func (w *worker) registerAlert(a alerts.Alert) {
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode the request
 	var rsr api.RHPScanRequest
 	if jc.Decode(&rsr) != nil {
 		return
 	}
 
-	ctx := jc.Request.Context()
+	// apply the timeout
 	if rsr.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(jc.Request.Context(), time.Duration(rsr.Timeout))
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(rsr.Timeout))
 		defer cancel()
 	}
 
 	// only scan hosts if we are online
-	peers, err := w.bus.SyncerPeers(jc.Request.Context())
+	peers, err := w.bus.SyncerPeers(ctx)
 	if jc.Check("failed to fetch peers from bus", err) != nil {
 		return
 	}
@@ -380,20 +376,6 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	if err != nil {
 		errStr = err.Error()
 	}
-
-	// record scan
-	err = w.bus.RecordHostScans(jc.Request.Context(), []hostdb.HostScan{{
-		HostKey:    rsr.HostKey,
-		Success:    err == nil,
-		Timestamp:  time.Now(),
-		Settings:   settings,
-		PriceTable: priceTable,
-	}})
-	if jc.Check("failed to record scan", err) != nil {
-		return
-	}
-
-	// TODO: record metric
 
 	jc.Encode(api.RHPScanResponse{
 		Ping:       api.DurationMS(elapsed),
@@ -465,30 +447,49 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode the request
 	var rptr api.RHPPriceTableRequest
 	if jc.Decode(&rptr) != nil {
 		return
 	}
 
-	ctx := jc.Request.Context()
+	// apply timeout
 	if rptr.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(jc.Request.Context(), time.Duration(rptr.Timeout))
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
 		defer cancel()
 	}
 
-	var pt rhpv3.HostPriceTable
-	if jc.Check("could not get price table", w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-		return
-	})) != nil {
+	// defer interaction recording
+	var err error
+	var hpt hostdb.HostPriceTable
+	defer func() {
+		InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+			HostKey:    rptr.HostKey,
+			Success:    isSuccessfulInteraction(err),
+			Timestamp:  time.Now(),
+			PriceTable: hpt,
+		})
+	}()
+
+	err = w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
+		if pt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
+			return err
+		} else {
+			hpt = hostdb.HostPriceTable{
+				HostPriceTable: pt,
+				Expiry:         time.Now().Add(pt.Validity),
+			}
+		}
+		return nil
+	})
+
+	if jc.Check("could not get price table", err) != nil {
 		return
 	}
-
-	jc.Encode(hostdb.HostPriceTable{
-		HostPriceTable: pt,
-		Expiry:         time.Now().Add(pt.Validity),
-	})
+	jc.Encode(hpt)
 }
 
 func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, errContext string, err *error) {
@@ -497,6 +498,8 @@ func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, err
 
 func (w *worker) rhpFormHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// decode the request
 	var rfr api.RHPFormRequest
 	if jc.Decode(&rfr) != nil {
 		return
@@ -558,7 +561,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	}
 
 	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
+	err = w.bus.BroadcastTransaction(ctx, txnSet)
 	if err != nil && !isErrDuplicateTransactionSet(err) {
 		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
 	}
@@ -571,13 +574,15 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpBroadcastHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode the fcid
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
 	}
 
 	// Acquire lock before fetching revision.
-	ctx := jc.Request.Context()
 	unlocker, err := w.acquireContractLock(ctx, fcid, lockingPriorityActiveContractRevision)
 	if jc.Check("could not acquire revision lock", err) != nil {
 		return
@@ -624,6 +629,8 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
 	// decode fcid
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
@@ -637,10 +644,9 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	}
 
 	// apply timeout
-	ctx := jc.Request.Context()
 	if pcr.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(jc.Request.Context(), time.Duration(pcr.Timeout))
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(pcr.Timeout))
 		defer cancel()
 	}
 
@@ -687,6 +693,8 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 }
 
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
+	ctx := jc.Request.Context()
+
 	// decode fcid
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -694,7 +702,6 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	}
 
 	// fetch the contract from the bus
-	ctx := jc.Request.Context()
 	c, err := w.bus.Contract(ctx, id)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -748,7 +755,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	}
 
 	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(jc.Request.Context(), txnSet)
+	err = w.bus.BroadcastTransaction(ctx, txnSet)
 	if err != nil && !isErrDuplicateTransactionSet(err) {
 		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
 	}
@@ -964,8 +971,9 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 }
 
 func (w *worker) objectsHandlerGET(jc jape.Context) {
-	ctx := jc.Request.Context()
 	jc.Custom(nil, []api.ObjectMetadata{})
+
+	ctx := jc.Request.Context()
 
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -1156,6 +1164,9 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
 	// cancel the upload if no contract set is specified
 	if up.ContractSet == "" {
 		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
@@ -1244,7 +1255,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if disablePreshardingEncryption {
 		opts = append(opts, WithCustomKey(object.NoOpKey))
 	} else {
-		upload, err := w.bus.MultipartUpload(jc.Request.Context(), uploadID)
+		upload, err := w.bus.MultipartUpload(ctx, uploadID)
 		if err != nil {
 			jc.Error(err, http.StatusBadRequest)
 			return
@@ -1306,6 +1317,8 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 
 func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
+
+	// fetch contracts
 	busContracts, err := w.bus.Contracts(ctx)
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
@@ -1418,7 +1431,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
+	return jape.Mux(tracing.TracingMiddleware("worker", interactionMiddleware(w, map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
@@ -1446,7 +1459,7 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
-	}))
+	})))
 }
 
 // Shutdown shuts down the worker.
@@ -1554,7 +1567,18 @@ func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContrac
 	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
-func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, hpt rhpv3.HostPriceTable, elapsed time.Duration, err error) {
+	// record host scan
+	defer func() {
+		InteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
+			HostKey:    hostKey,
+			Success:    isSuccessfulInteraction(err),
+			Timestamp:  time.Now(),
+			Settings:   settings,
+			PriceTable: hpt,
+		})
+	}()
+
 	// resolve hostIP. We don't want to scan hosts on private networks.
 	if !w.allowPrivateIPs {
 		host, _, err := net.SplitHostPort(hostIP)
@@ -1574,8 +1598,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 
 	// fetch the host settings
 	start := time.Now()
-	var settings rhpv2.HostSettings
-	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
+	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
 		if settings, err = RPCSettings(ctx, t); err == nil {
 			// NOTE: we overwrite the NetAddress with the host address here since we
 			// just used it to dial the host we know it's valid
@@ -1583,17 +1606,16 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		}
 		return err
 	})
-	elapsed := time.Since(start)
+	elapsed = time.Since(start)
 
 	// fetch the host pricetable
-	var pt rhpv3.HostPriceTable
 	if err == nil {
 		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) (err error) {
-			pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+			hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 			return err
 		})
 	}
-	return settings, pt, elapsed, err
+	return
 }
 
 // PartialSlab fetches the data of a partial slab from the bus. It will fall

@@ -449,3 +449,10 @@ func sectorUploadCostRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 	}
 	return total, false
 }
+
+func errToStr(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
