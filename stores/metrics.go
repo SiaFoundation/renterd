@@ -292,7 +292,9 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
-
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
 	return metrics, nil
 }
 
@@ -312,7 +314,9 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time,
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
 	}
-
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
 	return metrics, nil
 }
 
@@ -327,8 +331,19 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n ui
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
-
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
 	return metrics, nil
+}
+
+func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) unixTimeMS {
+	toNormalise := time.Time(t).UTC()
+	if start.After(toNormalise) {
+		return unixTimeMS(start)
+	}
+	normalized := (toNormalise.UnixMilli()-start.UnixMilli())/int64(interval)*int64(interval) + start.UnixMilli()
+	return unixTimeMS(time.UnixMilli(normalized).UTC())
 }
 
 // findPeriods is the core of all methods retrieving metrics. By using integer
@@ -361,6 +376,9 @@ func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64,
 	err = s.findPeriods(s.dbMetrics, &metrics, start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
+	}
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
 	}
 	return
 }
