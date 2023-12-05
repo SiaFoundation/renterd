@@ -23,8 +23,6 @@ var (
 
 type (
 	pruneResult struct {
-		ts time.Time
-
 		fcid    types.FileContractID
 		hk      types.PublicKey
 		version string
@@ -38,9 +36,12 @@ type (
 )
 
 func (pr pruneResult) String() string {
-	msg := fmt.Sprintf("contract %v, pruned %d bytes", pr.fcid, pr.pruned)
+	msg := fmt.Sprintf("contract %v", pr.fcid)
+	if pr.hk != (types.PublicKey{}) {
+		msg += fmt.Sprintf(", host %v version %s", pr.hk, pr.version)
+	}
 	if pr.pruned > 0 {
-		msg += fmt.Sprintf(", remaining %d bytes, elapsed %v", pr.remaining, pr.duration)
+		msg += fmt.Sprintf(", pruned %d bytes, remaining %d bytes, elapsed %v", pr.pruned, pr.remaining, pr.duration)
 	}
 	if pr.err != nil {
 		msg += fmt.Sprintf(", err: %v", pr.err)
@@ -155,14 +156,12 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	start := time.Now()
 	pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil && pruned == 0 {
-		return pruneResult{fcid: fcid, hk: host.PublicKey, err: err}
+		return pruneResult{fcid: fcid, hk: host.PublicKey, version: host.Settings.Version, err: err}
 	} else if err != nil && isErr(err, context.DeadlineExceeded) {
 		err = nil
 	}
 
 	return pruneResult{
-		ts: start,
-
 		fcid:    contract.ID,
 		hk:      host.PublicKey,
 		version: host.Settings.Version,
