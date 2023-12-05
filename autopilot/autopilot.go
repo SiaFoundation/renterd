@@ -500,8 +500,9 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 
 			// if we have received a deposit, trigger the autopilot
 			if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
-				_ = ap.Trigger(false)
-				return
+				if ap.Trigger(false) {
+					return
+				}
 			}
 		}
 	}()
