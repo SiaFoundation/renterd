@@ -356,8 +356,12 @@ func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, start time.Time, n 
 	end := start.Add(time.Duration(n) * interval)
 	// inner groups all metrics within the requested time range into periods of
 	// 'interval' length and gives us the min timestamp of each period.
+	floorExpr := "(timestamp - ?) / ? * ?"
+	if !isSQLite(s.dbMetrics) {
+		floorExpr = "FLOOR((timestamp - ?) / ?) * ?"
+	}
 	inner := tx.Model(dst).
-		Select("MIN(timestamp) AS min_time, (timestamp - ?) / ? * ? AS period", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		Select(fmt.Sprintf("MIN(timestamp) AS min_time, %s AS period", floorExpr), unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	// mid then joins the result with the original table. This might yield
