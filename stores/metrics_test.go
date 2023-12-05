@@ -277,7 +277,7 @@ func TestContractMetrics(t *testing.T) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
 		for _, m := range metrics {
-			if !cmp.Equal(m, fcid2Metric[m.ContractID]) {
+			if !cmp.Equal(m, fcid2Metric[m.ContractID], cmp.Comparer(api.CompareTimeRFC3339)) {
 				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
 			}
 			cmpFn(m)

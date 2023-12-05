@@ -72,6 +72,12 @@ func (s *ParamString) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// CompareTimeRFC3339 is a comparer function to be used with cmp.Comparer.
+func CompareTimeRFC3339(t1, t2 TimeRFC3339) bool {
+	return time.Time(t1).UTC().Equal(time.Time(t2).UTC())
+}
+
+// TimeNow returns the current time as a TimeRFC3339.
 func TimeNow() TimeRFC3339 {
 	return TimeRFC3339(time.Now())
 }
