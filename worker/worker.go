@@ -345,8 +345,7 @@ func (w *worker) registerAlert(a alerts.Alert) {
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode the request
 	var rsr api.RHPScanRequest
@@ -448,8 +447,7 @@ func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamux
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode the request
 	var rptr api.RHPPriceTableRequest
@@ -499,8 +497,7 @@ func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, err
 }
 
 func (w *worker) rhpFormHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode the request
 	var rfr api.RHPFormRequest
@@ -577,8 +574,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpBroadcastHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode the fcid
 	var fcid types.FileContractID
@@ -633,8 +629,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode fcid
 	var fcid types.FileContractID
@@ -698,8 +693,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 }
 
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode fcid
 	var id types.FileContractID
@@ -724,8 +718,7 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 }
 
 func (w *worker) rhpRenewHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode request
 	var rrr api.RHPRenewRequest
@@ -776,8 +769,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpFundHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode request
 	var rfr api.RHPFundRequest
@@ -849,8 +841,7 @@ func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
 }
 
 func (w *worker) rhpSyncHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode the request
 	var rsr api.RHPSyncRequest
@@ -875,8 +866,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 }
 
 func (w *worker) slabMigrateHandler(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// decode the slab
 	var slab object.Slab
@@ -1017,8 +1007,7 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 func (w *worker) objectsHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []api.ObjectMetadata{})
 
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -1102,9 +1091,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
-
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// grab the path
 	path := jc.PathParam("path")
@@ -1200,9 +1187,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
-
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// grab the path
 	path := jc.PathParam("path")
@@ -1365,8 +1350,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 }
 
 func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
-	// attach interaction recorder
-	ctx := WithInteractionRecorder(jc.Request.Context(), w)
+	ctx := jc.Request.Context()
 
 	// fetch contracts
 	busContracts, err := w.bus.Contracts(ctx)
@@ -1481,7 +1465,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes("worker", map[string]jape.Handler{
+	return jape.Mux(tracing.TracingMiddleware("worker", interactionMiddleware(w, map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
@@ -1511,7 +1495,7 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
-	}))
+	})))
 }
 
 // Shutdown shuts down the worker.

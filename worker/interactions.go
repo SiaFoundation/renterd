@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/tracing"
 )
@@ -22,8 +24,16 @@ type (
 
 var _ InteractionRecorder = &worker{}
 
-func WithInteractionRecorder(ctx context.Context, ir InteractionRecorder) context.Context {
-	return context.WithValue(ctx, keyInteractionRecorder, ir)
+func interactionMiddleware(ir InteractionRecorder, routes map[string]jape.Handler) map[string]jape.Handler {
+	for route, handler := range routes {
+		routes[route] = jape.Adapt(func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := context.WithValue(r.Context(), keyInteractionRecorder, ir)
+				h.ServeHTTP(w, r.WithContext(ctx))
+			})
+		})(handler)
+	}
+	return routes
 }
 
 func InteractionRecorderFromContext(ctx context.Context) InteractionRecorder {

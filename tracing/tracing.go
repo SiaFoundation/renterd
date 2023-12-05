@@ -69,8 +69,8 @@ func Init(serviceInstanceId string) (func(ctx context.Context) error, error) {
 	return provider.Shutdown, nil
 }
 
-// TracedHandler attaches a tracing handler to http routes.
-func TracedRoutes(component string, routes map[string]jape.Handler) map[string]jape.Handler {
+// TracingMiddleware attaches a tracing handler to http routes.
+func TracingMiddleware(component string, routes map[string]jape.Handler) map[string]jape.Handler {
 	adapt := func(route string, h jape.Handler) jape.Handler {
 		return jape.Adapt(func(h http.Handler) http.Handler {
 			return otelhttp.NewHandler(h, fmt.Sprintf("%s: %s", component, route))
