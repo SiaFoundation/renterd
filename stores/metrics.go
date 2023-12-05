@@ -338,11 +338,12 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n ui
 }
 
 func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) unixTimeMS {
+	start = start.UTC()
 	toNormalise := time.Time(t).UTC()
 	if start.After(toNormalise) {
 		return unixTimeMS(start)
 	}
-	normalized := (toNormalise.UnixMilli()-start.UnixMilli())/int64(interval)*int64(interval) + start.UnixMilli()
+	normalized := (toNormalise.UnixMilli()-start.UnixMilli())/int64(interval.Milliseconds())*int64(interval.Milliseconds()) + start.UnixMilli()
 	return unixTimeMS(time.UnixMilli(normalized).UTC())
 }
 

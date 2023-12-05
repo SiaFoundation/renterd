@@ -13,6 +13,40 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestNormaliseTimestamp(t *testing.T) {
+	tests := []struct {
+		start    time.Time
+		interval time.Duration
+		ti       time.Time
+		result   time.Time
+	}{
+		{
+			start:    time.UnixMilli(100),
+			interval: 10 * time.Millisecond,
+			ti:       time.UnixMilli(105),
+			result:   time.UnixMilli(100),
+		},
+		{
+			start:    time.UnixMilli(100),
+			interval: 10 * time.Millisecond,
+			ti:       time.UnixMilli(115),
+			result:   time.UnixMilli(110),
+		},
+		{
+			start:    time.UnixMilli(100),
+			interval: 10 * time.Millisecond,
+			ti:       time.UnixMilli(125),
+			result:   time.UnixMilli(120),
+		},
+	}
+
+	for _, test := range tests {
+		if result := time.Time(normaliseTimestamp(test.start, test.interval, unixTimeMS(test.ti))); !result.Equal(test.result) {
+			t.Fatalf("expected %v, got %v", test.result, result)
+		}
+	}
+}
+
 func TestContractSetMetrics(t *testing.T) {
 	testStart := time.Now().Round(time.Millisecond).UTC()
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
