@@ -178,13 +178,11 @@ type (
 		id  api.UploadID
 		mgr *uploadManager
 
-		allowed          map[types.FileContractID]struct{}
-		doneShardTrigger chan struct{}
-		lockPriority     int
+		allowed      map[types.FileContractID]struct{}
+		lockPriority int
 
-		mu      sync.Mutex
-		ongoing []slabID
-		used    map[slabID]map[types.FileContractID]struct{}
+		mu   sync.Mutex
+		used map[slabID]map[types.FileContractID]struct{}
 	}
 
 	slabUpload struct {
@@ -538,18 +536,18 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	var partialSlab []byte
 
 	// launch uploads in a separate goroutine
-	stopCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	go func() {
 		var slabIndex int
 		for {
 			select {
 			case <-mgr.stopChan:
 				return // interrupted
+			case <-ctx.Done():
+				return // interrupted
 			default:
 			}
 			// acquire memory
-			mem := mgr.mm.AcquireMemory(stopCtx, redundantSize)
+			mem := mgr.mm.AcquireMemory(ctx, redundantSize)
 			if mem == nil {
 				return // interrupted
 			}
@@ -573,7 +571,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 				// unexpected error, notify main thread
 				select {
 				case respChan <- slabUploadResponse{err: err}:
-				case <-stopCtx.Done():
+				case <-ctx.Done():
 				}
 				return
 			} else if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
@@ -767,12 +765,10 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 		id:  id,
 		mgr: mgr,
 
-		allowed:          allowed,
-		doneShardTrigger: make(chan struct{}, 1),
-		lockPriority:     lockPriority,
+		allowed:      allowed,
+		lockPriority: lockPriority,
 
-		ongoing: make([]slabID, 0),
-		used:    make(map[slabID]map[types.FileContractID]struct{}),
+		used: make(map[slabID]map[types.FileContractID]struct{}),
 	}, finishFn, nil
 }
 
@@ -783,56 +779,20 @@ func (mgr *uploadManager) numUploaders() int {
 }
 
 func (mgr *uploadManager) candidate(req *sectorUploadReq) *uploader {
-	// fetch candidates
-	candidates := func() []*uploader {
-		mgr.mu.Lock()
-		defer mgr.mu.Unlock()
+	// fetch candidate
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
 
-		// sort the uploaders by their estimate
-		sort.Slice(mgr.uploaders, func(i, j int) bool {
-			return mgr.uploaders[i].estimate() < mgr.uploaders[j].estimate()
-		})
-
-		// select top ten candidates
-		var candidates []*uploader
-		for _, uploader := range mgr.uploaders {
-			if req.upload.canUseUploader(req.sID, uploader) {
-				candidates = append(candidates, uploader)
-				if len(candidates) == 10 {
-					break
-				}
-			}
-		}
-		return candidates
-	}()
-
-	// return early if we have no queues left
-	if len(candidates) == 0 {
-		return nil
-	}
-
-loop:
-	for {
-		// if this slab does not have more than 1 parent, we return the best
-		// candidate
-		if len(req.upload.parents(req.sID)) <= 1 {
-			return candidates[0]
-		}
-
-		// otherwise we wait, allowing the parents to complete, after which we
-		// re-sort the candidates
-		select {
-		case <-req.upload.doneShardTrigger:
-			sort.Slice(candidates, func(i, j int) bool {
-				return candidates[i].estimate() < candidates[j].estimate()
-			})
-			continue loop
-		case <-req.ctx.Done():
-			break loop
+	// select candidate with the best estimate
+	var candidate *uploader
+	for _, uploader := range mgr.uploaders {
+		if !req.upload.canUseUploader(req.sID, uploader) {
+			continue // ignore
+		} else if candidate == nil || uploader.estimate() < candidate.estimate() {
+			candidate = uploader
 		}
 	}
-
-	return nil
+	return candidate
 }
 
 func (mgr *uploadManager) renewUploader(u *uploader) {
@@ -933,31 +893,7 @@ func (mgr *uploadManager) tryRecomputeStats() {
 	mgr.lastRecompute = time.Now()
 }
 
-func (u *upload) parents(sID slabID) []slabID {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	var parents []slabID
-	for _, ongoing := range u.ongoing {
-		if ongoing == sID {
-			break
-		}
-		parents = append(parents, ongoing)
-	}
-	return parents
-}
-
 func (u *upload) finishSlabUpload(upload *slabUpload) {
-	// update ongoing slab history
-	u.mu.Lock()
-	for i, prev := range u.ongoing {
-		if prev == upload.sID {
-			u.ongoing = append(u.ongoing[:i], u.ongoing[i+1:]...)
-			break
-		}
-	}
-	u.mu.Unlock()
-
 	// cleanup contexts
 	upload.mu.Lock()
 	for _, shard := range upload.remaining {
@@ -970,11 +906,6 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, mem *acquir
 	// create slab id
 	var sID slabID
 	frand.Read(sID[:])
-
-	// add to ongoing uploads
-	u.mu.Lock()
-	u.ongoing = append(u.ongoing, sID)
-	u.mu.Unlock()
 
 	// create slab upload
 	slab := &slabUpload{
@@ -1132,15 +1063,6 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, mem *acquire
 				if !overdriving {
 					break // fail the upload
 				}
-			}
-		}
-
-		// handle the response
-		if resp.err == nil {
-			// signal the upload a shard was received
-			select {
-			case u.doneShardTrigger <- struct{}{}:
-			default:
 			}
 		}
 	}
@@ -1596,13 +1518,10 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	// update remaining sectors
 	delete(s.remaining, resp.req.sectorIndex)
 
-	// release memory - we don't release memory for overdrive sectors because
-	// it's not included in the initial allocation.
+	// release memory
 	resp.req.sector = nil
 	s.shards[resp.req.sectorIndex] = nil
-	if !resp.req.overdrive {
-		s.mem.ReleaseSome(rhpv2.SectorSize)
-	}
+	s.mem.ReleaseSome(rhpv2.SectorSize)
 
 	return len(s.remaining) == 0
 }

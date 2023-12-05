@@ -800,40 +800,6 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}))
 }
 
-func (w *worker) rhpRegistryReadHandler(jc jape.Context) {
-	var rrrr api.RHPRegistryReadRequest
-	if jc.Decode(&rrrr) != nil {
-		return
-	}
-	var value rhpv3.RegistryValue
-	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrrr.HostKey, rrrr.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		value, err = RPCReadRegistry(ctx, t, &rrrr.Payment, rrrr.RegistryKey)
-		return
-	})
-	if jc.Check("couldn't read registry", err) != nil {
-		return
-	}
-	jc.Encode(value)
-}
-
-func (w *worker) rhpRegistryUpdateHandler(jc jape.Context) {
-	var rrur api.RHPRegistryUpdateRequest
-	if jc.Decode(&rrur) != nil {
-		return
-	}
-	var pt rhpv3.HostPriceTable   // TODO
-	rc := pt.UpdateRegistryCost() // TODO: handle refund
-	cost, _ := rc.Total()
-	// TODO: refactor to a w.RegistryUpdate method that calls host.RegistryUpdate.
-	payment := preparePayment(w.accounts.deriveAccountKey(rrur.HostKey), cost, pt.HostBlockHeight)
-	err := w.transportPoolV3.withTransportV3(jc.Request.Context(), rrur.HostKey, rrur.SiamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		return RPCUpdateRegistry(ctx, t, &payment, rrur.RegistryKey, rrur.RegistryValue)
-	})
-	if jc.Check("couldn't update registry", err) != nil {
-		return
-	}
-}
-
 func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -1461,8 +1427,6 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/fund":                   w.rhpFundHandler,
 		"POST   /rhp/sync":                   w.rhpSyncHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
-		"POST   /rhp/registry/read":          w.rhpRegistryReadHandler,
-		"POST   /rhp/registry/update":        w.rhpRegistryUpdateHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,

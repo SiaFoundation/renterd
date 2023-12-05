@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/hostdb"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 )
 
 // RHPBroadcast broadcasts the latest revision for a contract.
@@ -80,18 +79,6 @@ func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileCont
 	return
 }
 
-// RHPReadRegistry reads a registry value.
-func (c *Client) RHPReadRegistry(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, key rhpv3.RegistryKey, payment rhpv3.PayByEphemeralAccountRequest) (resp rhpv3.RegistryValue, err error) {
-	req := api.RHPRegistryReadRequest{
-		HostKey:     hostKey,
-		SiamuxAddr:  siamuxAddr,
-		RegistryKey: key,
-		Payment:     payment,
-	}
-	err = c.c.WithContext(ctx).POST("/rhp/registry/read", req, &resp)
-	return
-}
-
 // RHPRenew renews an existing contract with a host.
 func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, newCollateral types.Currency, windowSize uint64) (rhpv2.ContractRevision, []types.Transaction, error) {
 	req := api.RHPRenewRequest{
@@ -129,16 +116,5 @@ func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, h
 		SiamuxAddr: siamuxAddr,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
-	return
-}
-
-// RHPUpdateRegistry updates a registry value.
-func (c *Client) RHPUpdateRegistry(ctx context.Context, hostKey types.PublicKey, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
-	req := api.RHPRegistryUpdateRequest{
-		HostKey:       hostKey,
-		RegistryKey:   key,
-		RegistryValue: value,
-	}
-	err = c.c.WithContext(ctx).POST("/rhp/registry/update", req, nil)
 	return
 }

@@ -40,7 +40,13 @@ type (
 )
 
 func (pr pruneResult) String() string {
-	msg := fmt.Sprintf("contract %v, pruned %d bytes, remaining %d bytes, elapsed %v, host version %v", pr.fcid, pr.pruned, pr.remaining, pr.duration, pr.version)
+	msg := fmt.Sprintf("contract %v", pr.fcid)
+	if pr.hk != (types.PublicKey{}) {
+		msg += fmt.Sprintf(", host %v version %s", pr.hk, pr.version)
+	}
+	if pr.pruned > 0 {
+		msg += fmt.Sprintf(", pruned %d bytes, remaining %d bytes, elapsed %v", pr.pruned, pr.remaining, pr.duration)
+	}
 	if pr.err != nil {
 		msg += fmt.Sprintf(", err: %v", pr.err)
 	}
