@@ -19,7 +19,6 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 	values.Set("start", api.TimeRFC3339(start).String())
 	values.Set("n", fmt.Sprint(n))
 	values.Set("interval", api.DurationMS(interval).String())
-	fmt.Println("oof", api.TimeRFC3339(start).String(), values.Encode())
 	if opts.ContractID != (types.FileContractID{}) {
 		values.Set("contractID", opts.ContractID.String())
 	}
