@@ -250,10 +250,10 @@ func TestObjectEntries(t *testing.T) {
 	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
 			// assert mod time
-			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.After(start.UTC()) {
+			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
 				t.Fatal("mod time should be set")
 			}
-			entries[i].ModTime = time.Time{}
+			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
 			if entries[i].MimeType == "" {
@@ -2208,7 +2208,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 			t.Fatalf("expected 1 contract, got %v", m.Contracts)
 		} else if m.Name != testContractSet {
 			t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
-		} else if !m.Timestamp.After(startTime) {
+		} else if !m.Timestamp.Std().After(startTime) {
 			t.Fatal("expected time to be after start time")
 		}
 	}
@@ -2225,7 +2225,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected non-zero FCID")
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
-	} else if !m.Timestamp.After(startTime) {
+	} else if !m.Timestamp.Std().After(startTime) {
 		t.Fatal("expected time to be after start time")
 	}
 
@@ -2243,7 +2243,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 
 	if len(cMetrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
-	} else if m := cMetrics[0]; !startTime.Before(m.Timestamp) {
+	} else if m := cMetrics[0]; !startTime.Before(m.Timestamp.Std()) {
 		t.Fatalf("expected time to be after start time, got %v", m.Timestamp)
 	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")

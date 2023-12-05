@@ -254,7 +254,7 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 		for _, part := range dbParts {
 			resp.Parts = append(resp.Parts, api.MultipartListPartItem{
 				PartNumber:   part.PartNumber,
-				LastModified: part.CreatedAt.UTC(),
+				LastModified: api.TimeRFC3339(part.CreatedAt.UTC()),
 				ETag:         part.Etag,
 				Size:         int64(part.Size),
 			})
@@ -436,6 +436,6 @@ func (u dbMultipartUpload) convert() (api.MultipartUpload, error) {
 		Key:       key,
 		Path:      u.ObjectID,
 		UploadID:  u.UploadID,
-		CreatedAt: u.CreatedAt.UTC(),
+		CreatedAt: api.TimeRFC3339(u.CreatedAt.UTC()),
 	}, nil
 }

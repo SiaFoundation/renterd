@@ -1665,7 +1665,7 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 func (b *bus) consensusState() api.ConsensusState {
 	return api.ConsensusState{
 		BlockHeight:   b.cm.TipState().Index.Height,
-		LastBlockTime: b.cm.LastBlockTime(),
+		LastBlockTime: api.TimeRFC3339(b.cm.LastBlockTime()),
 		Synced:        b.cm.Synced(),
 	}
 }
@@ -1911,13 +1911,13 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 
 func (b *bus) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.BusStateResponse{
-		StartTime: b.startTime,
+		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
-			BuildTime: build.BuildTime(),
+			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 	})
 }

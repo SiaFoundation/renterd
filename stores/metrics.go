@@ -107,7 +107,7 @@ func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 	for i := range resp {
 		resp[i] = api.ContractMetric{
-			Timestamp:           time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp:           api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
 			ContractID:          types.FileContractID(metrics[i].FCID),
 			HostKey:             types.PublicKey(metrics[i].Host),
 			RemainingCollateral: toCurr(metrics[i].RemainingCollateralLo, metrics[i].RemainingCollateralHi),
@@ -135,7 +135,7 @@ func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, start time.Time,
 			ContractID: types.FileContractID(metrics[i].FCID),
 			Name:       metrics[i].Name,
 			Reason:     metrics[i].Reason,
-			Timestamp:  time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp:  api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
 		}
 	}
 	return resp, nil
@@ -151,7 +151,7 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n ui
 		resp[i] = api.ContractSetMetric{
 			Contracts: metrics[i].Contracts,
 			Name:      metrics[i].Name,
-			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
 		}
 	}
 	return resp, nil
@@ -169,7 +169,7 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n ui
 			HostKey:   types.PublicKey(metrics[i].Host),
 			Origin:    metrics[i].Origin,
 			Duration:  metrics[i].Duration,
-			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
 		}
 	}
 	return resp, nil
@@ -269,7 +269,7 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 	}
 	for i := range resp {
 		resp[i] = api.WalletMetric{
-			Timestamp:   time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp:   api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
 			Confirmed:   toCurr(metrics[i].ConfirmedLo, metrics[i].ConfirmedHi),
 			Spendable:   toCurr(metrics[i].SpendableLo, metrics[i].SpendableHi),
 			Unconfirmed: toCurr(metrics[i].UnconfirmedLo, metrics[i].UnconfirmedHi),
