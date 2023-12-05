@@ -59,7 +59,8 @@ var (
 			Upload:   rhpv2.SectorSize * 500,
 			Storage:  rhpv2.SectorSize * 5e3,
 
-			Set: testContractSet,
+			Set:   testContractSet,
+			Prune: true,
 		},
 		Hosts: api.HostsConfig{
 			MaxDowntimeHours:      10,
