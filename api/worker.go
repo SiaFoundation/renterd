@@ -165,15 +165,6 @@ type (
 		AccountKey types.PrivateKey `json:"accountKey"`
 	}
 
-	// RHPRegistryReadRequest is the request type for the /rhp/registry/read
-	// endpoint.
-	RHPRegistryReadRequest struct {
-		HostKey     types.PublicKey                    `json:"hostKey"`
-		SiamuxAddr  string                             `json:"siamuxAddr"`
-		RegistryKey rhpv3.RegistryKey                  `json:"registryKey"`
-		Payment     rhpv3.PayByEphemeralAccountRequest `json:"payment"`
-	}
-
 	// RHPRegistryUpdateRequest is the request type for the /rhp/registry/update
 	// endpoint.
 	RHPRegistryUpdateRequest struct {
