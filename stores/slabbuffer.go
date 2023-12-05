@@ -226,14 +226,8 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	}
 
 	// Commit all used buffers to disk.
-	type dbUpdate struct {
-		complete bool
-		syncSize int64
-		buffer   *SlabBuffer
-	}
-	var dbUpdates []dbUpdate
 	for _, buffer := range usedBuffers {
-		syncSize, complete, err := buffer.commitAppend(mgr.bufferedSlabCompletionThreshold)
+		complete, err := buffer.commitAppend(mgr.bufferedSlabCompletionThreshold)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -241,12 +235,6 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 		if complete {
 			mgr.markBufferComplete(buffer, gid)
 		}
-		// Remember to update the db with the new size if necessary.
-		dbUpdates = append(dbUpdates, dbUpdate{
-			buffer:   buffer,
-			complete: complete,
-			syncSize: syncSize,
-		})
 	}
 	return slabs, mgr.BufferSize(gid), nil
 }
@@ -425,13 +413,13 @@ func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool, minShards uint8) 
 	}
 }
 
-func (buf *SlabBuffer) commitAppend(completionThreshold int64) (int64, bool, error) {
+func (buf *SlabBuffer) commitAppend(completionThreshold int64) (bool, error) {
 	// Fetch the current size first. We know that we have at least synced the
 	// buffer up to this point upon success.
 	buf.mu.Lock()
 	if buf.syncErr != nil {
 		buf.mu.Unlock()
-		return 0, false, buf.syncErr
+		return false, buf.syncErr
 	}
 	syncSize := buf.size
 	buf.mu.Unlock()
@@ -442,7 +430,7 @@ func (buf *SlabBuffer) commitAppend(completionThreshold int64) (int64, bool, err
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	buf.syncErr = err
-	return syncSize, syncSize >= buf.maxSize-completionThreshold, err
+	return syncSize >= buf.maxSize-completionThreshold, err
 }
 
 func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferGroupID) {
