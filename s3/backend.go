@@ -401,7 +401,7 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 }
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
-	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
+	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, contentLength, api.UploadMultipartUploadPartOptions{
 		DisablePreshardingEncryption: true,
 	})
 	if err != nil {

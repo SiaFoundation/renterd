@@ -174,7 +174,7 @@ func (c *Client) State() (state api.WorkerStateResponse, err error) {
 }
 
 // UploadMultipartUploadPart uploads part of the data for a multipart upload.
-func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
+func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, contentLength int64, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
 	path = api.ObjectPathEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
@@ -194,6 +194,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.Header.Add("X-Content-Length", fmt.Sprintf("%d", contentLength))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
