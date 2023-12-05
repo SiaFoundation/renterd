@@ -88,5 +88,4 @@ func TestInteractions(t *testing.T) {
 	if ts+1 != h.Interactions.TotalScans {
 		t.Fatal("expected one new scan")
 	}
-
 }
