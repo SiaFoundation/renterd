@@ -26,13 +26,10 @@ type SlabBuffer struct {
 	slabKey  object.EncryptionKey
 	maxSize  int64
 
-	dbMu sync.Mutex
-
 	mu          sync.Mutex
 	file        *os.File
 	lockedUntil time.Time
 	size        int64
-	dbSize      int64
 	syncErr     error
 }
 
@@ -104,6 +101,17 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 			sqlStore.logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.DBSlab.Key, err)
 			continue
 		}
+		// Get the size of the buffer by looking at all slices using it
+		var size int64
+		err = sqlStore.db.Model(&dbSlab{}).
+			Joins("INNER JOIN slices sli ON slabs.id = sli.db_slab_id").
+			Select("COALESCE(MAX(offset+length), 0) as Size").
+			Where("slabs.db_buffered_slab_id = ?", buffer.ID).
+			Scan(&size).
+			Error
+		if err != nil {
+			return nil, err
+		}
 		// Create the slab buffer.
 		sb := &SlabBuffer{
 			dbID:     buffer.ID,
@@ -111,12 +119,11 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 			slabKey:  ec,
 			maxSize:  int64(bufferedSlabSize(buffer.DBSlab.MinShards)),
 			file:     file,
-			dbSize:   buffer.Size,
-			size:     buffer.Size,
+			size:     size,
 		}
 		// Add the buffer to the manager.
 		gid := bufferGID(buffer.DBSlab.MinShards, buffer.DBSlab.TotalShards, uint32(buffer.DBSlab.DBContractSetID))
-		if buffer.Complete {
+		if size >= int64(sb.maxSize-slabBufferCompletionThreshold) {
 			mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], sb)
 		} else {
 			mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], sb)
@@ -241,56 +248,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 			syncSize: syncSize,
 		})
 	}
-
-	// Update size field in db. Since multiple threads might be trying to do
-	// this, the operation is associative.
-	for _, update := range dbUpdates {
-		err = func() error {
-			// Make sure only one thread can update the entry for a buffer at a
-			// time.
-			update.buffer.dbMu.Lock()
-			defer update.buffer.dbMu.Unlock()
-
-			// Since the order in which threads arrive here is not deterministic
-			// there is a chance that we don't need to perform this update
-			// because a larger size was already written to the db.
-			if !update.buffer.requiresDBUpdate() {
-				return nil
-			}
-			err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
-				return update.buffer.saveSize(tx, update.syncSize, update.complete)
-			})
-			if err != nil {
-				return err
-			}
-			// Update the dbSize field in the buffer to the size we just wrote to the
-			// db. This also needs to be associative.
-			update.buffer.updateDBSize(update.syncSize)
-			return nil
-		}()
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to update size/complete in db: %w", err)
-		}
-	}
-
 	return slabs, mgr.BufferSize(gid), nil
-}
-
-func (b *SlabBuffer) saveSize(tx *gorm.DB, size int64, complete bool) error {
-	maxOp := "GREATEST"
-	if isSQLite(tx) {
-		maxOp = "MAX"
-	}
-	if err := tx.Model(&dbBufferedSlab{}).
-		Where("id", b.dbID).
-		Updates(map[string]interface{}{
-			"complete": gorm.Expr("complete OR ?", complete),
-			"size":     gorm.Expr(maxOp+"(size, ?)", size),
-		}).
-		Error; err != nil {
-		return fmt.Errorf("failed to update buffered slab %v in database: %v", b.dbID, err)
-	}
-	return nil
 }
 
 func (mgr *SlabBufferManager) BufferSize(gid bufferGroupID) (total int64) {
@@ -487,20 +445,6 @@ func (buf *SlabBuffer) commitAppend(completionThreshold int64) (int64, bool, err
 	return syncSize, syncSize >= buf.maxSize-completionThreshold, err
 }
 
-func (buf *SlabBuffer) requiresDBUpdate() bool {
-	buf.mu.Lock()
-	defer buf.mu.Unlock()
-	return buf.size > buf.dbSize
-}
-
-func (buf *SlabBuffer) updateDBSize(size int64) {
-	buf.mu.Lock()
-	if size > buf.dbSize {
-		buf.dbSize = size
-	}
-	buf.mu.Unlock()
-}
-
 func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferGroupID) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -543,8 +487,6 @@ func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, to
 			MinShards:       minShards,
 			TotalShards:     totalShards,
 		},
-		Complete: false,
-		Size:     0,
 		Filename: fileName,
 	}
 	err = tx.Create(&createdSlab).

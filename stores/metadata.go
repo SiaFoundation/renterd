@@ -156,9 +156,7 @@ type (
 
 		DBSlab dbSlab
 
-		Complete bool `gorm:"index"`
 		Filename string
-		Size     int64
 	}
 
 	dbSector struct {
