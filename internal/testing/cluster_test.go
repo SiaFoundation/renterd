@@ -2182,7 +2182,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 }
 
 func TestBusRecordedMetrics(t *testing.T) {
-	startTime := time.Now()
+	startTime := time.Now().UTC().Round(time.Second)
 
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
@@ -2208,8 +2208,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 			t.Fatalf("expected 1 contract, got %v", m.Contracts)
 		} else if m.Name != testContractSet {
 			t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
-		} else if !m.Timestamp.Std().After(startTime) {
-			t.Fatal("expected time to be after start time")
+		} else if m.Timestamp.Std().Before(startTime) {
+			t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 		}
 	}
 
@@ -2225,8 +2225,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected non-zero FCID")
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
-	} else if !m.Timestamp.Std().After(startTime) {
-		t.Fatal("expected time to be after start time")
+	} else if m.Timestamp.Std().Before(startTime) {
+		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}
 
 	// Get contract metrics.
@@ -2243,8 +2243,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 
 	if len(cMetrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
-	} else if m := cMetrics[0]; !startTime.Before(m.Timestamp.Std()) {
-		t.Fatalf("expected time to be after start time, got %v", m.Timestamp)
+	} else if m := cMetrics[0]; m.Timestamp.Std().Before(startTime) {
+		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
 	} else if m.HostKey == (types.PublicKey{}) {

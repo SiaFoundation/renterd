@@ -13,8 +13,42 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestNormaliseTimestamp(t *testing.T) {
+	tests := []struct {
+		start    time.Time
+		interval time.Duration
+		ti       time.Time
+		result   time.Time
+	}{
+		{
+			start:    time.UnixMilli(100),
+			interval: 10 * time.Millisecond,
+			ti:       time.UnixMilli(105),
+			result:   time.UnixMilli(100),
+		},
+		{
+			start:    time.UnixMilli(100),
+			interval: 10 * time.Millisecond,
+			ti:       time.UnixMilli(115),
+			result:   time.UnixMilli(110),
+		},
+		{
+			start:    time.UnixMilli(100),
+			interval: 10 * time.Millisecond,
+			ti:       time.UnixMilli(125),
+			result:   time.UnixMilli(120),
+		},
+	}
+
+	for _, test := range tests {
+		if result := time.Time(normaliseTimestamp(test.start, test.interval, unixTimeMS(test.ti))); !result.Equal(test.result) {
+			t.Fatalf("expected %v, got %v", test.result, result)
+		}
+	}
+}
+
 func TestContractSetMetrics(t *testing.T) {
-	testStart := time.Now()
+	testStart := time.Now().Round(time.Millisecond).UTC()
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -25,8 +59,8 @@ func TestContractSetMetrics(t *testing.T) {
 		t.Fatal(err)
 	} else if m := metrics[0]; m.Contracts != 0 {
 		t.Fatalf("expected 0 contracts, got %v", m.Contracts)
-	} else if !time.Time(m.Timestamp).After(testStart) {
-		t.Fatal("expected time to be after test start")
+	} else if ti := time.Time(m.Timestamp); !ti.Equal(testStart) {
+		t.Fatal("expected time to match start time")
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected name to be %v, got %v", testContractSet, m.Name)
 	}
@@ -277,8 +311,10 @@ func TestContractMetrics(t *testing.T) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
 		for _, m := range metrics {
-			if !cmp.Equal(m, fcid2Metric[m.ContractID], cmp.Comparer(api.CompareTimeRFC3339)) {
-				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
+			expectedMetric := fcid2Metric[m.ContractID]
+			expectedMetric.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, unixTimeMS(expectedMetric.Timestamp)))
+			if !cmp.Equal(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)) {
+				t.Fatal("unexpected metric", cmp.Diff(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)))
 			}
 			cmpFn(m)
 		}

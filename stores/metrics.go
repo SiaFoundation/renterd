@@ -292,7 +292,9 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
-
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
 	return metrics, nil
 }
 
@@ -312,7 +314,9 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time,
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
 	}
-
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
 	return metrics, nil
 }
 
@@ -327,8 +331,21 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n ui
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
-
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
 	return metrics, nil
+}
+
+func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) unixTimeMS {
+	startMS := start.UnixMilli()
+	toNormaliseMS := time.Time(t).UnixMilli()
+	intervalMS := interval.Milliseconds()
+	if startMS > toNormaliseMS {
+		return unixTimeMS(start)
+	}
+	normalizedMS := (toNormaliseMS-startMS)/intervalMS*intervalMS + start.UnixMilli()
+	return unixTimeMS(time.UnixMilli(normalizedMS))
 }
 
 // findPeriods is the core of all methods retrieving metrics. By using integer
@@ -340,8 +357,12 @@ func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, start time.Time, n 
 	end := start.Add(time.Duration(n) * interval)
 	// inner groups all metrics within the requested time range into periods of
 	// 'interval' length and gives us the min timestamp of each period.
+	floorExpr := "(timestamp - ?) / ? * ?"
+	if !isSQLite(s.dbMetrics) {
+		floorExpr = "FLOOR((timestamp - ?) / ?) * ?"
+	}
 	inner := tx.Model(dst).
-		Select("MIN(timestamp) AS min_time, (timestamp - ?) / ? * ? AS period", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		Select(fmt.Sprintf("MIN(timestamp) AS min_time, %s AS period", floorExpr), unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	// mid then joins the result with the original table. This might yield
@@ -361,6 +382,9 @@ func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64,
 	err = s.findPeriods(s.dbMetrics, &metrics, start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
+	}
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
 	}
 	return
 }
