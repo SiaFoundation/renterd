@@ -305,6 +305,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00034_objectHealth(tx, logger)
 			},
 		},
+		{
+			ID: "00035_bufferedSlabsDropSizeAndComplete",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00035_bufferedSlabsDropSizeAndComplete(tx, logger)
+			},
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1375,5 +1381,23 @@ func performMigration00034_objectHealth(txn *gorm.DB, logger *zap.SugaredLogger)
 	}
 
 	logger.Info("migration 00034_objectHealth complete")
+	return nil
+}
+
+func performMigration00035_bufferedSlabsDropSizeAndComplete(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00035_bufferedSlabsDropSizeAndComplete")
+
+	// add health column
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "size") {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "size"); err != nil {
+			return err
+		}
+	}
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "complete") {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "complete"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00035_bufferedSlabsDropSizeAndComplete complete")
 	return nil
 }
