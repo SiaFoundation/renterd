@@ -13,6 +13,85 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestContractPruneMetrics(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add some metrics
+	hosts := []types.PublicKey{{1}, {2}}
+	hostVersions := []string{"1.5.9", "1.6.0"}
+	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
+	var i byte
+	fcid2Metric := make(map[types.FileContractID]api.ContractPruneMetric)
+	for hi, host := range hosts {
+		for _, recordedTime := range times {
+			metric := api.ContractPruneMetric{
+				Timestamp: recordedTime,
+
+				ContractID:  types.FileContractID{i},
+				HostKey:     host,
+				HostVersion: hostVersions[hi],
+
+				Pruned:    math.MaxUint64,
+				Remaining: math.MaxUint64,
+				Duration:  time.Second,
+			}
+			fcid2Metric[metric.ContractID] = metric
+			if err := ss.RecordContractPruneMetric(context.Background(), metric); err != nil {
+				t.Fatal(err)
+			}
+			i++
+		}
+	}
+
+	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts, expected int, cmpFn func(api.ContractPruneMetric)) {
+		t.Helper()
+		metrics, err := ss.ContractPruneMetrics(context.Background(), start, n, interval, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(metrics) != expected {
+			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
+		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
+			return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
+		}) {
+			t.Fatal("expected metrics to be sorted by time")
+		}
+		for _, m := range metrics {
+			if !cmp.Equal(m, fcid2Metric[m.ContractID]) {
+				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
+			}
+			cmpFn(m)
+		}
+	}
+
+	// Query without any filters.
+	start := time.UnixMilli(1)
+	assertMetrics(start, 3, time.Millisecond, api.ContractPruneMetricsQueryOpts{}, 3, func(m api.ContractPruneMetric) {})
+
+	// Query by host.
+	assertMetrics(start, 3, time.Millisecond, api.ContractPruneMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.ContractPruneMetric) {
+		if m.HostKey != hosts[0] {
+			t.Fatalf("expected host to be %v, got %v", hosts[0], m.HostKey)
+		}
+	})
+
+	// Query by host version.
+	assertMetrics(start, 3, time.Millisecond, api.ContractPruneMetricsQueryOpts{HostVersion: hostVersions[0]}, 3, func(m api.ContractPruneMetric) {
+		if m.HostKey != hosts[0] {
+			t.Fatalf("expected host to be %v, got %v", hosts[0], m.HostKey)
+		}
+	})
+
+	// Query by fcid.
+	fcid := types.FileContractID{2}
+	assertMetrics(start, 3, time.Millisecond, api.ContractPruneMetricsQueryOpts{ContractID: fcid}, 1, func(m api.ContractPruneMetric) {
+		if m.ContractID != fcid {
+			t.Fatalf("expected fcid to be %v, got %v", fcid, m.ContractID)
+		}
+	})
+}
+
 func TestContractSetMetrics(t *testing.T) {
 	testStart := time.Now()
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)

@@ -23,6 +23,8 @@ var (
 
 type (
 	pruneResult struct {
+		ts time.Time
+
 		fcid    types.FileContractID
 		hk      types.PublicKey
 		version string
@@ -33,6 +35,8 @@ type (
 
 		err error
 	}
+
+	pruneMetrics []api.ContractPruneMetric
 )
 
 func (pr pruneResult) String() string {
@@ -49,6 +53,14 @@ func (pr pruneResult) String() string {
 	return msg
 }
 
+func (pm pruneMetrics) String() string {
+	var total uint64
+	for _, m := range pm {
+		total += m.Pruned
+	}
+	return fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(pm))
+}
+
 func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 	id = alertIDForContract(alertPruningID, pr.fcid)
 
@@ -61,6 +73,17 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 		alert = newContractPruningFailedAlert(pr.hk, pr.version, pr.fcid, pr.err)
 	}
 	return
+}
+
+func (pr pruneResult) toMetric() api.ContractPruneMetric {
+	return api.ContractPruneMetric{
+		Timestamp:  pr.ts,
+		ContractID: pr.fcid,
+		HostKey:    pr.hk,
+		Pruned:     pr.pruned,
+		Remaining:  pr.remaining,
+		Duration:   pr.duration,
+	}
 }
 
 func (c *contractor) fetchPrunableContracts() (prunable []api.ContractPrunableData, _ error) {
@@ -113,9 +136,14 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	// prune every contract individually, one at a time and for a maximum
 	// duration of 'timeoutPruneContract' to limit the amount of time we lock
 	// the contract as contracts on old hosts can take a long time to prune
-	var total uint64
+	var metrics pruneMetrics
 	wp.withWorker(func(w Worker) {
 		for _, contract := range prunable {
+			// return if we're stopped
+			if c.ap.isStopped() {
+				return
+			}
+
 			// prune contract
 			result := c.pruneContract(w, contract.ID)
 			if result.err != nil {
@@ -134,11 +162,19 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			cancel()
 
 			// handle metrics
-			total += result.pruned
+			metrics = append(metrics, result.toMetric())
 		}
 	})
 
-	c.logger.Infof("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable))
+	// record metrics
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	if err := c.ap.bus.RecordContractPruneMetric(ctx, metrics...); err != nil {
+		c.logger.Error(err)
+	}
+	cancel()
+
+	// log metrics
+	c.logger.Info(metrics)
 }
 
 func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
@@ -147,7 +183,7 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	defer cancel()
 
 	// fetch the host
-	host, contract, err := c.hostForContract(ctx, fcid)
+	host, _, err := c.hostForContract(ctx, fcid)
 	if err != nil {
 		return pruneResult{fcid: fcid, err: err}
 	}
@@ -162,7 +198,9 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	}
 
 	return pruneResult{
-		fcid:    contract.ID,
+		ts: start,
+
+		fcid:    fcid,
 		hk:      host.PublicKey,
 		version: host.Settings.Version,
 

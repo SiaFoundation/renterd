@@ -39,6 +39,24 @@ type (
 		ListSpendingHi        unsigned64 `gorm:"index:idx_list_spending;NOT NULL"`
 	}
 
+	// dbContractPruneMetric tracks information about contract pruning. Such as
+	// the number of bytes pruned, how much data there is left to prune and how
+	// long it took, along with potential errors that occurred while trying to
+	// prune the contract.
+	dbContractPruneMetric struct {
+		Model
+
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
+
+		FCID        fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
+		Host        publicKey      `gorm:"index;size:32;NOT NULL"`
+		HostVersion string         `gorm:"index"`
+
+		Pruned    unsigned64    `gorm:"index;NOT NULL"`
+		Remaining unsigned64    `gorm:"index;NOT NULL"`
+		Duration  time.Duration `gorm:"index;NOT NULL"`
+	}
+
 	// dbContractSetMetric tracks information about a specific contract set.
 	// Such as the number of contracts it contains. Intended to be reported by
 	// the bus every time the set is updated.
@@ -91,6 +109,7 @@ type (
 )
 
 func (dbContractMetric) TableName() string         { return "contracts" }
+func (dbContractPruneMetric) TableName() string    { return "contract_prunes" }
 func (dbContractSetMetric) TableName() string      { return "contract_sets" }
 func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn" }
 func (dbPerformanceMetric) TableName() string      { return "performance" }
@@ -118,6 +137,29 @@ func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint6
 			FundAccountSpending: toCurr(metrics[i].FundAccountSpendingLo, metrics[i].FundAccountSpendingHi),
 			DeleteSpending:      toCurr(metrics[i].DeleteSpendingLo, metrics[i].DeleteSpendingHi),
 			ListSpending:        toCurr(metrics[i].ListSpendingLo, metrics[i].ListSpendingHi),
+		}
+	}
+	return resp, nil
+}
+
+func (s *SQLStore) ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error) {
+	metrics, err := s.contractPruneMetrics(ctx, start, n, interval, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := make([]api.ContractPruneMetric, len(metrics))
+	for i := range resp {
+		resp[i] = api.ContractPruneMetric{
+			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
+
+			ContractID:  types.FileContractID(metrics[i].FCID),
+			HostKey:     types.PublicKey(metrics[i].Host),
+			HostVersion: metrics[i].HostVersion,
+
+			Pruned:    uint64(metrics[i].Pruned),
+			Remaining: uint64(metrics[i].Remaining),
+			Duration:  metrics[i].Duration,
 		}
 	}
 	return resp, nil
@@ -197,6 +239,24 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 			DeleteSpendingHi:      unsigned64(metric.DeleteSpending.Hi),
 			ListSpendingLo:        unsigned64(metric.ListSpending.Lo),
 			ListSpendingHi:        unsigned64(metric.ListSpending.Hi),
+		}
+	}
+	return s.dbMetrics.Create(&dbMetrics).Error
+}
+
+func (s *SQLStore) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
+	dbMetrics := make([]dbContractPruneMetric, len(metrics))
+	for i, metric := range metrics {
+		dbMetrics[i] = dbContractPruneMetric{
+			Timestamp: unixTimeMS(metric.Timestamp),
+
+			FCID:        fileContractID(metric.ContractID),
+			Host:        publicKey(metric.HostKey),
+			HostVersion: metric.HostVersion,
+
+			Pruned:    unsigned64(metric.Pruned),
+			Remaining: unsigned64(metric.Remaining),
+			Duration:  metric.Duration,
 		}
 	}
 	return s.dbMetrics.Create(&dbMetrics).Error
@@ -288,6 +348,27 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 
 	var metrics []dbContractMetric
+	err := s.findPeriods(tx, &metrics, start, n, interval)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
+	}
+
+	return metrics, nil
+}
+
+func (s *SQLStore) contractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]dbContractPruneMetric, error) {
+	tx := s.dbMetrics
+	if opts.ContractID != (types.FileContractID{}) {
+		tx = tx.Where("fcid", fileContractID(opts.ContractID))
+	}
+	if opts.HostKey != (types.PublicKey{}) {
+		tx = tx.Where("host", publicKey(opts.HostKey))
+	}
+	if opts.HostVersion != "" {
+		tx = tx.Where("host_version", opts.HostVersion)
+	}
+
+	var metrics []dbContractPruneMetric
 	err := s.findPeriods(tx, &metrics, start, n, interval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
