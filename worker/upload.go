@@ -1517,7 +1517,11 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	}
 
 	// mark uploaders we used for overdrives as unused
-	for fcid := range sector.overdriving {
+	sector.mu.Lock()
+	overdriving := sector.overdriving
+	sector.overdriving = nil
+	sector.mu.Unlock()
+	for fcid := range overdriving {
 		s.upload.markUnused(req.sID, fcid)
 	}
 
