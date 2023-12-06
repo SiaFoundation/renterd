@@ -177,7 +177,7 @@ type (
 	upload struct {
 		id  api.UploadID
 		mgr *uploadManager
-
+		q
 		allowed      map[types.FileContractID]struct{}
 		lockPriority int
 
@@ -197,11 +197,10 @@ type (
 		mu          sync.Mutex
 		numInflight uint64
 		numLaunched uint64
+		numUploaded uint64
 
 		lastOverdrive time.Time
-		overdriving   map[int]int
-		remaining     map[int]sectorCtx
-		sectors       []object.Sector
+		sectors       map[int]*sectorUpload
 		errs          HostErrorSet
 	}
 
@@ -211,24 +210,30 @@ type (
 		err   error
 	}
 
-	sectorCtx struct {
+	sectorUpload struct {
 		ctx    context.Context
 		cancel context.CancelFunc
+
+		sector      object.Sector
+		sectorData  *[rhpv2.SectorSize]byte
+		sectorRoot  types.Hash256
+		sectorIndex int
+
+		uploaders    map[types.FileContractID]struct{}
+		numOverdrive int
 	}
 
 	sectorUploadReq struct {
 		upload *upload
-
-		sID slabID
-		ctx context.Context
+		sID    slabID
+		sector *sectorUpload
 
 		overdrive    bool
-		sector       *[rhpv2.SectorSize]byte
-		sectorIndex  int
 		responseChan chan sectorUploadResp
 
 		// set by the uploader performing the upload
-		hk types.PublicKey
+		fcid types.FileContractID
+		hk   types.PublicKey
 	}
 
 	sectorUploadResp struct {
@@ -881,12 +886,11 @@ func (mgr *uploadManager) tryRecomputeStats() {
 }
 
 func (u *upload) finishSlabUpload(upload *slabUpload) {
-	// cleanup contexts
-	upload.mu.Lock()
-	for _, shard := range upload.remaining {
-		shard.cancel()
+	for _, sector := range upload.sectors {
+		if sector.sector.Root == (types.Hash256{}) {
+			sector.cancel()
+		}
 	}
-	upload.mu.Unlock()
 }
 
 func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, mem *acquiredMemory) (*slabUpload, []*sectorUploadReq, chan sectorUploadResp) {
@@ -904,33 +908,37 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, mem *acquir
 		created: time.Now(),
 		shards:  shards,
 
-		overdriving: make(map[int]int, len(shards)),
-		remaining:   make(map[int]sectorCtx, len(shards)),
-		sectors:     make([]object.Sector, len(shards)),
-		errs:        make(HostErrorSet),
+		sectors: make(map[int]*sectorUpload, len(shards)),
+		errs:    make(HostErrorSet),
 	}
 
 	// prepare sector uploads
 	responseChan := make(chan sectorUploadResp)
 	requests := make([]*sectorUploadReq, len(shards))
 	for sI, shard := range shards {
-		// create the sector upload's cancel func
-		sCtx, cancel := context.WithCancel(ctx)
-		slab.remaining[sI] = sectorCtx{ctx: sCtx, cancel: cancel}
+		// create the sector
+		slab.sectors[sI] = &sectorUpload{
+			sectorIndex: sI,
+			sectorData:  (*[rhpv2.SectorSize]byte)(shard),
+			sectorRoot:  rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shard)),
 
-		// create the upload's span
-		sCtx, span := tracing.Tracer.Start(sCtx, "uploadSector")
+			uploaders: make(map[types.FileContractID]struct{}),
+		}
+
+		// attach a context
+		slab.sectors[sI].ctx, slab.sectors[sI].cancel = context.WithCancel(ctx)
+
+		// attach the upload's span
+		var span trace.Span
+		slab.sectors[sI].ctx, span = tracing.Tracer.Start(slab.sectors[sI].ctx, "uploadSector")
 		span.SetAttributes(attribute.Bool("overdrive", false))
 		span.SetAttributes(attribute.Int("sector", sI))
 
-		// create the sector upload
+		// create the request
 		requests[sI] = &sectorUploadReq{
-			upload: u,
-			sID:    sID,
-			ctx:    sCtx,
-
-			sector:       (*[rhpv2.SectorSize]byte)(shard),
-			sectorIndex:  sI,
+			upload:       u,
+			sID:          sID,
+			sector:       slab.sectors[sI],
 			responseChan: responseChan,
 		}
 	}
@@ -1004,6 +1012,12 @@ func (u *upload) markUsed(sID slabID, fcid types.FileContractID) {
 		u.used[sID] = make(map[types.FileContractID]struct{})
 	}
 	u.used[sID][fcid] = struct{}{}
+}
+
+func (u *upload) markUnused(sID slabID, fcid types.FileContractID) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	delete(u.used[sID], fcid)
 }
 
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, mem *acquiredMemory) ([]object.Sector, error) {
@@ -1109,7 +1123,7 @@ outer:
 			var root types.Hash256
 			start := time.Now()
 			fcid, _, _ := u.contractInfo()
-			err := rl.withRevision(req.ctx, defaultRevisionFetchTimeout, fcid, u.hk, u.siamuxAddr, req.upload.lockPriority, u.blockHeight(), func(rev types.FileContractRevision) error {
+			err := rl.withRevision(req.sector.ctx, defaultRevisionFetchTimeout, fcid, u.hk, u.siamuxAddr, req.upload.lockPriority, u.blockHeight(), func(rev types.FileContractRevision) error {
 				if rev.RevisionNumber == math.MaxUint64 {
 					return errMaxRevisionReached
 				}
@@ -1172,17 +1186,17 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	u.mu.Unlock()
 
 	// fetch span from context
-	span := trace.SpanFromContext(req.ctx)
+	span := trace.SpanFromContext(req.sector.ctx)
 	span.AddEvent("execute")
 
 	// update the bus
-	if err := u.mgr.b.AddUploadingSector(req.ctx, req.upload.id, fcid, rhpv2.SectorRoot(req.sector)); err != nil {
+	if err := u.mgr.b.AddUploadingSector(req.sector.ctx, req.upload.id, fcid, req.sector.sectorRoot); err != nil {
 		return types.Hash256{}, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
 	}
 
 	// upload the sector
 	start := time.Now()
-	root, err := host.UploadSector(req.ctx, req.sector, rev)
+	root, err := host.UploadSector(req.sector.ctx, req.sector.sectorData, rev)
 	if err != nil {
 		return types.Hash256{}, err
 	}
@@ -1225,18 +1239,21 @@ func (u *uploader) requeue(req *sectorUploadReq) {
 
 func (u *uploader) enqueue(req *sectorUploadReq) {
 	// trace the request
-	span := trace.SpanFromContext(req.ctx)
+	span := trace.SpanFromContext(req.sector.ctx)
 	span.SetAttributes(attribute.Stringer("hk", u.hk))
 	span.AddEvent("enqueued")
 
-	// set the host key and enqueue the request
-	u.mu.Lock()
+	// decorate the request
+	fcid, _, _ := u.contractInfo()
+	req.fcid = fcid
 	req.hk = u.hk
+
+	// enqueue the request
+	u.mu.Lock()
 	u.queue = append(u.queue, req)
 	u.mu.Unlock()
 
 	// mark as used
-	fcid, _, _ := u.contractInfo()
 	req.upload.markUsed(req.sID, fcid)
 
 	// signal there's work
@@ -1278,7 +1295,7 @@ func (u *uploader) pop() *sectorUploadReq {
 
 func (req *sectorUploadReq) succeed(root types.Hash256, hk types.PublicKey, fcid types.FileContractID) {
 	select {
-	case <-req.ctx.Done():
+	case <-req.sector.ctx.Done():
 	case req.responseChan <- sectorUploadResp{
 		fcid: fcid,
 		hk:   hk,
@@ -1290,7 +1307,7 @@ func (req *sectorUploadReq) succeed(root types.Hash256, hk types.PublicKey, fcid
 
 func (req *sectorUploadReq) fail(err error) {
 	select {
-	case <-req.ctx.Done():
+	case <-req.sector.ctx.Done():
 	case req.responseChan <- sectorUploadResp{
 		req: req,
 		err: err,
@@ -1300,7 +1317,7 @@ func (req *sectorUploadReq) fail(err error) {
 
 func (req *sectorUploadReq) done() bool {
 	select {
-	case <-req.ctx.Done():
+	case <-req.sector.ctx.Done():
 		return true
 	default:
 		return false
@@ -1310,22 +1327,24 @@ func (req *sectorUploadReq) done() bool {
 func (s *slabUpload) uploadSpeed() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	totalShards := len(s.sectors)
-	completedShards := totalShards - len(s.remaining)
-	bytes := completedShards * rhpv2.SectorSize
+	bytes := s.numUploaded * rhpv2.SectorSize
 	ms := time.Since(s.created).Milliseconds()
 	return int64(bytes) / ms
 }
 
-func (s *slabUpload) finish() ([]object.Sector, error) {
+func (s *slabUpload) finish() (sectors []object.Sector, _ error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	remaining := len(s.remaining)
-	if remaining > 0 {
+	if s.numUploaded < uint64(len(s.shards)) {
+		remaining := uint64(len(s.shards)) - s.numUploaded
 		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, launched=%d uploaders=%d errors=%d %w", remaining, s.numInflight, s.numLaunched, s.mgr.numUploaders(), len(s.errs), s.errs)
 	}
-	return s.sectors, nil
+
+	for _, sector := range s.sectors {
+		sectors = append(sectors, sector.sector)
+	}
+	return
 }
 
 func (s *slabUpload) inflight() uint64 {
@@ -1334,7 +1353,7 @@ func (s *slabUpload) inflight() uint64 {
 	return s.numInflight
 }
 
-func (s *slabUpload) launch(req *sectorUploadReq) (overdriving bool, err error) {
+func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1346,8 +1365,8 @@ func (s *slabUpload) launch(req *sectorUploadReq) (overdriving bool, err error) 
 	// launch the req
 	err = s.mgr.launch(req)
 	if err != nil {
-		overdriving = req.overdrive && s.overdriving[req.sectorIndex] > 0
-		span := trace.SpanFromContext(req.ctx)
+		interrupt = !req.overdrive && req.sector.numOverdrive == 0
+		span := trace.SpanFromContext(req.sector.ctx)
 		span.RecordError(err)
 		span.End()
 		return
@@ -1358,8 +1377,8 @@ func (s *slabUpload) launch(req *sectorUploadReq) (overdriving bool, err error) 
 	s.numLaunched++
 	if req.overdrive {
 		s.lastOverdrive = time.Now()
-		s.overdriving[req.sectorIndex]++
-		overdriving = true
+		req.sector.numOverdrive++
+		req.sector.uploaders[req.fcid] = struct{}{}
 	}
 	return
 }
@@ -1387,7 +1406,8 @@ func (s *slabUpload) overdrive(ctx context.Context, respChan chan sectorUploadRe
 		defer s.mu.Unlock()
 
 		// overdrive is not kicking in yet
-		if uint64(len(s.remaining)) >= s.mgr.maxOverdrive {
+		remaining := uint64(len(s.shards)) - s.numUploaded
+		if remaining >= s.mgr.maxOverdrive {
 			return false
 		}
 
@@ -1397,7 +1417,7 @@ func (s *slabUpload) overdrive(ctx context.Context, respChan chan sectorUploadRe
 		}
 
 		// overdrive is maxed out
-		if s.numInflight-uint64(len(s.remaining)) >= s.mgr.maxOverdrive {
+		if s.numInflight-remaining >= s.mgr.maxOverdrive {
 			return false
 		}
 
@@ -1426,28 +1446,25 @@ func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUplo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// overdrive the remaining sector with the least number of overdrives
-	lowestSI := -1
-	s.overdriving[lowestSI] = math.MaxInt
-	for sI := range s.remaining {
-		if s.overdriving[sI] < s.overdriving[lowestSI] {
-			lowestSI = sI
+	// find the sector that's not finished and has the least amount of overdrives
+	lowestNumOverdrives := math.MaxInt
+	var nextSector *sectorUpload
+	for _, sector := range s.sectors {
+		if sector.sector.Root == (types.Hash256{}) && sector.numOverdrive < lowestNumOverdrives {
+			nextSector = sector
 		}
 	}
-	if lowestSI == -1 {
+	if nextSector == nil {
 		return nil
 	}
 
 	return &sectorUploadReq{
 		upload: s.upload,
 		sID:    s.sID,
-		ctx:    s.remaining[lowestSI].ctx,
+		sector: nextSector,
 
 		overdrive:    true,
 		responseChan: responseChan,
-
-		sectorIndex: lowestSI,
-		sector:      (*[rhpv2.SectorSize]byte)(s.shards[lowestSI]),
 	}
 }
 
@@ -1475,7 +1492,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 
 	// update the state
 	if resp.req.overdrive {
-		s.overdriving[resp.req.sectorIndex]--
+		resp.req.sector.numOverdrive--
 	}
 
 	// failed reqs can't complete the upload
@@ -1486,31 +1503,36 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	}
 
 	// redundant sectors can't complete the upload
-	if s.sectors[resp.req.sectorIndex].Root != (types.Hash256{}) {
+	if resp.req.sector.sector.Root != (types.Hash256{}) {
 		return false
 	}
 
-	// store the sector and call cancel on the sector ctx
-	s.sectors[resp.req.sectorIndex] = object.Sector{
-		Contracts: map[types.PublicKey][]types.FileContractID{
-			resp.hk: {
-				resp.fcid,
-			},
-		},
+	// store the sector
+	resp.req.sector.sector = object.Sector{
+		Contracts:  map[types.PublicKey][]types.FileContractID{resp.hk: {resp.fcid}},
 		LatestHost: resp.req.hk,
 		Root:       resp.root,
 	}
-	s.remaining[resp.req.sectorIndex].cancel()
 
-	// update remaining sectors
-	delete(s.remaining, resp.req.sectorIndex)
+	// cancel the sector context
+	resp.req.sector.cancel()
+
+	// mark uploaders we used for overdrives as unused
+	for fcid := range resp.req.sector.uploaders {
+		if fcid != resp.req.fcid {
+			s.upload.markUnused(resp.req.sID, fcid)
+		}
+	}
+
+	// update uploaded sectors
+	s.numUploaded++
 
 	// release memory
-	resp.req.sector = nil
-	s.shards[resp.req.sectorIndex] = nil
+	resp.req.sector.sectorData = nil
+	s.shards[resp.req.sector.sectorIndex] = nil
 	s.mem.ReleaseSome(rhpv2.SectorSize)
 
-	return len(s.remaining) == 0
+	return s.numUploaded == uint64(len(s.shards))
 }
 
 func (sID slabID) String() string {
