@@ -198,10 +198,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		req.ContentLength = opts.ContentLength
 	} else {
 		if s, ok := r.(io.Seeker); ok {
-			length, err := s.Seek(0, io.SeekEnd)
-			if err == nil {
-				req.ContentLength = length
-			}
+			_, _ = s.Seek(0, io.SeekEnd)
 			_, _ = s.Seek(0, io.SeekStart)
 		}
 	}
@@ -240,10 +237,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 		req.ContentLength = opts.Size
 	} else {
 		if s, ok := r.(io.Seeker); ok {
-			length, err := s.Seek(0, io.SeekEnd)
-			if err == nil {
-				req.ContentLength = length
-			}
+			_, _ = s.Seek(0, io.SeekEnd)
 			_, _ = s.Seek(0, io.SeekStart)
 		}
 	}
