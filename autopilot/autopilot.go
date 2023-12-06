@@ -62,6 +62,7 @@ type Bus interface {
 
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
 	// objects
 	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
@@ -125,6 +126,37 @@ type state struct {
 	address types.Address
 	fee     types.Currency
 	period  uint64
+}
+
+// New initializes an Autopilot.
+func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
+	ap := &Autopilot{
+		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
+		id:      id,
+		bus:     bus,
+		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
+		workers: newWorkerPool(workers),
+
+		tickerDuration: heartbeat,
+	}
+	scanner, err := newScanner(
+		ap,
+		scannerBatchSize,
+		scannerNumThreads,
+		scannerScanInterval,
+		scannerTimeoutInterval,
+		scannerTimeoutMinTimeout,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	ap.s = scanner
+	ap.c = newContractor(ap, revisionSubmissionBuffer, revisionBroadcastInterval)
+	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
+	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
+
+	return ap, nil
 }
 
 // Handler returns an HTTP handler that serves the autopilot api.
@@ -295,6 +327,12 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 	return nil
 }
 
+func (ap *Autopilot) StartTime() time.Time {
+	ap.startStopMu.Lock()
+	defer ap.startStopMu.Unlock()
+	return ap.startTime
+}
+
 func (ap *Autopilot) State() state {
 	ap.stateMu.Lock()
 	defer ap.stateMu.Unlock()
@@ -311,12 +349,6 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 	default:
 		return false
 	}
-}
-
-func (ap *Autopilot) StartTime() time.Time {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
-	return ap.startTime
 }
 
 func (ap *Autopilot) Uptime() (dur time.Duration) {
@@ -605,37 +637,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	jc.Encode(api.AutopilotTriggerResponse{
 		Triggered: ap.Trigger(req.ForceScan),
 	})
-}
-
-// New initializes an Autopilot.
-func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
-	ap := &Autopilot{
-		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
-		id:      id,
-		bus:     bus,
-		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
-		workers: newWorkerPool(workers),
-
-		tickerDuration: heartbeat,
-	}
-	scanner, err := newScanner(
-		ap,
-		scannerBatchSize,
-		scannerNumThreads,
-		scannerScanInterval,
-		scannerTimeoutInterval,
-		scannerTimeoutMinTimeout,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	ap.s = scanner
-	ap.c = newContractor(ap, revisionSubmissionBuffer, revisionBroadcastInterval)
-	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
-
-	return ap, nil
 }
 
 func (ap *Autopilot) hostHandlerGET(jc jape.Context) {

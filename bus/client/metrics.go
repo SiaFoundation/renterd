@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,28 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 
 	var resp []api.ContractMetric
 	if err := c.metric(ctx, api.MetricContract, values, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *Client) ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error) {
+	values := url.Values{}
+	values.Set("start", api.TimeRFC3339(start).String())
+	values.Set("n", fmt.Sprint(n))
+	values.Set("interval", api.DurationMS(interval).String())
+	if opts.ContractID != (types.FileContractID{}) {
+		values.Set("fcid", opts.ContractID.String())
+	}
+	if opts.HostKey != (types.PublicKey{}) {
+		values.Set("hostKey", opts.HostKey.String())
+	}
+	if opts.HostVersion != "" {
+		values.Set("hostVersion", opts.HostVersion)
+	}
+
+	var resp []api.ContractPruneMetric
+	if err := c.metric(ctx, api.MetricContractPrune, values, &resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -85,9 +108,41 @@ func (c *Client) WalletMetrics(ctx context.Context, start time.Time, n uint64, i
 }
 
 func (c *Client) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
-	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/metric/%s", api.MetricContractSetChurn), api.ContractSetChurnMetricRequestPUT{
-		Metrics: metrics,
-	})
+	return c.recordMetric(ctx, api.MetricContractSetChurn, api.ContractSetChurnMetricRequestPUT{Metrics: metrics})
+}
+
+func (c *Client) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
+	return c.recordMetric(ctx, api.MetricContractPrune, api.ContractPruneMetricRequestPUT{Metrics: metrics})
+}
+
+func (c *Client) recordMetric(ctx context.Context, key string, d interface{}) error {
+	c.c.Custom("PUT", fmt.Sprintf("/metric/%s", key), (interface{})(nil), nil)
+
+	js, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+
+	u, err := url.Parse(fmt.Sprintf("%s/metric/%s", c.c.BaseURL, key))
+	if err != nil {
+		panic(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", u.String(), bytes.NewReader(js))
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		err, _ := io.ReadAll(resp.Body)
+		return errors.New(string(err))
+	}
+	return nil
 }
 
 func (c *Client) metric(ctx context.Context, key string, values url.Values, res interface{}) error {
