@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -65,9 +66,14 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 // RHPPruneContract prunes deleted sectors from the contract with given id.
 func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (pruned, remaining uint64, err error) {
 	var res api.RHPPruneContractResponse
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", contractID), api.RHPPruneContractRequest{
+	if err = c.c.WithContext(ctx).POST(fmt.Sprintf("/rhp/contract/%s/prune", contractID), api.RHPPruneContractRequest{
 		Timeout: api.DurationMS(timeout),
-	}, &res)
+	}, &res); err != nil {
+		return
+	} else if res.Error != "" {
+		err = errors.New(res.Error)
+	}
+
 	pruned = res.Pruned
 	remaining = res.Remaining
 	return

@@ -188,6 +188,9 @@ func TestSectorPruning(t *testing.T) {
 	b = cluster2.Bus
 	w = cluster2.Worker
 
+	// shut down the autopilot to prevent it from interfering
+	cluster2.ShutdownAutopilot(context.Background())
+
 	// assert prunable data is 0
 	res, err := b.PrunableData(context.Background())
 	tt.OK(err)

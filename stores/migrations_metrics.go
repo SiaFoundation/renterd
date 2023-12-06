@@ -12,6 +12,7 @@ import (
 var (
 	metricsTables = []interface{}{
 		&dbContractMetric{},
+		&dbContractPruneMetric{},
 		&dbContractSetMetric{},
 		&dbContractSetChurnMetric{},
 		&dbPerformanceMetric{},
@@ -36,6 +37,13 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID: "00001_wallet_metrics",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00001_wallet_metrics(tx, logger)
+			},
+			Rollback: nil,
+		},
+		{
+			ID: "00002_contract_prune_metrics",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00002_contract_prune_metrics(tx, logger)
 			},
 			Rollback: nil,
 		},
@@ -72,5 +80,27 @@ func performMigration00001_wallet_metrics(txn *gorm.DB, logger *zap.SugaredLogge
 		return err
 	}
 	logger.Info("migration 00001_wallet_metrics complete")
+	return nil
+}
+
+func performMigration00002_contract_prune_metrics(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00002_contract_prune_metrics")
+	if err := txn.Table("contract_prunes").Migrator().AutoMigrate(&struct {
+		ID        uint `gorm:"primarykey"`
+		CreatedAt time.Time
+
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
+
+		FCID        fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
+		Host        publicKey      `gorm:"index;size:32;NOT NULL"`
+		HostVersion string         `gorm:"index"`
+
+		Pruned    unsigned64    `gorm:"index;NOT NULL"`
+		Remaining unsigned64    `gorm:"index;NOT NULL"`
+		Duration  time.Duration `gorm:"index;NOT NULL"`
+	}{}); err != nil {
+		return err
+	}
+	logger.Info("migration 00002_contract_prune_metrics complete")
 	return nil
 }

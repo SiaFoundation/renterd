@@ -103,7 +103,7 @@ type (
 	RHPPruneContractResponse struct {
 		Pruned    uint64 `json:"pruned"`
 		Remaining uint64 `json:"remaining"`
-		Error     error  `json:"error,omitempty"`
+		Error     string `json:"error,omitempty"`
 	}
 
 	// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.

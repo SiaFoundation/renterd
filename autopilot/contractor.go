@@ -25,8 +25,10 @@ import (
 )
 
 const (
-	// targetBlockTime is the average block time of the Sia network
-	targetBlockTime = 10 * time.Minute
+	// broadcastRevisionRetriesPerInterval is the number of chances we give a
+	// contract that fails to broadcst to be broadcasted again within a single
+	// contract broadcast interval.
+	broadcastRevisionRetriesPerInterval = 5
 
 	// estimatedFileContractTransactionSetSize is the estimated blockchain size
 	// of a transaction set between a renter and a host that contains a file
@@ -55,18 +57,12 @@ const (
 	// usable.
 	minAllowedScoreLeeway = 500
 
+	// targetBlockTime is the average block time of the Sia network
+	targetBlockTime = 10 * time.Minute
+
 	// timeoutHostPriceTable is the amount of time we wait to receive a price
 	// table from the host
 	timeoutHostPriceTable = 30 * time.Second
-
-	// timeoutHostRevision is the amount of time we wait for the broadcast of a
-	// revision to succeed.
-	timeoutBroadcastRevision = time.Minute
-
-	// broadcastRevisionRetriesPerInterval is the number of chances we give a
-	// contract that fails to broadcst to be broadcasted again within a single
-	// contract broadcast interval.
-	broadcastRevisionRetriesPerInterval = 5
 
 	// timeoutHostRevision is the amount of time we wait to receive the latest
 	// revision from the host. This is set to 4 minutes since siad currently
@@ -79,6 +75,14 @@ const (
 	// timeoutHostScan is the amount of time we wait for a host scan to be
 	// completed
 	timeoutHostScan = 30 * time.Second
+
+	// timeoutBroadcastRevision is the amount of time we wait for the broadcast
+	// of a revision to succeed.
+	timeoutBroadcastRevision = time.Minute
+
+	// timeoutPruneContract is the amount of time we wait for a contract to get
+	// pruned.
+	timeoutPruneContract = 10 * time.Minute
 )
 
 type (
@@ -87,12 +91,17 @@ type (
 		resolver *ipResolver
 		logger   *zap.SugaredLogger
 
-		maintenanceTxnID          types.TransactionID
+		maintenanceTxnID types.TransactionID
+
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
 		revisionSubmissionBuffer  uint64
 
-		mu               sync.Mutex
+		mu sync.Mutex
+
+		pruning          bool
+		pruningLastStart time.Time
+
 		cachedHostInfo   map[types.PublicKey]hostInfo
 		cachedDataStored map[types.PublicKey]uint64
 		cachedMinScore   float64
@@ -125,13 +134,21 @@ type (
 
 func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
 	return &contractor{
-		ap:                        ap,
-		resolver:                  newIPResolver(resolverLookupTimeout, ap.logger.Named("resolver")),
-		logger:                    ap.logger.Named("contractor"),
+		ap:     ap,
+		logger: ap.logger.Named("contractor"),
+
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
+
+		resolver: newIPResolver(resolverLookupTimeout, ap.logger.Named("resolver")),
 	}
+}
+
+func (c *contractor) Status() (bool, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pruning, c.pruningLastStart
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (bool, error) {
@@ -499,7 +516,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	)
 	hasChanged := len(added)+len(removed) > 0
 	if hasChanged {
-		c.ap.RegisterAlert(context.Background(), newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
+		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
 	}
 	return hasChanged
 }
@@ -1016,7 +1033,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 				toKeep = append(toKeep, toRenew[i])
 			}
 		} else {
-			c.ap.DismissAlert(ctx, alertIDForContract(alertRenewalFailedID, contract))
+			c.ap.DismissAlert(ctx, alertIDForContract(alertRenewalFailedID, contract.ID))
 			renewals = append(renewals, renewal{from: contract.ID, to: renewed.ID, ci: toRenew[i]})
 		}
 
@@ -1548,30 +1565,47 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
-	// return early if the host's pricetable is not expired yet
-	if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
-		return nil
+func (c *contractor) tryPerformPruning(ctx context.Context, wp *workerPool) {
+	c.mu.Lock()
+	if c.pruning || c.ap.isStopped() {
+		c.mu.Unlock()
+		return
 	}
+	c.pruning = true
+	c.pruningLastStart = time.Now()
+	c.mu.Unlock()
 
-	// scan the host if it hasn't been successfully scanned before, which
-	// can occur when contracts are added manually to the bus or database
-	if !host.Scanned {
-		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
-		if err != nil {
-			return fmt.Errorf("failed to scan host %v: %w", host.PublicKey, err)
-		}
-		host.Settings = scan.Settings
-	}
+	c.ap.wg.Add(1)
+	go func() {
+		defer c.ap.wg.Done()
+		c.performContractPruning(wp)
+		c.mu.Lock()
+		c.pruning = false
+		c.mu.Unlock()
+	}()
+}
 
-	// fetch the price table
-	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
+func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host hostdb.HostInfo, metadata api.ContractMetadata, err error) {
+	// fetch the contract
+	metadata, err = c.ap.bus.Contract(ctx, fcid)
 	if err != nil {
-		return fmt.Errorf("failed to fetch price table for host %v: %w", host.PublicKey, err)
+		return
 	}
 
-	host.PriceTable = hpt
-	return nil
+	// fetch the host
+	host, err = c.ap.bus.Host(ctx, metadata.HostKey)
+	return
+}
+
+func addLeeway(n uint64, pct float64) uint64 {
+	if pct < 0 {
+		panic("given leeway percent has to be positive")
+	}
+	return uint64(math.Ceil(float64(n) * pct))
+}
+
+func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
+	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
@@ -1596,15 +1630,30 @@ func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, 
 	return
 }
 
-func addLeeway(n uint64, pct float64) uint64 {
-	if pct < 0 {
-		panic("given leeway percent has to be positive")
+func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
+	// return early if the host's pricetable is not expired yet
+	if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
+		return nil
 	}
-	return uint64(math.Ceil(float64(n) * pct))
-}
 
-func endHeight(cfg api.AutopilotConfig, currentPeriod uint64) uint64 {
-	return currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+	// scan the host if it hasn't been successfully scanned before, which
+	// can occur when contracts are added manually to the bus or database
+	if !host.Scanned {
+		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
+		if err != nil {
+			return fmt.Errorf("failed to scan host %v: %w", host.PublicKey, err)
+		}
+		host.Settings = scan.Settings
+	}
+
+	// fetch the price table
+	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
+	if err != nil {
+		return fmt.Errorf("failed to fetch price table for host %v: %w", host.PublicKey, err)
+	}
+
+	host.PriceTable = hpt
+	return nil
 }
 
 // renterFundsToExpectedStorage returns how much storage a renter is expected to

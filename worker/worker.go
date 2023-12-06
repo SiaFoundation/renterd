@@ -666,25 +666,26 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't fetch contract size", err) != nil {
 		return
 	} else if size.Prunable == 0 {
-		jc.Encode(api.RHPPruneContractResponse{
-			Pruned:    0,
-			Remaining: 0,
-		})
+		jc.Encode(api.RHPPruneContractResponse{})
 		return
 	}
 
 	// prune the contract
 	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
-	if err == nil || pruned > 0 {
-		jc.Encode(api.RHPPruneContractResponse{
-			Pruned:    pruned,
-			Remaining: remaining,
-			Error:     err,
-		})
-	} else {
-		err = fmt.Errorf("failed to prune contract; %w", err)
+	if err != nil && !errors.Is(err, ErrNoSectorsToPrune) && pruned == 0 {
+		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
 		jc.Error(err, http.StatusInternalServerError)
+		return
 	}
+
+	res := api.RHPPruneContractResponse{
+		Pruned:    pruned,
+		Remaining: remaining,
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	jc.Encode(res)
 }
 
 func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
@@ -884,18 +885,8 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight, w.logger)
 	if err != nil {
-		jc.Encode(api.MigrateSlabResponse{
-			NumShardsMigrated: numShardsMigrated,
-			SurchargeApplied:  surchargeApplied,
-			Error:             err.Error(),
-		})
-		return
-	}
-
-	// update the slab
-	if err := w.bus.UpdateSlab(ctx, slab, up.ContractSet); err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
 			SurchargeApplied:  surchargeApplied,
@@ -1033,7 +1024,10 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
 		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
-		if err != nil && !errors.Is(err, errDownloadManagerStopped) {
+		if err != nil && !(errors.Is(err, errDownloadManagerStopped) ||
+			errors.Is(err, errNotEnoughContracts) ||
+			errors.Is(err, context.Canceled)) {
+			w.logger.Error(err)
 			w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
 		}
 		return
@@ -1134,9 +1128,13 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the object
-	eTag, err := w.upload(ctx, jc.Request.Body, contracts, bucket, path, opts...)
+	params := defaultParameters(bucket, path)
+	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if err := jc.Check("couldn't upload object", err); err != nil {
-		if !errors.Is(err, errUploadManagerStopped) {
+		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+			errors.Is(err, errNotEnoughContracts) ||
+			errors.Is(err, context.Canceled)) {
+			w.logger.Error(err)
 			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return
@@ -1269,9 +1267,13 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the multipart
-	eTag, err := w.uploadMultiPart(ctx, jc.Request.Body, contracts, bucket, path, uploadID, partNumber, opts...)
+	params := multipartParameters(bucket, path, uploadID, partNumber)
+	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
-		if !errors.Is(err, errUploadManagerStopped) {
+		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+			errors.Is(err, errNotEnoughContracts) ||
+			errors.Is(err, context.Canceled)) {
+			w.logger.Error(err)
 			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
 		}
 		return

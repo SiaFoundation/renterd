@@ -10,6 +10,7 @@ const (
 	ChurnDirAdded   = "added"
 	ChurnDirRemoved = "removed"
 
+	MetricContractPrune    = "contractprune"
 	MetricContractSet      = "contractset"
 	MetricContractSetChurn = "churn"
 	MetricContract         = "contract"
@@ -77,6 +78,24 @@ type (
 		HostKey    types.PublicKey
 	}
 
+	ContractPruneMetric struct {
+		Timestamp time.Time `json:"timestamp"`
+
+		ContractID  types.FileContractID `json:"contractID"`
+		HostKey     types.PublicKey      `json:"hostKey"`
+		HostVersion string               `json:"hostVersion"`
+
+		Pruned    uint64        `json:"pruned"`
+		Remaining uint64        `json:"remaining"`
+		Duration  time.Duration `json:"duration"`
+	}
+
+	ContractPruneMetricsQueryOpts struct {
+		ContractID  types.FileContractID
+		HostKey     types.PublicKey
+		HostVersion string
+	}
+
 	WalletMetric struct {
 		Timestamp TimeRFC3339 `json:"timestamp"`
 
@@ -89,6 +108,10 @@ type (
 )
 
 type (
+	ContractPruneMetricRequestPUT struct {
+		Metrics []ContractPruneMetric `json:"metrics"`
+	}
+
 	ContractSetChurnMetricRequestPUT struct {
 		Metrics []ContractSetChurnMetric `json:"metrics"`
 	}

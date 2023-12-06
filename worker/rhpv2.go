@@ -48,6 +48,10 @@ var (
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
 	ErrContractFinalized = errors.New("contract cannot be revised further")
+
+	// ErrNoSectorsToPrune is returned when we try to prune a contract that has
+	// no sectors to prune.
+	ErrNoSectorsToPrune = errors.New("no sectors to prune")
 )
 
 // A HostErrorSet is a collection of errors from various hosts.
@@ -300,7 +304,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 					indices = append(indices, uint64(i))
 				}
 				if len(indices) == 0 {
-					return fmt.Errorf("no sectors to prune, database holds %d (%d pending), contract contains %d", len(want)+len(pending), len(pending), len(got))
+					return fmt.Errorf("%w: database holds %d (%d pending), contract contains %d", ErrNoSectorsToPrune, len(want)+len(pending), len(pending), len(got))
 				}
 
 				// delete the roots from the contract
@@ -452,7 +456,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			leafHashes := merkleResp.OldLeafHashes
 			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
 			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
-				err := fmt.Errorf("host %v version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
+				err := fmt.Errorf("couldn't verify delete proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
 				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				t.WriteResponseErr(err)
 				return err
@@ -579,7 +583,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 
 		// verify the proof
 		if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
-			return nil, ErrInvalidMerkleProof
+			return nil, fmt.Errorf("could verify roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
 		}
 
 		// append roots

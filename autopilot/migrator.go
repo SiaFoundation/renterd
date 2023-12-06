@@ -258,7 +258,7 @@ OUTER:
 
 		for i, slab := range toMigrate {
 			select {
-			case <-m.ap.stopChan:
+			case <-m.ap.stopCtx.Done():
 				return
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")

@@ -42,21 +42,48 @@ var (
 )
 
 type uploadParameters struct {
+	bucket string
+	path   string
+
+	multipart  bool
+	uploadID   string
+	partNumber int
+
 	ec               object.EncryptionKey
 	encryptionOffset uint64
-	mimeType         string
 
 	rs          api.RedundancySettings
 	bh          uint64
 	contractSet string
 	packing     bool
+	mimeType    string
 }
 
-func defaultParameters() uploadParameters {
+func defaultParameters(bucket, path string) uploadParameters {
 	return uploadParameters{
+		bucket: bucket,
+		path:   path,
+
 		ec:               object.GenerateEncryptionKey(), // random key
 		encryptionOffset: 0,                              // from the beginning
-		rs:               build.DefaultRedundancySettings,
+
+		rs: build.DefaultRedundancySettings,
+	}
+}
+
+func multipartParameters(bucket, path, uploadID string, partNumber int) uploadParameters {
+	return uploadParameters{
+		bucket: bucket,
+		path:   path,
+
+		multipart:  true,
+		uploadID:   uploadID,
+		partNumber: partNumber,
+
+		ec:               object.GenerateEncryptionKey(), // random key
+		encryptionOffset: 0,                              // from the beginning
+
+		rs: build.DefaultRedundancySettings,
 	}
 }
 
@@ -229,49 +256,29 @@ func (w *worker) initUploadManager(mm *memoryManager, maxOverdrive uint64, overd
 	w.uploadManager = newUploadManager(w.bus, w, w, mm, maxOverdrive, overdriveTimeout, logger)
 }
 
-func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, bucket, path string, opts ...UploadOption) (string, error) {
-	//  build upload parameters
-	up := defaultParameters()
+func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
+	// apply the options
 	for _, opt := range opts {
 		opt(&up)
 	}
 
 	// if not given, try decide on a mime type using the file extension
-	mimeType := up.mimeType
-	if mimeType == "" {
-		mimeType = mime.TypeByExtension(filepath.Ext(path))
+	if !up.multipart && up.mimeType == "" {
+		up.mimeType = mime.TypeByExtension(filepath.Ext(up.path))
 
 		// if mime type is still not known, wrap the reader with a mime reader
-		if mimeType == "" {
-			var err error
-			mimeType, r, err = newMimeReader(r)
+		if up.mimeType == "" {
+			up.mimeType, r, err = newMimeReader(r)
 			if err != nil {
-				return "", err
+				return
 			}
 		}
 	}
 
 	// perform the upload
-	obj, partialSlabData, eTag, err := w.uploadManager.Upload(ctx, r, contracts, up, lockingPriorityUpload)
+	bufferSizeLimitReached, eTag, err := w.uploadManager.Upload(ctx, r, contracts, up, lockingPriorityUpload)
 	if err != nil {
-		return "", fmt.Errorf("couldn't upload object: %w", err)
-	}
-
-	// add partial slabs
-	var bufferSizeLimitReached bool
-	if len(partialSlabData) > 0 {
-		var pss []object.SlabSlice
-		pss, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
-		if err != nil {
-			return "", err
-		}
-		obj.Slabs = append(obj.Slabs, pss...)
-	}
-
-	// persist the object
-	err = w.bus.AddObject(ctx, bucket, path, up.contractSet, obj, api.AddObjectOptions{MimeType: mimeType, ETag: eTag})
-	if err != nil {
-		return "", fmt.Errorf("couldn't add object: %w", err)
+		return "", err
 	}
 
 	// if packing was enabled try uploading packed slabs
@@ -280,46 +287,6 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 		}
 	}
-	return eTag, nil
-}
-
-func (w *worker) uploadMultiPart(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, bucket, path, uploadID string, partNumber int, opts ...UploadOption) (string, error) {
-	//  build upload parameters
-	up := defaultParameters()
-	for _, opt := range opts {
-		opt(&up)
-	}
-
-	// upload the part
-	obj, partialSlabData, eTag, err := w.uploadManager.Upload(ctx, r, contracts, up, lockingPriorityUpload)
-	if err != nil {
-		return "", fmt.Errorf("couldn't upload object: %w", err)
-	}
-
-	// add parital slabs
-	var bufferSizeLimitReached bool
-	if len(partialSlabData) > 0 {
-		var pss []object.SlabSlice
-		pss, bufferSizeLimitReached, err = w.bus.AddPartialSlab(ctx, partialSlabData, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
-		if err != nil {
-			return "", err
-		}
-		obj.Slabs = append(obj.Slabs, pss...)
-	}
-
-	// persist the part
-	err = w.bus.AddMultipartPart(ctx, bucket, path, up.contractSet, eTag, uploadID, partNumber, obj.Slabs)
-	if err != nil {
-		return "", fmt.Errorf("couldn't add multi part: %w", err)
-	}
-
-	// if packing was enabled try uploading packed slabs
-	if up.packing {
-		if err := w.tryUploadPackedSlabs(ctx, up.rs, up.contractSet, bufferSizeLimitReached); err != nil {
-			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
-		}
-	}
-
 	return eTag, nil
 }
 
@@ -444,17 +411,9 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload packed slab
-	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
-	sectors, err := w.uploadManager.UploadShards(ctx, shards, contracts, up.CurrentHeight, lockPriority, mem)
+	err = w.uploadManager.UploadPackedSlab(ctx, rs, ps, contracts, up.CurrentHeight, lockPriority, mem)
 	if err != nil {
 		return fmt.Errorf("couldn't upload packed slab, err: %v", err)
-	}
-
-	// mark packed slab as uploaded
-	slab := api.UploadedPackedSlab{BufferID: ps.BufferID, Shards: sectors}
-	err = w.bus.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{slab})
-	if err != nil {
-		return fmt.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
 	}
 
 	return nil
@@ -535,7 +494,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, lockPriority int) (_ object.Object, partialSlab []byte, eTag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, lockPriority int) (bufferSizeLimitReached bool, eTag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -556,13 +515,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the cipher reader
 	cr, err := o.Encrypt(hr, up.encryptionOffset)
 	if err != nil {
-		return object.Object{}, nil, "", err
+		return false, "", err
 	}
 
 	// create the upload
 	u, finishFn, err := mgr.newUpload(ctx, up.rs.TotalShards, contracts, up.bh, lockPriority)
 	if err != nil {
-		return object.Object{}, nil, "", err
+		return false, "", err
 	}
 	defer finishFn()
 
@@ -575,6 +534,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// prepare slab size
 	size := int64(up.rs.MinShards) * rhpv2.SectorSize
 	redundantSize := uint64(up.rs.TotalShards) * rhpv2.SectorSize
+	var partialSlab []byte
 
 	// launch uploads in a separate goroutine
 	go func() {
@@ -638,11 +598,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	for len(responses) < numSlabs {
 		select {
 		case <-mgr.stopChan:
-			return object.Object{}, nil, "", errUploadManagerStopped
+			return false, "", errUploadManagerStopped
 		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
-				return object.Object{}, nil, "", res.err
+				return false, "", res.err
 			}
 			responses = append(responses, res)
 		}
@@ -657,29 +617,102 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	for _, resp := range responses {
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
-	return o, partialSlab, hr.Hash(), nil
+
+	// calculate the eTag
+	eTag = hr.Hash()
+
+	// add partial slabs
+	if len(partialSlab) > 0 {
+		var pss []object.SlabSlice
+		pss, bufferSizeLimitReached, err = u.mgr.b.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		if err != nil {
+			return false, "", err
+		}
+		o.Slabs = append(o.Slabs, pss...)
+	}
+
+	if up.multipart {
+		// persist the part
+		err = u.mgr.b.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
+		if err != nil {
+			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
+		}
+	} else {
+		// persist the object
+		err = u.mgr.b.AddObject(ctx, up.bucket, up.path, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag})
+		if err != nil {
+			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add object: %w", err)
+		}
+	}
+
+	return
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, shards [][]byte, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) ([]object.Sector, error) {
+func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) error {
+	// build the shards
+	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
+
 	// initiate the upload
 	upload, finishFn, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer finishFn()
 
 	// upload the shards
 	sectors, err := upload.uploadShards(ctx, shards, mem)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// build host to contract map
-	h2c := make(map[types.PublicKey]types.FileContractID)
-	for _, contract := range contracts {
-		h2c[contract.HostKey] = contract.ID
+	// mark packed slab as uploaded
+	slab := api.UploadedPackedSlab{BufferID: ps.BufferID, Shards: sectors}
+	err = mgr.b.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{slab})
+	if err != nil {
+		return fmt.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
 	}
-	return sectors, nil
+
+	return nil
+}
+
+func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) error {
+	// initiate the upload
+	upload, finishFn, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	if err != nil {
+		return err
+	}
+	defer finishFn()
+
+	// upload the shards
+	uploaded, err := upload.uploadShards(ctx, shards, mem)
+	if err != nil {
+		return err
+	}
+
+	// overwrite the shards with the newly uploaded ones
+	for i, si := range shardIndices {
+		s.Shards[si].LatestHost = uploaded[i].LatestHost
+
+		knownContracts := make(map[types.FileContractID]struct{})
+		for _, fcids := range s.Shards[si].Contracts {
+			for _, fcid := range fcids {
+				knownContracts[fcid] = struct{}{}
+			}
+		}
+		for hk, fcids := range uploaded[i].Contracts {
+			for _, fcid := range fcids {
+				if _, exists := knownContracts[fcid]; !exists {
+					if s.Shards[si].Contracts == nil {
+						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
+					}
+					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
+				}
+			}
+		}
+	}
+
+	// update the slab
+	return mgr.b.UpdateSlab(ctx, *s, contractSet)
 }
 
 func (mgr *uploadManager) launch(req *sectorUploadReq) error {

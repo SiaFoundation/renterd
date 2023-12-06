@@ -28,7 +28,6 @@ const (
 
 var (
 	errIOTimeout         = errors.New("i/o timeout")
-	errNoSuchHost        = errors.New("no such host")
 	errServerMisbehaving = errors.New("server misbehaving")
 	errTooManyAddresses  = errors.New("host has more than two addresses, or two of the same type")
 	errUnparsableAddress = errors.New("host address could not be parsed to a subnet")

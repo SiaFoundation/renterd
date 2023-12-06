@@ -18,6 +18,7 @@ var (
 	alertLostSectorsID   = frand.Entropy256() // constant until restarted
 	alertLowBalanceID    = frand.Entropy256() // constant until restarted
 	alertMigrationID     = frand.Entropy256() // constant until restarted
+	alertPruningID       = frand.Entropy256() // constant until restarted
 	alertRenewalFailedID = frand.Entropy256() // constant until restarted
 )
 
@@ -25,8 +26,8 @@ func alertIDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
 	return types.HashBytes(append(alertID[:], id[:]...))
 }
 
-func alertIDForContract(alertID [32]byte, contract api.ContractMetadata) types.Hash256 {
-	return types.HashBytes(append(alertID[:], contract.ID[:]...))
+func alertIDForContract(alertID [32]byte, fcid types.FileContractID) types.Hash256 {
+	return types.HashBytes(append(alertID[:], fcid[:]...))
 }
 
 func alertIDForHost(alertID [32]byte, hk types.PublicKey) types.Hash256 {
@@ -102,7 +103,7 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 	}
 
 	return alerts.Alert{
-		ID:       alertIDForContract(alertRenewalFailedID, contract),
+		ID:       alertIDForContract(alertRenewalFailedID, contract.ID),
 		Severity: severity,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
@@ -111,6 +112,27 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 			"contractID":          contract.ID.String(),
 			"hostKey":             contract.HostKey.String(),
 		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid types.FileContractID, err error) *alerts.Alert {
+	data := map[string]interface{}{"error": err.Error()}
+	if hk != (types.PublicKey{}) {
+		data["hostKey"] = hk.String()
+	}
+	if version != "" {
+		data["hostVersion"] = version
+	}
+	if fcid != (types.FileContractID{}) {
+		data["contractID"] = fcid.String()
+	}
+
+	return &alerts.Alert{
+		ID:        alertIDForContract(alertPruningID, fcid),
+		Severity:  alerts.SeverityWarning,
+		Message:   "Contract pruning failed",
+		Data:      data,
 		Timestamp: time.Now(),
 	}
 }

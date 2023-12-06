@@ -52,6 +52,7 @@ type (
 		Download    uint64         `json:"download"`
 		Upload      uint64         `json:"upload"`
 		Storage     uint64         `json:"storage"`
+		Prune       bool           `json:"prune"`
 	}
 
 	// HostsConfig contains all hosts settings used in the autopilot.
@@ -87,6 +88,8 @@ type (
 		Configured         bool        `json:"configured"`
 		Migrating          bool        `json:"migrating"`
 		MigratingLastStart TimeRFC3339 `json:"migratingLastStart"`
+		Pruning            bool        `json:"pruning"`
+		PruningLastStart   TimeRFC3339 `json:"pruningLastStart"`
 		Scanning           bool        `json:"scanning"`
 		ScanningLastStart  TimeRFC3339 `json:"scanningLastStart"`
 		UptimeMS           DurationMS  `json:"uptimeMS"`
