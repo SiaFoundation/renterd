@@ -306,9 +306,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00035_contractPruneCfg",
+			ID: "00035_bufferedSlabsDropSizeAndComplete",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00035_contractPruneCfg(tx, logger)
+				return performMigration00035_bufferedSlabsDropSizeAndComplete(tx, logger)
+			},
+		},
+		{
+			ID: "00036_contractPruneCfg",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00036_contractPruneCfg(tx, logger)
 			},
 		},
 	}
@@ -1384,8 +1390,24 @@ func performMigration00034_objectHealth(txn *gorm.DB, logger *zap.SugaredLogger)
 	return nil
 }
 
-func performMigration00035_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00035_contractPruneCfg")
+func performMigration00035_bufferedSlabsDropSizeAndComplete(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00035_bufferedSlabsDropSizeAndComplete")
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "size") {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "size"); err != nil {
+			return err
+		}
+	}
+	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "complete") {
+		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "complete"); err != nil {
+			return err
+		}
+	}
+	logger.Info("migration 00035_bufferedSlabsDropSizeAndComplete complete")
+	return nil
+}
+
+func performMigration00036_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00036_contractPruneCfg")
 
 	var autopilots []dbAutopilot
 	if err := txn.Model(&dbAutopilot{}).Find(&autopilots).Error; err != nil {
@@ -1401,6 +1423,6 @@ func performMigration00035_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLog
 		logger.Debugf("successfully defaulted Contracts.Prun to 'false' on autopilot '%v'", autopilot.Identifier)
 	}
 
-	logger.Info("migration 00035_contractPruneCfg complete")
+	logger.Info("migration 00036_contractPruneCfg complete")
 	return nil
 }

@@ -2773,11 +2773,20 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add 2 more partial slabs.
-	_, _, err = ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	slices1, _, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bufferSize, err = ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	slices2, bufferSize, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Associate them with an object.
+	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, "", "", object.Object{
+		Key:   object.GenerateEncryptionKey(),
+		Slabs: append(slices1, slices2...),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
