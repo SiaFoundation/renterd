@@ -893,7 +893,7 @@ func (mgr *uploadManager) tryRecomputeStats() {
 
 func (u *upload) finishSlabUpload(upload *slabUpload) {
 	for _, sector := range upload.sectors {
-		if sector.uploaded.Root == (types.Hash256{}) {
+		if !sector.isUploaded() {
 			sector.cancel()
 		}
 	}
@@ -1458,7 +1458,7 @@ func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUplo
 	lowestNumOverdrives := math.MaxInt
 	var nextSector *sectorUpload
 	for _, sector := range s.sectors {
-		if sector.uploaded.Root == (types.Hash256{}) && sector.numOverdriving() < lowestNumOverdrives {
+		if !sector.isUploaded() && sector.numOverdriving() < lowestNumOverdrives {
 			nextSector = sector
 		}
 	}
@@ -1556,6 +1556,10 @@ func (u *upload) isAllowed(fcid ...types.FileContractID) bool {
 		}
 	}
 	return false
+}
+
+func (s *sectorUpload) isUploaded() bool {
+	return s.uploaded.Root != (types.Hash256{})
 }
 
 func (s *sectorUpload) numOverdriving() int {
