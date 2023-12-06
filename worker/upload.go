@@ -778,10 +778,16 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 	}, finishFn, nil
 }
 
-func (mgr *uploadManager) numUploaders() int {
+func (mgr *uploadManager) numUploaders(u *upload) (n int) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	return len(mgr.uploaders)
+	for _, uploader := range mgr.uploaders {
+		fcid, renewedFrom, _ := uploader.contractInfo()
+		if u.isAllowed(fcid, renewedFrom) {
+			n++
+		}
+	}
+	return
 }
 
 func (mgr *uploadManager) candidate(req *sectorUploadReq) *uploader {
@@ -1338,7 +1344,7 @@ func (s *slabUpload) finish() (sectors []object.Sector, _ error) {
 
 	if s.numUploaded < uint64(len(s.shards)) {
 		remaining := uint64(len(s.shards)) - s.numUploaded
-		return nil, fmt.Errorf("failed to upload slab: remaining=%d, inflight=%d, launched=%d uploaders=%d errors=%d %w", remaining, s.numInflight, s.numLaunched, s.mgr.numUploaders(), len(s.errs), s.errs)
+		return nil, fmt.Errorf("failed to upload slab: launched=%d uploaded=%d remaining=%d inflight=%d uploaders=%d errors=%d %w", s.numLaunched, s.numUploaded, remaining, s.numInflight, s.mgr.numUploaders(s.upload), len(s.errs), s.errs)
 	}
 
 	for i := 0; i < len(s.shards); i++ {
@@ -1539,6 +1545,17 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	s.mem.ReleaseSome(rhpv2.SectorSize)
 
 	return s.numUploaded == uint64(len(s.shards))
+}
+
+func (u *upload) isAllowed(fcid ...types.FileContractID) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, c := range fcid {
+		if _, allowed := u.allowed[c]; allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sectorUpload) numOverdriving() int {
