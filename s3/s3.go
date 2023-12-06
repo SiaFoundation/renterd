@@ -49,7 +49,7 @@ type bus interface {
 type worker interface {
 	GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error)
 	UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error)
-	UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, contentLength int64, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error)
+	UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error)
 }
 
 func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {

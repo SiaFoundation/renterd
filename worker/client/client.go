@@ -174,7 +174,7 @@ func (c *Client) State() (state api.WorkerStateResponse, err error) {
 }
 
 // UploadMultipartUploadPart uploads part of the data for a multipart upload.
-func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, contentLength int64, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
+func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
 	path = api.ObjectPathEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
@@ -194,7 +194,17 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	req.Header.Add("X-Content-Length", fmt.Sprintf("%d", contentLength))
+	if opts.ContentLength != 0 {
+		req.ContentLength = opts.ContentLength
+	} else {
+		if s, ok := r.(io.Seeker); ok {
+			length, err := s.Seek(0, io.SeekEnd)
+			if err == nil {
+				req.ContentLength = length
+			}
+			_, _ = s.Seek(0, io.SeekStart)
+		}
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -226,6 +236,17 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	if opts.Size != 0 {
+		req.ContentLength = opts.Size
+	} else {
+		if s, ok := r.(io.Seeker); ok {
+			length, err := s.Seek(0, io.SeekEnd)
+			if err == nil {
+				req.ContentLength = length
+			}
+			_, _ = s.Seek(0, io.SeekStart)
+		}
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

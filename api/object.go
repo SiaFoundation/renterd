@@ -196,11 +196,13 @@ type (
 		ContractSet                  string
 		MimeType                     string
 		DisablePreshardingEncryption bool
+		Size                         int64
 	}
 
 	UploadMultipartUploadPartOptions struct {
 		DisablePreshardingEncryption bool
 		EncryptionOffset             int
+		ContentLength                int64
 	}
 )
 

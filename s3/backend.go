@@ -337,7 +337,9 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	opts := api.UploadObjectOptions{}
+	opts := api.UploadObjectOptions{
+		Size: size,
+	}
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct
 	}
@@ -401,8 +403,9 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 }
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
-	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, contentLength, api.UploadMultipartUploadPartOptions{
+	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
 		DisablePreshardingEncryption: true,
+		ContentLength:                contentLength,
 	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
