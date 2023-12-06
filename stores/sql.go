@@ -81,10 +81,6 @@ type (
 		closed       bool
 
 		knownContracts map[types.FileContractID]struct{}
-
-		spendingMu     sync.Mutex
-		interactionsMu sync.Mutex
-		objectsMu      sync.Mutex
 	}
 
 	revisionUpdate struct {

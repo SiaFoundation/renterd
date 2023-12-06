@@ -699,10 +699,6 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 		return nil // nothing to do
 	}
 
-	// Only allow for applying one batch of interactions at a time.
-	ss.interactionsMu.Lock()
-	defer ss.interactionsMu.Unlock()
-
 	// Get keys from input.
 	keyMap := make(map[publicKey]struct{})
 	var hks []publicKey
@@ -823,10 +819,6 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ho
 	if len(priceTableUpdate) == 0 {
 		return nil // nothing to do
 	}
-
-	// Only allow for applying one batch of interactions at a time.
-	ss.interactionsMu.Lock()
-	defer ss.interactionsMu.Unlock()
 
 	// Get keys from input.
 	keyMap := make(map[publicKey]struct{})
