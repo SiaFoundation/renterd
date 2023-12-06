@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
@@ -95,7 +94,7 @@ type (
 		ScanningLastStart  TimeRFC3339 `json:"scanningLastStart"`
 		UptimeMS           DurationMS  `json:"uptimeMS"`
 
-		StartTime time.Time `json:"startTime"`
+		StartTime TimeRFC3339 `json:"startTime"`
 		BuildState
 	}
 )

@@ -23,30 +23,6 @@ type hostAnnouncement struct {
 	Signature types.Signature
 }
 
-type ErrorResult struct {
-	Error string `json:"error,omitempty"`
-}
-
-type MetricResultCommon struct {
-	Address   string        `json:"address"`
-	Timestamp time.Time     `json:"timestamp"`
-	Elapsed   time.Duration `json:"elapsed"`
-}
-
-type ScanResult struct {
-	ErrorResult
-	PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
-	Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
-}
-
-type PriceTableUpdateResult struct {
-	ErrorResult
-	PriceTable HostPriceTable `json:"priceTable,omitempty"`
-}
-
-const InteractionTypeScan = "scan"
-const InteractionTypePriceTableUpdate = "pricetableupdate"
-
 // ForEachAnnouncement calls fn on each host announcement in a block.
 func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, Announcement)) {
 	for _, txn := range b.Transactions {

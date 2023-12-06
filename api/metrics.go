@@ -18,9 +18,9 @@ const (
 
 type (
 	ContractSetMetric struct {
-		Contracts int       `json:"contracts"`
-		Name      string    `json:"name"`
-		Timestamp time.Time `json:"timestamp"`
+		Contracts int         `json:"contracts"`
+		Name      string      `json:"name"`
+		Timestamp TimeRFC3339 `json:"timestamp"`
 	}
 
 	ContractSetMetricsQueryOpts struct {
@@ -32,7 +32,7 @@ type (
 		ContractID types.FileContractID `json:"contractID"`
 		Name       string               `json:"name"`
 		Reason     string               `json:"reason,omitempty"`
-		Timestamp  time.Time            `json:"timestamp"`
+		Timestamp  TimeRFC3339          `json:"timestamp"`
 	}
 
 	ContractSetChurnMetricsQueryOpts struct {
@@ -46,7 +46,7 @@ type (
 		HostKey   types.PublicKey `json:"hostKey"`
 		Origin    string          `json:"origin"`
 		Duration  time.Duration   `json:"duration"`
-		Timestamp time.Time       `json:"timestamp"`
+		Timestamp TimeRFC3339     `json:"timestamp"`
 	}
 
 	PerformanceMetricsQueryOpts struct {
@@ -56,7 +56,7 @@ type (
 	}
 
 	ContractMetric struct {
-		Timestamp time.Time `json:"timestamp"`
+		Timestamp TimeRFC3339 `json:"timestamp"`
 
 		ContractID types.FileContractID `json:"contractID"`
 		HostKey    types.PublicKey      `json:"hostKey"`
@@ -78,7 +78,7 @@ type (
 	}
 
 	WalletMetric struct {
-		Timestamp time.Time `json:"timestamp"`
+		Timestamp TimeRFC3339 `json:"timestamp"`
 
 		Confirmed   types.Currency `json:"confirmed"`
 		Spendable   types.Currency `json:"spendable"`

@@ -72,15 +72,40 @@ func (s *ParamString) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// CompareTimeRFC3339 is a comparer function to be used with cmp.Comparer.
+func CompareTimeRFC3339(t1, t2 TimeRFC3339) bool {
+	return time.Time(t1).UTC().Equal(time.Time(t2).UTC())
+}
+
+// TimeNow returns the current time as a TimeRFC3339.
+func TimeNow() TimeRFC3339 {
+	return TimeRFC3339(time.Now())
+}
+
+// Std converts a TimeRFC3339 to a time.Time.
+func (t TimeRFC3339) Std() time.Time { return time.Time(t).UTC() }
+
+// IsZero reports whether t represents the zero time instant, January 1, year 1,
+// 00:00:00 UTC.
+func (t TimeRFC3339) IsZero() bool { return (time.Time)(t).IsZero() }
+
 // String implements fmt.Stringer.
-func (t TimeRFC3339) String() string { return (time.Time)(t).Format(time.RFC3339Nano) }
+func (t TimeRFC3339) String() string { return (time.Time)(t).UTC().Format(time.RFC3339Nano) }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (t *TimeRFC3339) UnmarshalText(b []byte) error { return (*time.Time)(t).UnmarshalText(b) }
+func (t *TimeRFC3339) UnmarshalText(b []byte) error {
+	var stdTime time.Time
+	err := stdTime.UnmarshalText(b)
+	if err != nil {
+		return err
+	}
+	*t = TimeRFC3339(stdTime.UTC())
+	return nil
+}
 
 // MarshalJSON implements json.Marshaler.
 func (t TimeRFC3339) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%s"`, (time.Time)(t).Format(time.RFC3339))), nil
+	return []byte(fmt.Sprintf(`"%s"`, (time.Time)(t).UTC().Format(time.RFC3339))), nil
 }
 
 // String implements fmt.Stringer.

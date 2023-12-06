@@ -829,20 +829,6 @@ func (mgr *uploadManager) renewUploader(u *uploader) {
 	u.SignalWork()
 }
 
-func (mgr *uploadManager) renewalsMap() map[types.FileContractID]types.FileContractID {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	renewals := make(map[types.FileContractID]types.FileContractID)
-	for _, u := range mgr.uploaders {
-		fcid, renewedFrom, _ := u.contractInfo()
-		if renewedFrom != (types.FileContractID{}) {
-			renewals[renewedFrom] = fcid
-		}
-	}
-	return renewals
-}
-
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
 	// build map
 	c2m := make(map[types.FileContractID]api.ContractMetadata)

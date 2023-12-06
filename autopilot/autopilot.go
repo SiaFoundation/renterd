@@ -129,7 +129,7 @@ type state struct {
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
+	return jape.Mux(tracing.TracingMiddleware(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /hosts":         ap.hostsHandlerPOST,
@@ -619,13 +619,13 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 		ScanningLastStart:  api.TimeRFC3339(sLastStart),
 		UptimeMS:           api.DurationMS(ap.Uptime()),
 
-		StartTime: ap.StartTime(),
+		StartTime: api.TimeRFC3339(ap.StartTime()),
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
-			BuildTime: build.BuildTime(),
+			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 	})
 }

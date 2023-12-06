@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"time"
 )
 
 const (
@@ -25,7 +24,7 @@ var (
 
 type (
 	Bucket struct {
-		CreatedAt time.Time    `json:"createdAt"`
+		CreatedAt TimeRFC3339  `json:"createdAt"`
 		Name      string       `json:"name"`
 		Policy    BucketPolicy `json:"policy"`
 	}
