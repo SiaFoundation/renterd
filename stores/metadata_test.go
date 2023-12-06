@@ -937,11 +937,6 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Try to store it again. Should work.
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1); err != nil {
-		t.Fatal(err)
-	}
-
 	// Fetch it using get and verify every field.
 	obj, err := ss.dbObject(objID)
 	if err != nil {
@@ -999,6 +994,36 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
 
+	// Try to store it again. Should work.
+	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, obj1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch it again and verify.
+	obj, err = ss.dbObject(objID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set the Model fields to zero before comparing. These are set by gorm
+	// itself and contain a few timestamps which would make the following
+	// code a lot more verbose.
+	obj.Model = Model{}
+	for i := range obj.Slabs {
+		obj.Slabs[i].Model = Model{}
+	}
+
+	// The expected object is the same except for some ids which were
+	// incremented due to the object and slab being overwritten.
+	two := uint(2)
+	expectedObj.Slabs[0].DBObjectID = &two
+	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[1].DBObjectID = &two
+	expectedObj.Slabs[1].DBSlabID = 4
+	if !reflect.DeepEqual(obj, expectedObj) {
+		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
+	}
+
 	// Fetch it and verify again.
 	fullObj, err := ss.Object(ctx, api.DefaultBucketName, objID)
 	if err != nil {
@@ -1016,7 +1041,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   1,
+				DBSlabID:   3,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1056,7 +1081,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   2,
+				DBSlabID:   4,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
