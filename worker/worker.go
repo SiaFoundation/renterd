@@ -260,8 +260,10 @@ type worker struct {
 	contractSpendingRecorder *contractSpendingRecorder
 	contractLockingDuration  time.Duration
 
-	transportPoolV3 *transportPoolV3
-	logger          *zap.SugaredLogger
+	transportPoolV3   *transportPoolV3
+	logger            *zap.SugaredLogger
+	shutdownCtx       context.Context
+	shutdownCtxCancel context.CancelFunc
 }
 
 func dial(ctx context.Context, hostIP string) (net.Conn, error) {
@@ -1393,6 +1395,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("upload overdrive timeout must be positive")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
@@ -1404,6 +1407,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		logger:                  l.Sugar().Named("worker").Named(id),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]bool),
+		shutdownCtx:             ctx,
+		shutdownCtxCancel:       cancel,
 	}
 	w.initTransportPool()
 	w.initAccounts(b)
@@ -1457,6 +1462,8 @@ func (w *worker) Handler() http.Handler {
 
 // Shutdown shuts down the worker.
 func (w *worker) Shutdown(_ context.Context) error {
+	w.shutdownCtxCancel()
+
 	w.interactionsMu.Lock()
 	if w.interactionsFlushTimer != nil {
 		w.interactionsFlushTimer.Stop()

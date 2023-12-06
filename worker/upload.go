@@ -342,8 +342,9 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	}()
 
 	// keep uploading packed slabs until we're done
+	ctx := context.WithValue(w.shutdownCtx, keyInteractionRecorder, w)
 	for {
-		uploaded, err := w.uploadPackedSlabs(context.Background(), defaultPackedSlabsLockDuration, rs, contractSet, lockPriority)
+		uploaded, err := w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, rs, contractSet, lockPriority)
 		if err != nil {
 			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 			return
