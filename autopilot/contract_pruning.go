@@ -125,7 +125,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			}
 
 			// handle alert
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			ctx, cancel := context.WithTimeout(c.ap.stopCtx, time.Minute)
 			if id, alert := result.toAlert(); alert != nil {
 				c.ap.RegisterAlert(ctx, *alert)
 			} else {

@@ -1022,7 +1022,10 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
 		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
-		if err != nil && !errors.Is(err, errDownloadManagerStopped) {
+		if err != nil && !(errors.Is(err, errDownloadManagerStopped) ||
+			errors.Is(err, errNotEnoughContracts) ||
+			errors.Is(err, context.Canceled)) {
+			w.logger.Error(err)
 			w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
 		}
 		return
@@ -1126,7 +1129,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	params := defaultParameters(bucket, path)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if err := jc.Check("couldn't upload object", err); err != nil {
-		if !errors.Is(err, errUploadManagerStopped) {
+		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+			errors.Is(err, errNotEnoughContracts) ||
+			errors.Is(err, context.Canceled)) {
+			w.logger.Error(err)
 			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return
@@ -1262,7 +1268,10 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	params := multipartParameters(bucket, path, uploadID, partNumber)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
-		if !errors.Is(err, errUploadManagerStopped) {
+		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+			errors.Is(err, errNotEnoughContracts) ||
+			errors.Is(err, context.Canceled)) {
+			w.logger.Error(err)
 			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
 		}
 		return

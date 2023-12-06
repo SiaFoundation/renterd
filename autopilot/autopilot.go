@@ -427,7 +427,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 	wallet, err := ap.bus.Wallet(ctx)
 	cancel()
 
@@ -448,13 +448,13 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ap.stopChan:
+			case <-ap.stopCtx.Done():
 				return
 			case <-ticker.C:
 			}
 
 			// fetch wallet info
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
 			if wallet, err = ap.bus.Wallet(ctx); err != nil {
 				ap.logger.Errorf("failed to get wallet info, err: %v", err)
 			}
