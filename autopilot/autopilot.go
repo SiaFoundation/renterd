@@ -160,6 +160,12 @@ func (ap *Autopilot) Run() error {
 		return nil
 	}
 
+	// schedule a trigger when the wallet receives its first deposit
+	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
+		ap.logger.Error(err)
+		return nil
+	}
+
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
 	for {
@@ -418,6 +424,52 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		}
 		return
 	}
+}
+
+func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	wallet, err := ap.bus.Wallet(ctx)
+	cancel()
+
+	// no need to schedule a trigger if the wallet is already funded
+	if err != nil {
+		return err
+	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
+		return nil
+	}
+
+	// spin a goroutine that triggers the autopilot when we receive a deposit
+	ap.logger.Info("autopilot loop trigger is scheduled for when the wallet receives a deposit")
+	ap.wg.Add(1)
+	go func() {
+		defer ap.wg.Done()
+
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ap.stopChan:
+				return
+			case <-ticker.C:
+			}
+
+			// fetch wallet info
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if wallet, err = ap.bus.Wallet(ctx); err != nil {
+				ap.logger.Errorf("failed to get wallet info, err: %v", err)
+			}
+			cancel()
+
+			// if we have received a deposit, trigger the autopilot
+			if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
+				if ap.Trigger(false) {
+					return
+				}
+			}
+		}
+	}()
+
+	return nil
 }
 
 func (ap *Autopilot) isRunning() bool {
