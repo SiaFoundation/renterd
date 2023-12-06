@@ -1393,12 +1393,12 @@ func performMigration00035_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLog
 	}
 
 	for _, autopilot := range autopilots {
-		autopilot.Config.Contracts.Prune = true
+		autopilot.Config.Contracts.Prune = false
 		if err := txn.Save(&autopilot).Error; err != nil {
 			logger.Errorf("failed to set default value for Contracts.Prune on autopilot '%v', err: %v", autopilot.Identifier, err)
 			return err
 		}
-		logger.Debugf("successfully defaulted Contracts.Prun to 'true' on autopilot '%v'", autopilot.Identifier)
+		logger.Debugf("successfully defaulted Contracts.Prun to 'false' on autopilot '%v'", autopilot.Identifier)
 	}
 
 	logger.Info("migration 00035_contractPruneCfg complete")
