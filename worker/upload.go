@@ -957,24 +957,13 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, mem *acquir
 func (u *upload) canUseUploader(sID slabID, ul *uploader) bool {
 	fcid, renewedFrom, _ := ul.contractInfo()
 
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
 	// check if the uploader is allowed
-	_, allowed := u.allowed[fcid]
-	if !allowed {
-		_, allowed = u.allowed[renewedFrom]
-	}
-	if !allowed {
+	if allowed := u.isAllowed(fcid, renewedFrom); !allowed {
 		return false
 	}
 
 	// check whether we've used it already
-	_, used := u.used[sID][fcid]
-	if !used {
-		_, used = u.used[sID][renewedFrom]
-	}
-	return !used
+	return !u.isUsed(sID, fcid, renewedFrom)
 }
 
 func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, mem *acquiredMemory) {
@@ -1556,6 +1545,17 @@ func (u *upload) isAllowed(fcid ...types.FileContractID) bool {
 	defer u.mu.Unlock()
 	for _, c := range fcid {
 		if _, allowed := u.allowed[c]; allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *upload) isUsed(sID slabID, fcid ...types.FileContractID) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, c := range fcid {
+		if _, used := u.used[sID][c]; used {
 			return true
 		}
 	}
