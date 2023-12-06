@@ -391,7 +391,7 @@ func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 		ETag:     raw.ETag,
 		Health:   raw.Health,
 		MimeType: raw.MimeType,
-		ModTime:  time.Time(raw.ModTime).UTC(),
+		ModTime:  api.TimeRFC3339(time.Time(raw.ModTime).UTC()),
 		Name:     raw.Name,
 		Size:     raw.Size,
 	}
@@ -461,7 +461,7 @@ func (raw rawObject) convert() (api.Object, error) {
 			ETag:     raw[0].ObjectETag,
 			Health:   raw[0].ObjectHealth,
 			MimeType: raw[0].ObjectMimeType,
-			ModTime:  raw[0].ObjectModTime.UTC(),
+			ModTime:  api.TimeRFC3339(raw[0].ObjectModTime.UTC()),
 			Name:     raw[0].ObjectName,
 			Size:     raw[0].ObjectSize,
 		},
@@ -542,7 +542,7 @@ func (s *SQLStore) Bucket(ctx context.Context, bucket string) (api.Bucket, error
 		return api.Bucket{}, err
 	}
 	return api.Bucket{
-		CreatedAt: b.CreatedAt.UTC(),
+		CreatedAt: api.TimeRFC3339(b.CreatedAt.UTC()),
 		Name:      b.Name,
 		Policy:    b.Policy,
 	}, nil
@@ -623,7 +623,7 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 	resp := make([]api.Bucket, len(buckets))
 	for i, b := range buckets {
 		resp[i] = api.Bucket{
-			CreatedAt: b.CreatedAt.UTC(),
+			CreatedAt: api.TimeRFC3339(b.CreatedAt.UTC()),
 			Name:      b.Name,
 			Policy:    b.Policy,
 		}
@@ -1052,7 +1052,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	err = s.RecordContractSetMetric(ctx, api.ContractSetMetric{
 		Name:      name,
 		Contracts: nContractsAfter,
-		Timestamp: time.Now(),
+		Timestamp: api.TimeNow(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to record contract set metric: %w", err)
@@ -1339,7 +1339,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				remainingCollateral = mhp.Sub(types.Currency(contract.ContractPrice))
 			}
 			m := api.ContractMetric{
-				Timestamp:           time.Now(),
+				Timestamp:           api.TimeNow(),
 				ContractID:          fcid,
 				HostKey:             types.PublicKey(contract.Host.PublicKey),
 				RemainingCollateral: remainingCollateral,
@@ -1521,7 +1521,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			om = api.ObjectMetadata{
 				Health:   srcObjHealth,
 				MimeType: srcObj.MimeType,
-				ModTime:  srcObj.CreatedAt.UTC(),
+				ModTime:  api.TimeRFC3339(srcObj.CreatedAt.UTC()),
 				Name:     srcObj.ObjectID,
 				Size:     srcObj.Size,
 			}
@@ -1569,7 +1569,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			MimeType: dstObj.MimeType,
 			ETag:     dstObj.Etag,
 			Health:   srcObjHealth,
-			ModTime:  dstObj.CreatedAt.UTC(),
+			ModTime:  api.TimeRFC3339(dstObj.CreatedAt.UTC()),
 			Name:     dstObj.ObjectID,
 			Size:     dstObj.Size,
 		}

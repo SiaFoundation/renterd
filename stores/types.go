@@ -116,11 +116,11 @@ func (currency) GormDataType() string {
 // Scan scan value into currency, implements sql.Scanner interface.
 func (c *currency) Scan(value interface{}) error {
 	var s string
-	switch value.(type) {
+	switch value := value.(type) {
 	case string:
-		s = value.(string)
+		s = value
 	case []byte:
-		s = string(value.([]byte))
+		s = string(value)
 	default:
 		return fmt.Errorf("failed to unmarshal currency value: %v %t", value, value)
 	}
@@ -202,11 +202,11 @@ func (balance) GormDataType() string {
 // Scan scan value into balance, implements sql.Scanner interface.
 func (hs *balance) Scan(value interface{}) error {
 	var s string
-	switch value.(type) {
+	switch value := value.(type) {
 	case string:
-		s = value.(string)
+		s = value
 	case []byte:
-		s = string(value.([]byte))
+		s = string(value)
 	default:
 		return fmt.Errorf("failed to unmarshal balance value: %v %t", value, value)
 	}

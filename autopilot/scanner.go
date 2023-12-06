@@ -265,7 +265,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 		for !s.ap.isStopped() && !exhausted {
 			// fetch next batch
 			hosts, err := s.bus.HostsForScanning(context.Background(), api.HostsForScanningOptions{
-				MaxLastScan: cutoff,
+				MaxLastScan: api.TimeRFC3339(cutoff),
 				Offset:      offset,
 				Limit:       int(s.scanBatchSize),
 			})

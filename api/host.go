@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
@@ -76,7 +75,7 @@ type (
 		Limit  int
 	}
 	HostsForScanningOptions struct {
-		MaxLastScan time.Time
+		MaxLastScan TimeRFC3339
 		Limit       int
 		Offset      int
 	}

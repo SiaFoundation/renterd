@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"go.sia.tech/renterd/object"
 )
@@ -51,12 +50,12 @@ type (
 
 	// ObjectMetadata contains various metadata about an object.
 	ObjectMetadata struct {
-		ETag     string    `json:"eTag,omitempty"`
-		Health   float64   `json:"health"`
-		MimeType string    `json:"mimeType,omitempty"`
-		ModTime  time.Time `json:"modTime"`
-		Name     string    `json:"name"`
-		Size     int64     `json:"size"`
+		ETag     string      `json:"eTag,omitempty"`
+		Health   float64     `json:"health"`
+		MimeType string      `json:"mimeType,omitempty"`
+		ModTime  TimeRFC3339 `json:"modTime"`
+		Name     string      `json:"name"`
+		Size     int64       `json:"size"`
 	}
 
 	// ObjectAddRequest is the request type for the /bus/object/*key endpoint.
@@ -125,7 +124,7 @@ type (
 // LastModified returns the object's ModTime formatted for use in the
 // 'Last-Modified' header
 func (o ObjectMetadata) LastModified() string {
-	return o.ModTime.UTC().Format(http.TimeFormat)
+	return o.ModTime.Std().Format(http.TimeFormat)
 }
 
 // ContentType returns the object's MimeType for use in the 'Content-Type'
@@ -197,11 +196,13 @@ type (
 		ContractSet                  string
 		MimeType                     string
 		DisablePreshardingEncryption bool
+		ContentLength                int64
 	}
 
 	UploadMultipartUploadPartOptions struct {
 		DisablePreshardingEncryption bool
 		EncryptionOffset             int
+		ContentLength                int64
 	}
 )
 

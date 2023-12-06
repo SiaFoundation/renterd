@@ -293,7 +293,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	// check block height - if too much time has passed since the last block
 	// there is a chance we are not up-to-date anymore. So we only check whether
 	// the host's height is at least equal to ours.
-	if !cs.Synced || time.Since(cs.LastBlockTime) > time.Hour {
+	if !cs.Synced || time.Since(cs.LastBlockTime.Std()) > time.Hour {
 		if pt.HostBlockHeight < cs.BlockHeight {
 			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
 		}
@@ -448,4 +448,11 @@ func sectorUploadCostRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 		return types.ZeroCurrency, true
 	}
 	return total, false
+}
+
+func errToStr(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }

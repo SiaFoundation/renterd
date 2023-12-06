@@ -43,7 +43,7 @@ func (s *s3) ListBuckets(ctx context.Context) ([]gofakes3.BucketInfo, error) {
 	for i, bucket := range buckets {
 		bucketInfos[i] = gofakes3.BucketInfo{
 			Name:         bucket.Name,
-			CreationDate: gofakes3.NewContentTime(bucket.CreatedAt),
+			CreationDate: gofakes3.NewContentTime(bucket.CreatedAt.Std()),
 		}
 	}
 	return bucketInfos, nil
@@ -153,7 +153,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 
 		item := &gofakes3.Content{
 			Key:          key,
-			LastModified: gofakes3.NewContentTime(object.ModTime),
+			LastModified: gofakes3.NewContentTime(object.ModTime.Std()),
 			ETag:         hex.EncodeToString(frand.Bytes(32)), // TODO: don't have that
 			Size:         object.Size,
 			StorageClass: gofakes3.StorageStandard,
@@ -260,7 +260,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	// TODO: When we support metadata we need to add it here.
 	metadata := map[string]string{
 		"Content-Type":  res.ContentType,
-		"Last-Modified": res.ModTime.UTC().Format(http.TimeFormat),
+		"Last-Modified": res.ModTime.Std().Format(http.TimeFormat),
 	}
 
 	return &gofakes3.Object{
@@ -337,7 +337,9 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // TODO: Metadata is currently ignored. The backend requires an update to
 // support it.
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	opts := api.UploadObjectOptions{}
+	opts := api.UploadObjectOptions{
+		ContentLength: size,
+	}
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct
 	}
@@ -384,7 +386,7 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 	}
 	return gofakes3.CopyObjectResult{
 		ETag:         api.FormatETag(obj.ETag),
-		LastModified: gofakes3.NewContentTime(obj.ModTime.UTC()),
+		LastModified: gofakes3.NewContentTime(obj.ModTime.Std()),
 	}, nil
 }
 
@@ -403,6 +405,7 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
 	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
 		DisablePreshardingEncryption: true,
+		ContentLength:                contentLength,
 	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -429,7 +432,7 @@ func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *go
 		uploads = append(uploads, gofakes3.ListMultipartUploadItem{
 			Key:       upload.Path[1:],
 			UploadID:  gofakes3.UploadID(upload.UploadID),
-			Initiated: gofakes3.NewContentTime(upload.CreatedAt),
+			Initiated: gofakes3.NewContentTime(upload.CreatedAt.Std()),
 		})
 	}
 	return &gofakes3.ListMultipartUploadsResult{
@@ -456,7 +459,7 @@ func (s *s3) ListParts(ctx context.Context, bucket, object string, uploadID gofa
 	for _, part := range resp.Parts {
 		parts = append(parts, gofakes3.ListMultipartUploadPartItem{
 			PartNumber:   part.PartNumber,
-			LastModified: gofakes3.NewContentTime(part.LastModified),
+			LastModified: gofakes3.NewContentTime(part.LastModified.Std()),
 			ETag:         part.ETag,
 			Size:         part.Size,
 		})

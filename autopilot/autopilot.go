@@ -174,7 +174,7 @@ func (wp *workerPool) withWorkers(workerFunc func([]Worker)) {
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracedRoutes(api.DefaultAutopilotID, map[string]jape.Handler{
+	return jape.Mux(tracing.TracingMiddleware(api.DefaultAutopilotID, map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /hosts":         ap.hostsHandlerPOST,
@@ -202,6 +202,12 @@ func (ap *Autopilot) Run() error {
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
 		ap.logger.Error("autopilot stopped before it was able to come online")
+		return nil
+	}
+
+	// schedule a trigger when the wallet receives its first deposit
+	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
+		ap.logger.Error(err)
 		return nil
 	}
 
@@ -458,6 +464,52 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 	}
 }
 
+func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	wallet, err := ap.bus.Wallet(ctx)
+	cancel()
+
+	// no need to schedule a trigger if the wallet is already funded
+	if err != nil {
+		return err
+	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
+		return nil
+	}
+
+	// spin a goroutine that triggers the autopilot when we receive a deposit
+	ap.logger.Info("autopilot loop trigger is scheduled for when the wallet receives a deposit")
+	ap.wg.Add(1)
+	go func() {
+		defer ap.wg.Done()
+
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ap.stopChan:
+				return
+			case <-ticker.C:
+			}
+
+			// fetch wallet info
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if wallet, err = ap.bus.Wallet(ctx); err != nil {
+				ap.logger.Errorf("failed to get wallet info, err: %v", err)
+			}
+			cancel()
+
+			// if we have received a deposit, trigger the autopilot
+			if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
+				if ap.Trigger(false) {
+					return
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
 func (ap *Autopilot) isRunning() bool {
 	return !ap.startTime.IsZero()
 }
@@ -654,13 +706,13 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 		ScanningLastStart:  api.TimeRFC3339(sLastStart),
 		UptimeMS:           api.DurationMS(ap.Uptime()),
 
-		StartTime: ap.StartTime(),
+		StartTime: api.TimeRFC3339(ap.StartTime()),
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
-			BuildTime: build.BuildTime(),
+			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 	})
 }

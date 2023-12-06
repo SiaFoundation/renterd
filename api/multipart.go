@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"time"
 
 	"go.sia.tech/renterd/object"
 )
@@ -31,14 +30,14 @@ type (
 		Key       object.EncryptionKey `json:"key"`
 		Path      string               `json:"path"`
 		UploadID  string               `json:"uploadID"`
-		CreatedAt time.Time            `json:"createdAt"`
+		CreatedAt TimeRFC3339          `json:"createdAt"`
 	}
 
 	MultipartListPartItem struct {
-		PartNumber   int       `json:"partNumber"`
-		LastModified time.Time `json:"lastModified"`
-		ETag         string    `json:"eTag"`
-		Size         int64     `json:"size"`
+		PartNumber   int         `json:"partNumber"`
+		LastModified TimeRFC3339 `json:"lastModified"`
+		ETag         string      `json:"eTag"`
+		Size         int64       `json:"size"`
 	}
 
 	MultipartCompletedPart struct {
