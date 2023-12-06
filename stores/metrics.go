@@ -338,13 +338,14 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n ui
 }
 
 func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) unixTimeMS {
-	start = start.UTC()
-	toNormalise := time.Time(t).UTC()
-	if start.After(toNormalise) {
+	startMS := start.UnixMilli()
+	toNormaliseMS := time.Time(t).UnixMilli()
+	intervalMS := interval.Milliseconds()
+	if startMS > toNormaliseMS {
 		return unixTimeMS(start)
 	}
-	normalized := (toNormalise.UnixMilli()-start.UnixMilli())/int64(interval.Milliseconds())*int64(interval.Milliseconds()) + start.UnixMilli()
-	return unixTimeMS(time.UnixMilli(normalized).UTC())
+	normalizedMS := (toNormaliseMS-startMS)/intervalMS*intervalMS + start.UnixMilli()
+	return unixTimeMS(time.UnixMilli(normalizedMS))
 }
 
 // findPeriods is the core of all methods retrieving metrics. By using integer
