@@ -430,7 +430,7 @@ func (buf *SlabBuffer) commitAppend(completionThreshold int64) (bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	buf.syncErr = err
-	return syncSize >= buf.maxSize-completionThreshold, err
+	return syncSize+completionThreshold >= buf.maxSize, err
 }
 
 func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferGroupID) {
