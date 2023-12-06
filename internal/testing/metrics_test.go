@@ -21,9 +21,14 @@ func TestMetrics(t *testing.T) {
 	// register start time
 	start := time.Now()
 
+	// enable pruning
+	apCfg := testAutopilotConfig
+	apCfg.Contracts.Prune = true
+
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts:             testRedundancySettings.TotalShards,
+		autopilotSettings: &apCfg,
 	})
 	defer cluster.Shutdown()
 
