@@ -40,6 +40,9 @@ const (
 	// messages.
 	defaultWithdrawalExpiryBlocks = 6
 
+	// maxPriceTableSize defines the maximum size of a price table
+	maxPriceTableSize = 16 * 1024
+
 	// responseLeeway is the amount of leeway given to the maxLen when we read
 	// the response in the ReadSector RPC
 	responseLeeway = 1 << 12 // 4 KiB
@@ -953,24 +956,14 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			defer func() {
-				InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
-					HostKey:    h.HostKey(),
-					Success:    isSuccessfulInteraction(err),
-					Timestamp:  time.Now(),
-					PriceTable: hpt,
-				})
-			}()
-
-			pt, err := RPCPriceTable(ctx, t, paymentFn)
-			if err != nil {
-				return err
-			}
-			hpt = hostdb.HostPriceTable{
-				HostPriceTable: pt,
-				Expiry:         time.Now().Add(pt.Validity),
-			}
-			return nil
+			hpt, err = RPCPriceTable(ctx, t, paymentFn)
+			InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+				HostKey:    h.HostKey(),
+				Success:    isSuccessfulInteraction(err),
+				Timestamp:  time.Now(),
+				PriceTable: hpt,
+			})
+			return
 		})
 		return
 	}
@@ -989,33 +982,40 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 }
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (pt rhpv3.HostPriceTable, err error) {
+func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ hostdb.HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
-	start := time.Now()
+
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return hostdb.HostPriceTable{}, err
 	}
 	defer s.Close()
 
-	const maxPriceTableSize = 16 * 1024
+	var pt rhpv3.HostPriceTable
 	var ptr rhpv3.RPCUpdatePriceTableResponse
 	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w (%v)", err, time.Since(start))
+		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w", err)
 	} else if err := s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w (%v)", err, time.Since(start))
+		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w", err)
 	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w (%v)", err, time.Since(start))
+		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w", err)
 	} else if payment, err := paymentFunc(pt); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w (%v)", err, time.Since(start))
+		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w", err)
 	} else if payment == nil {
-		return pt, nil // intended not to pay
+		return hostdb.HostPriceTable{
+			HostPriceTable: pt,
+			Expiry:         time.Now().Add(pt.Validity),
+		}, nil // intended not to pay
 	} else if err := processPayment(s, payment); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w (%v)", err, time.Since(start))
+		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w", err)
 	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w (%v)", err, time.Since(start))
+		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w", err)
+	} else {
+		return hostdb.HostPriceTable{
+			HostPriceTable: pt,
+			Expiry:         time.Now().Add(pt.Validity),
+		}, nil
 	}
-	return pt, nil
 }
 
 // RPCAccountBalance calls the AccountBalance RPC.

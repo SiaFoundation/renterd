@@ -475,15 +475,8 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}()
 
 	err = w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
-		if pt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
-			return err
-		} else {
-			hpt = hostdb.HostPriceTable{
-				HostPriceTable: pt,
-				Expiry:         time.Now().Add(pt.Validity),
-			}
-		}
-		return nil
+		hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+		return err
 	})
 
 	if jc.Check("could not get price table", err) != nil {
@@ -1567,7 +1560,7 @@ func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContrac
 	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
-func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, hpt rhpv3.HostPriceTable, elapsed time.Duration, err error) {
+func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, elapsed time.Duration, err error) {
 	// record host scan
 	defer func() {
 		InteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
@@ -1575,7 +1568,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 			Success:    isSuccessfulInteraction(err),
 			Timestamp:  time.Now(),
 			Settings:   settings,
-			PriceTable: hpt,
+			PriceTable: pt,
 		})
 	}()
 
@@ -1610,9 +1603,13 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 
 	// fetch the host pricetable
 	if err == nil {
-		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) (err error) {
-			hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-			return err
+		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
+			if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
+				return err
+			} else {
+				pt = hpt.HostPriceTable
+				return nil
+			}
 		})
 	}
 	return
