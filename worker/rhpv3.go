@@ -1004,7 +1004,7 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 	} else if payment == nil {
 		return hostdb.HostPriceTable{
 			HostPriceTable: pt,
-			Expiry:         time.Now().Add(pt.Validity),
+			Expiry:         time.Now(),
 		}, nil // intended not to pay
 	} else if err := processPayment(s, payment); err != nil {
 		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w", err)
