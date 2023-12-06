@@ -338,7 +338,7 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // support it.
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
 	opts := api.UploadObjectOptions{
-		Size: size,
+		ContentLength: size,
 	}
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct

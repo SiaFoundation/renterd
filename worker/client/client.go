@@ -198,8 +198,15 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		req.ContentLength = opts.ContentLength
 	} else {
 		if s, ok := r.(io.Seeker); ok {
-			_, _ = s.Seek(0, io.SeekEnd)
-			_, _ = s.Seek(0, io.SeekStart)
+			length, err := s.Seek(0, io.SeekEnd)
+			if err != nil {
+				return nil, err
+			}
+			_, err = s.Seek(0, io.SeekStart)
+			if err != nil {
+				return nil, err
+			}
+			req.ContentLength = length
 		}
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -233,12 +240,19 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	if opts.Size != 0 {
-		req.ContentLength = opts.Size
+	if opts.ContentLength != 0 {
+		req.ContentLength = opts.ContentLength
 	} else {
 		if s, ok := r.(io.Seeker); ok {
-			_, _ = s.Seek(0, io.SeekEnd)
-			_, _ = s.Seek(0, io.SeekStart)
+			length, err := s.Seek(0, io.SeekEnd)
+			if err != nil {
+				return nil, err
+			}
+			_, err = s.Seek(0, io.SeekStart)
+			if err != nil {
+				return nil, err
+			}
+			req.ContentLength = length
 		}
 	}
 	resp, err := http.DefaultClient.Do(req)
