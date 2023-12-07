@@ -92,7 +92,7 @@ type (
 		PruningLastStart   TimeRFC3339 `json:"pruningLastStart"`
 		Scanning           bool        `json:"scanning"`
 		ScanningLastStart  TimeRFC3339 `json:"scanningLastStart"`
-		UptimeMS           DurationMS  `json:"uptimeMS"`
+		UptimeMS           DurationMS  `json:"uptimeMs"`
 
 		StartTime TimeRFC3339 `json:"startTime"`
 		BuildState

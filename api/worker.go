@@ -176,21 +176,21 @@ type (
 
 	// DownloadStatsResponse is the response type for the /stats/downloads endpoint.
 	DownloadStatsResponse struct {
-		AvgDownloadSpeedMBPS float64           `json:"avgDownloadSpeedMBPS"`
+		AvgDownloadSpeedMBPS float64           `json:"avgDownloadSpeedMbps"`
 		AvgOverdrivePct      float64           `json:"avgOverdrivePct"`
 		HealthyDownloaders   uint64            `json:"healthyDownloaders"`
 		NumDownloaders       uint64            `json:"numDownloaders"`
 		DownloadersStats     []DownloaderStats `json:"downloadersStats"`
 	}
 	DownloaderStats struct {
-		AvgSectorDownloadSpeedMBPS float64         `json:"avgSectorDownloadSpeedMBPS"`
+		AvgSectorDownloadSpeedMBPS float64         `json:"avgSectorDownloadSpeedMbps"`
 		HostKey                    types.PublicKey `json:"hostKey"`
 		NumDownloads               uint64          `json:"numDownloads"`
 	}
 
 	// UploadStatsResponse is the response type for the /stats/uploads endpoint.
 	UploadStatsResponse struct {
-		AvgSlabUploadSpeedMBPS float64         `json:"avgSlabUploadSpeedMBPS"`
+		AvgSlabUploadSpeedMBPS float64         `json:"avgSlabUploadSpeedMbps"`
 		AvgOverdrivePct        float64         `json:"avgOverdrivePct"`
 		HealthyUploaders       uint64          `json:"healthyUploaders"`
 		NumUploaders           uint64          `json:"numUploaders"`
@@ -198,7 +198,7 @@ type (
 	}
 	UploaderStats struct {
 		HostKey                  types.PublicKey `json:"hostKey"`
-		AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMBPS"`
+		AvgSectorUploadSpeedMBPS float64         `json:"avgSectorUploadSpeedMbps"`
 	}
 
 	// WorkerStateResponse is the response type for the /worker/state endpoint.

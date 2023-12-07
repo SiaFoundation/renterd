@@ -55,7 +55,7 @@ type (
 		RemoteAddr                    string        `yaml:"remoteAddr"`
 		RemotePassword                string        `yaml:"remotePassword"`
 		PersistInterval               time.Duration `yaml:"persistInterval"`
-		UsedUTXOExpiry                time.Duration `yaml:"usedUTXOExpiry"`
+		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold"`
 	}
 
@@ -67,7 +67,7 @@ type (
 
 	// MySQL contains the configuration for an optional MySQL database.
 	MySQL struct {
-		URI             string `yaml:"URI"`
+		URI             string `yaml:"uri"`
 		User            string `yaml:"user"`
 		Password        string `yaml:"password"`
 		Database        string `yaml:"database"`
@@ -90,7 +90,7 @@ type (
 	// Worker contains the configuration for a worker.
 	Worker struct {
 		Enabled                       bool           `yaml:"enabled"`
-		ID                            string         `yaml:"ID"`
+		ID                            string         `yaml:"id"`
 		Remotes                       []RemoteWorker `yaml:"remotes"`
 		AllowPrivateIPs               bool           `yaml:"allowPrivateIPs"`
 		BusFlushInterval              time.Duration  `yaml:"busFlushInterval"`

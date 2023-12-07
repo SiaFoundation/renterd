@@ -643,6 +643,7 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 
 	// read the json config
 	log.Println("migration: reading autopilot.json")
+	//nolint:tagliatelle
 	var cfg struct {
 		Config api.AutopilotConfig `json:"Config"`
 	}

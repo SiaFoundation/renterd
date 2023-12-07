@@ -84,6 +84,12 @@ linters-settings:
       - name: package-comments
         disabled: true
 
+  tagliatelle:
+    case:
+      rules:
+        json: goCamel
+        yaml: goCamel
+
 linters:
   disable-all: true
   fast: false
@@ -95,6 +101,7 @@ linters:
     - misspell
     - typecheck
     - whitespace
+    - tagliatelle
 
 issues:
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
