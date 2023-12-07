@@ -66,9 +66,10 @@ body:
       description: |
         The configuration of your bus
         ```bash
-        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/redundancy
-
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/contractset
         curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/gouging
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/redundancy
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/uploadpacking
         ```
       placeholder: Paste the output of the above commands here
     validations:
@@ -81,6 +82,7 @@ body:
         The number of contracts in your contract set
         ```bash
         curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/contracts/set/autopilot | grep '"id"' | wc -l
+        ```
       placeholder: Paste the output of the above command here ```
     validations:
       required: true
