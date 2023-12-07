@@ -3,6 +3,8 @@ package stores
 import (
 	"context"
 	"fmt"
+	"math"
+	"math/bits"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -338,6 +340,44 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 	return resp, nil
 }
 
+func (m dbContractMetric) Aggregate(o dbContractMetric) (out dbContractMetric) {
+	out = m
+	remainingCollateralLo, carry := bits.Add64(uint64(m.RemainingCollateralLo), uint64(o.RemainingCollateralLo), 0)
+	remainingCollateralHi, _ := bits.Add64(uint64(m.RemainingCollateralHi), uint64(o.RemainingCollateralHi), carry)
+	remainingFundsLo, carry := bits.Add64(uint64(m.RemainingFundsLo), uint64(o.RemainingFundsLo), 0)
+	remainingFundsHi, _ := bits.Add64(uint64(m.RemainingFundsHi), uint64(o.RemainingFundsHi), carry)
+	uploadSpendingLo, carry := bits.Add64(uint64(m.UploadSpendingLo), uint64(o.UploadSpendingLo), 0)
+	uploadSpendingHi, _ := bits.Add64(uint64(m.UploadSpendingHi), uint64(o.UploadSpendingHi), carry)
+	downloadSpendingLo, carry := bits.Add64(uint64(m.DownloadSpendingLo), uint64(o.DownloadSpendingLo), 0)
+	downloadSpendingHi, _ := bits.Add64(uint64(m.DownloadSpendingHi), uint64(o.DownloadSpendingHi), carry)
+	fundAccountSpendingLo, carry := bits.Add64(uint64(m.FundAccountSpendingLo), uint64(o.FundAccountSpendingLo), 0)
+	fundAccountSpendingHi, _ := bits.Add64(uint64(m.FundAccountSpendingHi), uint64(o.FundAccountSpendingHi), carry)
+	deleteSpendingLo, carry := bits.Add64(uint64(m.DeleteSpendingLo), uint64(o.DeleteSpendingLo), 0)
+	deleteSpendingHi, _ := bits.Add64(uint64(m.DeleteSpendingHi), uint64(o.DeleteSpendingHi), carry)
+	listSpendingLo, carry := bits.Add64(uint64(m.ListSpendingLo), uint64(o.ListSpendingLo), 0)
+	listSpendingHi, _ := bits.Add64(uint64(m.ListSpendingHi), uint64(o.ListSpendingHi), carry)
+
+	out.FCID = fileContractID{}
+	out.Host = publicKey{}
+	out.RevisionNumber = 0
+
+	out.RemainingCollateralLo = unsigned64(remainingCollateralLo)
+	out.RemainingCollateralHi = unsigned64(remainingCollateralHi)
+	out.RemainingFundsLo = unsigned64(remainingFundsLo)
+	out.RemainingFundsHi = unsigned64(remainingFundsHi)
+	out.UploadSpendingLo = unsigned64(uploadSpendingLo)
+	out.UploadSpendingHi = unsigned64(uploadSpendingHi)
+	out.DownloadSpendingLo = unsigned64(downloadSpendingLo)
+	out.DownloadSpendingHi = unsigned64(downloadSpendingHi)
+	out.FundAccountSpendingLo = unsigned64(fundAccountSpendingLo)
+	out.FundAccountSpendingHi = unsigned64(fundAccountSpendingHi)
+	out.DeleteSpendingLo = unsigned64(deleteSpendingLo)
+	out.DeleteSpendingHi = unsigned64(deleteSpendingHi)
+	out.ListSpendingLo = unsigned64(listSpendingLo)
+	out.ListSpendingHi = unsigned64(listSpendingHi)
+	return
+}
+
 func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]dbContractMetric, error) {
 	tx := s.dbMetrics
 	if opts.ContractID != (types.FileContractID{}) {
@@ -348,9 +388,42 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 
 	var metrics []dbContractMetric
-	err := s.findPeriods(tx, &metrics, start, n, interval)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
+	if opts.ContractID == (types.FileContractID{}) && opts.HostKey == (types.PublicKey{}) {
+		// if neither contract nor host filters were set, we return the
+		// aggregate spending for each period
+		var metricsWithPeriod []struct {
+			Metric dbContractMetric `gorm:"embedded"`
+			Period int64
+		}
+		currentPeriod := int64(math.MinInt64)
+		err := tx.Raw(`
+			SELECT * FROM contracts
+			INNER JOIN (
+			SELECT fcid, MIN(timestamp) as timestamp, (timestamp - ?) / ? * ? AS Period
+			FROM contracts
+			GROUP BY Period, fcid) i
+			ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
+		`, unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+			Scan(&metricsWithPeriod).
+			Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch aggregate metrics: %w", err)
+		}
+		for _, m := range metricsWithPeriod {
+			if m.Period != currentPeriod {
+				metrics = append(metrics, m.Metric)
+				currentPeriod = m.Period
+			} else {
+				metrics[len(metrics)-1] = metrics[len(metrics)-1].Aggregate(m.Metric)
+			}
+		}
+	} else {
+		// otherwise we return the first metric for each period like we usually
+		// do
+		err := s.findPeriods(tx, &metrics, start, n, interval)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
+		}
 	}
 	for i, m := range metrics {
 		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
