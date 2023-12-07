@@ -101,7 +101,7 @@ type (
 		mem              *acquiredMemory
 		overdriveTimeout time.Duration
 
-		candidates []*uploader
+		candidates []*uploader // sorted by upload estimate
 		shards     [][]byte
 
 		mu          sync.Mutex
@@ -431,7 +431,6 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 	var numHealthy uint64
 	speeds := make(map[types.PublicKey]float64)
 	for _, u := range mgr.uploaders {
-		u.tryRecomputeStats()
 		speeds[u.hk] = u.statsSectorUploadSpeedBytesPerMS.Average() * 0.008
 		if u.healthy() {
 			numHealthy++
@@ -677,6 +676,11 @@ func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (cand
 			candidates = append(candidates, u)
 		}
 	}
+
+	// sort candidates by upload estimate
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].estimate() < candidates[j].estimate()
+	})
 	return
 }
 
@@ -739,6 +743,8 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 		} else {
 			uploader.updateBlockHeight(bh)
 		}
+
+		uploader.tryRecomputeStats()
 		uploaders = append(uploaders, uploader)
 	}
 
@@ -1155,15 +1161,14 @@ func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 		return false, nil
 	}
 
-	// find candidate candidate
+	// find next candidate
 	var candidate *uploader
 	for _, uploader := range s.candidates {
 		if _, used := s.used[uploader.hk]; used {
 			continue
 		}
-		if candidate == nil || uploader.estimate() < candidate.estimate() {
-			candidate = uploader
-		}
+		candidate = uploader
+		break
 	}
 
 	// no candidate found
