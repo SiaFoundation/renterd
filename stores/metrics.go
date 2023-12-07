@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type (
@@ -399,11 +400,11 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 		err := tx.Raw(`
 			SELECT * FROM contracts
 			INNER JOIN (
-			SELECT fcid, MIN(timestamp) as timestamp, (timestamp - ?) / ? * ? AS Period
+			SELECT fcid, MIN(timestamp) as timestamp, ? AS Period
 			FROM contracts
 			GROUP BY Period, fcid) i
 			ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
-		`, unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		`, roundPeriodExpr(tx, start, interval)).
 			Scan(&metricsWithPeriod).
 			Error
 		if err != nil {
@@ -502,6 +503,14 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 	return unixTimeMS(time.UnixMilli(normalizedMS))
 }
 
+func roundPeriodExpr(db *gorm.DB, start time.Time, interval time.Duration) clause.Expr {
+	if !isSQLite(db) {
+		return gorm.Expr("FLOOR((timestamp - ?) / ?) * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
+	} else {
+		return gorm.Expr("(timestamp - ?) / ? * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
+	}
+}
+
 // findPeriods is the core of all methods retrieving metrics. By using integer
 // division rounding combined with a GROUP BY operation, all rows of a table are
 // split into intervals and the row with the lowest timestamp for each interval
@@ -511,12 +520,8 @@ func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, start time.Time, n 
 	end := start.Add(time.Duration(n) * interval)
 	// inner groups all metrics within the requested time range into periods of
 	// 'interval' length and gives us the min timestamp of each period.
-	floorExpr := "(timestamp - ?) / ? * ?"
-	if !isSQLite(s.dbMetrics) {
-		floorExpr = "FLOOR((timestamp - ?) / ?) * ?"
-	}
 	inner := tx.Model(dst).
-		Select(fmt.Sprintf("MIN(timestamp) AS min_time, %s AS period", floorExpr), unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		Select("MIN(timestamp) AS min_time, ? AS period", roundPeriodExpr(tx, start, interval)).
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	// mid then joins the result with the original table. This might yield
