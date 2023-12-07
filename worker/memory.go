@@ -12,7 +12,12 @@ import (
 type (
 	// memoryManager helps regulate processes that use a lot of memory. Such as
 	// uploads and downloads.
-	memoryManager struct {
+	memoryManager interface {
+		Status() api.MemoryStatus
+		AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory
+	}
+
+	manager struct {
 		totalAvailable uint64
 		logger         *zap.SugaredLogger
 
@@ -22,17 +27,19 @@ type (
 	}
 
 	acquiredMemory struct {
-		mm *memoryManager
+		mm *manager
 
 		remaining uint64
 	}
 )
 
-func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) (*memoryManager, error) {
+var _ memoryManager = (*manager)(nil)
+
+func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) (memoryManager, error) {
 	if maxMemory == 0 {
 		return nil, fmt.Errorf("maxMemory cannot be 0")
 	}
-	mm := &memoryManager{
+	mm := &manager{
 		logger:         logger,
 		totalAvailable: maxMemory,
 	}
@@ -41,7 +48,7 @@ func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) (*memoryManag
 	return mm, nil
 }
 
-func (mm *memoryManager) Status() api.MemoryStatus {
+func (mm *manager) Status() api.MemoryStatus {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	return api.MemoryStatus{
@@ -50,7 +57,7 @@ func (mm *memoryManager) Status() api.MemoryStatus {
 	}
 }
 
-func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory {
+func (mm *manager) AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory {
 	if amt == 0 {
 		mm.logger.Fatal("cannot acquire 0 memory")
 	} else if mm.totalAvailable < amt {

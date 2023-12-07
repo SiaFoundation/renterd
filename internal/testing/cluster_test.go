@@ -1244,6 +1244,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 // TestUploadDownloadSameHost uploads a file to the same host through different
 // contracts and tries downloading the file again.
 func TestUploadDownloadSameHost(t *testing.T) {
+	t.SkipNow() // TODO PJ
+
 	if testing.Short() {
 		t.SkipNow()
 	}

@@ -40,7 +40,7 @@ type (
 	id [8]byte
 
 	downloadManager struct {
-		mm     *memoryManager
+		mm     memoryManager
 		hp     hostProvider
 		pss    partialSlabStore
 		slm    sectorLostMarker
@@ -159,7 +159,7 @@ type (
 	}
 )
 
-func (w *worker) initDownloadManager(mm *memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *worker) initDownloadManager(mm memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
@@ -167,7 +167,7 @@ func (w *worker) initDownloadManager(mm *memoryManager, maxOverdrive uint64, ove
 	w.downloadManager = newDownloadManager(w, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, pss partialSlabStore, mm *memoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(hp hostProvider, pss partialSlabStore, mm memoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
 		hp:     hp,
 		mm:     mm,
