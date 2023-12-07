@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sia Community Discord
+    url: https://discord.gg/sia
+    about: Join the Sia community discord for more help with Sia or hostd.
