@@ -1244,82 +1244,47 @@ func TestEphemeralAccountSync(t *testing.T) {
 // TestUploadDownloadSameHost uploads a file to the same host through different
 // contracts and tries downloading the file again.
 func TestUploadDownloadSameHost(t *testing.T) {
-	t.SkipNow() // TODO PJ
-
 	if testing.Short() {
 		t.SkipNow()
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: 1,
+		hosts: testRedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
+	b := cluster.Bus
+	w := cluster.Worker
 
 	// shut down the autopilot to prevent it from doing contract maintenance if any kind
 	cluster.ShutdownAutopilot(context.Background())
 
-	// get wallet address
-	wallet, err := cluster.Bus.Wallet(context.Background())
-	tt.OK(err)
+	// upload 3 objects so every host has 3 sectors
+	var err error
+	var res api.ObjectsResponse
+	shards := make(map[types.PublicKey][]object.Sector)
+	for i := 0; i < 3; i++ {
+		// upload object
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(frand.Bytes(rhpv2.SectorSize)), api.DefaultBucketName, fmt.Sprintf("foo_%d", i), api.UploadObjectOptions{}))
 
-	ac, err := cluster.Worker.Contracts(context.Background(), time.Minute)
-	tt.OK(err)
+		// download object from bus and keep track of its shards
+		res, err = b.Object(context.Background(), api.DefaultBucketName, fmt.Sprintf("foo_%d", i), api.GetObjectOptions{})
+		tt.OK(err)
+		for _, shard := range res.Object.Slabs[0].Shards {
+			shards[shard.LatestHost] = append(shards[shard.LatestHost], shard)
+		}
 
-	contracts := ac.Contracts
-	if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
-	}
-	c := contracts[0]
-
-	// form 2 more contracts with the same host
-	rev2, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
-	tt.OK(err)
-	c2, err := cluster.Bus.AddContract(context.Background(), rev2, types.ZeroCurrency, c.TotalCost, c.StartHeight, api.ContractStatePending)
-	tt.OK(err)
-	rev3, _, err := cluster.Worker.RHPForm(context.Background(), c.WindowStart, c.HostKey, c.HostIP, wallet.Address, c.RenterFunds(), c.Revision.ValidHostPayout())
-	tt.OK(err)
-	c3, err := cluster.Bus.AddContract(context.Background(), rev3, types.ZeroCurrency, c.TotalCost, c.StartHeight, api.ContractStatePending)
-	tt.OK(err)
-
-	// create a contract set with all 3 contracts
-	err = cluster.Bus.SetContractSet(context.Background(), testAutopilotConfig.Contracts.Set, []types.FileContractID{c.ID, c2.ID, c3.ID})
-	tt.OK(err)
-
-	// check the bus returns the desired contracts
-	up, err := cluster.Bus.UploadParams(context.Background())
-	tt.OK(err)
-	csc, err := cluster.Bus.ContractSetContracts(context.Background(), up.ContractSet)
-	tt.OK(err)
-	if len(csc) != 3 {
-		t.Fatal("expected 3 contracts", len(csc))
+		// delete the object
+		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("foo_%d", i), api.DeleteObjectOptions{}))
 	}
 
-	// upload a file
-	data := frand.Bytes(5*rhpv2.SectorSize + 1)
-	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
+	// build a frankenstein object constructed with all sectors on the same host
+	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
+	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", testContractSet, res.Object.Object, api.AddObjectOptions{}))
 
-	// Download the file multiple times.
-	var wg sync.WaitGroup
-	for tt := 0; tt < 3; tt++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 5; i++ {
-				buf := &bytes.Buffer{}
-				if err := cluster.Worker.DownloadObject(context.Background(), buf, api.DefaultBucketName, "foo", api.DownloadObjectOptions{}); err != nil {
-					t.Error(err)
-					break
-				}
-				if !bytes.Equal(buf.Bytes(), data) {
-					t.Error("data mismatch")
-					break
-				}
-			}
-		}()
-	}
-	wg.Wait()
+	// assert we can download this object
+	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "frankenstein", api.DownloadObjectOptions{}))
 }
 
 func TestContractArchival(t *testing.T) {
