@@ -1131,7 +1131,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	params := defaultParameters(bucket, path)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if err := jc.Check("couldn't upload object", err); err != nil {
-		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+		if err != nil && !(errors.Is(err, errWorkerShutDown) ||
 			errors.Is(err, errNotEnoughContracts) ||
 			errors.Is(err, context.Canceled)) {
 			w.logger.Error(err)
@@ -1270,7 +1270,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	params := multipartParameters(bucket, path, uploadID, partNumber)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
-		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+		if err != nil && !(errors.Is(err, errWorkerShutDown) ||
 			errors.Is(err, errNotEnoughContracts) ||
 			errors.Is(err, context.Canceled)) {
 			w.logger.Error(err)

@@ -31,9 +31,9 @@ const (
 )
 
 var (
-	errNoCandidateUploader  = errors.New("no candidate uploader found")
-	errNotEnoughContracts   = errors.New("not enough contracts to support requested redundancy")
-	errUploadManagerStopped = errors.New("upload manager stopped")
+	errNoCandidateUploader = errors.New("no candidate uploader found")
+	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
+	errWorkerShutDown      = errors.New("worker was shut down")
 )
 
 type (
@@ -367,7 +367,18 @@ func (mgr *uploadManager) newUploader(b Bus, hp hostProvider, c api.ContractMeta
 	}
 }
 
-func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) error {
+func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) (err error) {
+	// cancel all in-flight requests when the upload is done
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// add tracing
+	ctx, span := tracing.Tracer.Start(ctx, "MigrateShards")
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
+
 	// create the upload
 	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
 	if err != nil {
@@ -461,7 +472,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	defer cancel()
 
 	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "upload")
+	ctx, span := tracing.Tracer.Start(ctx, "Upload")
 	defer func() {
 		span.RecordError(err)
 		span.End()
@@ -573,7 +584,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	for len(responses) < numSlabs {
 		select {
 		case <-mgr.shutdownCtx.Done():
-			return false, "", errUploadManagerStopped
+			return false, "", errWorkerShutDown
 		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
@@ -623,7 +634,18 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	return
 }
 
-func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) error {
+func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem *acquiredMemory) (err error) {
+	// cancel all in-flight requests when the upload is done
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// add tracing
+	ctx, span := tracing.Tracer.Start(ctx, "UploadPackedSlab")
+	defer func() {
+		span.RecordError(err)
+		span.End()
+	}()
+
 	// build the shards
 	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
 
@@ -712,15 +734,11 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 }
 
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
-	// build map of contracts
+	// build map of contracts to keep and what contracts got renewed
 	toKeep := make(map[types.FileContractID]api.ContractMetadata)
-	for _, c := range contracts {
-		toKeep[c.ID] = c
-	}
-
-	// build map of renewed contracts
 	renewedTo := make(map[types.FileContractID]api.ContractMetadata)
 	for _, c := range contracts {
+		toKeep[c.ID] = c
 		if c.RenewedFrom != (types.FileContractID{}) {
 			renewedTo[c.RenewedFrom] = c
 		}
@@ -736,7 +754,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 			uploader.Stop()
 			continue
 		}
-		delete(toKeep, fcid) // toKeep becomes missing
+		delete(toKeep, fcid) // toKeep becomes toAdd
 
 		if renewed {
 			uploader.renew(mgr.hp, renewal, bh)
@@ -829,12 +847,6 @@ outer:
 	}
 }
 
-func (u *uploader) healthy() bool {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.consecutiveFailures == 0
-}
-
 func (u *uploader) Stop() {
 	for {
 		upload := u.pop()
@@ -922,6 +934,12 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	span.End()
 
 	return root, nil
+}
+
+func (u *uploader) healthy() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.consecutiveFailures == 0
 }
 
 func (u *uploader) pop() *sectorUploadReq {
@@ -1354,6 +1372,10 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	return s.numUploaded == uint64(len(s.shards))
 }
 
+func (s *sectorUpload) isUploaded() bool {
+	return s.uploaded.Root != (types.Hash256{})
+}
+
 func (req *sectorUploadReq) done() bool {
 	select {
 	case <-req.sector.ctx.Done():
@@ -1361,10 +1383,6 @@ func (req *sectorUploadReq) done() bool {
 	default:
 		return false
 	}
-}
-
-func (s *sectorUpload) isUploaded() bool {
-	return s.uploaded.Root != (types.Hash256{})
 }
 
 func (req *sectorUploadReq) fail(err error) {

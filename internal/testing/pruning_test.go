@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -22,9 +21,7 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// create a new test cluster
-	opts := clusterOptsDefault
-	opts.logger = newTestLoggerCustom(zapcore.DebugLevel)
-	cluster := newTestCluster(t, opts)
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
@@ -84,9 +81,6 @@ func TestHostPruning(t *testing.T) {
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
-	}
-	if remaining != 0 {
-		t.Log("failed to trigger")
 	}
 
 	// assert the host was not pruned
