@@ -505,7 +505,7 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 
 func roundPeriodExpr(db *gorm.DB, start time.Time, interval time.Duration) clause.Expr {
 	if !isSQLite(db) {
-		return gorm.Expr("FLOOR((timestamp - ?) / ?) * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
+		return gorm.Expr("CAST(FLOOR((timestamp - ?) / ?) * ? AS SIGNED)", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
 	} else {
 		return gorm.Expr("(timestamp - ?) / ? * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
 	}
