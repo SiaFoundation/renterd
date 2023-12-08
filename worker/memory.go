@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.sia.tech/renterd/api"
@@ -35,17 +34,14 @@ type (
 
 var _ memoryManager = (*manager)(nil)
 
-func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) (memoryManager, error) {
-	if maxMemory == 0 {
-		return nil, fmt.Errorf("maxMemory cannot be 0")
-	}
+func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) memoryManager {
 	mm := &manager{
 		logger:         logger,
 		totalAvailable: maxMemory,
 	}
 	mm.available = mm.totalAvailable
 	mm.sigNewMem = *sync.NewCond(&mm.mu)
-	return mm, nil
+	return mm
 }
 
 func (mm *manager) Status() api.MemoryStatus {

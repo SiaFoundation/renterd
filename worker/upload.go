@@ -153,11 +153,12 @@ type (
 	}
 )
 
-func (w *worker) initUploadManager(mm memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
+	mm := newMemoryManager(logger, maxMemory)
 	w.uploadManager = newUploadManager(w.bus, w, w, mm, maxOverdrive, overdriveTimeout, w.shutdownCtx, logger)
 }
 

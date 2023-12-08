@@ -159,11 +159,12 @@ type (
 	}
 )
 
-func (w *worker) initDownloadManager(mm memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
 
+	mm := newMemoryManager(logger, maxMemory)
 	w.downloadManager = newDownloadManager(w, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 

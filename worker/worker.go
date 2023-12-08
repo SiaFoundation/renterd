@@ -1396,6 +1396,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	if uploadOverdriveTimeout == 0 {
 		return nil, errors.New("upload overdrive timeout must be positive")
 	}
+	if downloadMaxMemory == 0 {
+		return nil, errors.New("downloadMaxMemory cannot be 0")
+	}
+	if uploadMaxMemory == 0 {
+		return nil, errors.New("uploadMaxMemory cannot be 0")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
@@ -1412,20 +1418,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		shutdownCtx:             ctx,
 		shutdownCtxCancel:       cancel,
 	}
-	w.initTransportPool()
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
+	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
 	w.initPriceTables()
-	dmm, err := newMemoryManager(w.logger, downloadMaxMemory)
-	if err != nil {
-		return nil, err
-	}
-	w.initDownloadManager(dmm, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
-	umm, err := newMemoryManager(w.logger, uploadMaxMemory)
-	if err != nil {
-		return nil, err
-	}
-	w.initUploadManager(umm, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
+	w.initTransportPool()
+	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 	return w, nil
 }
 
