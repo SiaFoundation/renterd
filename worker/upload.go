@@ -41,7 +41,7 @@ type (
 		b           Bus
 		hp          hostProvider
 		rl          revisionLocker
-		mm          memoryManager
+		mm          MemoryManager
 		logger      *zap.SugaredLogger
 		shutdownCtx context.Context
 
@@ -53,29 +53,6 @@ type (
 
 		mu        sync.Mutex
 		uploaders []*uploader
-	}
-
-	uploader struct {
-		b Bus
-
-		hk              types.PublicKey
-		siamuxAddr      string
-		signalNewUpload chan struct{}
-		shutdownCtx     context.Context
-
-		mu        sync.Mutex
-		bh        uint64
-		endHeight uint64
-		fcid      types.FileContractID
-		host      hostV3
-		queue     []*sectorUploadReq
-
-		// stats related field
-		consecutiveFailures uint64
-		lastRecompute       time.Time
-
-		statsSectorUploadEstimateInMS    *stats.DataPoints
-		statsSectorUploadSpeedBytesPerMS *stats.DataPoints
 	}
 
 	uploadManagerStats struct {
@@ -101,21 +78,25 @@ type (
 		mem              *acquiredMemory
 		overdriveTimeout time.Duration
 
-		candidates []*uploader // sorted by upload estimate
+		sectors    []*sectorUpload
+		candidates []*candidate // sorted by upload estimate
 		shards     [][]byte
 
-		mu          sync.Mutex
-		numInflight uint64
-		numLaunched uint64
-		numUploaded uint64
-
-		overdriving    map[int]map[types.PublicKey]struct{}
-		lastOverdrive  time.Time
+		mu             sync.Mutex
+		numInflight    uint64
+		numLaunched    uint64
 		numOverdriving uint64
+		numUploaded    uint64
 
-		sectors map[int]*sectorUpload
-		used    map[types.PublicKey]struct{}
-		errs    HostErrorSet
+		lastOverdrive time.Time
+		errs          HostErrorSet
+	}
+
+	candidate struct {
+		uploader *uploader
+
+		used        bool
+		overdriving int // sector index
 	}
 
 	slabUploadResponse struct {
@@ -325,7 +306,7 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 	return nil
 }
 
-func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, mm memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, shutdownCtx context.Context, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, mm MemoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, shutdownCtx context.Context, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		b:      b,
 		hp:     hp,
@@ -444,7 +425,7 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 	speeds := make(map[types.PublicKey]float64)
 	for _, u := range mgr.uploaders {
 		speeds[u.hk] = u.statsSectorUploadSpeedBytesPerMS.Average() * 0.008
-		if u.healthy() {
+		if u.Healthy() {
 			numHealthy++
 		}
 	}
@@ -748,19 +729,19 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// keep list of uploaders uploaders
 	var uploaders []*uploader
 	for _, uploader := range mgr.uploaders {
-		renewal, renewed := renewedTo[uploader.contractID()]
-		if _, keep := toKeep[uploader.contractID()]; !(keep || renewed) {
+		renewal, renewed := renewedTo[uploader.ContractID()]
+		if _, keep := toKeep[uploader.ContractID()]; !(keep || renewed) {
 			uploader.Stop()
 			continue
 		} else if renewed {
-			uploader.renew(mgr.hp, renewal, bh)
+			uploader.Renew(mgr.hp, renewal, bh)
 		}
 
 		// delete current fcid from toKeep, by doing so it becomes a list of the
 		// contracts we want to add
-		delete(toKeep, uploader.contractID())
+		delete(toKeep, uploader.ContractID())
 
-		uploader.updateBlockHeight(bh)
+		uploader.UpdateBlockHeight(bh)
 		uploader.tryRecomputeStats()
 		uploaders = append(uploaders, uploader)
 	}
@@ -774,251 +755,12 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	mgr.uploaders = uploaders
 }
 
-func (u *uploader) SignalWork() {
-	select {
-	case u.signalNewUpload <- struct{}{}:
-	default:
-	}
-}
-
-func (u *uploader) Start(hp hostProvider, rl revisionLocker) {
-outer:
-	for {
-		// wait for work
-		select {
-		case <-u.signalNewUpload:
-		case <-u.shutdownCtx.Done():
-			return
-		}
-
-		for {
-			// check if we are stopped
-			select {
-			case <-u.shutdownCtx.Done():
-				return
-			default:
-			}
-
-			// pop the next upload req
-			req := u.pop()
-			if req == nil {
-				continue outer
-			}
-
-			// skip if upload is done
-			if req.done() {
-				continue
-			}
-
-			// execute it
-			var root types.Hash256
-			start := time.Now()
-			fcid := u.contractID()
-			err := rl.withRevision(req.sector.ctx, defaultRevisionFetchTimeout, fcid, u.hk, u.siamuxAddr, req.lockPriority, u.blockHeight(), func(rev types.FileContractRevision) error {
-				if rev.RevisionNumber == math.MaxUint64 {
-					return errMaxRevisionReached
-				}
-
-				var err error
-				root, err = u.execute(req, rev)
-				return err
-			})
-
-			// the uploader's contract got renewed, requeue the request
-			if errors.Is(err, errMaxRevisionReached) {
-				u.enqueue(req)
-				continue outer
-			}
-
-			// send the response
-			if err != nil {
-				req.fail(err)
-			} else {
-				req.succeed(root)
-			}
-
-			// track the error, ignore gracefully closed streams and canceled overdrives
-			canceledOverdrive := req.done() && req.overdrive && err != nil
-			if !canceledOverdrive && !isClosedStream(err) {
-				u.trackSectorUpload(err, time.Since(start))
-			}
-		}
-	}
-}
-
-func (u *uploader) Stop() {
-	for {
-		upload := u.pop()
-		if upload == nil {
-			break
-		}
-		if !upload.done() {
-			upload.fail(errors.New("uploader stopped"))
-		}
-	}
-}
-
-func (u *uploader) blockHeight() uint64 {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.bh
-}
-
-func (u *uploader) contractID() types.FileContractID {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.fcid
-}
-
-func (u *uploader) enqueue(req *sectorUploadReq) {
-	// trace the request
-	span := trace.SpanFromContext(req.sector.ctx)
-	span.SetAttributes(attribute.Stringer("hk", u.hk))
-	span.AddEvent("enqueued")
-
-	// decorate the request
-	req.fcid = u.contractID()
-	req.hk = u.hk
-
-	// enqueue the request
-	u.mu.Lock()
-	u.queue = append(u.queue, req)
-	u.mu.Unlock()
-
-	// signal there's work
-	u.SignalWork()
-}
-
-func (u *uploader) estimate() float64 {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	// fetch estimated duration per sector
-	estimateP90 := u.statsSectorUploadEstimateInMS.P90()
-	if estimateP90 == 0 {
-		estimateP90 = 1
-	}
-
-	// calculate estimated time
-	numSectors := float64(len(u.queue) + 1)
-	return numSectors * estimateP90
-}
-
-func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision) (types.Hash256, error) {
-	u.mu.Lock()
-	host := u.host
-	fcid := u.fcid
-	u.mu.Unlock()
-
-	// fetch span from context
-	span := trace.SpanFromContext(req.sector.ctx)
-	span.AddEvent("execute")
-
-	// update the bus
-	if err := u.b.AddUploadingSector(req.sector.ctx, req.uploadID, fcid, req.sector.root); err != nil {
-		return types.Hash256{}, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
-	}
-
-	// upload the sector
-	start := time.Now()
-	root, err := host.UploadSector(req.sector.ctx, req.sector.data, rev)
-	if err != nil {
-		return types.Hash256{}, err
-	}
-
-	// update span
-	elapsed := time.Since(start)
-	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-	span.RecordError(err)
-	span.End()
-
-	return root, nil
-}
-
-func (u *uploader) healthy() bool {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.consecutiveFailures == 0
-}
-
-func (u *uploader) pop() *sectorUploadReq {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	if len(u.queue) > 0 {
-		j := u.queue[0]
-		u.queue[0] = nil
-		u.queue = u.queue[1:]
-		return j
-	}
-	return nil
-}
-
-func (u *uploader) renew(hp hostProvider, c api.ContractMetadata, bh uint64) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	u.bh = bh
-	u.host = hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
-	u.fcid = c.ID
-	u.siamuxAddr = c.SiamuxAddr
-	u.endHeight = c.WindowEnd
-}
-
-func (u *uploader) trackSectorUpload(err error, d time.Duration) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if err != nil {
-		u.consecutiveFailures++
-		u.statsSectorUploadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-	} else {
-		ms := d.Milliseconds()
-		u.consecutiveFailures = 0
-		u.statsSectorUploadEstimateInMS.Track(float64(ms))                       // duration in ms
-		u.statsSectorUploadSpeedBytesPerMS.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
-	}
-}
-
-func (u *uploader) tryRecomputeStats() {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if time.Since(u.lastRecompute) < statsRecomputeMinInterval {
-		return
-	}
-
-	u.lastRecompute = time.Now()
-	u.statsSectorUploadEstimateInMS.Recompute()
-	u.statsSectorUploadSpeedBytesPerMS.Recompute()
-}
-
-func (u *uploader) updateBlockHeight(bh uint64) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.bh = bh
-}
-
-func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, candidates []*uploader, mem *acquiredMemory, maxOverdrive uint64, overdriveTimeout time.Duration) (*slabUpload, []*sectorUploadReq, chan sectorUploadResp) {
-	// create slab upload
-	slab := &slabUpload{
-		lockPriority:     u.lockPriority,
-		uploadID:         u.id,
-		created:          time.Now(),
-		maxOverdrive:     maxOverdrive,
-		mem:              mem,
-		overdriveTimeout: overdriveTimeout,
-
-		candidates: candidates,
-		shards:     shards,
-
-		overdriving: make(map[int]map[types.PublicKey]struct{}),
-		sectors:     make(map[int]*sectorUpload, len(shards)),
-		used:        make(map[types.PublicKey]struct{}),
-		errs:        make(HostErrorSet),
-	}
-
-	// prepare sector uploads
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem *acquiredMemory, maxOverdrive uint64, overdriveTimeout time.Duration) (*slabUpload, []*sectorUploadReq, chan sectorUploadResp) {
+	// prepare response channel
 	responseChan := make(chan sectorUploadResp)
-	requests := make([]*sectorUploadReq, len(shards))
+
+	// prepare sectors
+	sectors := make([]*sectorUpload, len(shards))
 	for sI, shard := range shards {
 		// create the ctx
 		sCtx, sCancel := context.WithCancel(ctx)
@@ -1029,27 +771,48 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, candidates 
 		span.SetAttributes(attribute.Int("sector", sI))
 
 		// create the sector
-		sector := &sectorUpload{
-			data:  (*[rhpv2.SectorSize]byte)(shard),
-			index: sI,
-			root:  rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shard)),
-
+		sectors[sI] = &sectorUpload{
+			data:   (*[rhpv2.SectorSize]byte)(shard),
+			index:  sI,
+			root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shard)),
 			ctx:    sCtx,
 			cancel: sCancel,
 		}
-		slab.sectors[sI] = sector
+	}
 
-		// create the request
+	// prepare requests
+	requests := make([]*sectorUploadReq, len(shards))
+	for sI := range shards {
 		requests[sI] = &sectorUploadReq{
-			lockPriority: slab.lockPriority,
+			lockPriority: u.lockPriority,
 			overdrive:    false,
 			responseChan: responseChan,
-			sector:       sector,
-			uploadID:     slab.uploadID,
+			sector:       sectors[sI],
+			uploadID:     u.id,
 		}
 	}
 
-	return slab, requests, responseChan
+	// prepare candidates
+	candidates := make([]*candidate, len(uploaders))
+	for i, uploader := range uploaders {
+		candidates[i] = &candidate{uploader: uploader, used: false, overdriving: -1}
+	}
+
+	// create slab upload
+	return &slabUpload{
+		lockPriority:     u.lockPriority,
+		uploadID:         u.id,
+		created:          time.Now(),
+		maxOverdrive:     maxOverdrive,
+		mem:              mem,
+		overdriveTimeout: overdriveTimeout,
+
+		sectors:    sectors,
+		candidates: candidates,
+		shards:     shards,
+
+		errs: make(HostErrorSet),
+	}, requests, responseChan
 }
 
 func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem *acquiredMemory, maxOverdrive uint64, overdriveTimeout time.Duration) (overdrivePct float64, overdriveSpeed int64) {
@@ -1103,33 +866,54 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 		}
 	}
 
-	// launch overdrive
-	resetOverdrive := slab.overdrive(ctx, respChan)
+	// create an overdrive timer
+	if overdriveTimeout == 0 {
+		overdriveTimeout = time.Duration(math.MaxInt64)
+	}
+	timer := time.NewTimer(overdriveTimeout)
 
 	// collect responses
 	var done bool
+loop:
 	for slab.inflight() > 0 && !done {
-		var resp sectorUploadResp
 		select {
 		case <-u.shutdownCtx.Done():
 			return nil, 0, 0, errors.New("upload stopped")
 		case <-ctx.Done():
 			return nil, 0, 0, ctx.Err()
-		case resp = <-respChan:
-		}
+		case resp := <-respChan:
+			// receive the response
+			done = slab.receive(resp)
 
-		resetOverdrive()
-
-		// receive the response
-		done = slab.receive(resp)
-
-		// relaunch non-overdrive uploads
-		if !done && resp.err != nil && !resp.req.overdrive {
-			if overdriving, err := slab.launch(resp.req); err != nil {
-				if !overdriving {
-					break // fail the upload
+			// relaunch non-overdrive uploads
+			if !done && resp.err != nil && !resp.req.overdrive {
+				if overdriving, err := slab.launch(resp.req); err != nil {
+					if !overdriving {
+						break loop // fail the upload
+					}
 				}
 			}
+
+			// try overdriving a sector
+			if slab.canOverdrive() {
+				_, _ = slab.launch(slab.nextRequest(respChan)) // ignore result
+			}
+		case <-timer.C:
+			// try overdriving a sector
+			if slab.canOverdrive() {
+				_, _ = slab.launch(slab.nextRequest(respChan)) // ignore result
+			}
+		}
+
+		// reset the overdrive timer
+		if overdriveTimeout != math.MaxInt64 {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(overdriveTimeout)
 		}
 	}
 
@@ -1140,12 +924,27 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	return sectors, slab.overdrivePct(), slab.uploadSpeed(), err
 }
 
-func (s *slabUpload) uploadSpeed() int64 {
+func (s *slabUpload) canOverdrive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	bytes := s.numUploaded * rhpv2.SectorSize
-	ms := time.Since(s.created).Milliseconds()
-	return int64(bytes) / ms
+
+	// overdrive is not kicking in yet
+	remaining := uint64(len(s.shards)) - s.numUploaded
+	if remaining >= s.maxOverdrive {
+		return false
+	}
+
+	// overdrive is not due yet
+	if time.Since(s.lastOverdrive) < s.overdriveTimeout {
+		return false
+	}
+
+	// overdrive is maxed out
+	if s.numInflight-remaining >= s.maxOverdrive {
+		return false
+	}
+
+	return true
 }
 
 func (s *slabUpload) finish() (sectors []object.Sector, _ error) {
@@ -1169,6 +968,15 @@ func (s *slabUpload) inflight() uint64 {
 	return s.numInflight
 }
 
+func (s *slabUpload) ongoingOverdrive(sI int) bool {
+	for _, candidate := range s.candidates {
+		if candidate.used && candidate.overdriving == sI {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1178,102 +986,40 @@ func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 		return false, nil
 	}
 
-	// find next candidate
-	var candidate *uploader
-	for _, uploader := range s.candidates {
-		if _, used := s.used[uploader.hk]; used {
+	// find candidate
+	var candidate *candidate
+	for _, c := range s.candidates {
+		if c.used {
 			continue
 		}
-		candidate = uploader
+		candidate = c
 		break
 	}
 
 	// no candidate found
 	if candidate == nil {
 		err = errNoCandidateUploader
-		interrupt = !req.overdrive && len(s.overdriving[req.sector.index]) == 0
+		interrupt = !req.overdrive && !s.ongoingOverdrive(req.sector.index)
 		span := trace.SpanFromContext(req.sector.ctx)
 		span.RecordError(err)
 		span.End()
 		return
 	}
 
-	// enqueue the req
-	candidate.enqueue(req)
+	// update the candidate
+	candidate.used = true
+	if req.overdrive {
+		candidate.overdriving = req.sector.index
+		s.lastOverdrive = time.Now()
+		s.numOverdriving++
+	}
 
 	// update the state
 	s.numInflight++
 	s.numLaunched++
-	s.used[req.hk] = struct{}{}
 
-	if req.overdrive {
-		s.lastOverdrive = time.Now()
-		s.numOverdriving++
-
-		if _, exists := s.overdriving[req.sector.index]; !exists {
-			s.overdriving[req.sector.index] = make(map[types.PublicKey]struct{})
-		}
-		s.overdriving[req.sector.index][req.hk] = struct{}{}
-	}
-	return
-}
-
-func (s *slabUpload) overdrive(ctx context.Context, respChan chan sectorUploadResp) (resetTimer func()) {
-	// overdrive is disabled
-	if s.overdriveTimeout == 0 {
-		return func() {}
-	}
-
-	// create a timer to trigger overdrive
-	timer := time.NewTimer(s.overdriveTimeout)
-	resetTimer = func() {
-		timer.Stop()
-		select {
-		case <-timer.C:
-		default:
-		}
-		timer.Reset(s.overdriveTimeout)
-	}
-
-	// create a function to check whether overdrive is possible
-	canOverdrive := func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
-		// overdrive is not kicking in yet
-		remaining := uint64(len(s.shards)) - s.numUploaded
-		if remaining >= s.maxOverdrive {
-			return false
-		}
-
-		// overdrive is not due yet
-		if time.Since(s.lastOverdrive) < s.overdriveTimeout {
-			return false
-		}
-
-		// overdrive is maxed out
-		if s.numInflight-remaining >= s.maxOverdrive {
-			return false
-		}
-
-		return true
-	}
-
-	// try overdriving every time the timer fires
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-				if canOverdrive() {
-					_, _ = s.launch(s.nextRequest(respChan)) // ignore result
-				}
-				resetTimer()
-			}
-		}
-	}()
-
+	// enqueue the req
+	candidate.uploader.enqueue(req)
 	return
 }
 
@@ -1281,11 +1027,20 @@ func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUplo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// find the sector that's not finished and has the least amount of overdrives
+	// count overdrives
+	overdriveCnts := make(map[int]int)
+	for _, c := range s.candidates {
+		if c.used && c.overdriving != -1 {
+			overdriveCnts[c.overdriving]++
+		}
+	}
+
+	// overdrive the sector with the least amount of overdrives
 	lowestNumOverdrives := math.MaxInt
 	var nextSector *sectorUpload
-	for _, sector := range s.sectors {
-		if !sector.isUploaded() && len(s.overdriving[sector.index]) < lowestNumOverdrives {
+	for sI, sector := range s.sectors {
+		if !sector.isUploaded() && overdriveCnts[sI] < lowestNumOverdrives {
+			lowestNumOverdrives = overdriveCnts[sI]
 			nextSector = sector
 		}
 	}
@@ -1358,9 +1113,12 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	// cancel the sector context
 	sector.cancel()
 
-	// free hosts we're using to overdrive this sector
-	for hk := range s.overdriving[req.sector.index] {
-		delete(s.used, hk)
+	// release hosts that are overdriving this sector
+	for _, candidate := range s.candidates {
+		if candidate.overdriving == sector.index {
+			candidate.overdriving = -1
+			candidate.used = false
+		}
 	}
 
 	// release memory
@@ -1369,6 +1127,14 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	s.mem.ReleaseSome(rhpv2.SectorSize)
 
 	return s.numUploaded == uint64(len(s.shards))
+}
+
+func (s *slabUpload) uploadSpeed() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bytes := s.numUploaded * rhpv2.SectorSize
+	ms := time.Since(s.created).Milliseconds()
+	return int64(bytes) / ms
 }
 
 func (s *sectorUpload) isUploaded() bool {

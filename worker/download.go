@@ -40,7 +40,7 @@ type (
 	id [8]byte
 
 	downloadManager struct {
-		mm     memoryManager
+		mm     MemoryManager
 		hp     hostProvider
 		pss    partialSlabStore
 		slm    sectorLostMarker
@@ -168,7 +168,7 @@ func (w *worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTi
 	w.downloadManager = newDownloadManager(w, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, pss partialSlabStore, mm memoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(hp hostProvider, pss partialSlabStore, mm MemoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
 		hp:     hp,
 		mm:     mm,
