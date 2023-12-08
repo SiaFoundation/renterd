@@ -124,6 +124,7 @@ type (
 		ContractErr string `json:"contractErr"`
 		DownloadErr string `json:"downloadErr"`
 		GougingErr  string `json:"gougingErr"`
+		PruneErr    string `json:"pruneErr"`
 		UploadErr   string `json:"uploadErr"`
 	}
 
@@ -144,6 +145,10 @@ func (sb HostScoreBreakdown) String() string {
 
 func (hgb HostGougingBreakdown) DownloadGouging() bool {
 	return hgb.V3.DownloadErr != ""
+}
+
+func (hgb HostGougingBreakdown) PruneGouging() bool {
+	return hgb.V2.PruneErr != ""
 }
 
 func (hgb HostGougingBreakdown) Gouging() bool {
