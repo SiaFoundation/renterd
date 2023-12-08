@@ -1,0 +1,42 @@
+name: Feature Request
+description: Request a new feature be added to renterd.
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this feature request!
+        Note: Please search to see if an issue already exists for the feature
+        you want added.
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: Description
+      description: |
+        A description of the feature you want added
+        Tip: You can attach images by clicking this area and then dragging files in.
+      placeholder: Tell us what you want! Be as descriptive as possible.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What version of renterd are you running?
+      placeholder: v1.0.0
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: What operating system are you running (e.g. Ubuntu 22.04, macOS, Windows 11)?
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Anything else?
+      description: |
+        Links? References? Anything that will give us more context about the feature!
+        Tip: You can attach images or log files by clicking this area to highlight it and then dragging files in.
+    validations:
+      required: false
