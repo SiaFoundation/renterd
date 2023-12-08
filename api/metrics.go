@@ -14,6 +14,7 @@ const (
 	MetricContractSet      = "contractset"
 	MetricContractSetChurn = "churn"
 	MetricContract         = "contract"
+	MetricPerformance      = "performance"
 	MetricWallet           = "wallet"
 )
 

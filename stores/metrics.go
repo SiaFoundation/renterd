@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -489,4 +490,33 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, start time.Time, n ui
 	}
 
 	return metrics, nil
+}
+
+func (s *SQLStore) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
+	if metric == "" {
+		return errors.New("metric must be set")
+	} else if cutoff.IsZero() {
+		return errors.New("cutoff time must be set")
+	}
+	var model interface{}
+	switch metric {
+	case api.MetricContractPrune:
+		model = &dbContractPruneMetric{}
+	case api.MetricContractSet:
+		model = &dbContractSetMetric{}
+	case api.MetricContractSetChurn:
+		model = &dbContractSetChurnMetric{}
+	case api.MetricContract:
+		model = &dbContractMetric{}
+	case api.MetricPerformance:
+		model = &dbPerformanceMetric{}
+	case api.MetricWallet:
+		model = &dbWalletMetric{}
+	default:
+		return fmt.Errorf("unknown metric '%s'", metric)
+	}
+	return s.dbMetrics.Model(model).
+		Where("timestamp < ?", unixTimeMS(cutoff)).
+		Delete(model).
+		Error
 }
