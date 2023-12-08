@@ -2000,20 +2000,19 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 }
 
 func (b *bus) metricsHandlerDELETE(jc jape.Context) {
-	// parse mandatory query parameters
+	metric := jc.PathParam("key")
+	if jc.DecodeForm("cutoff", &metric) != nil {
+		return
+	} else if metric == "" {
+		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
+		return
+	}
+
 	var cutoff time.Time
 	if jc.DecodeForm("start", (*api.TimeRFC3339)(&cutoff)) != nil {
 		return
 	} else if cutoff.IsZero() {
 		jc.Error(errors.New("parameter 'cutoff' is required"), http.StatusBadRequest)
-		return
-	}
-
-	metric := jc.PathParam("key")
-	if jc.DecodeForm("n", &metric) != nil {
-		return
-	} else if metric == "" {
-		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
 		return
 	}
 
