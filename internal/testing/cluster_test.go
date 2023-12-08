@@ -2245,16 +2245,16 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
 	} else if m := cMetrics[0]; m.Timestamp.Std().Before(startTime) {
 		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-	} else if m.ContractID == (types.FileContractID{}) {
-		t.Fatal("expected non-zero FCID")
-	} else if m.HostKey == (types.PublicKey{}) {
-		t.Fatal("expected non-zero Host")
+	} else if m.ContractID != (types.FileContractID{}) {
+		t.Fatal("expected zero FCID")
+	} else if m.HostKey != (types.PublicKey{}) {
+		t.Fatal("expected zero Host")
 	} else if m.RemainingCollateral == (types.Currency{}) {
 		t.Fatal("expected non-zero RemainingCollateral")
 	} else if m.RemainingFunds == (types.Currency{}) {
 		t.Fatal("expected non-zero RemainingFunds")
-	} else if m.RevisionNumber == 0 {
-		t.Fatal("expected non-zero RevisionNumber")
+	} else if m.RevisionNumber != 0 {
+		t.Fatal("expected zero RevisionNumber")
 	} else if !m.UploadSpending.IsZero() {
 		t.Fatal("expected zero UploadSpending")
 	} else if !m.DownloadSpending.IsZero() {
