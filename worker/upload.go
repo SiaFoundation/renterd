@@ -748,21 +748,19 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// keep list of uploaders uploaders
 	var uploaders []*uploader
 	for _, uploader := range mgr.uploaders {
-		fcid := uploader.contractID()
-
-		renewal, renewed := renewedTo[fcid]
-		if _, keep := toKeep[fcid]; !(keep || renewed) {
+		renewal, renewed := renewedTo[uploader.contractID()]
+		if _, keep := toKeep[uploader.contractID()]; !(keep || renewed) {
 			uploader.Stop()
 			continue
-		}
-		delete(toKeep, fcid) // toKeep becomes toAdd
-
-		if renewed {
+		} else if renewed {
 			uploader.renew(mgr.hp, renewal, bh)
-		} else {
-			uploader.updateBlockHeight(bh)
 		}
 
+		// delete current fcid from toKeep, by doing so it becomes a list of the
+		// contracts we want to add
+		delete(toKeep, uploader.contractID())
+
+		uploader.updateBlockHeight(bh)
 		uploader.tryRecomputeStats()
 		uploaders = append(uploaders, uploader)
 	}
