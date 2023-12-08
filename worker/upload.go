@@ -55,6 +55,7 @@ type (
 		uploaders []*uploader
 	}
 
+	// TODO: should become a metric
 	uploadManagerStats struct {
 		avgSlabUploadSpeedMBPS float64
 		avgOverdrivePct        float64
@@ -72,6 +73,7 @@ type (
 
 	slabUpload struct {
 		uploadID     api.UploadID
+		mem          *acquiredMemory
 		lockPriority int
 
 		maxOverdrive  uint64
@@ -86,7 +88,6 @@ type (
 		numUploaded    uint64
 		numSectors     uint64
 
-		mem  *acquiredMemory
 		errs HostErrorSet
 	}
 
@@ -104,8 +105,8 @@ type (
 	}
 
 	sectorUpload struct {
-		data     *[rhpv2.SectorSize]byte
 		index    int
+		data     *[rhpv2.SectorSize]byte
 		root     types.Hash256
 		uploaded object.Sector
 
@@ -114,11 +115,11 @@ type (
 	}
 
 	sectorUploadReq struct {
+		uploadID     api.UploadID
+		sector       *sectorUpload
 		lockPriority int
 		overdrive    bool
 		responseChan chan sectorUploadResp
-		sector       *sectorUpload
-		uploadID     api.UploadID
 
 		// set by the uploader performing the upload
 		fcid types.FileContractID
@@ -753,7 +754,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	mgr.uploaders = uploaders
 }
 
-func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem *acquiredMemory, maxOverdrive uint64) (*slabUpload, []*sectorUploadReq, chan sectorUploadResp) {
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem *acquiredMemory, maxOverdrive uint64) (*slabUpload, chan sectorUploadResp) {
 	// prepare response channel
 	responseChan := make(chan sectorUploadResp)
 
@@ -778,18 +779,6 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 		}
 	}
 
-	// prepare requests
-	requests := make([]*sectorUploadReq, len(shards))
-	for sI := range shards {
-		requests[sI] = &sectorUploadReq{
-			lockPriority: u.lockPriority,
-			overdrive:    false,
-			responseChan: responseChan,
-			sector:       sectors[sI],
-			uploadID:     u.id,
-		}
-	}
-
 	// prepare candidates
 	candidates := make([]*candidate, len(uploaders))
 	for i, uploader := range uploaders {
@@ -808,7 +797,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 		numSectors: uint64(len(shards)),
 
 		errs: make(HostErrorSet),
-	}, requests, responseChan
+	}, responseChan
 }
 
 func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem *acquiredMemory, maxOverdrive uint64, overdriveTimeout time.Duration) (overdrivePct float64, overdriveSpeed int64) {
@@ -855,9 +844,21 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	defer cancel()
 
 	// prepare the upload
-	slab, requests, respChan := u.newSlabUpload(ctx, shards, candidates, mem, maxOverdrive)
+	slab, respChan := u.newSlabUpload(ctx, shards, candidates, mem, maxOverdrive)
 
-	// launch all shard uploads
+	// prepare requests
+	requests := make([]*sectorUploadReq, len(shards))
+	for sI := range shards {
+		requests[sI] = &sectorUploadReq{
+			uploadID:     slab.uploadID,
+			sector:       slab.sectors[sI],
+			lockPriority: slab.lockPriority,
+			overdrive:    false,
+			responseChan: respChan,
+		}
+	}
+
+	// launch all requests
 	for _, upload := range requests {
 		if _, err := slab.launch(upload); err != nil {
 			return nil, 0, 0, err
@@ -1068,6 +1069,12 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 
 	// redundant sectors can't complete the upload
 	if sector.uploaded.Root != (types.Hash256{}) {
+		return false
+	}
+
+	// sanity check we receive the expected root
+	if resp.root != req.sector.root {
+		s.errs[req.hk] = errors.New("root mismatch")
 		return false
 	}
 
