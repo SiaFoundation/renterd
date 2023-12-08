@@ -389,42 +389,18 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 
 	var metrics []dbContractMetric
+	var err error
 	if opts.ContractID == (types.FileContractID{}) && opts.HostKey == (types.PublicKey{}) {
 		// if neither contract nor host filters were set, we return the
 		// aggregate spending for each period
-		var metricsWithPeriod []struct {
-			Metric dbContractMetric `gorm:"embedded"`
-			Period int64
-		}
-		currentPeriod := int64(math.MinInt64)
-		err := tx.Raw(`
-			SELECT * FROM contracts
-			INNER JOIN (
-			SELECT fcid, MIN(timestamp) as timestamp, ? AS Period
-			FROM contracts
-			GROUP BY Period, fcid) i
-			ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
-		`, roundPeriodExpr(tx, start, interval)).
-			Scan(&metricsWithPeriod).
-			Error
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch aggregate metrics: %w", err)
-		}
-		for _, m := range metricsWithPeriod {
-			if m.Period != currentPeriod {
-				metrics = append(metrics, m.Metric)
-				currentPeriod = m.Period
-			} else {
-				metrics[len(metrics)-1] = metrics[len(metrics)-1].Aggregate(m.Metric)
-			}
-		}
+		metrics, err = s.findAggregatedContractPeriods(start, interval)
 	} else {
 		// otherwise we return the first metric for each period like we usually
 		// do
-		err := s.findPeriods(tx, &metrics, start, n, interval)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
-		}
+		err = s.findPeriods(tx, &metrics, start, n, interval)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
 	for i, m := range metrics {
 		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
@@ -509,6 +485,37 @@ func roundPeriodExpr(db *gorm.DB, start time.Time, interval time.Duration) claus
 	} else {
 		return gorm.Expr("(timestamp - ?) / ? * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
 	}
+}
+
+func (s *SQLStore) findAggregatedContractPeriods(start time.Time, interval time.Duration) ([]dbContractMetric, error) {
+	var metricsWithPeriod []struct {
+		Metric dbContractMetric `gorm:"embedded"`
+		Period int64
+	}
+	currentPeriod := int64(math.MinInt64)
+	err := s.dbMetrics.Raw(`
+		SELECT * FROM contracts
+		INNER JOIN (
+			SELECT fcid, MIN(timestamp) as timestamp, ? AS Period
+			FROM contracts
+			GROUP BY Period, fcid) i
+		ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
+	`, roundPeriodExpr(s.dbMetrics, start, interval)).
+		Scan(&metricsWithPeriod).
+		Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch aggregate metrics: %w", err)
+	}
+	var metrics []dbContractMetric
+	for _, m := range metricsWithPeriod {
+		if m.Period != currentPeriod {
+			metrics = append(metrics, m.Metric)
+			currentPeriod = m.Period
+		} else {
+			metrics[len(metrics)-1] = metrics[len(metrics)-1].Aggregate(m.Metric)
+		}
+	}
+	return metrics, nil
 }
 
 // findPeriods is the core of all methods retrieving metrics. By using integer
