@@ -118,7 +118,7 @@ func (c *Client) RecordContractPruneMetric(ctx context.Context, metrics ...api.C
 func (c *Client) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
 	values := url.Values{}
 	values.Set("cutoff", api.TimeRFC3339(cutoff).String())
-	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/metric/%s?"+values.Encode(), metric))
+	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/metric/%s?", metric) + values.Encode())
 }
 
 func (c *Client) recordMetric(ctx context.Context, key string, d interface{}) error {

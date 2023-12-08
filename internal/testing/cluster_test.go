@@ -2266,6 +2266,15 @@ func TestBusRecordedMetrics(t *testing.T) {
 	} else if !m.ListSpending.IsZero() {
 		t.Fatal("expected zero ListSpending")
 	}
+
+	// Prune one of the metrics
+	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
+		t.Fatal(err)
+	} else if cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, math.MaxUint32, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(cMetrics) > 0 {
+		t.Fatalf("expected 0 metrics, got %v", len(cscMetrics))
+	}
 }
 
 func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {

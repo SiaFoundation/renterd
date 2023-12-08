@@ -2001,15 +2001,13 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 
 func (b *bus) metricsHandlerDELETE(jc jape.Context) {
 	metric := jc.PathParam("key")
-	if jc.DecodeForm("cutoff", &metric) != nil {
-		return
-	} else if metric == "" {
+	if metric == "" {
 		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
 		return
 	}
 
 	var cutoff time.Time
-	if jc.DecodeForm("start", (*api.TimeRFC3339)(&cutoff)) != nil {
+	if jc.DecodeForm("cutoff", (*api.TimeRFC3339)(&cutoff)) != nil {
 		return
 	} else if cutoff.IsZero() {
 		jc.Error(errors.New("parameter 'cutoff' is required"), http.StatusBadRequest)
