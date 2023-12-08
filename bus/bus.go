@@ -2009,7 +2009,7 @@ func (b *bus) metricsHandlerDELETE(jc jape.Context) {
 		return
 	}
 
-	var metric string
+	metric := jc.PathParam("key")
 	if jc.DecodeForm("n", &metric) != nil {
 		return
 	} else if metric == "" {
