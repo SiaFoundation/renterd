@@ -281,6 +281,15 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+				// perform gouging checks
+				gc, err := GougingCheckerFromContext(ctx, false)
+				if err != nil {
+					return err
+				}
+				if breakdown := gc.Check(&settings, nil); breakdown.PruneGouging() {
+					return fmt.Errorf("failed to prune contract, %w: %v", errPriceGouging, breakdown)
+				}
+
 				// delete roots
 				got, err := w.fetchContractRoots(t, &rev, settings)
 				if err != nil {
