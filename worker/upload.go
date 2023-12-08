@@ -93,9 +93,7 @@ type (
 
 	candidate struct {
 		uploader *uploader
-
-		used        bool
-		overdriving int // sector index
+		req      *sectorUploadReq
 	}
 
 	slabUploadResponse struct {
@@ -782,7 +780,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	// prepare candidates
 	candidates := make([]*candidate, len(uploaders))
 	for i, uploader := range uploaders {
-		candidates[i] = &candidate{uploader: uploader, used: false, overdriving: -1}
+		candidates[i] = &candidate{uploader: uploader}
 	}
 
 	// create slab upload
@@ -886,8 +884,8 @@ loop:
 
 			// relaunch non-overdrive uploads
 			if !done && resp.err != nil && !resp.req.overdrive {
-				if overdriving, err := slab.launch(resp.req); err != nil {
-					if !overdriving {
+				if interrupt, err := slab.launch(resp.req); err != nil {
+					if interrupt {
 						break loop // fail the upload
 					}
 				}
@@ -969,7 +967,7 @@ func (s *slabUpload) finish() (sectors []object.Sector, _ error) {
 
 func (s *slabUpload) ongoingOverdrive(sI int) bool {
 	for _, candidate := range s.candidates {
-		if candidate.used && candidate.overdriving == sI {
+		if candidate.req != nil && candidate.req.overdrive && candidate.req.sector.index == sI {
 			return true
 		}
 	}
@@ -985,7 +983,7 @@ func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	// find candidate
 	var candidate *candidate
 	for _, c := range s.candidates {
-		if c.used {
+		if c.req != nil {
 			continue
 		}
 		candidate = c
@@ -1003,9 +1001,8 @@ func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	}
 
 	// update the candidate
-	candidate.used = true
+	candidate.req = req
 	if req.overdrive {
-		candidate.overdriving = req.sector.index
 		s.lastOverdrive = time.Now()
 		s.numOverdriving++
 	}
@@ -1023,8 +1020,8 @@ func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUplo
 	// count overdrives
 	overdriveCnts := make(map[int]int)
 	for _, c := range s.candidates {
-		if c.used && c.overdriving != -1 {
-			overdriveCnts[c.overdriving]++
+		if c.req != nil && c.req.overdrive {
+			overdriveCnts[c.req.sector.index]++
 		}
 	}
 
@@ -1091,11 +1088,10 @@ func (s *slabUpload) receive(resp sectorUploadResp) bool {
 	// cancel the sector's context
 	sector.cancel()
 
-	// release hosts that are overdriving this sector
+	// release all other candidates for this sector
 	for _, candidate := range s.candidates {
-		if candidate.overdriving == sector.index {
-			candidate.overdriving = -1
-			candidate.used = false
+		if candidate.req != nil && candidate.req != req && candidate.req.sector.index == sector.index {
+			candidate.req = nil
 		}
 	}
 
