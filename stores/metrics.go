@@ -358,10 +358,6 @@ func (m dbContractMetric) Aggregate(o dbContractMetric) (out dbContractMetric) {
 	listSpendingLo, carry := bits.Add64(uint64(m.ListSpendingLo), uint64(o.ListSpendingLo), 0)
 	listSpendingHi, _ := bits.Add64(uint64(m.ListSpendingHi), uint64(o.ListSpendingHi), carry)
 
-	out.FCID = fileContractID{}
-	out.Host = publicKey{}
-	out.RevisionNumber = 0
-
 	out.RemainingCollateralLo = unsigned64(remainingCollateralLo)
 	out.RemainingCollateralHi = unsigned64(remainingCollateralHi)
 	out.RemainingFundsLo = unsigned64(remainingFundsLo)
@@ -393,7 +389,7 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	if opts.ContractID == (types.FileContractID{}) && opts.HostKey == (types.PublicKey{}) {
 		// if neither contract nor host filters were set, we return the
 		// aggregate spending for each period
-		metrics, err = s.findAggregatedContractPeriods(start, interval)
+		metrics, err = s.findAggregatedContractPeriods(start, n, interval)
 	} else {
 		// otherwise we return the first metric for each period like we usually
 		// do
@@ -487,7 +483,8 @@ func roundPeriodExpr(db *gorm.DB, start time.Time, interval time.Duration) claus
 	}
 }
 
-func (s *SQLStore) findAggregatedContractPeriods(start time.Time, interval time.Duration) ([]dbContractMetric, error) {
+func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
+	end := start.Add(time.Duration(n) * interval)
 	var metricsWithPeriod []struct {
 		Metric dbContractMetric `gorm:"embedded"`
 		Period int64
@@ -498,9 +495,11 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, interval time.
 		INNER JOIN (
 			SELECT fcid, MIN(timestamp) as timestamp, ? AS Period
 			FROM contracts
+			WHERE timestamp >= ? AND timestamp < ?
 			GROUP BY Period, fcid) i
 		ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
-	`, roundPeriodExpr(s.dbMetrics, start, interval)).
+	`, roundPeriodExpr(s.dbMetrics, start, interval),
+		unixTimeMS(start), unixTimeMS(end)).
 		Scan(&metricsWithPeriod).
 		Error
 	if err != nil {
@@ -508,6 +507,9 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, interval time.
 	}
 	var metrics []dbContractMetric
 	for _, m := range metricsWithPeriod {
+		m.Metric.FCID = fileContractID{}
+		m.Metric.Host = publicKey{}
+		m.Metric.RevisionNumber = 0
 		if m.Period != currentPeriod {
 			metrics = append(metrics, m.Metric)
 			currentPeriod = m.Period
