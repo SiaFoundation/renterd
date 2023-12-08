@@ -70,13 +70,6 @@ func (u *uploader) Renew(hp hostProvider, c api.ContractMetadata, bh uint64) {
 	u.endHeight = c.WindowEnd
 }
 
-func (u *uploader) SignalWork() {
-	select {
-	case u.signalNewUpload <- struct{}{}:
-	default:
-	}
-}
-
 func (u *uploader) Start(hp hostProvider, rl revisionLocker) {
 outer:
 	for {
@@ -176,7 +169,7 @@ func (u *uploader) enqueue(req *sectorUploadReq) {
 	u.mu.Unlock()
 
 	// signal there's work
-	u.SignalWork()
+	u.signalWork()
 }
 
 func (u *uploader) estimate() float64 {
@@ -236,6 +229,13 @@ func (u *uploader) pop() *sectorUploadReq {
 		return j
 	}
 	return nil
+}
+
+func (u *uploader) signalWork() {
+	select {
+	case u.signalNewUpload <- struct{}{}:
+	default:
+	}
 }
 
 func (u *uploader) trackSectorUpload(err error, d time.Duration) {
