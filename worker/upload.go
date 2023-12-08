@@ -965,15 +965,6 @@ func (s *slabUpload) finish() (sectors []object.Sector, _ error) {
 	return
 }
 
-func (s *slabUpload) ongoingOverdrive(sI int) bool {
-	for _, candidate := range s.candidates {
-		if candidate.req != nil && candidate.req.overdrive && candidate.req.sector.index == sI {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	// nothing to do
 	if req == nil {
@@ -981,9 +972,13 @@ func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	}
 
 	// find candidate
+	var overdriving bool
 	var candidate *candidate
 	for _, c := range s.candidates {
 		if c.req != nil {
+			if c.req.sector.index == req.sector.index {
+				overdriving = true
+			}
 			continue
 		}
 		candidate = c
@@ -993,7 +988,7 @@ func (s *slabUpload) launch(req *sectorUploadReq) (interrupt bool, err error) {
 	// no candidate found
 	if candidate == nil {
 		err = errNoCandidateUploader
-		interrupt = !req.overdrive && !s.ongoingOverdrive(req.sector.index)
+		interrupt = !req.overdrive && !overdriving
 		span := trace.SpanFromContext(req.sector.ctx)
 		span.RecordError(err)
 		span.End()
