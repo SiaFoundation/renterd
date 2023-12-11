@@ -312,7 +312,7 @@ func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceT
 	if expectedStorage > s.RemainingStorage {
 		expectedStorage = s.RemainingStorage
 	}
-	newCollateral := rhpv2.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, s, blockHeight, c.EndHeight())
+	newCollateral := worker.ContractRenewalCollateral(c.Revision.FileContract, expectedStorage, pt, blockHeight, c.EndHeight())
 	return isBelowCollateralThreshold(newCollateral, c.RemainingCollateral(s))
 }
 
@@ -335,9 +335,14 @@ func isBelowCollateralThreshold(newCollateral, actualCollateral types.Currency) 
 		// contracts out eventually.
 		return false
 	}
-	collateral := big.NewRat(0, 1).SetFrac(actualCollateral.Big(), newCollateral.Big())
-	threshold := big.NewRat(minContractCollateralThresholdNumerator, minContractCollateralThresholdDenominator)
-	return collateral.Cmp(threshold) < 0
+	return newCollateral.Cmp(minNewCollateral(actualCollateral)) < 0
+}
+
+// minNewCollateral returns the minimum amount of unallocated collateral that a
+// contract should contain after a refresh given the current amount of
+// unallocated collateral.
+func minNewCollateral(unallocatedCollateral types.Currency) types.Currency {
+	return unallocatedCollateral.Mul64(minContractCollateralThresholdDenominator).Div64(minContractCollateralThresholdNumerator)
 }
 
 func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) (shouldRenew, secondHalf bool) {

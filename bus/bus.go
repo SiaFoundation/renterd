@@ -298,8 +298,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
 
-		"PUT /metric/:key": b.metricsHandlerPUT,
-		"GET /metric/:key": b.metricsHandlerGET,
+		"PUT    /metric/:key": b.metricsHandlerPUT,
+		"GET    /metric/:key": b.metricsHandlerGET,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,

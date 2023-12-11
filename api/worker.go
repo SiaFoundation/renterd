@@ -115,15 +115,16 @@ type (
 
 	// RHPRenewRequest is the request type for the /rhp/renew endpoint.
 	RHPRenewRequest struct {
-		ContractID    types.FileContractID `json:"contractID"`
-		EndHeight     uint64               `json:"endHeight"`
-		HostAddress   types.Address        `json:"hostAddress"`
-		HostKey       types.PublicKey      `json:"hostKey"`
-		SiamuxAddr    string               `json:"siamuxAddr"`
-		NewCollateral types.Currency       `json:"newCollateral"`
-		RenterAddress types.Address        `json:"renterAddress"`
-		RenterFunds   types.Currency       `json:"renterFunds"`
-		WindowSize    uint64               `json:"windowSize"`
+		ContractID       types.FileContractID `json:"contractID"`
+		EndHeight        uint64               `json:"endHeight"`
+		ExpectedStorage  uint64               `json:"expectedStorage"`
+		HostAddress      types.Address        `json:"hostAddress"`
+		HostKey          types.PublicKey      `json:"hostKey"`
+		MinNewCollateral types.Currency       `json:"minNewCollateral"`
+		SiamuxAddr       string               `json:"siamuxAddr"`
+		RenterAddress    types.Address        `json:"renterAddress"`
+		RenterFunds      types.Currency       `json:"renterFunds"`
+		WindowSize       uint64               `json:"windowSize"`
 	}
 
 	// RHPRenewResponse is the response type for the /rhp/renew endpoint.
@@ -131,6 +132,7 @@ type (
 		Error          string                 `json:"error"`
 		ContractID     types.FileContractID   `json:"contractID"`
 		Contract       rhpv2.ContractRevision `json:"contract"`
+		ContractPrice  types.Currency         `json:"contractPrice"`
 		TransactionSet []types.Transaction    `json:"transactionSet"`
 	}
 

@@ -923,7 +923,7 @@ type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, e
 // Renew renews a contract with a host. To avoid an edge case where the contract
 // is drained and can therefore not be used to pay for the revision, we simply
 // don't pay for it.
-func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
 	// Try to get a valid pricetable.
 	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -935,21 +935,23 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 		h.logger.Debugf("unable to fetch price table for renew: %v", err)
 	}
 
+	var contractPrice types.Currency
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
+			contractPrice = pt.ContractPrice
 			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
 	})
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
+		return rhpv2.ContractRevision{}, nil, contractPrice, err
 	}
-	return rev, txnSet, renewErr
+	return rev, txnSet, contractPrice, renewErr
 }
 
 func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
@@ -1386,9 +1388,15 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", breakdown.Reasons())
 	}
 
+	// Compute the additional collateral we can put into the contract.
+	newCollateral := ContractRenewalCollateral(rev.FileContract, rrr.ExpectedStorage, *pt, pt.HostBlockHeight, rrr.EndHeight)
+	if newCollateral.Cmp(rrr.MinNewCollateral) < 0 {
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("newCollateral < minNewCollateral: %v < %v", newCollateral, rrr.MinNewCollateral)
+	}
+
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.NewCollateral, *pt, rrr.EndHeight, rrr.WindowSize)
+	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, newCollateral, *pt, rrr.EndHeight, rrr.WindowSize)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to prepare renew: %w", err)
 	}
@@ -1570,4 +1578,38 @@ func payByContract(rev *types.FileContractRevision, amount types.Currency, refun
 		return rhpv3.PayByContractRequest{}, ErrInsufficientFunds
 	}
 	return payment, nil
+}
+
+// TODO: get this into core and eventually use that instead of this function
+func ContractRenewalCollateral(fc types.FileContract, expectedNewStorage uint64, pt rhpv3.HostPriceTable, blockHeight, endHeight uint64) types.Currency {
+	if endHeight < fc.EndHeight() {
+		panic("endHeight should be at least the current end height of the contract")
+	}
+	extension := endHeight - fc.EndHeight()
+	if endHeight < blockHeight {
+		panic("current blockHeight should be lower than the endHeight")
+	}
+	duration := endHeight - blockHeight
+
+	// calculate the base collateral - if it exceeds MaxCollateral we can't add more collateral
+	baseCollateral := pt.CollateralCost.Mul64(fc.Filesize).Mul64(extension)
+	if baseCollateral.Cmp(pt.MaxCollateral) >= 0 {
+		return types.ZeroCurrency
+	}
+
+	// calculate the new collateral
+	newCollateral := pt.CollateralCost.Mul64(expectedNewStorage).Mul64(duration)
+
+	// if the total collateral is more than the MaxCollateral subtract the
+	// delta.
+	totalCollateral := baseCollateral.Add(newCollateral)
+	if totalCollateral.Cmp(pt.MaxCollateral) > 0 {
+		delta := totalCollateral.Sub(pt.MaxCollateral)
+		if delta.Cmp(newCollateral) > 0 {
+			newCollateral = types.ZeroCurrency
+		} else {
+			newCollateral = newCollateral.Sub(delta)
+		}
+	}
+	return newCollateral
 }

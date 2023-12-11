@@ -1371,10 +1371,9 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 
 	// calculate the host collateral
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.priceTable)
-	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, endHeight)
 
 	// renew the contract
-	newRevision, _, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, types.ZeroCurrency, expectedStorage, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
@@ -1387,8 +1386,8 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
-	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
+	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
+	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
@@ -1448,22 +1447,11 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// calculate the new collateral
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
-	newCollateral := rhpv2.ContractRenewalCollateral(rev.FileContract, expectedStorage, settings, cs.BlockHeight, contract.EndHeight())
-
-	// do not refresh if the contract's updated collateral will fall below the threshold anyway
-	_, hostMissedPayout, _, _ := rhpv2.CalculateHostPayouts(rev.FileContract, newCollateral, settings, contract.EndHeight())
-	var newRemainingCollateral types.Currency
-	if hostMissedPayout.Cmp(settings.ContractPrice) > 0 {
-		newRemainingCollateral = hostMissedPayout.Sub(settings.ContractPrice)
-	}
-	if isBelowCollateralThreshold(newCollateral, newRemainingCollateral) {
-		err := errors.New("refresh failed, new collateral is below the threshold")
-		c.logger.Errorw(err.Error(), "hk", hk, "fcid", fcid, "expectedCollateral", newCollateral.String(), "actualCollateral", newRemainingCollateral.String(), "maxCollateral", settings.MaxCollateral)
-		return api.ContractMetadata{}, true, err
-	}
+	unallocatedCollateral := rev.MissedHostPayout().Sub(contract.ContractPrice)
+	minNewCollateral := minNewCollateral(unallocatedCollateral)
 
 	// renew the contract
-	newRevision, _, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, newCollateral, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
@@ -1476,8 +1464,8 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	contractPrice := newRevision.Revision.MissedHostPayout().Sub(newCollateral)
-	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, newRevision, contractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
+	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
+	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
