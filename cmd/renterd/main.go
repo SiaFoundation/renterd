@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/web/renterd"
+	"go.uber.org/zap"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm/logger"
@@ -211,6 +212,23 @@ func parseEnvVar(s string, v interface{}) {
 		}
 		fmt.Printf("Using %s environment variable\n", s)
 	}
+}
+
+func listenTCP(logger *zap.Logger, addr string) (net.Listener, error) {
+	l, err := net.Listen("tcp", addr)
+	if err != nil && strings.Contains(err.Error(), "no such host") && strings.Contains(addr, "localhost") {
+		// fall back to 127.0.0.1 if 'localhost' doesn't work
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		fallbackAddr := fmt.Sprintf("127.0.0.1:%s", port)
+		logger.Sugar().Warnf("failed to listen on %s, falling back to %s", addr, fallbackAddr)
+		return net.Listen("tcp", fallbackAddr)
+	} else if err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 func main() {
@@ -425,7 +443,7 @@ func main() {
 
 	// create listener first, so that we know the actual apiAddr if the user
 	// specifies port :0
-	l, err := net.Listen("tcp", cfg.HTTP.Address)
+	l, err := listenTCP(logger, cfg.HTTP.Address)
 	if err != nil {
 		logger.Fatal("failed to create listener: " + err.Error())
 	}
@@ -502,7 +520,7 @@ func main() {
 					Addr:    cfg.S3.Address,
 					Handler: s3Handler,
 				}
-				s3Listener, err = net.Listen("tcp", cfg.S3.Address)
+				s3Listener, err = listenTCP(logger, cfg.S3.Address)
 				if err != nil {
 					logger.Fatal("failed to create listener: " + err.Error())
 				}
