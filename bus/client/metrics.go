@@ -115,6 +115,33 @@ func (c *Client) RecordContractPruneMetric(ctx context.Context, metrics ...api.C
 	return c.recordMetric(ctx, api.MetricContractPrune, api.ContractPruneMetricRequestPUT{Metrics: metrics})
 }
 
+func (c *Client) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
+	values := url.Values{}
+	values.Set("cutoff", api.TimeRFC3339(cutoff).String())
+	c.c.Custom("DELETE", fmt.Sprintf("/metric/%s?"+values.Encode(), metric), nil, nil)
+
+	u, err := url.Parse(fmt.Sprintf("%s/metric/%s", c.c.BaseURL, metric))
+	if err != nil {
+		panic(err)
+	}
+	u.RawQuery = values.Encode()
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u.String(), nil)
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		err, _ := io.ReadAll(resp.Body)
+		return errors.New(string(err))
+	}
+	return nil
+}
+
 func (c *Client) recordMetric(ctx context.Context, key string, d interface{}) error {
 	c.c.Custom("PUT", fmt.Sprintf("/metric/%s", key), (interface{})(nil), nil)
 
