@@ -677,7 +677,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OK(err)
 	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
 	if info.TotalObjectsSize != objectsSize {
-		t.Error("wrong size", info.TotalObjectsSize, len(small)+len(large))
+		t.Error("wrong size", info.TotalObjectsSize, objectsSize)
 	}
 	sectorsSize := 15 * rhpv2.SectorSize
 	if info.TotalSectorsSize != uint64(sectorsSize) {
