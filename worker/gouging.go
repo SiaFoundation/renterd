@@ -31,6 +31,11 @@ const (
 	maxSectorAccessPriceVsBandwidth = uint64(400e3)
 )
 
+var (
+	errHostSettingsGouging = errors.New("host settings gouging detected")
+	errPriceTableGouging   = errors.New("price table gouging detected")
+)
+
 type (
 	GougingChecker interface {
 		Check(_ *rhpv2.HostSettings, _ *rhpv3.HostPriceTable) api.HostGougingBreakdown
@@ -103,43 +108,31 @@ func NewGougingChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee typ
 	}
 }
 
-func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) (breakdown api.HostGougingBreakdown) {
+func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.HostGougingBreakdown {
 	if hs == nil && pt == nil {
 		panic("gouging checker needs to be provided with at least host settings or a price table") // developer error
 	}
 
-	breakdown.V2 = gc.checkHS(hs)
-	breakdown.V3 = gc.checkPT(pt)
-	return
-}
-
-func (gc gougingChecker) checkHS(hs *rhpv2.HostSettings) (check api.GougingChecks) {
-	if hs != nil {
-		check = api.GougingChecks{
-			ContractErr: errToStr(checkContractGougingRHPv2(gc.period, gc.renewWindow, *hs)),
-			DownloadErr: errToStr(nil),
-			GougingErr:  errToStr(checkPriceGougingHS(gc.settings, *hs)),
-			PruneErr:    errToStr(checkPruneGougingRHPv2(gc.settings, *hs)),
-			UploadErr:   errToStr(nil),
-		}
+	return api.HostGougingBreakdown{
+		ContractErr: errsToStr(
+			checkContractGougingRHPv2(gc.period, gc.renewWindow, hs),
+			checkContractGougingRHPv3(gc.period, gc.renewWindow, pt),
+		),
+		DownloadErr: errsToStr(checkDownloadGougingRHPv3(gc.settings, pt)),
+		GougingErr: errsToStr(
+			checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, pt),
+			checkPriceGougingHS(gc.settings, hs),
+		),
+		PruneErr:  errsToStr(checkPruneGougingRHPv2(gc.settings, hs)),
+		UploadErr: errsToStr(checkUploadGougingRHPv3(gc.settings, pt)),
 	}
-	return
 }
 
-func (gc gougingChecker) checkPT(pt *rhpv3.HostPriceTable) (check api.GougingChecks) {
-	if pt != nil {
-		check = api.GougingChecks{
-			ContractErr: errToStr(checkContractGougingRHPv3(gc.period, gc.renewWindow, *pt)),
-			DownloadErr: errToStr(checkDownloadGougingRHPv3(gc.settings, *pt)),
-			GougingErr:  errToStr(checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, *pt)),
-			PruneErr:    errToStr(nil),
-			UploadErr:   errToStr(checkUploadGougingRHPv3(gc.settings, *pt)),
-		}
+func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
+	// check if we have settings
+	if hs == nil {
+		return nil
 	}
-	return
-}
-
-func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && hs.BaseRPCPrice.Cmp(gs.MaxRPCPrice) > 0 {
 		return fmt.Errorf("rpc price exceeds max: %v > %v", hs.BaseRPCPrice, gs.MaxRPCPrice)
@@ -192,7 +185,11 @@ func checkPriceGougingHS(gs api.GougingSettings, hs rhpv2.HostSettings) error {
 // TODO: if we ever stop assuming that certain prices in the pricetable are
 // always set to 1H we should account for those fields in
 // `hostPeriodCostForScore` as well.
-func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable) error {
+	// check if we have a price table
+	if pt == nil {
+		return nil
+	}
 	// check base rpc price
 	if !gs.MaxRPCPrice.IsZero() && gs.MaxRPCPrice.Cmp(pt.InitBaseCost) < 0 {
 		return fmt.Errorf("init base cost exceeds max: %v > %v", pt.InitBaseCost, gs.MaxRPCPrice)
@@ -328,22 +325,31 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	return nil
 }
 
-func checkContractGougingRHPv2(period, renewWindow *uint64, hs rhpv2.HostSettings) error {
+func checkContractGougingRHPv2(period, renewWindow *uint64, hs *rhpv2.HostSettings) (err error) {
 	// period and renew window might be nil since we don't always have access to
 	// these settings when performing gouging checks
-	if period == nil || renewWindow == nil {
+	if hs == nil || period == nil || renewWindow == nil {
 		return nil
 	}
-	return checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
+
+	err = checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
+	if err != nil {
+		err = fmt.Errorf("%w: %v", errHostSettingsGouging, err)
+	}
+	return
 }
 
-func checkContractGougingRHPv3(period, renewWindow *uint64, pt rhpv3.HostPriceTable) error {
+func checkContractGougingRHPv3(period, renewWindow *uint64, pt *rhpv3.HostPriceTable) (err error) {
 	// period and renew window might be nil since we don't always have access to
 	// these settings when performing gouging checks
-	if period == nil || renewWindow == nil {
+	if pt == nil || period == nil || renewWindow == nil {
 		return nil
 	}
-	return checkContractGouging(*period, *renewWindow, pt.MaxDuration, pt.WindowSize)
+	err = checkContractGouging(*period, *renewWindow, pt.MaxDuration, pt.WindowSize)
+	if err != nil {
+		err = fmt.Errorf("%w: %v", errPriceTableGouging, err)
+	}
+	return
 }
 
 func checkContractGouging(period, renewWindow, maxDuration, windowSize uint64) error {
@@ -360,7 +366,10 @@ func checkContractGouging(period, renewWindow, maxDuration, windowSize uint64) e
 	return nil
 }
 
-func checkPruneGougingRHPv2(gs api.GougingSettings, hs rhpv2.HostSettings) error {
+func checkPruneGougingRHPv2(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
+	if hs == nil {
+		return nil
+	}
 	// pruning costs are similar to sector read costs in a way because they
 	// include base costs and download bandwidth costs, to avoid re-adding all
 	// RHPv2 cost calculations we reuse download gouging checks to cover pruning
@@ -372,44 +381,50 @@ func checkPruneGougingRHPv2(gs api.GougingSettings, hs rhpv2.HostSettings) error
 		hs.UploadBandwidthPrice,
 	)
 	if overflow {
-		return fmt.Errorf("overflow detected when computing sector download price")
+		return fmt.Errorf("%w: overflow detected when computing sector download price", errHostSettingsGouging)
 	}
 	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(1 << 40 / rhpv2.SectorSize) // sectors per TiB
 	if overflow {
-		return fmt.Errorf("overflow detected when computing download price per TiB")
+		return fmt.Errorf("%w: overflow detected when computing download price per TiB", errHostSettingsGouging)
 	}
 	if !gs.MaxDownloadPrice.IsZero() && dpptb.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max dl price: %v > %v", dpptb, gs.MaxDownloadPrice)
+		return fmt.Errorf("%w: cost per TiB exceeds max dl price: %v > %v", errHostSettingsGouging, dpptb, gs.MaxDownloadPrice)
 	}
 	return nil
 }
 
-func checkDownloadGougingRHPv3(gs api.GougingSettings, pt rhpv3.HostPriceTable) error {
-	sectorDownloadPrice, overflow := sectorReadCostRHPv3(pt)
+func checkDownloadGougingRHPv3(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error {
+	if pt == nil {
+		return nil
+	}
+	sectorDownloadPrice, overflow := sectorReadCostRHPv3(*pt)
 	if overflow {
-		return fmt.Errorf("overflow detected when computing sector download price")
+		return fmt.Errorf("%w: overflow detected when computing sector download price", errPriceTableGouging)
 	}
 	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(1 << 40 / rhpv2.SectorSize) // sectors per TiB
 	if overflow {
-		return fmt.Errorf("overflow detected when computing download price per TiB")
+		return fmt.Errorf("%w: overflow detected when computing download price per TiB", errPriceTableGouging)
 	}
 	if !gs.MaxDownloadPrice.IsZero() && dpptb.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max dl price: %v > %v", dpptb, gs.MaxDownloadPrice)
+		return fmt.Errorf("%w: cost per TiB exceeds max dl price: %v > %v", errPriceTableGouging, dpptb, gs.MaxDownloadPrice)
 	}
 	return nil
 }
 
-func checkUploadGougingRHPv3(gs api.GougingSettings, pt rhpv3.HostPriceTable) error {
-	sectorUploadPricePerMonth, overflow := sectorUploadCostRHPv3(pt)
+func checkUploadGougingRHPv3(gs api.GougingSettings, pt *rhpv3.HostPriceTable) error {
+	if pt == nil {
+		return nil
+	}
+	sectorUploadPricePerMonth, overflow := sectorUploadCostRHPv3(*pt)
 	if overflow {
-		return fmt.Errorf("overflow detected when computing sector price")
+		return fmt.Errorf("%w: overflow detected when computing sector price", errPriceTableGouging)
 	}
 	uploadPrice, overflow := sectorUploadPricePerMonth.Mul64WithOverflow(1 << 40 / rhpv2.SectorSize) // sectors per TiB
 	if overflow {
-		return fmt.Errorf("overflow detected when computing upload price per TiB")
+		return fmt.Errorf("%w: overflow detected when computing upload price per TiB", errPriceTableGouging)
 	}
 	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
-		return fmt.Errorf("cost per TiB exceeds max ul price: %v > %v", uploadPrice, gs.MaxUploadPrice)
+		return fmt.Errorf("%w: cost per TiB exceeds max ul price: %v > %v", errPriceTableGouging, uploadPrice, gs.MaxUploadPrice)
 	}
 	return nil
 }
@@ -486,8 +501,8 @@ func sectorUploadCostRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 	return total, false
 }
 
-func errToStr(err error) string {
-	if err != nil {
+func errsToStr(errs ...error) string {
+	if err := errors.Join(errs...); err != nil {
 		return err.Error()
 	}
 	return ""

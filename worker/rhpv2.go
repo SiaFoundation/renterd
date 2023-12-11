@@ -52,9 +52,6 @@ var (
 	// ErrNoSectorsToPrune is returned when we try to prune a contract that has
 	// no sectors to prune.
 	ErrNoSectorsToPrune = errors.New("no sectors to prune")
-
-	// errPriceGouging is returned when the host is price gouging.
-	errPriceGouging = errors.New("host price gouging")
 )
 
 // A HostErrorSet is a collection of errors from various hosts.
@@ -286,8 +283,8 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 				if err != nil {
 					return err
 				}
-				if breakdown := gc.Check(&settings, nil); breakdown.PruneGouging() {
-					return fmt.Errorf("failed to prune contract, %w: %v", errPriceGouging, breakdown)
+				if breakdown := gc.Check(&settings, nil); breakdown.Gouging() {
+					return fmt.Errorf("failed to prune contract: %v", breakdown)
 				}
 
 				// delete roots
@@ -518,8 +515,8 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 			if err != nil {
 				return err
 			}
-			if breakdown := gc.Check(&settings, nil); breakdown.PruneGouging() {
-				return fmt.Errorf("failed to list contract roots, %w: %v", errPriceGouging, breakdown)
+			if breakdown := gc.Check(&settings, nil); breakdown.Gouging() {
+				return fmt.Errorf("failed to list contract roots: %v", breakdown)
 			}
 			roots, err = w.fetchContractRoots(t, &rev, settings)
 			return

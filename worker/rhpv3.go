@@ -67,9 +67,6 @@ var (
 	// valid.
 	errPriceTableExpired = errors.New("price table requested is expired")
 
-	// errPriceTableGouging is returned when the host is price gouging.
-	errPriceTableGouging = errors.New("host price table gouging")
-
 	// errPriceTableNotFound is returned by the host when it can not find a
 	// price table that corresponds with the id we sent it.
 	errPriceTableNotFound = errors.New("price table not found")
@@ -608,7 +605,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	if err != nil {
 		return err
 	}
-	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadGouging() {
+	if breakdown := gc.Check(nil, &hpt); breakdown.Gouging() {
 		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
 	}
 
@@ -1383,7 +1380,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to get gouging checker: %w", err)
 	}
 	if breakdown := gc.Check(nil, pt); breakdown.Gouging() {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", breakdown.Reasons())
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", breakdown)
 	}
 
 	// Prepare the signed transaction that contains the final revision as well
