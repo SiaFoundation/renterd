@@ -1370,12 +1370,19 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	}
 
 	// calculate the host collateral
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.priceTable)
+	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.priceTable)
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, types.ZeroCurrency, expectedStorage, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, types.ZeroCurrency, expectedNewStorage, settings.WindowSize)
 	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("renewal failed, err: %v", err), "hk", hk, "fcid", fcid)
+		c.logger.Errorw(
+			fmt.Sprintf("renewal failed, err: %v", err),
+			"hk", hk,
+			"fcid", fcid,
+			"endHeight", endHeight,
+			"renterFunds", renterFunds,
+			"expectedNewStorage", expectedNewStorage,
+		)
 		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}

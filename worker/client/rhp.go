@@ -82,16 +82,16 @@ func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileCont
 // RHPRenew renews an existing contract with a host.
 func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, expectedStorage, windowSize uint64) (resp api.RHPRenewResponse, err error) {
 	req := api.RHPRenewRequest{
-		ContractID:       contractID,
-		EndHeight:        endHeight,
-		ExpectedStorage:  expectedStorage,
-		HostAddress:      hostAddress,
-		HostKey:          hostKey,
-		MinNewCollateral: minNewCollateral,
-		RenterAddress:    renterAddress,
-		RenterFunds:      renterFunds,
-		SiamuxAddr:       siamuxAddr,
-		WindowSize:       windowSize,
+		ContractID:         contractID,
+		EndHeight:          endHeight,
+		ExpectedNewStorage: expectedStorage,
+		HostAddress:        hostAddress,
+		HostKey:            hostKey,
+		MinNewCollateral:   minNewCollateral,
+		RenterAddress:      renterAddress,
+		RenterFunds:        renterFunds,
+		SiamuxAddr:         siamuxAddr,
+		WindowSize:         windowSize,
 	}
 	err = c.c.WithContext(ctx).POST("/rhp/renew", req, &resp)
 	return
