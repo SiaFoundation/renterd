@@ -24,8 +24,8 @@ const (
 	// into a contract upon renewing it. That means, we consider a contract
 	// worth renewing when that results in 10x the collateral of what it
 	// currently has remaining.
-	minContractCollateralThresholdNumerator   = 10
-	minContractCollateralThresholdDenominator = 100
+	minContractCollateralThresholdNumerator   = 1
+	minContractCollateralThresholdDenominator = 10
 
 	// contractConfirmationDeadline is the number of blocks since its start
 	// height we wait for a contract to appear on chain.
@@ -316,12 +316,12 @@ func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceT
 	return isBelowCollateralThreshold(newCollateral, c.RemainingCollateral(s))
 }
 
-// isBelowCollateralThreshold returns true if the actualCollateral is below a
+// isBelowCollateralThreshold returns true if the remainingCollateral is below a
 // certain percentage of newCollateral. The newCollateral is the amount of
 // unallocated collateral in a contract after refreshing it and the
-// actualCollateral is the current amount of unallocated collateral in the
+// remainingCollateral is the current amount of unallocated collateral in the
 // contract.
-func isBelowCollateralThreshold(newCollateral, actualCollateral types.Currency) bool {
+func isBelowCollateralThreshold(newCollateral, remainingCollateral types.Currency) bool {
 	if newCollateral.IsZero() {
 		// Protect against division-by-zero. This can happen for 2 reasons.
 		// 1. the collateral is already at the host's max collateral so a
@@ -335,7 +335,7 @@ func isBelowCollateralThreshold(newCollateral, actualCollateral types.Currency) 
 		// contracts out eventually.
 		return false
 	}
-	return newCollateral.Cmp(minNewCollateral(actualCollateral)) < 0
+	return newCollateral.Cmp(minNewCollateral(remainingCollateral)) >= 0
 }
 
 // minNewCollateral returns the minimum amount of unallocated collateral that a
