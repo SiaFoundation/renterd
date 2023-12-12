@@ -549,7 +549,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 			} else {
 				// regular upload
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
-					upload.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+					uploadSpeed, overdrivePct := upload.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+
+					// track stats
+					mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
+					mgr.statsOverdrivePct.Track(overdrivePct)
+
+					// release memory
 					mem.Release()
 				}(up.rs, data, length, slabIndex)
 			}
