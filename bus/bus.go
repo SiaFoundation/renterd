@@ -202,6 +202,7 @@ type (
 		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
+		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
 		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 
@@ -300,6 +301,7 @@ func (b *bus) Handler() http.Handler {
 
 		"PUT    /metric/:key": b.metricsHandlerPUT,
 		"GET    /metric/:key": b.metricsHandlerGET,
+		"DELETE /metric/:key": b.metricsHandlerDELETE,
 
 		"POST   /multipart/create":      b.multipartHandlerCreatePOST,
 		"POST   /multipart/abort":       b.multipartHandlerAbortPOST,
@@ -1996,6 +1998,27 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	})
 	if err != nil {
 		jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (b *bus) metricsHandlerDELETE(jc jape.Context) {
+	metric := jc.PathParam("key")
+	if metric == "" {
+		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
+		return
+	}
+
+	var cutoff time.Time
+	if jc.DecodeForm("cutoff", (*api.TimeRFC3339)(&cutoff)) != nil {
+		return
+	} else if cutoff.IsZero() {
+		jc.Error(errors.New("parameter 'cutoff' is required"), http.StatusBadRequest)
+		return
+	}
+
+	err := b.mtrcs.PruneMetrics(jc.Request.Context(), metric, cutoff)
+	if jc.Check("failed to prune metrics", err) != nil {
 		return
 	}
 }
