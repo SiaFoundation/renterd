@@ -1061,7 +1061,7 @@ loop:
 				// handle lost sectors
 				if isSectorNotFound(resp.err) {
 					if err := s.slm.DeleteHostSector(ctx, resp.req.hk, resp.req.root); err != nil {
-						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.hk, "root", resp.req.root, "err", err)
+						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.hk, "root", resp.req.root, zap.Error(err))
 					} else {
 						s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.hk, "root", resp.req.root)
 					}

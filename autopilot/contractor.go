@@ -1376,7 +1376,8 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, types.ZeroCurrency, expectedNewStorage, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw(
-			fmt.Sprintf("renewal failed, err: %v", err),
+			"renewal failed",
+			zap.Error(err),
 			"hk", hk,
 			"fcid", fcid,
 			"endHeight", endHeight,
@@ -1460,7 +1461,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	// renew the contract
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
 	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
+		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
@@ -1474,7 +1475,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("refresh failed, err: %v", err), "hk", hk, "fcid", fcid)
+		c.logger.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
 	}
 
