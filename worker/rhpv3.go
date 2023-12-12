@@ -923,7 +923,7 @@ type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, e
 // Renew renews a contract with a host. To avoid an edge case where the contract
 // is drained and can therefore not be used to pay for the revision, we simply
 // don't pay for it.
-func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
 	// Try to get a valid pricetable.
 	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -935,21 +935,23 @@ func (h *host) Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.Cont
 		h.logger.Debugf("unable to fetch price table for renew: %v", err)
 	}
 
+	var contractPrice types.Currency
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
 	err = h.transportPool.withTransportV3(ctx, h.HostKey(), h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
+			contractPrice = pt.ContractPrice
 			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
 	})
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, err
+		return rhpv2.ContractRevision{}, nil, contractPrice, err
 	}
-	return rev, txnSet, renewErr
+	return rev, txnSet, contractPrice, renewErr
 }
 
 func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
@@ -1388,7 +1390,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.NewCollateral, *pt, rrr.EndHeight, rrr.WindowSize)
+	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.MinNewCollateral, *pt, rrr.EndHeight, rrr.WindowSize, rrr.ExpectedNewStorage)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to prepare renew: %w", err)
 	}

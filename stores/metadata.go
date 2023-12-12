@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/modules"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -1374,7 +1375,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 		}
 	}
 	if err := s.RecordContractMetric(ctx, metrics...); err != nil {
-		s.logger.Errorw("failed to record contract metrics", "err", err)
+		s.logger.Errorw("failed to record contract metrics", zap.Error(err))
 	}
 	return nil
 }
