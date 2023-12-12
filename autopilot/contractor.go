@@ -1394,13 +1394,13 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	renewedContract, err := c.ap.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
 	}
 
+	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	c.logger.Debugw(
 		"renewal succeeded",
 		"fcid", renewedContract.ID,
@@ -1472,7 +1472,6 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	*budget = budget.Sub(renterFunds)
 
 	// persist the contract
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	refreshedContract, err := c.ap.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
 		c.logger.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
@@ -1480,6 +1479,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	}
 
 	// add to renewed set
+	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	c.logger.Debugw("refresh succeeded",
 		"fcid", refreshedContract.ID,
 		"renewedFrom", contract.ID,
