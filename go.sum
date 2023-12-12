@@ -262,8 +262,8 @@ go.opentelemetry.io/otel/trace v1.21.0 h1:WD9i5gzvoUPuXIXH24ZNBudiarZDKuekPqi/E8
 go.opentelemetry.io/otel/trace v1.21.0/go.mod h1:LGbsEB0f9LGjN+OZaQQ26sohbOmiMR+BaslueVtS/qQ=
 go.opentelemetry.io/proto/otlp v1.0.0 h1:T0TX0tmXU8a3CbNXzEKGeU5mIVOdf0oykP+u2lIVU/I=
 go.opentelemetry.io/proto/otlp v1.0.0/go.mod h1:Sy6pihPLfYHkr3NkUbEhGHFhINUSI/v80hjKIs5JXpM=
-go.sia.tech/core v0.1.12-0.20231211155540-c255cc1e3282 h1:5SYHarTm9AcIUQuSGco4YsaOJD0dxl6zDcoaE++o3oU=
-go.sia.tech/core v0.1.12-0.20231211155540-c255cc1e3282/go.mod h1:3EoY+rR78w1/uGoXXVqcYdwSjSJKuEMI5bL7WROA27Q=
+go.sia.tech/core v0.1.12-0.20231211182757-77190f04f90b h1:xJSxYN2kZD3NAijHIwjXhG5+7GoPyjDNIJPEoD3b72g=
+go.sia.tech/core v0.1.12-0.20231211182757-77190f04f90b/go.mod h1:3EoY+rR78w1/uGoXXVqcYdwSjSJKuEMI5bL7WROA27Q=
 go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2 h1:ulzfJNjxN5DjXHClkW2pTiDk+eJ+0NQhX87lFDZ03t0=
 go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
 go.sia.tech/hostd v0.2.2 h1:HbXB4WripvVFUSpTrckEhC8DteL+QpXKZeonJHUpq3M=
