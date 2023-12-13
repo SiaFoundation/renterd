@@ -452,6 +452,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 				reason = "unknown"
 			}
 			removedReasons[contract.ID.String()] = reason
+			fmt.Printf("DEBUG PJ: ap: contract %v removed reason %v\n", contract.ID, reason)
 			c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
 		}
 	}
@@ -516,6 +517,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	)
 	hasChanged := len(added)+len(removed) > 0
 	if hasChanged {
+		fmt.Printf("DEBUG PJ: ap: num contracts %d added %d removed %d renewed %d\n", len(newSet), len(added), len(removed), len(renewed))
 		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
 	}
 	return hasChanged

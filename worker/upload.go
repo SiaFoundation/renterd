@@ -729,6 +729,10 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 		}
 	}
 
+	var added int
+	var stopped int
+	var renewedd int
+
 	// stop or renew uploads we currently have
 	var refreshed []*uploader
 	for _, uploader := range mgr.uploaders {
@@ -737,13 +741,17 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 		// stop uploaders that no longer appear in the list
 		if !(keep || renewed) {
+			fmt.Printf("DEBUG PJ: mgr: stopping %v\n", uploader.ContractID())
 			uploader.Stop()
+			stopped++
 			continue
 		}
 
 		// renew uploaders that got renewed
 		if renewed {
+			fmt.Printf("DEBUG PJ: mgr: renewing %v to %v\n", uploader.ContractID(), renewal.ID)
 			uploader.Renew(mgr.hp, renewal, bh)
+			renewedd++
 		}
 
 		// update uploader and add to the list
@@ -757,11 +765,14 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 	// add missing uploaders
 	for _, c := range wanted {
+		added++
 		uploader := mgr.newUploader(mgr.b, mgr.hp, c, bh)
+		fmt.Printf("DEBUG PJ: mgr: starting %v\n", uploader.ContractID())
 		refreshed = append(refreshed, uploader)
 		go uploader.Start(mgr.hp, mgr.rl)
 	}
 
+	fmt.Printf("DEBUG PJ: mgr: uploaders refreshed %d -> %d | added %d | stopped %d | renewed %d\n", len(mgr.uploaders), len(refreshed), added, stopped, renewedd)
 	mgr.uploaders = refreshed
 }
 
