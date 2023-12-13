@@ -18,7 +18,7 @@ import (
 
 type (
 	uploader struct {
-		b Bus
+		os ObjectStore
 
 		hk              types.PublicKey
 		siamuxAddr      string
@@ -29,7 +29,7 @@ type (
 		bh        uint64
 		endHeight uint64
 		fcid      types.FileContractID
-		host      hostV3
+		host      Host
 		queue     []*sectorUploadReq
 
 		// stats related field
@@ -59,18 +59,18 @@ func (u *uploader) Healthy() bool {
 	return u.consecutiveFailures == 0
 }
 
-func (u *uploader) Renew(hp hostProvider, c api.ContractMetadata, bh uint64) {
+func (u *uploader) Renew(h Host, c api.ContractMetadata, bh uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	u.bh = bh
-	u.host = hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr)
+	u.host = h
 	u.fcid = c.ID
 	u.siamuxAddr = c.SiamuxAddr
 	u.endHeight = c.WindowEnd
 }
 
-func (u *uploader) Start(hp hostProvider, rl revisionLocker) {
+func (u *uploader) Start(hp HostManager, rl revisionLocker) {
 outer:
 	for {
 		// wait for work
@@ -198,7 +198,7 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	span.AddEvent("execute")
 
 	// update the bus
-	if err := u.b.AddUploadingSector(req.sector.ctx, req.uploadID, fcid, req.sector.root); err != nil {
+	if err := u.os.AddUploadingSector(req.sector.ctx, req.uploadID, fcid, req.sector.root); err != nil {
 		return types.Hash256{}, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
 	}
 

@@ -13,7 +13,12 @@ type (
 	// uploads and downloads.
 	MemoryManager interface {
 		Status() api.MemoryStatus
-		AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory
+		AcquireMemory(ctx context.Context, amt uint64) Memory
+	}
+
+	Memory interface {
+		Release()
+		ReleaseSome(amt uint64)
 	}
 
 	memoryManager struct {
@@ -53,7 +58,7 @@ func (mm *memoryManager) Status() api.MemoryStatus {
 	}
 }
 
-func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory {
+func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
 	if amt == 0 {
 		mm.logger.Fatal("cannot acquire 0 memory")
 	} else if mm.totalAvailable < amt {

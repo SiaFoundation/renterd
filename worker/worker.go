@@ -64,108 +64,86 @@ func NewClient(address, password string) *Client {
 	}
 }
 
-var privateSubnets []*net.IPNet
-
-func init() {
-	for _, subnet := range []string{
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		"100.64.0.0/10",
-	} {
-		_, subnet, err := net.ParseCIDR(subnet)
-		if err != nil {
-			panic(fmt.Sprintf("failed to parse subnet: %v", err))
-		}
-		privateSubnets = append(privateSubnets, subnet)
-	}
-}
-
-type AccountStore interface {
-	Accounts(ctx context.Context) ([]api.Account, error)
-	AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
-
-	LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
-	UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
-
-	ResetDrift(ctx context.Context, id rhpv3.Account) error
-	SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
-	ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
-}
-
 type (
+	Bus interface {
+		alerts.Alerter
+		consensusState
+		webhooks.Broadcaster
+
+		AccountStore
+		ContractLocker
+		ObjectStore
+
+		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
+		SyncerPeers(ctx context.Context) (resp []string, err error)
+
+		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
+		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
+		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+
+		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
+		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
+		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
+
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+
+		GougingParams(ctx context.Context) (api.GougingParams, error)
+		UploadParams(ctx context.Context) (api.UploadParams, error)
+
+		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
+		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
+		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+
+		WalletDiscard(ctx context.Context, txn types.Transaction) error
+		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
+		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
+		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+
+		Bucket(_ context.Context, bucket string) (api.Bucket, error)
+	}
+
+	AccountStore interface {
+		Accounts(ctx context.Context) ([]api.Account, error)
+		AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
+
+		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
+		UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
+
+		ResetDrift(ctx context.Context, id rhpv3.Account) error
+		SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
+		ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
+	}
+
+	ObjectStore interface {
+		// NOTE: used for download (TODO: remove)
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
+		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+
+		// NOTE: used for upload (TODO: remove)
+		AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
+		AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
+		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
+		FinishUpload(ctx context.Context, uID api.UploadID) error
+		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
+		TrackUpload(ctx context.Context, uID api.UploadID) error
+		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+	}
+
 	consensusState interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
-	}
-
-	revisionUnlocker interface {
-		Release(context.Context) error
 	}
 
 	revisionLocker interface {
 		withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error
 	}
 )
-
-// A Bus is the source of truth within a renterd system.
-type Bus interface {
-	alerts.Alerter
-	consensusState
-	webhooks.Broadcaster
-
-	AccountStore
-	ContractLocker
-
-	SyncerPeers(ctx context.Context) (resp []string, err error)
-
-	BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
-
-	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-	ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
-	ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
-	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
-	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
-	RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
-	RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
-	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-
-	GougingParams(ctx context.Context) (api.GougingParams, error)
-	UploadParams(ctx context.Context) (api.UploadParams, error)
-
-	Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
-	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
-
-	AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
-	MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
-
-	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
-	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
-	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
-
-	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
-
-	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
-	PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
-
-	Accounts(ctx context.Context) ([]api.Account, error)
-	UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
-
-	TrackUpload(ctx context.Context, uID api.UploadID) error
-	AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
-	FinishUpload(ctx context.Context, uID api.UploadID) error
-
-	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
-	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-
-	Bucket(_ context.Context, bucket string) (api.Bucket, error)
-}
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
 // masterkey to use for a specific purpose. Such as deriving more keys for
@@ -198,31 +176,6 @@ func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 		seed[i] = 0
 	}
 	return pk
-}
-
-type hostV2 interface {
-	Contract() types.FileContractID
-	HostKey() types.PublicKey
-}
-
-type hostV3 interface {
-	hostV2
-
-	DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
-	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
-	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
-	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
-	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
-	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
-	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
-}
-
-type hostProvider interface {
-	newHostV3(types.FileContractID, types.PublicKey, string) hostV3
-}
-
-type partialSlabStore interface {
-	PartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error)
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -260,56 +213,9 @@ type worker struct {
 	shutdownCtxCancel context.CancelFunc
 }
 
-func dial(ctx context.Context, hostIP string) (net.Conn, error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
-	return conn, err
-}
-
-func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
-	conn, err := dial(ctx, hostIP)
-	if err != nil {
-		return err
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			conn.Close()
-		}
-	}()
-	defer func() {
-		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
-		}
-	}()
-	t, err := rhpv2.NewRenterTransport(conn, hostKey)
-	if err != nil {
-		return err
-	}
-	defer t.Close()
-	return fn(t)
-}
-
-func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.PublicKey, siamuxAddr string) hostV3 {
-	return &host{
-		acc:                      w.accounts.ForHost(hostKey),
-		bus:                      w.bus,
-		contractSpendingRecorder: w.contractSpendingRecorder,
-		logger:                   w.logger.Named(hostKey.String()[:4]),
-		fcid:                     contractID,
-		siamuxAddr:               siamuxAddr,
-		renterKey:                w.deriveRenterKey(hostKey),
-		accountKey:               w.accounts.deriveAccountKey(hostKey),
-		transportPool:            w.transportPoolV3,
-		priceTables:              w.priceTables,
-	}
-}
-
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
-	return w.withContractLock(ctx, contractID, lockPriority, func() error {
-		h := w.newHostV3(contractID, hk, siamuxAddr)
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
+	return w.withContractLock(ctx, fcid, lockPriority, func() error {
+		h := w.Host(hk, fcid, siamuxAddr)
 		rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
 		if err != nil {
 			return err
@@ -420,7 +326,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 }
 
 func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	h := w.newHostV3(types.FileContractID{}, hk, siamuxAddr)
+	h := w.Host(hk, types.FileContractID{}, siamuxAddr) // TODO: passing a nil fcid is hacky
 	hpt, err = h.FetchPriceTable(ctx, rev)
 	if err != nil {
 		return hostdb.HostPriceTable{}, err
@@ -723,8 +629,8 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, cs.BlockHeight, func(_ types.FileContractRevision) (err error) {
-		h := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
-		renewed, txnSet, err = h.Renew(ctx, rrr)
+		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
+		renewed, txnSet, err = h.RenewContract(ctx, rrr)
 		return err
 	})) != nil {
 		return
@@ -762,7 +668,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 
 	// fund the account
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
-		h := w.newHostV3(rev.ParentID, rfr.HostKey, rfr.SiamuxAddr)
+		h := w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr)
 		err = h.FundAccount(ctx, rfr.Balance, &rev)
 		if isBalanceMaxExceeded(err) {
 			// sync the account
@@ -801,7 +707,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
-	h := w.newHostV3(rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)
+	h := w.Host(rsr.HostKey, rsr.ContractID, rsr.SiamuxAddr)
 	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	}))
@@ -1501,24 +1407,6 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	return
 }
 
-// PartialSlab fetches the data of a partial slab from the bus. It will fall
-// back to ask the bus for the slab metadata in case the slab wasn't found in
-// the partial slab buffer.
-func (w *worker) PartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error) {
-	data, err := w.bus.FetchPartialSlab(ctx, key, offset, length)
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
-		// Check if slab was already uploaded.
-		slab, err := w.bus.Slab(ctx, key)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch uploaded partial slab: %v", err)
-		}
-		return nil, &slab, nil
-	} else if err != nil {
-		return nil, nil, err
-	}
-	return data, nil, nil
-}
-
 func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
 	if *err == nil {
 		return
@@ -1536,17 +1424,4 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 func isErrDuplicateTransactionSet(err error) bool {
 	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
-}
-
-func isPrivateIP(addr net.IP) bool {
-	if addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
-		return true
-	}
-
-	for _, block := range privateSubnets {
-		if block.Contains(addr) {
-			return true
-		}
-	}
-	return false
 }

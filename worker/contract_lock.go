@@ -51,7 +51,7 @@ func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, 
 	return cl
 }
 
-func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
+func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ *contractLock, err error) {
 	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
 	if err != nil {
 		return nil, err
