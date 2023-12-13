@@ -85,10 +85,6 @@ const (
 	timeoutPruneContract = 10 * time.Minute
 )
 
-var (
-	errLargeTransaction = errors.New("transaction is too large for this transaction pool")
-)
-
 type (
 	contractor struct {
 		ap       *Autopilot
@@ -1388,9 +1384,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if strings.Contains(err.Error(), errLargeTransaction.Error()) {
-			return api.ContractMetadata{}, true, err
-		} else if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1468,9 +1462,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if strings.Contains(err.Error(), errLargeTransaction.Error()) {
-			return api.ContractMetadata{}, true, err
-		} else if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1543,9 +1535,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		if strings.Contains(err.Error(), errLargeTransaction.Error()) {
-			return api.ContractMetadata{}, true, err
-		} else if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
