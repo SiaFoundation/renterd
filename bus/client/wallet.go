@@ -32,7 +32,7 @@ func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput, u
 			_ = c.WalletDiscard(ctx, txnSet...)
 		}
 	}()
-	err = c.WalletSign(ctx, &txn, toSign, types.CoveredFields{WholeTransaction: true})
+	err = c.WalletSign(ctx, &txnSet[len(txnSet)-1], toSign, types.CoveredFields{WholeTransaction: true})
 	if err != nil {
 		return err
 	}
