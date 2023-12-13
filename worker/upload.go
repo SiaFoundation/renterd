@@ -719,57 +719,55 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 }
 
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
-	// build maps to allow quick lookups
-	wanted := make(map[types.FileContractID]api.ContractMetadata)
+	var added int
+	var stopped int
+	var renewedd int
+
+	// build map of renewals
 	renewals := make(map[types.FileContractID]api.ContractMetadata)
 	for _, c := range contracts {
-		wanted[c.ID] = c
 		if c.RenewedFrom == (types.FileContractID{}) {
 			renewals[c.RenewedFrom] = c
 		}
 	}
 
-	var added int
-	var stopped int
-	var renewedd int
-
-	// stop or renew uploads we currently have
+	// refresh uploaders
 	var refreshed []*uploader
+	existing := make(map[types.FileContractID]struct{})
 	for _, uploader := range mgr.uploaders {
-		_, keep := wanted[uploader.ContractID()]
-		renewal, renewed := renewals[uploader.ContractID()]
+		// renew uploaders that got renewed
+		if renewal, renewed := renewals[uploader.ContractID()]; renewed {
+			fmt.Printf("DEBUG PJ: mgr: renewing %v to %v\n", uploader.ContractID(), renewal.ID)
+			uploader.Renew(mgr.hp, renewal, bh)
+			renewedd++
+		}
 
-		// stop uploaders that no longer appear in the list
-		if !(keep || renewed) {
+		// stop uploaders that expired
+		if uploader.Expired(bh) {
 			fmt.Printf("DEBUG PJ: mgr: stopping %v\n", uploader.ContractID())
 			uploader.Stop()
 			stopped++
 			continue
 		}
 
-		// renew uploaders that got renewed
-		if renewed {
-			fmt.Printf("DEBUG PJ: mgr: renewing %v to %v\n", uploader.ContractID(), renewal.ID)
-			uploader.Renew(mgr.hp, renewal, bh)
-			renewedd++
-		}
-
-		// update uploader and add to the list
+		// update uploader
 		uploader.UpdateBlockHeight(bh)
 		uploader.tryRecomputeStats()
 
-		// update the wanted list, we'll be left with the uploaders we want to add
+		// add to the list
 		refreshed = append(refreshed, uploader)
-		delete(wanted, uploader.ContractID())
+		existing[uploader.ContractID()] = struct{}{}
 	}
 
 	// add missing uploaders
-	for _, c := range wanted {
-		added++
-		uploader := mgr.newUploader(mgr.b, mgr.hp, c, bh)
-		fmt.Printf("DEBUG PJ: mgr: starting %v\n", uploader.ContractID())
-		refreshed = append(refreshed, uploader)
-		go uploader.Start(mgr.hp, mgr.rl)
+	for _, c := range contracts {
+		if _, exists := existing[c.ID]; !exists {
+			added++
+			uploader := mgr.newUploader(mgr.b, mgr.hp, c, bh)
+			fmt.Printf("DEBUG PJ: mgr: starting %v\n", uploader.ContractID())
+			refreshed = append(refreshed, uploader)
+			go uploader.Start(mgr.hp, mgr.rl)
+		}
 	}
 
 	fmt.Printf("DEBUG PJ: mgr: uploaders refreshed %d -> %d | added %d | stopped %d | renewed %d\n", len(mgr.uploaders), len(refreshed), added, stopped, renewedd)

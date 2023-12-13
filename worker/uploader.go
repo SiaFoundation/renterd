@@ -53,6 +53,12 @@ func (u *uploader) ContractID() types.FileContractID {
 	return u.fcid
 }
 
+func (u *uploader) Expired(bh uint64) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return bh >= u.endHeight
+}
+
 func (u *uploader) Healthy() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
