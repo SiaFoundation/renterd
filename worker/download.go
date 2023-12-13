@@ -25,10 +25,10 @@ import (
 )
 
 const (
+	downloadMemoryLimitDenom       = 6 // 1/6th of the available download memory can be used by a single download
 	downloadOverheadB              = 284
 	downloadOverpayHealthThreshold = 0.25
 	maxConcurrentSectorsPerHost    = 3
-	maxConcurrentSlabsPerDownload  = 3
 )
 
 var (
@@ -113,7 +113,7 @@ type (
 	}
 
 	slabDownloadResponse struct {
-		mem              *acquiredMemory
+		mem              Memory
 		surchargeApplied bool
 		shards           [][]byte
 		index            int
@@ -262,26 +262,20 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
 	responseChan := make(chan *slabDownloadResponse)
-	concurrentSlabsChan := make(chan struct{}, maxConcurrentSlabsPerDownload)
 	ctx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
 		wg.Wait()
 		close(responseChan)
-
-	DRAIN_LOOP:
-		for {
-			select {
-			case <-concurrentSlabsChan:
-			default:
-				break DRAIN_LOOP
-			}
-		}
-		close(concurrentSlabsChan)
 	}()
 
-	// launch a goroutine to launch consecutive slab downloads
+	// apply a per-download limit to the memory manager
+	mm, err := mgr.mm.Limit(mgr.mm.Status().Total / downloadMemoryLimitDenom)
+	if err != nil {
+		return err
+	}
 
+	// launch a goroutine to launch consecutive slab downloads
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -296,7 +290,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				return
 			case <-mgr.stopChan:
 				return
-			case concurrentSlabsChan <- struct{}{}:
+			default:
 			}
 
 			// check if the next slab is a partial slab.
@@ -318,7 +312,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 			}
 
 			// acquire memory
-			mem := mgr.mm.AcquireMemory(ctx, uint64(next.Length))
+			mem := mm.AcquireMemory(ctx, uint64(next.Length))
 			if mem == nil {
 				return // interrupted
 			}
@@ -363,12 +357,6 @@ outer:
 			if resp.mem != nil {
 				defer resp.mem.Release()
 			}
-			defer func() {
-				select {
-				case <-concurrentSlabsChan:
-				default:
-				}
-			}()
 
 			if resp.err != nil {
 				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
