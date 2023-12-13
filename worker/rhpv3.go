@@ -1234,7 +1234,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	}
 
 	// Starting from here, we need to make sure to release the txn on error.
-	defer discardTxnOnErr(ctx, bus, l, wprr.TransactionSet[len(wprr.TransactionSet)-1], "RPCRenew", &err)
+	defer discardTxnSetOnErr(ctx, bus, l, wprr.TransactionSet, "RPCRenew", &err)
 
 	txnSet := wprr.TransactionSet
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]

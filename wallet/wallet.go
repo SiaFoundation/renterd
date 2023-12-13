@@ -270,9 +270,11 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 // ReleaseInputs is a helper function that releases the inputs of txn for use in
 // other transactions. It should only be called on transactions that are invalid
 // or will never be broadcast.
-func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
-	for _, in := range txn.SiacoinInputs {
-		delete(w.lastUsed, types.Hash256(in.ParentID))
+func (w *SingleAddressWallet) ReleaseInputs(txnSet ...types.Transaction) {
+	for _, txn := range txnSet {
+		for _, in := range txn.SiacoinInputs {
+			delete(w.lastUsed, types.Hash256(in.ParentID))
+		}
 	}
 }
 

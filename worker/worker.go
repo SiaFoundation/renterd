@@ -98,7 +98,7 @@ type (
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 
-		WalletDiscard(ctx context.Context, txn types.Transaction) error
+		WalletDiscard(ctx context.Context, txnSet ...types.Transaction) error
 		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
 		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
@@ -373,8 +373,8 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	jc.Encode(hpt)
 }
 
-func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, errContext string, err *error) {
-	discardTxnOnErr(ctx, w.bus, w.logger, txn, errContext, err)
+func (w *worker) discardTxnSetOnErr(ctx context.Context, txnSet []types.Transaction, errContext string, err *error) {
+	discardTxnSetOnErr(ctx, w.bus, w.logger, txnSet, errContext, err)
 }
 
 func (w *worker) rhpFormHandler(jc jape.Context) {
@@ -429,7 +429,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
-		defer w.discardTxnOnErr(ctx, renterTxnSet[len(renterTxnSet)-1], "rhpFormHandler", &err)
+		defer w.discardTxnSetOnErr(ctx, renterTxnSet, "rhpFormHandler", &err)
 
 		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
@@ -492,19 +492,21 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("failed to fund transaction", err) != nil {
 		return
 	}
+
 	// Sign the txn.
 	err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
 		WholeTransaction: true,
 	})
+
+	txnSet := append(parents, txn)
 	if jc.Check("failed to sign transaction", err) != nil {
-		_ = w.bus.WalletDiscard(ctx, txn)
+		_ = w.bus.WalletDiscard(ctx, txnSet...)
 		return
 	}
 	// Broadcast the txn.
-	txnSet := append(parents, txn)
 	err = w.bus.BroadcastTransaction(ctx, txnSet)
 	if jc.Check("failed to broadcast transaction", err) != nil {
-		_ = w.bus.WalletDiscard(ctx, txn)
+		_ = w.bus.WalletDiscard(ctx, txnSet...)
 		return
 	}
 }
@@ -1409,7 +1411,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	return
 }
 
-func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
+func discardTxnSetOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txnSet []types.Transaction, errContext string, err *error) {
 	if *err == nil {
 		return
 	}
@@ -1419,7 +1421,7 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
-	if err := bus.WalletDiscard(timeoutCtx, txn); err != nil {
+	if err := bus.WalletDiscard(timeoutCtx, txnSet...); err != nil {
 		l.Errorf("%v: failed to discard txn: %v", err)
 	}
 }

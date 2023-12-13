@@ -84,7 +84,7 @@ type Bus interface {
 
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletDiscard(ctx context.Context, txn types.Transaction) error
+	WalletDiscard(ctx context.Context, txnSet ...types.Transaction) error
 	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)

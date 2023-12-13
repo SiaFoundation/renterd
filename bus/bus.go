@@ -84,7 +84,7 @@ type (
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error)
 		Height() uint64
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
-		ReleaseInputs(txn types.Transaction)
+		ReleaseInputs(txnSete ...types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 		Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
@@ -621,9 +621,9 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 }
 
 func (b *bus) walletDiscardHandler(jc jape.Context) {
-	var txn types.Transaction
-	if jc.Decode(&txn) == nil {
-		b.w.ReleaseInputs(txn)
+	var wdr api.WalletDiscardRequest
+	if jc.Decode(&wdr) == nil {
+		b.w.ReleaseInputs(wdr.TransactionSet...)
 	}
 }
 

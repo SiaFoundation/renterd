@@ -26,16 +26,17 @@ func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput, u
 	if err != nil {
 		return err
 	}
+	txnSet := append(parents, txn)
 	defer func() {
 		if err != nil {
-			_ = c.WalletDiscard(ctx, txn)
+			_ = c.WalletDiscard(ctx, txnSet...)
 		}
 	}()
 	err = c.WalletSign(ctx, &txn, toSign, types.CoveredFields{WholeTransaction: true})
 	if err != nil {
 		return err
 	}
-	return c.BroadcastTransaction(ctx, append(parents, txn))
+	return c.BroadcastTransaction(ctx, txnSet)
 }
 
 // Wallet calls the /wallet endpoint on the bus.
@@ -46,8 +47,10 @@ func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error
 
 // WalletDiscard discards the provided txn, make its inputs usable again. This
 // should only be called on transactions that will never be broadcast.
-func (c *Client) WalletDiscard(ctx context.Context, txn types.Transaction) error {
-	return c.c.WithContext(ctx).POST("/wallet/discard", txn, nil)
+func (c *Client) WalletDiscard(ctx context.Context, txn ...types.Transaction) error {
+	return c.c.WithContext(ctx).POST("/wallet/discard", api.WalletDiscardRequest{
+		TransactionSet: txn,
+	}, nil)
 }
 
 // WalletFund funds txn using inputs controlled by the wallet.

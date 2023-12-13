@@ -11,6 +11,12 @@ import (
 )
 
 type (
+	// WalletDiscardRequest is the request type for the /wallet/discard
+	// endpoint.
+	WalletDiscardRequest struct {
+		TransactionSet []types.Transaction `json:"transactionSet"`
+	}
+
 	// WalletFundRequest is the request type for the /wallet/fund endpoint.
 	WalletFundRequest struct {
 		Transaction        types.Transaction `json:"transaction"`
