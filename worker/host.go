@@ -53,6 +53,7 @@ var _ Host = (*host)(nil)
 
 func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	return &host{
+		hk:                       hk,
 		acc:                      w.accounts.ForHost(hk),
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
