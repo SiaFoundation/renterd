@@ -596,6 +596,33 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 	return
 }
 
+func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
+	conn, err := dial(ctx, hostIP)
+	if err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			conn.Close()
+		}
+	}()
+	defer func() {
+		close(done)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+	}()
+	t, err := rhpv2.NewRenterTransport(conn, hostKey)
+	if err != nil {
+		return err
+	}
+	defer t.Close()
+	return fn(t)
+}
+
 func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
 	renterKey := w.deriveRenterKey(hk)
 

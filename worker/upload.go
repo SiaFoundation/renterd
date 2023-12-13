@@ -38,18 +38,19 @@ var (
 
 type (
 	uploadManager struct {
-		b           Bus
-		hp          hostProvider
-		rl          revisionLocker
-		mm          MemoryManager
-		logger      *zap.SugaredLogger
-		shutdownCtx context.Context
+		hm     HostManager
+		mm     MemoryManager
+		os     ObjectStore
+		rl     revisionLocker // TODO: host should implement revisionLocker, would allow us to remove it here
+		logger *zap.SugaredLogger
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
 		statsOverdrivePct              *stats.DataPoints
 		statsSlabUploadSpeedBytesPerMS *stats.DataPoints
+
+		shutdownCtx context.Context
 
 		mu        sync.Mutex
 		uploaders []*uploader
@@ -137,7 +138,7 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	}
 
 	mm := newMemoryManager(logger, maxMemory)
-	w.uploadManager = newUploadManager(w.bus, w, w, mm, maxOverdrive, overdriveTimeout, w.shutdownCtx, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w, maxOverdrive, overdriveTimeout, logger)
 }
 
 func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
@@ -303,13 +304,13 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 	return nil
 }
 
-func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, mm MemoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, shutdownCtx context.Context, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, rl revisionLocker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
-		b:      b,
-		hp:     hp,
+		hm:     hm,
+		mm:     mm,
+		os:     os,
 		rl:     rl,
 		logger: logger,
-		mm:     mm,
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
@@ -317,15 +318,15 @@ func newUploadManager(b Bus, hp hostProvider, rl revisionLocker, mm MemoryManage
 		statsOverdrivePct:              stats.NoDecay(),
 		statsSlabUploadSpeedBytesPerMS: stats.NoDecay(),
 
-		shutdownCtx: shutdownCtx,
+		shutdownCtx: ctx,
 
 		uploaders: make([]*uploader, 0),
 	}
 }
 
-func (mgr *uploadManager) newUploader(b Bus, hp hostProvider, c api.ContractMetadata, bh uint64) *uploader {
+func (mgr *uploadManager) newUploader(os ObjectStore, h Host, c api.ContractMetadata, bh uint64) *uploader {
 	return &uploader{
-		b: b,
+		os: os,
 
 		// static
 		hk:              c.HostKey,
@@ -338,7 +339,7 @@ func (mgr *uploadManager) newUploader(b Bus, hp hostProvider, c api.ContractMeta
 		statsSectorUploadSpeedBytesPerMS: stats.NoDecay(),
 
 		// covered by mutex
-		host:      hp.newHostV3(c.ID, c.HostKey, c.SiamuxAddr),
+		host:      h,
 		bh:        bh,
 		fcid:      c.ID,
 		endHeight: c.WindowEnd,
@@ -365,14 +366,14 @@ func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, sha
 	}
 
 	// track the upload in the bus
-	if err := mgr.b.TrackUpload(ctx, upload.id); err != nil {
+	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
 
 	// defer a function that finishes the upload
 	defer func() {
 		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.b.FinishUpload(ctx, upload.id); err != nil {
+		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
 		}
 		cancel()
@@ -411,7 +412,7 @@ func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, sha
 	}
 
 	// update the slab
-	return mgr.b.UpdateSlab(ctx, *s, contractSet)
+	return mgr.os.UpdateSlab(ctx, *s, contractSet)
 }
 
 func (mgr *uploadManager) Stats() uploadManagerStats {
@@ -476,14 +477,14 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// track the upload in the bus
-	if err := mgr.b.TrackUpload(ctx, upload.id); err != nil {
+	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return false, "", fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
 
 	// defer a function that finishes the upload
 	defer func() {
 		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.b.FinishUpload(ctx, upload.id); err != nil {
+		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
 		}
 		cancel()
@@ -595,7 +596,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// add partial slabs
 	if len(partialSlab) > 0 {
 		var pss []object.SlabSlice
-		pss, bufferSizeLimitReached, err = mgr.b.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		pss, bufferSizeLimitReached, err = mgr.os.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
 		if err != nil {
 			return false, "", err
 		}
@@ -604,13 +605,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 
 	if up.multipart {
 		// persist the part
-		err = mgr.b.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
+		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}
 	} else {
 		// persist the object
-		err = mgr.b.AddObject(ctx, up.bucket, up.path, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag})
+		err = mgr.os.AddObject(ctx, up.bucket, up.path, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag})
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add object: %w", err)
 		}
@@ -641,14 +642,14 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	}
 
 	// track the upload in the bus
-	if err := mgr.b.TrackUpload(ctx, upload.id); err != nil {
+	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
 
 	// defer a function that finishes the upload
 	defer func() {
 		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.b.FinishUpload(ctx, upload.id); err != nil {
+		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
 		}
 		cancel()
@@ -666,7 +667,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 
 	// mark packed slab as uploaded
 	slab := api.UploadedPackedSlab{BufferID: ps.BufferID, Shards: sectors}
-	err = mgr.b.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{slab})
+	err = mgr.os.MarkPackedSlabsUploaded(ctx, []api.UploadedPackedSlab{slab})
 	if err != nil {
 		return fmt.Errorf("couldn't mark packed slabs uploaded, err: %v", err)
 	}
@@ -743,7 +744,8 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 		// renew uploaders that got renewed
 		if renewed {
-			uploader.Renew(mgr.hp, renewal, bh)
+			host := mgr.hm.Host(renewal.HostKey, renewal.ID, renewal.SiamuxAddr)
+			uploader.Renew(host, renewal, bh)
 		}
 
 		// update uploader and add to the list
@@ -757,9 +759,10 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 	// add missing uploaders
 	for _, c := range wanted {
-		uploader := mgr.newUploader(mgr.b, mgr.hp, c, bh)
+		host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
+		uploader := mgr.newUploader(mgr.os, host, c, bh)
 		refreshed = append(refreshed, uploader)
-		go uploader.Start(mgr.hp, mgr.rl)
+		go uploader.Start(mgr.hm, mgr.rl)
 	}
 
 	mgr.uploaders = refreshed
