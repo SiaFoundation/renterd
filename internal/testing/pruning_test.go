@@ -145,20 +145,23 @@ func TestSectorPruning(t *testing.T) {
 	numObjects := 10
 
 	// add hosts
-	cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
+	hosts := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
 
 	// wait until we have accounts
 	cluster.WaitForAccounts()
-
-	// create a contracts dict
-	contracts, err := b.Contracts(context.Background())
-	tt.OK(err)
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
 		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), api.DefaultBucketName, filename, api.UploadObjectOptions{}))
 	}
+
+	// shut down the autopilot to prevent it from interfering
+	cluster.ShutdownAutopilot(context.Background())
+
+	// create a contracts dict
+	contracts, err := b.Contracts(context.Background())
+	tt.OK(err)
 
 	// compare database against roots returned by the host
 	var n int
@@ -181,15 +184,8 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal("unexpected number of roots", n)
 	}
 
-	// reboot the cluster to ensure spending records get flushed
-	// Restart cluster to have worker fetch the account from the bus again.
-	cluster2 := cluster.Reboot(context.Background())
-	defer cluster2.Shutdown()
-	b = cluster2.Bus
-	w = cluster2.Worker
-
-	// shut down the autopilot to prevent it from interfering
-	cluster2.ShutdownAutopilot(context.Background())
+	// sleep for a bit to ensure spending records get flushed
+	time.Sleep(3 * testBusFlushInterval)
 
 	// assert prunable data is 0
 	res, err := b.PrunableData(context.Background())
@@ -236,5 +232,43 @@ func TestSectorPruning(t *testing.T) {
 		if c.Spending.Deletions.IsZero() {
 			t.Fatal("spending record not updated")
 		}
+	}
+
+	// delete other object
+	for i := 1; i < numObjects; i += 2 {
+		filename := fmt.Sprintf("obj_%d", i)
+		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
+	}
+
+	// sleep for a bit to ensure spending records get flushed
+	time.Sleep(3 * testBusFlushInterval)
+
+	// assert amount of prunable data
+	res, err = b.PrunableData(context.Background())
+	tt.OK(err)
+	if res.TotalPrunable == 0 {
+		t.Fatal("expected prunable data")
+	}
+
+	// update the host settings so it's gouging
+	host := hosts[0]
+	settings := host.settings.Settings()
+	settings.IngressPrice = types.Siacoins(1)
+	settings.EgressPrice = types.Siacoins(1)
+	settings.BaseRPCPrice = types.Siacoins(1)
+	tt.OK(host.UpdateSettings(settings))
+
+	// find the corresponding contract
+	var c api.ContractMetadata
+	for _, c = range contracts {
+		if c.HostKey == host.PublicKey() {
+			break
+		}
+	}
+
+	// prune the contract and assert it threw a gouging error
+	_, _, err = w.RHPPruneContract(context.Background(), c.ID, 0)
+	if err == nil || !strings.Contains(err.Error(), "gouging") {
+		t.Fatal("expected gouging error", err)
 	}
 }

@@ -116,14 +116,10 @@ type (
 	}
 
 	HostGougingBreakdown struct {
-		V2 GougingChecks `json:"v2"`
-		V3 GougingChecks `json:"v3"`
-	}
-
-	GougingChecks struct {
 		ContractErr string `json:"contractErr"`
 		DownloadErr string `json:"downloadErr"`
 		GougingErr  string `json:"gougingErr"`
+		PruneErr    string `json:"pruneErr"`
 		UploadErr   string `json:"uploadErr"`
 	}
 
@@ -142,20 +138,13 @@ func (sb HostScoreBreakdown) String() string {
 	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
 }
 
-func (hgb HostGougingBreakdown) DownloadGouging() bool {
-	return hgb.V3.DownloadErr != ""
-}
-
 func (hgb HostGougingBreakdown) Gouging() bool {
-	return hgb.V2.Gouging() || hgb.V3.Gouging()
-}
-
-func (gc GougingChecks) Gouging() bool {
 	for _, err := range []string{
-		gc.ContractErr,
-		gc.DownloadErr,
-		gc.GougingErr,
-		gc.UploadErr,
+		hgb.ContractErr,
+		hgb.DownloadErr,
+		hgb.GougingErr,
+		hgb.PruneErr,
+		hgb.UploadErr,
 	} {
 		if err != "" {
 			return true
@@ -164,29 +153,18 @@ func (gc GougingChecks) Gouging() bool {
 	return false
 }
 
-func (gc GougingChecks) Errors() (errs []string) {
-	for _, err := range []string{
-		gc.ContractErr,
-		gc.DownloadErr,
-		gc.GougingErr,
-		gc.UploadErr,
-	} {
-		if err != "" {
-			errs = append(errs, err)
-		}
-	}
-	return
-}
-
-func (hgb HostGougingBreakdown) Reasons() string {
+func (hgb HostGougingBreakdown) String() string {
 	var reasons []string
-	for _, err := range append(hgb.V2.Errors(), hgb.V3.Errors()...) {
-		if err != "" {
-			reasons = append(reasons, err)
+	for _, errStr := range []string{
+		hgb.ContractErr,
+		hgb.DownloadErr,
+		hgb.GougingErr,
+		hgb.PruneErr,
+		hgb.UploadErr,
+	} {
+		if errStr != "" {
+			reasons = append(reasons, errStr)
 		}
-	}
-	if len(reasons) == 0 {
-		return ""
 	}
 	return strings.Join(reasons, ";")
 }

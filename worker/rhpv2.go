@@ -278,6 +278,15 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+				// perform gouging checks
+				gc, err := GougingCheckerFromContext(ctx, false)
+				if err != nil {
+					return err
+				}
+				if breakdown := gc.Check(&settings, nil); breakdown.Gouging() {
+					return fmt.Errorf("failed to prune contract: %v", breakdown)
+				}
+
 				// delete roots
 				got, err := w.fetchContractRoots(t, &rev, settings)
 				if err != nil {
@@ -502,6 +511,13 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			gc, err := GougingCheckerFromContext(ctx, false)
+			if err != nil {
+				return err
+			}
+			if breakdown := gc.Check(&settings, nil); breakdown.Gouging() {
+				return fmt.Errorf("failed to list contract roots: %v", breakdown)
+			}
 			roots, err = w.fetchContractRoots(t, &rev, settings)
 			return
 		})

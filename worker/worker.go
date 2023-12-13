@@ -422,7 +422,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 			return err
 		}
 		if breakdown := gc.Check(&hostSettings, nil); breakdown.Gouging() {
-			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown.Reasons())
+			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown)
 		}
 
 		renterTxnSet, err := w.bus.WalletPrepareForm(ctx, renterAddress, renterKey.PublicKey(), renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
@@ -531,13 +531,6 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		defer cancel()
 	}
 
-	// attach gouging checker
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
 	// fetch the contract from the bus
 	contract, err := w.bus.Contract(ctx, fcid)
 	if errors.Is(err, api.ErrContractNotFound) {
@@ -555,6 +548,15 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		jc.Encode(api.RHPPruneContractResponse{})
 		return
 	}
+
+	// fetch gouging params
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("could not fetch gouging parameters", err) != nil {
+		return
+	}
+
+	// attach gouging checker
+	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// prune the contract
 	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
@@ -591,6 +593,15 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	} else if jc.Check("couldn't fetch contract", err) != nil {
 		return
 	}
+
+	// fetch gouging params
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
+		return
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// fetch the roots from the host
 	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, id, c.RevisionNumber)
@@ -773,7 +784,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	numShardsMigrated, surchargeApplied, err := migrateSlab(ctx, w.downloadManager, w.uploadManager, &slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight, w.logger)
+	numShardsMigrated, surchargeApplied, err := w.migrate(ctx, &slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
 	if err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
