@@ -720,49 +720,47 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 }
 
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
-	// build maps to allow quick lookups
-	wanted := make(map[types.FileContractID]api.ContractMetadata)
+	// build map of renewals
 	renewals := make(map[types.FileContractID]api.ContractMetadata)
 	for _, c := range contracts {
-		wanted[c.ID] = c
 		if c.RenewedFrom == (types.FileContractID{}) {
 			renewals[c.RenewedFrom] = c
 		}
 	}
 
-	// stop or renew uploads we currently have
+	// refresh uploaders
 	var refreshed []*uploader
+	existing := make(map[types.FileContractID]struct{})
 	for _, uploader := range mgr.uploaders {
-		_, keep := wanted[uploader.ContractID()]
-		renewal, renewed := renewals[uploader.ContractID()]
-
-		// stop uploaders that no longer appear in the list
-		if !(keep || renewed) {
-			uploader.Stop()
-			continue
-		}
-
 		// renew uploaders that got renewed
-		if renewed {
+		if renewal, renewed := renewals[uploader.ContractID()]; renewed {
 			host := mgr.hm.Host(renewal.HostKey, renewal.ID, renewal.SiamuxAddr)
 			uploader.Renew(host, renewal, bh)
 		}
 
-		// update uploader and add to the list
+		// stop uploaders that expired
+		if uploader.Expired(bh) {
+			uploader.Stop()
+			continue
+		}
+
+		// update uploader
 		uploader.UpdateBlockHeight(bh)
 		uploader.tryRecomputeStats()
 
-		// update the wanted list, we'll be left with the uploaders we want to add
+		// add to the list
 		refreshed = append(refreshed, uploader)
-		delete(wanted, uploader.ContractID())
+		existing[uploader.ContractID()] = struct{}{}
 	}
 
 	// add missing uploaders
-	for _, c := range wanted {
-		host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
-		uploader := mgr.newUploader(mgr.os, host, c, bh)
-		refreshed = append(refreshed, uploader)
-		go uploader.Start(mgr.hm, mgr.rl)
+	for _, c := range contracts {
+		if _, exists := existing[c.ID]; !exists {
+			host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
+			uploader := mgr.newUploader(mgr.os, host, c, bh)
+			refreshed = append(refreshed, uploader)
+			go uploader.Start(mgr.hm, mgr.rl)
+		}
 	}
 
 	mgr.uploaders = refreshed

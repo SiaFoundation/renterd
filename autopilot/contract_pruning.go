@@ -15,6 +15,7 @@ import (
 var (
 	errConnectionRefused         = errors.New("connection refused")
 	errConnectionTimedOut        = errors.New("connection timed out")
+	errConnectionResetByPeer     = errors.New("connection reset by peer")
 	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
 	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
 	errNoRouteToHost             = errors.New("no route to host")
@@ -65,8 +66,10 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 	id = alertIDForContract(alertPruningID, pr.fcid)
 
 	if shouldTrigger := pr.err != nil && !((isErr(pr.err, errInvalidMerkleProof) && build.VersionCmp(pr.version, "1.6.0") < 0) ||
+		isErr(pr.err, api.ErrContractNotFound) || // contract got archived
 		isErr(pr.err, errConnectionRefused) ||
 		isErr(pr.err, errConnectionTimedOut) ||
+		isErr(pr.err, errConnectionResetByPeer) ||
 		isErr(pr.err, errInvalidHandshakeSignature) ||
 		isErr(pr.err, errNoRouteToHost) ||
 		isErr(pr.err, errNoSuchHost)); shouldTrigger {

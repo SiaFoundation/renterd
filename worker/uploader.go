@@ -53,6 +53,12 @@ func (u *uploader) ContractID() types.FileContractID {
 	return u.fcid
 }
 
+func (u *uploader) Expired(bh uint64) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return bh >= u.endHeight
+}
+
 func (u *uploader) Healthy() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -70,7 +76,7 @@ func (u *uploader) Renew(h Host, c api.ContractMetadata, bh uint64) {
 	u.endHeight = c.WindowEnd
 }
 
-func (u *uploader) Start(hp HostManager, rl revisionLocker) {
+func (u *uploader) Start(hm HostManager, rl revisionLocker) {
 outer:
 	for {
 		// wait for work
