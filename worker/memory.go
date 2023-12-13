@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.sia.tech/renterd/api"
@@ -13,7 +14,13 @@ type (
 	// uploads and downloads.
 	MemoryManager interface {
 		Status() api.MemoryStatus
-		AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory
+		AcquireMemory(ctx context.Context, amt uint64) Memory
+		Limit(amt uint64) (MemoryManager, error)
+	}
+
+	Memory interface {
+		Release()
+		ReleaseSome(amt uint64)
 	}
 
 	memoryManager struct {
@@ -44,6 +51,16 @@ func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) MemoryManager
 	return mm
 }
 
+func (mm *memoryManager) Limit(amt uint64) (MemoryManager, error) {
+	if amt > mm.totalAvailable {
+		return nil, fmt.Errorf("cannot limit memory to %v when only %v is available", amt, mm.available)
+	}
+	return &limitMemoryManager{
+		parent: mm,
+		child:  newMemoryManager(mm.logger, amt),
+	}, nil
+}
+
 func (mm *memoryManager) Status() api.MemoryStatus {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -53,7 +70,7 @@ func (mm *memoryManager) Status() api.MemoryStatus {
 	}
 }
 
-func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory {
+func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
 	if amt == 0 {
 		mm.logger.Fatal("cannot acquire 0 memory")
 	} else if mm.totalAvailable < amt {
@@ -106,4 +123,51 @@ func (am *acquiredMemory) ReleaseSome(amt uint64) {
 	am.remaining -= amt
 	am.mm.sigNewMem.Signal() // wake next goroutine
 	am.mm.sigNewMem.L.Unlock()
+}
+
+type (
+	limitMemoryManager struct {
+		parent MemoryManager
+		child  MemoryManager
+	}
+
+	limitAcquiredMemory struct {
+		parent Memory
+		child  Memory
+	}
+)
+
+func (lmm *limitMemoryManager) Status() api.MemoryStatus {
+	return lmm.child.Status()
+}
+
+func (lmm *limitMemoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
+	childMem := lmm.child.AcquireMemory(ctx, amt)
+	if childMem == nil {
+		return nil
+	}
+	parentMem := lmm.parent.AcquireMemory(ctx, amt)
+	if parentMem == nil {
+		childMem.Release()
+		return nil
+	}
+
+	return &limitAcquiredMemory{
+		child:  childMem,
+		parent: parentMem,
+	}
+}
+
+func (lmm *limitMemoryManager) Limit(amt uint64) (MemoryManager, error) {
+	return lmm.child.Limit(amt)
+}
+
+func (lam *limitAcquiredMemory) Release() {
+	lam.child.Release()
+	lam.parent.Release()
+}
+
+func (lam *limitAcquiredMemory) ReleaseSome(amt uint64) {
+	lam.child.ReleaseSome(amt)
+	lam.parent.ReleaseSome(amt)
 }
