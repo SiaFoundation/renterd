@@ -332,69 +332,6 @@ func (h *host) fetchRevisionNoPayment(ctx context.Context, hostKey types.PublicK
 	return rev, err
 }
 
-func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
-	if err != nil {
-		return err
-	}
-
-	// calculate the amount to deposit
-	curr, err := h.acc.Balance(ctx)
-	if err != nil {
-		return err
-	}
-	if curr.Cmp(balance) >= 0 {
-		return nil
-	}
-	amount := balance.Sub(curr)
-
-	// cap the amount by the amount of money left in the contract
-	renterFunds := rev.ValidRenterPayout()
-	possibleFundCost := pt.FundAccountCost.Add(pt.UpdatePriceTableCost)
-	if renterFunds.Cmp(possibleFundCost) <= 0 {
-		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, possibleFundCost)
-	} else if maxAmount := renterFunds.Sub(possibleFundCost); maxAmount.Cmp(amount) < 0 {
-		amount = maxAmount
-	}
-
-	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			cost := amount.Add(pt.FundAccountCost)
-			payment, err := payByContract(rev, cost, rhpv3.Account{}, h.renterKey) // no account needed for funding
-			if err != nil {
-				return err
-			}
-			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
-				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
-			}
-			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: cost})
-			return nil
-		})
-	})
-}
-
-func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
-	if err != nil {
-		return err
-	}
-
-	return h.acc.WithSync(ctx, func() (types.Currency, error) {
-		var balance types.Currency
-		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
-			if err != nil {
-				return err
-			}
-			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
-			return err
-		})
-		return balance, err
-	})
-}
-
 type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
