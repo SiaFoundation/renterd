@@ -1228,7 +1228,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.NewCollateral, *pt, rrr.EndHeight, rrr.WindowSize)
+	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.MinNewCollateral, *pt, rrr.EndHeight, rrr.WindowSize, rrr.ExpectedNewStorage)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to prepare renew: %w", err)
 	}

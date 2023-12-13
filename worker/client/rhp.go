@@ -80,22 +80,21 @@ func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileCont
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, newCollateral types.Currency, windowSize uint64) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, expectedStorage, windowSize uint64) (resp api.RHPRenewResponse, err error) {
 	req := api.RHPRenewRequest{
-		ContractID:    contractID,
-		EndHeight:     endHeight,
-		HostAddress:   hostAddress,
-		HostKey:       hostKey,
-		NewCollateral: newCollateral,
-		RenterAddress: renterAddress,
-		RenterFunds:   renterFunds,
-		SiamuxAddr:    siamuxAddr,
-		WindowSize:    windowSize,
+		ContractID:         contractID,
+		EndHeight:          endHeight,
+		ExpectedNewStorage: expectedStorage,
+		HostAddress:        hostAddress,
+		HostKey:            hostKey,
+		MinNewCollateral:   minNewCollateral,
+		RenterAddress:      renterAddress,
+		RenterFunds:        renterFunds,
+		SiamuxAddr:         siamuxAddr,
+		WindowSize:         windowSize,
 	}
-
-	var resp api.RHPRenewResponse
-	err := c.c.WithContext(ctx).POST("/rhp/renew", req, &resp)
-	return resp.Contract, resp.TransactionSet, err
+	err = c.c.WithContext(ctx).POST("/rhp/renew", req, &resp)
+	return
 }
 
 // RHPScan scans a host, returning its current settings.
