@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - master
-      - stable
+      - dev
     tags: 
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
