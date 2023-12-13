@@ -720,10 +720,6 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 }
 
 func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) {
-	var added int
-	var stopped int
-	var renewedd int
-
 	// build map of renewals
 	renewals := make(map[types.FileContractID]api.ContractMetadata)
 	for _, c := range contracts {
@@ -738,17 +734,13 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	for _, uploader := range mgr.uploaders {
 		// renew uploaders that got renewed
 		if renewal, renewed := renewals[uploader.ContractID()]; renewed {
-			fmt.Printf("DEBUG PJ: mgr: renewing %v to %v\n", uploader.ContractID(), renewal.ID)
 			host := mgr.hm.Host(renewal.HostKey, renewal.ID, renewal.SiamuxAddr)
 			uploader.Renew(host, renewal, bh)
-			renewedd++
 		}
 
 		// stop uploaders that expired
 		if uploader.Expired(bh) {
-			fmt.Printf("DEBUG PJ: mgr: stopping %v\n", uploader.ContractID())
 			uploader.Stop()
-			stopped++
 			continue
 		}
 
@@ -764,16 +756,13 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists {
-			added++
 			host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 			uploader := mgr.newUploader(mgr.os, host, c, bh)
-			fmt.Printf("DEBUG PJ: mgr: starting %v\n", uploader.ContractID())
 			refreshed = append(refreshed, uploader)
 			go uploader.Start(mgr.hm, mgr.rl)
 		}
 	}
 
-	fmt.Printf("DEBUG PJ: mgr: uploaders refreshed %d -> %d | added %d | stopped %d | renewed %d\n", len(mgr.uploaders), len(refreshed), added, stopped, renewedd)
 	mgr.uploaders = refreshed
 }
 
