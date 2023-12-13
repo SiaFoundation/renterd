@@ -242,7 +242,7 @@ func (ap *Autopilot) Run() error {
 			// Trace/Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ctx)
 			if err != nil {
-				ap.logger.Errorf("failed to fetch worker id - abort maintenance", err)
+				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
 				return
 			}
 			span.SetAttributes(attribute.String("worker", workerID))

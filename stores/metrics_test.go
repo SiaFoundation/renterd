@@ -124,6 +124,15 @@ func TestContractPruneMetrics(t *testing.T) {
 			t.Fatalf("expected fcid to be %v, got %v", fcid, m.ContractID)
 		}
 	})
+
+	// Prune metrics
+	if err := ss.PruneMetrics(context.Background(), api.MetricContractPrune, time.UnixMilli(3)); err != nil {
+		t.Fatal(err)
+	} else if metrics, err := ss.ContractPruneMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.ContractPruneMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
+	}
 }
 
 func TestContractSetMetrics(t *testing.T) {
@@ -192,6 +201,15 @@ func TestContractSetMetrics(t *testing.T) {
 
 	// Query the metric in the middle of the 3 we added.
 	assertMetrics(time.UnixMilli(150), 1, 50*time.Millisecond, api.ContractSetMetricsQueryOpts{Name: cs}, 1, []int{3})
+
+	// Prune metrics
+	if err := ss.PruneMetrics(context.Background(), api.MetricContractSet, time.UnixMilli(200)); err != nil {
+		t.Fatal(err)
+	} else if metrics, err := ss.ContractSetMetrics(context.Background(), time.UnixMilli(100), 3, 50*time.Millisecond, api.ContractSetMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
+	}
 }
 
 func TestContractChurnSetMetrics(t *testing.T) {
@@ -266,6 +284,15 @@ func TestContractChurnSetMetrics(t *testing.T) {
 			t.Fatalf("expected reason to be %v, got %v", reasons[0], m.Reason)
 		}
 	})
+
+	// Prune metrics
+	if err := ss.PruneMetrics(context.Background(), api.MetricContractSetChurn, time.UnixMilli(3)); err != nil {
+		t.Fatal(err)
+	} else if metrics, err := ss.ContractSetChurnMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.ContractSetChurnMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
+	}
 }
 
 func TestPerformanceMetrics(t *testing.T) {
@@ -342,6 +369,15 @@ func TestPerformanceMetrics(t *testing.T) {
 			t.Fatalf("expected origin to be %v, got %v", origins[0], m.Origin)
 		}
 	})
+
+	// Prune metrics
+	if err := ss.PruneMetrics(context.Background(), api.MetricPerformance, time.UnixMilli(3)); err != nil {
+		t.Fatal(err)
+	} else if metrics, err := ss.PerformanceMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.PerformanceMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
+	}
 }
 
 func TestContractMetrics(t *testing.T) {
@@ -353,6 +389,7 @@ func TestContractMetrics(t *testing.T) {
 	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
 	var i byte
 	fcid2Metric := make(map[types.FileContractID]api.ContractMetric)
+	var metricsTimeAsc []api.ContractMetric
 	for _, host := range hosts {
 		for _, recordedTime := range times {
 			metric := api.ContractMetric{
@@ -369,12 +406,16 @@ func TestContractMetrics(t *testing.T) {
 				ListSpending:        types.NewCurrency64(1),
 			}
 			fcid2Metric[metric.ContractID] = metric
+			metricsTimeAsc = append(metricsTimeAsc, metric)
 			if err := ss.RecordContractMetric(context.Background(), metric); err != nil {
 				t.Fatal(err)
 			}
 			i++
 		}
 	}
+	sort.SliceStable(metricsTimeAsc, func(i, j int) bool {
+		return metricsTimeAsc[i].Timestamp.Std().UnixMilli() < metricsTimeAsc[j].Timestamp.Std().UnixMilli()
+	})
 
 	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts, expected int, cmpFn func(api.ContractMetric)) {
 		t.Helper()
@@ -399,11 +440,8 @@ func TestContractMetrics(t *testing.T) {
 		}
 	}
 
-	// Query without any filters.
-	start := time.UnixMilli(1)
-	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{}, 3, func(m api.ContractMetric) {})
-
 	// Query by host.
+	start := time.UnixMilli(1)
 	assertMetrics(start, 3, time.Millisecond, api.ContractMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.ContractMetric) {
 		if m.HostKey != hosts[0] {
 			t.Fatalf("expected host to be %v, got %v", hosts[0], m.HostKey)
@@ -417,6 +455,39 @@ func TestContractMetrics(t *testing.T) {
 			t.Fatalf("expected fcid to be %v, got %v", fcid, m.ContractID)
 		}
 	})
+	// Query without any filters. This will cause aggregate values to be returned.
+	metrics, err := ss.ContractMetrics(context.Background(), start, 3, time.Millisecond, api.ContractMetricsQueryOpts{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 3 {
+		t.Fatalf("expected 3 metrics, got %v", len(metrics))
+	}
+	for i, m := range metrics {
+		var expectedMetric api.ContractMetric
+		expectedMetric.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, time.Millisecond, unixTimeMS(metricsTimeAsc[2*i].Timestamp)))
+		expectedMetric.ContractID = types.FileContractID{}
+		expectedMetric.HostKey = types.PublicKey{}
+		expectedMetric.RemainingCollateral, _ = metricsTimeAsc[2*i].RemainingCollateral.AddWithOverflow(metricsTimeAsc[2*i+1].RemainingCollateral)
+		expectedMetric.RemainingFunds, _ = metricsTimeAsc[2*i].RemainingFunds.AddWithOverflow(metricsTimeAsc[2*i+1].RemainingFunds)
+		expectedMetric.RevisionNumber = 0
+		expectedMetric.UploadSpending, _ = metricsTimeAsc[2*i].UploadSpending.AddWithOverflow(metricsTimeAsc[2*i+1].UploadSpending)
+		expectedMetric.DownloadSpending, _ = metricsTimeAsc[2*i].DownloadSpending.AddWithOverflow(metricsTimeAsc[2*i+1].DownloadSpending)
+		expectedMetric.FundAccountSpending, _ = metricsTimeAsc[2*i].FundAccountSpending.AddWithOverflow(metricsTimeAsc[2*i+1].FundAccountSpending)
+		expectedMetric.DeleteSpending, _ = metricsTimeAsc[2*i].DeleteSpending.AddWithOverflow(metricsTimeAsc[2*i+1].DeleteSpending)
+		expectedMetric.ListSpending, _ = metricsTimeAsc[2*i].ListSpending.AddWithOverflow(metricsTimeAsc[2*i+1].ListSpending)
+		if !cmp.Equal(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)) {
+			t.Fatal(i, "unexpected metric", cmp.Diff(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)))
+		}
+	}
+
+	// Prune metrics
+	if err := ss.PruneMetrics(context.Background(), api.MetricContract, time.UnixMilli(3)); err != nil {
+		t.Fatal(err)
+	} else if metrics, err := ss.ContractMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.ContractMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
+	}
 }
 
 func TestWalletMetrics(t *testing.T) {
@@ -447,5 +518,14 @@ func TestWalletMetrics(t *testing.T) {
 		return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
 	}) {
 		t.Fatal("expected metrics to be sorted by time")
+	}
+
+	// Prune metrics
+	if err := ss.PruneMetrics(context.Background(), api.MetricWallet, time.UnixMilli(3)); err != nil {
+		t.Fatal(err)
+	} else if metrics, err := ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(metrics) != 1 {
+		t.Fatalf("expected 1 metric, got %v", len(metrics))
 	}
 }

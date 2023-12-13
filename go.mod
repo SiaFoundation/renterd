@@ -17,13 +17,13 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.21.0
 	go.opentelemetry.io/otel/sdk v1.21.0
 	go.opentelemetry.io/otel/trace v1.21.0
-	go.sia.tech/core v0.1.12-0.20231011172826-6ca0ac7b3b6b
+	go.sia.tech/core v0.1.12-0.20231211182757-77190f04f90b
 	go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2
 	go.sia.tech/hostd v0.2.2
 	go.sia.tech/jape v0.11.1
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.34.0
+	go.sia.tech/web/renterd v0.36.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/crypto v0.16.0
 	golang.org/x/term v0.15.0

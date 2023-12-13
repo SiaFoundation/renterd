@@ -93,8 +93,8 @@ func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
 // A SiacoinElement is a SiacoinOutput along with its ID.
 type SiacoinElement struct {
 	types.SiacoinOutput
-	ID             types.Hash256
-	MaturityHeight uint64
+	ID             types.Hash256 `json:"id"`
+	MaturityHeight uint64        `json:"maturityHeight"`
 }
 
 // A Transaction is an on-chain transaction relevant to a particular wallet,

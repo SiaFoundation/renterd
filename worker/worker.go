@@ -107,12 +107,6 @@ type (
 	}
 )
 
-type ContractLocker interface {
-	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
-	KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error)
-	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
-}
-
 // A Bus is the source of truth within a renterd system.
 type Bus interface {
 	alerts.Alerter
@@ -167,7 +161,7 @@ type Bus interface {
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
 	WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, newCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize uint64) (api.WalletPrepareRenewResponse, error)
+	WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
 	WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 
 	Bucket(_ context.Context, bucket string) (api.Bucket, error)
@@ -218,7 +212,7 @@ type hostV3 interface {
 	FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 	FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
 	FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
-	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, err error)
+	Renew(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error)
 	SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 	UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 }
@@ -311,20 +305,6 @@ func (w *worker) newHostV3(contractID types.FileContractID, hostKey types.Public
 		transportPool:            w.transportPoolV3,
 		priceTables:              w.priceTables,
 	}
-}
-
-func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
-	contractLock, err := w.acquireContractLock(ctx, fcid, priority)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = contractLock.Release(releaseCtx)
-		cancel()
-	}()
-
-	return fn()
 }
 
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
@@ -753,9 +733,10 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	// renew the contract
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
+	var contractPrice types.Currency
 	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, cs.BlockHeight, func(_ types.FileContractRevision) (err error) {
 		h := w.newHostV3(rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr)
-		renewed, txnSet, err = h.Renew(ctx, rrr)
+		renewed, txnSet, contractPrice, err = h.Renew(ctx, rrr)
 		return err
 	})) != nil {
 		return
@@ -771,6 +752,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	jc.Encode(api.RHPRenewResponse{
 		ContractID:     renewed.ID(),
 		Contract:       renewed,
+		ContractPrice:  contractPrice,
 		TransactionSet: txnSet,
 	})
 }
@@ -1142,7 +1124,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	params := defaultParameters(bucket, path)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if err := jc.Check("couldn't upload object", err); err != nil {
-		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+		if err != nil && !(errors.Is(err, errWorkerShutDown) ||
 			errors.Is(err, errNotEnoughContracts) ||
 			errors.Is(err, context.Canceled)) {
 			w.logger.Error(err)
@@ -1281,7 +1263,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	params := multipartParameters(bucket, path, uploadID, partNumber)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
-		if err != nil && !(errors.Is(err, errUploadManagerStopped) ||
+		if err != nil && !(errors.Is(err, errWorkerShutDown) ||
 			errors.Is(err, errNotEnoughContracts) ||
 			errors.Is(err, context.Canceled)) {
 			w.logger.Error(err)
@@ -1292,18 +1274,6 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// set etag header
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(eTag))
-}
-
-func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
-	slab := object.Slab{
-		Key:       key,
-		MinShards: minShards,
-		Shards:    make([]object.Sector, totalShards),
-	}
-	encodedShards := make([][]byte, totalShards)
-	slab.Encode(data, encodedShards)
-	slab.Encrypt(encodedShards)
-	return encodedShards
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
@@ -1355,10 +1325,6 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func preparePayment(accountKey types.PrivateKey, amt types.Currency, blockHeight uint64) rhpv3.PayByEphemeralAccountRequest {
-	return rhpv3.PayByEphemeralAccount(rhpv3.Account(accountKey.PublicKey()), amt, blockHeight+6, accountKey) // 1 hour valid
-}
-
 func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
@@ -1407,6 +1373,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	if uploadOverdriveTimeout == 0 {
 		return nil, errors.New("upload overdrive timeout must be positive")
 	}
+	if downloadMaxMemory == 0 {
+		return nil, errors.New("downloadMaxMemory cannot be 0")
+	}
+	if uploadMaxMemory == 0 {
+		return nil, errors.New("uploadMaxMemory cannot be 0")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
@@ -1423,20 +1395,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		shutdownCtx:             ctx,
 		shutdownCtxCancel:       cancel,
 	}
-	w.initTransportPool()
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
+	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
 	w.initPriceTables()
-	dmm, err := newMemoryManager(w.logger, downloadMaxMemory)
-	if err != nil {
-		return nil, err
-	}
-	w.initDownloadManager(dmm, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
-	umm, err := newMemoryManager(w.logger, uploadMaxMemory)
-	if err != nil {
-		return nil, err
-	}
-	w.initUploadManager(umm, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
+	w.initTransportPool()
+	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 	return w, nil
 }
 
@@ -1493,91 +1457,6 @@ func (w *worker) Shutdown(_ context.Context) error {
 	// Stop the uploader.
 	w.uploadManager.Stop()
 	return nil
-}
-
-type contractLock struct {
-	lockID uint64
-	fcid   types.FileContractID
-	d      time.Duration
-	locker ContractLocker
-	logger *zap.SugaredLogger
-
-	stopCtx       context.Context
-	stopCtxCancel context.CancelFunc
-	stopWG        sync.WaitGroup
-}
-
-func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
-	ctx, cancel := context.WithCancel(context.Background())
-	cl := &contractLock{
-		lockID: lockID,
-		fcid:   fcid,
-		d:      d,
-		locker: locker,
-		logger: logger,
-
-		stopCtx:       ctx,
-		stopCtxCancel: cancel,
-	}
-	cl.stopWG.Add(1)
-	go func() {
-		cl.keepaliveLoop()
-		cl.stopWG.Done()
-	}()
-	return cl
-}
-
-func (cl *contractLock) Release(ctx context.Context) error {
-	// Stop background loop.
-	cl.stopCtxCancel()
-	cl.stopWG.Wait()
-
-	// Release the contract.
-	return cl.locker.ReleaseContract(ctx, cl.fcid, cl.lockID)
-}
-
-func (cl *contractLock) keepaliveLoop() {
-	// Create ticker for 20% of the lock duration.
-	start := time.Now()
-	var lastUpdate time.Time
-	tickDuration := cl.d / 5
-	t := time.NewTicker(tickDuration)
-
-	// Cleanup
-	defer func() {
-		t.Stop()
-		select {
-		case <-t.C:
-		default:
-		}
-	}()
-
-	// Loop until stopped.
-	for {
-		select {
-		case <-cl.stopCtx.Done():
-			return // released
-		case <-t.C:
-		}
-		if err := cl.locker.KeepaliveContract(cl.stopCtx, cl.fcid, cl.lockID, cl.d); err != nil && !errors.Is(err, context.Canceled) {
-			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err),
-				"contract", cl.fcid,
-				"lockID", cl.lockID,
-				"loopStart", start,
-				"timeSinceLastUpdate", time.Since(lastUpdate),
-				"tickDuration", tickDuration)
-			return
-		}
-		lastUpdate = time.Now()
-	}
-}
-
-func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ revisionUnlocker, err error) {
-	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
-	if err != nil {
-		return nil, err
-	}
-	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, elapsed time.Duration, err error) {

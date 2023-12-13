@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.sia.tech/jape"
 )
 
@@ -23,7 +23,7 @@ const (
 )
 
 var (
-	Tracer = trace.NewNoopTracerProvider().Tracer("noop")
+	Tracer = noop.NewTracerProvider().Tracer("noop")
 )
 
 // Init initialises a new OpenTelemetry Tracer using information from the

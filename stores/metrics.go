@@ -2,12 +2,16 @@ package stores
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
+	"math/bits"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type (
@@ -338,6 +342,69 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 	return resp, nil
 }
 
+func (m dbContractMetric) Aggregate(o dbContractMetric) (out dbContractMetric) {
+	out = m
+	remainingCollateralLo, carry := bits.Add64(uint64(m.RemainingCollateralLo), uint64(o.RemainingCollateralLo), 0)
+	remainingCollateralHi, _ := bits.Add64(uint64(m.RemainingCollateralHi), uint64(o.RemainingCollateralHi), carry)
+	remainingFundsLo, carry := bits.Add64(uint64(m.RemainingFundsLo), uint64(o.RemainingFundsLo), 0)
+	remainingFundsHi, _ := bits.Add64(uint64(m.RemainingFundsHi), uint64(o.RemainingFundsHi), carry)
+	uploadSpendingLo, carry := bits.Add64(uint64(m.UploadSpendingLo), uint64(o.UploadSpendingLo), 0)
+	uploadSpendingHi, _ := bits.Add64(uint64(m.UploadSpendingHi), uint64(o.UploadSpendingHi), carry)
+	downloadSpendingLo, carry := bits.Add64(uint64(m.DownloadSpendingLo), uint64(o.DownloadSpendingLo), 0)
+	downloadSpendingHi, _ := bits.Add64(uint64(m.DownloadSpendingHi), uint64(o.DownloadSpendingHi), carry)
+	fundAccountSpendingLo, carry := bits.Add64(uint64(m.FundAccountSpendingLo), uint64(o.FundAccountSpendingLo), 0)
+	fundAccountSpendingHi, _ := bits.Add64(uint64(m.FundAccountSpendingHi), uint64(o.FundAccountSpendingHi), carry)
+	deleteSpendingLo, carry := bits.Add64(uint64(m.DeleteSpendingLo), uint64(o.DeleteSpendingLo), 0)
+	deleteSpendingHi, _ := bits.Add64(uint64(m.DeleteSpendingHi), uint64(o.DeleteSpendingHi), carry)
+	listSpendingLo, carry := bits.Add64(uint64(m.ListSpendingLo), uint64(o.ListSpendingLo), 0)
+	listSpendingHi, _ := bits.Add64(uint64(m.ListSpendingHi), uint64(o.ListSpendingHi), carry)
+
+	out.RemainingCollateralLo = unsigned64(remainingCollateralLo)
+	out.RemainingCollateralHi = unsigned64(remainingCollateralHi)
+	out.RemainingFundsLo = unsigned64(remainingFundsLo)
+	out.RemainingFundsHi = unsigned64(remainingFundsHi)
+	out.UploadSpendingLo = unsigned64(uploadSpendingLo)
+	out.UploadSpendingHi = unsigned64(uploadSpendingHi)
+	out.DownloadSpendingLo = unsigned64(downloadSpendingLo)
+	out.DownloadSpendingHi = unsigned64(downloadSpendingHi)
+	out.FundAccountSpendingLo = unsigned64(fundAccountSpendingLo)
+	out.FundAccountSpendingHi = unsigned64(fundAccountSpendingHi)
+	out.DeleteSpendingLo = unsigned64(deleteSpendingLo)
+	out.DeleteSpendingHi = unsigned64(deleteSpendingHi)
+	out.ListSpendingLo = unsigned64(listSpendingLo)
+	out.ListSpendingHi = unsigned64(listSpendingHi)
+	return
+}
+
+func (s *SQLStore) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
+	if metric == "" {
+		return errors.New("metric must be set")
+	} else if cutoff.IsZero() {
+		return errors.New("cutoff time must be set")
+	}
+	var model interface{}
+	switch metric {
+	case api.MetricContractPrune:
+		model = &dbContractPruneMetric{}
+	case api.MetricContractSet:
+		model = &dbContractSetMetric{}
+	case api.MetricContractSetChurn:
+		model = &dbContractSetChurnMetric{}
+	case api.MetricContract:
+		model = &dbContractMetric{}
+	case api.MetricPerformance:
+		model = &dbPerformanceMetric{}
+	case api.MetricWallet:
+		model = &dbWalletMetric{}
+	default:
+		return fmt.Errorf("unknown metric '%s'", metric)
+	}
+	return s.dbMetrics.Model(model).
+		Where("timestamp < ?", unixTimeMS(cutoff)).
+		Delete(model).
+		Error
+}
+
 func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]dbContractMetric, error) {
 	tx := s.dbMetrics
 	if opts.ContractID != (types.FileContractID{}) {
@@ -348,7 +415,16 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 
 	var metrics []dbContractMetric
-	err := s.findPeriods(tx, &metrics, start, n, interval)
+	var err error
+	if opts.ContractID == (types.FileContractID{}) && opts.HostKey == (types.PublicKey{}) {
+		// if neither contract nor host filters were set, we return the
+		// aggregate spending for each period
+		metrics, err = s.findAggregatedContractPeriods(start, n, interval)
+	} else {
+		// otherwise we return the first metric for each period like we usually
+		// do
+		err = s.findPeriods(tx, &metrics, start, n, interval)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
@@ -429,6 +505,51 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 	return unixTimeMS(time.UnixMilli(normalizedMS))
 }
 
+func roundPeriodExpr(db *gorm.DB, start time.Time, interval time.Duration) clause.Expr {
+	if !isSQLite(db) {
+		return gorm.Expr("CAST(FLOOR((timestamp - ?) / ?) * ? AS SIGNED)", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
+	} else {
+		return gorm.Expr("(timestamp - ?) / ? * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
+	}
+}
+
+func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
+	end := start.Add(time.Duration(n) * interval)
+	var metricsWithPeriod []struct {
+		Metric dbContractMetric `gorm:"embedded"`
+		Period int64
+	}
+	currentPeriod := int64(math.MinInt64)
+	err := s.dbMetrics.Raw(`
+		SELECT * FROM contracts
+		INNER JOIN (
+			SELECT fcid, MIN(timestamp) as timestamp, ? AS Period
+			FROM contracts
+			WHERE timestamp >= ? AND timestamp < ?
+			GROUP BY Period, fcid) i
+		ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
+	`, roundPeriodExpr(s.dbMetrics, start, interval),
+		unixTimeMS(start), unixTimeMS(end)).
+		Scan(&metricsWithPeriod).
+		Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch aggregate metrics: %w", err)
+	}
+	var metrics []dbContractMetric
+	for _, m := range metricsWithPeriod {
+		m.Metric.FCID = fileContractID{}
+		m.Metric.Host = publicKey{}
+		m.Metric.RevisionNumber = 0
+		if m.Period != currentPeriod {
+			metrics = append(metrics, m.Metric)
+			currentPeriod = m.Period
+		} else {
+			metrics[len(metrics)-1] = metrics[len(metrics)-1].Aggregate(m.Metric)
+		}
+	}
+	return metrics, nil
+}
+
 // findPeriods is the core of all methods retrieving metrics. By using integer
 // division rounding combined with a GROUP BY operation, all rows of a table are
 // split into intervals and the row with the lowest timestamp for each interval
@@ -438,12 +559,8 @@ func (s *SQLStore) findPeriods(tx *gorm.DB, dst interface{}, start time.Time, n 
 	end := start.Add(time.Duration(n) * interval)
 	// inner groups all metrics within the requested time range into periods of
 	// 'interval' length and gives us the min timestamp of each period.
-	floorExpr := "(timestamp - ?) / ? * ?"
-	if !isSQLite(s.dbMetrics) {
-		floorExpr = "FLOOR((timestamp - ?) / ?) * ?"
-	}
 	inner := tx.Model(dst).
-		Select(fmt.Sprintf("MIN(timestamp) AS min_time, %s AS period", floorExpr), unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds()).
+		Select("MIN(timestamp) AS min_time, ? AS period", roundPeriodExpr(tx, start, interval)).
 		Where("timestamp >= ? AND timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 		Group("period")
 	// mid then joins the result with the original table. This might yield

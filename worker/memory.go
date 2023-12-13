@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.sia.tech/renterd/api"
@@ -10,8 +9,13 @@ import (
 )
 
 type (
-	// memoryManager helps regulate processes that use a lot of memory. Such as
+	// MemoryManager helps regulate processes that use a lot of memory. Such as
 	// uploads and downloads.
+	MemoryManager interface {
+		Status() api.MemoryStatus
+		AcquireMemory(ctx context.Context, amt uint64) *acquiredMemory
+	}
+
 	memoryManager struct {
 		totalAvailable uint64
 		logger         *zap.SugaredLogger
@@ -28,17 +32,16 @@ type (
 	}
 )
 
-func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) (*memoryManager, error) {
-	if maxMemory == 0 {
-		return nil, fmt.Errorf("maxMemory cannot be 0")
-	}
+var _ MemoryManager = (*memoryManager)(nil)
+
+func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) MemoryManager {
 	mm := &memoryManager{
 		logger:         logger,
 		totalAvailable: maxMemory,
 	}
 	mm.available = mm.totalAvailable
 	mm.sigNewMem = *sync.NewCond(&mm.mu)
-	return mm, nil
+	return mm
 }
 
 func (mm *memoryManager) Status() api.MemoryStatus {

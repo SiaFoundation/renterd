@@ -40,7 +40,7 @@ type (
 	id [8]byte
 
 	downloadManager struct {
-		mm     *memoryManager
+		mm     MemoryManager
 		hp     hostProvider
 		pss    partialSlabStore
 		slm    sectorLostMarker
@@ -159,15 +159,16 @@ type (
 	}
 )
 
-func (w *worker) initDownloadManager(mm *memoryManager, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
 
+	mm := newMemoryManager(logger, maxMemory)
 	w.downloadManager = newDownloadManager(w, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(hp hostProvider, pss partialSlabStore, mm *memoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(hp hostProvider, pss partialSlabStore, mm MemoryManager, slm sectorLostMarker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
 	return &downloadManager{
 		hp:     hp,
 		mm:     mm,
@@ -1061,7 +1062,7 @@ loop:
 				// handle lost sectors
 				if isSectorNotFound(resp.err) {
 					if err := s.slm.DeleteHostSector(ctx, resp.req.hk, resp.req.root); err != nil {
-						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.hk, "root", resp.req.root, "err", err)
+						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.hk, "root", resp.req.root, zap.Error(err))
 					} else {
 						s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.hk, "root", resp.req.root)
 					}
@@ -1122,7 +1123,7 @@ func (s *slabDownload) finish() ([][]byte, bool, error) {
 			}
 		}
 
-		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d, inflight=%d, launched=%d, relaunched=%d, overpaid=%d, downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), unused, len(s.errs), s.errs)
+		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), unused, len(s.errs), s.errs)
 	}
 	return s.sectors, s.numOverpaid > 0, nil
 }
