@@ -1392,6 +1392,14 @@ func performMigration00034_objectHealth(txn *gorm.DB, logger *zap.SugaredLogger)
 
 func performMigration00035_bufferedSlabsDropSizeAndComplete(txn *gorm.DB, logger *zap.SugaredLogger) error {
 	logger.Info("performing migration 00035_bufferedSlabsDropSizeAndComplete")
+
+	// Disable foreign keys in SQLite to avoid issues with updating constraints.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 0`).Error; err != nil {
+			return err
+		}
+	}
+
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "size") {
 		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "size"); err != nil {
 			return err
@@ -1399,6 +1407,16 @@ func performMigration00035_bufferedSlabsDropSizeAndComplete(txn *gorm.DB, logger
 	}
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "complete") {
 		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "complete"); err != nil {
+			return err
+		}
+	}
+
+	// Enable foreign keys again.
+	if isSQLite(txn) {
+		if err := txn.Exec(`PRAGMA foreign_keys = 1`).Error; err != nil {
+			return err
+		}
+		if err := txn.Exec(`PRAGMA foreign_key_check(buffered_slabs)`).Error; err != nil {
 			return err
 		}
 	}

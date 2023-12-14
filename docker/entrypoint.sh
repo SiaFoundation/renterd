@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 if [[ "$BUILD_TAGS" == *'testnet'* ]]; then
     exec renterd -http=':9880' -s3.address=':7070' "$@"

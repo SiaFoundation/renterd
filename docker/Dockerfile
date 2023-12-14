@@ -23,10 +23,10 @@ RUN if [ "$BUILD_RUN_GO_GENERATE" = "true" ] ; then go generate ./... ; fi
 # Build renterd.
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags="-s -w" -tags="${BUILD_TAGS}" ./cmd/renterd
+    CGO_ENABLED=1 go build -ldflags='-s -w -linkmode external -extldflags "-static"' -tags="${BUILD_TAGS}" ./cmd/renterd
 
 # Build image that will be used to run renterd.
-FROM debian:bookworm-slim
+FROM alpine:3
 LABEL maintainer="The Sia Foundation <info@sia.tech>" \
       org.opencontainers.image.description.vendor="The Sia Foundation" \
       org.opencontainers.image.description="A renterd container - next-generation Sia renter" \
