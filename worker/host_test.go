@@ -108,6 +108,7 @@ func (cl *mockContractLocker) AcquireContract(ctx context.Context, fcid types.Fi
 
 	return 0, nil
 }
+
 func (cl *mockContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
 	if lock, ok := cl.contracts[fcid]; !ok {
 		return errContractNotFound
