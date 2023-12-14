@@ -2066,7 +2066,11 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("n", &n) != nil {
 		return
 	} else if n == 0 {
-		jc.Error(errors.New("parameter 'n' is required"), http.StatusBadRequest)
+		if jc.Request.FormValue("n") == "" {
+			jc.Error(errors.New("parameter 'n' is required"), http.StatusBadRequest)
+		} else {
+			jc.Error(errors.New("'n' has to be greater than zero"), http.StatusBadRequest)
+		}
 		return
 	}
 
