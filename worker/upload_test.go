@@ -101,12 +101,12 @@ func TestUpload(t *testing.T) {
 	params.rs = api.RedundancySettings{MinShards: 2, TotalShards: 6}
 
 	// create test hosts and contracts
-	hosts := newTestHosts(params.rs.TotalShards)
-	contracts := newTestContracts(hosts)
+	hosts := newMockHosts(params.rs.TotalShards)
+	contracts := newMockContracts(hosts)
 
 	// mock dependencies
-	cl := newTestContractLocker(contracts)
-	hm := newTestHostManager(hosts)
+	cl := newMockContractLocker(contracts)
+	hm := newMockHostManager(hosts)
 	os := &mockObjectStore{objects: make(map[string]object.Object)}
 	mm := &mockMemoryManager{}
 
@@ -120,8 +120,8 @@ func TestUpload(t *testing.T) {
 	}
 
 	// create managers
-	ul := newUploadManager(context.TODO(), hm, mm, os, cl, 0, 0, time.Minute, zap.NewNop().Sugar())
-	dl := newDownloadManager(context.TODO(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
+	ul := newUploadManager(context.Background(), hm, mm, os, cl, 0, 0, time.Minute, zap.NewNop().Sugar())
+	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
 
 	// create test data
 	data := make([]byte, 128)
@@ -154,7 +154,7 @@ func TestUpload(t *testing.T) {
 	}
 }
 
-func newTestContracts(hosts []*mockHost) []*mockContract {
+func newMockContracts(hosts []*mockHost) []*mockContract {
 	contracts := make([]*mockContract, len(hosts))
 	for i := range contracts {
 		contracts[i] = newMockContract(types.FileContractID{byte(i)})
@@ -163,7 +163,7 @@ func newTestContracts(hosts []*mockHost) []*mockContract {
 	return contracts
 }
 
-func newTestContractLocker(contracts []*mockContract) ContractLocker {
+func newMockContractLocker(contracts []*mockContract) *mockContractLocker {
 	cl := &mockContractLocker{contracts: make(map[types.FileContractID]*mockContract)}
 	for _, c := range contracts {
 		cl.contracts[c.rev.ParentID] = c
@@ -171,7 +171,7 @@ func newTestContractLocker(contracts []*mockContract) ContractLocker {
 	return cl
 }
 
-func newTestHosts(n int) []*mockHost {
+func newMockHosts(n int) []*mockHost {
 	hosts := make([]*mockHost, n)
 	for i := range hosts {
 		hosts[i] = newMockHost(types.PublicKey{byte(i)}, nil)
@@ -179,7 +179,7 @@ func newTestHosts(n int) []*mockHost {
 	return hosts
 }
 
-func newTestHostManager(hosts []*mockHost) HostManager {
+func newMockHostManager(hosts []*mockHost) *mockHostManager {
 	hm := &mockHostManager{hosts: make(map[types.PublicKey]Host)}
 	for _, h := range hosts {
 		hm.hosts[h.hk] = h
