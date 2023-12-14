@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,23 +19,46 @@ import (
 
 type (
 	mockHost struct {
-		hk      types.PublicKey
-		fcid    types.FileContractID
+		hk types.PublicKey
+
+		mu sync.Mutex
+		c  *mockContract
+	}
+
+	mockHostManager struct {
+		hosts map[types.PublicKey]Host
+	}
+
+	mockContract struct {
+		rev types.FileContractRevision
+
+		mu      sync.Mutex
 		sectors map[types.Hash256]*[rhpv2.SectorSize]byte
+	}
+
+	mockContractLocker struct {
+		contracts map[types.FileContractID]*mockContract
 	}
 )
 
 var (
-	_ Host = (*mockHost)(nil)
+	_ Host           = (*mockHost)(nil)
+	_ HostManager    = (*mockHostManager)(nil)
+	_ ContractLocker = (*mockContractLocker)(nil)
+)
+
+var (
+	errContractNotFound  = errors.New("contract not found")
+	errSectorOutOfBounds = errors.New("sector out of bounds")
 )
 
 func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
-	sector, exist := h.sectors[root]
+	sector, exist := h.c.sectors[root]
 	if !exist {
-		return errors.New("sector not found")
+		return errSectorNotFound
 	}
 	if offset+length > rhpv2.SectorSize {
-		return errors.New("sector out of bounds")
+		return errSectorOutOfBounds
 	}
 	_, err := w.Write(sector[offset : offset+length])
 	return err
@@ -42,11 +66,14 @@ func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 
 func (h *mockHost) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error) {
 	root := rhpv2.SectorRoot(sector)
-	h.sectors[root] = sector
+	h.c.sectors[root] = sector
 	return root, nil
 }
 
 func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (rev types.FileContractRevision, _ error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	rev = h.c.rev
 	return
 }
 
@@ -66,11 +93,41 @@ func (h *mockHost) SyncAccount(ctx context.Context, rev *types.FileContractRevis
 	return nil
 }
 
+func (hp *mockHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
+	if _, ok := hp.hosts[hk]; !ok {
+		panic("host not found")
+	}
+	return hp.hosts[hk]
+}
+
+func (cl *mockContractLocker) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
+	if lock, ok := cl.contracts[fcid]; !ok {
+		return 0, errContractNotFound
+	} else {
+		lock.mu.Lock()
+	}
+
+	return 0, nil
+}
+func (cl *mockContractLocker) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
+	if lock, ok := cl.contracts[fcid]; !ok {
+		return errContractNotFound
+	} else {
+		lock.mu.Unlock()
+	}
+	return nil
+}
+
+func (cl *mockContractLocker) KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error) {
+	return nil
+}
+
 func TestHost(t *testing.T) {
-	h := newTestHost()
+	c := newTestContract(types.FileContractID{1})
+	h := newTestHost(types.PublicKey{1}, c)
 	s := newTestSector()
 
-	root, err := h.UploadSector(context.Background(), s, types.FileContractRevision{})
+	root, err := h.UploadSector(context.Background(), s, c.rev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +159,16 @@ func TestHost(t *testing.T) {
 	}
 }
 
-func newTestHost() Host {
+func newTestHost(hk types.PublicKey, c *mockContract) *mockHost {
 	return &mockHost{
-		hk:      types.PublicKey{1},
-		fcid:    types.FileContractID{1},
+		hk: hk,
+		c:  c,
+	}
+}
+
+func newTestContract(fcid types.FileContractID) *mockContract {
+	return &mockContract{
+		rev:     types.FileContractRevision{ParentID: fcid},
 		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
 	}
 }
