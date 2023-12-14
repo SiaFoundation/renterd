@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -123,13 +122,16 @@ func (cl *mockContractLocker) KeepaliveContract(ctx context.Context, fcid types.
 }
 
 func TestHost(t *testing.T) {
-	c := newTestContract(types.FileContractID{1})
-	h := newTestHost(types.PublicKey{1}, c)
-	s := newTestSector()
+	c := newMockContract(types.FileContractID{1})
+	h := newMockHost(types.PublicKey{1}, c)
+	sector, root := newMockSector()
 
-	root, err := h.UploadSector(context.Background(), s, c.rev)
+	// upload the sector
+	uploaded, err := h.UploadSector(context.Background(), sector, types.FileContractRevision{})
 	if err != nil {
 		t.Fatal(err)
+	} else if uploaded != root {
+		t.Fatal("root mismatch")
 	}
 
 	// download entire sector
@@ -137,8 +139,7 @@ func TestHost(t *testing.T) {
 	err = h.DownloadSector(context.Background(), &buf, root, 0, rhpv2.SectorSize, false)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(buf.Bytes(), s[:]) {
+	} else if !bytes.Equal(buf.Bytes(), sector[:]) {
 		t.Fatal("sector mismatch")
 	}
 
@@ -147,34 +148,33 @@ func TestHost(t *testing.T) {
 	err = h.DownloadSector(context.Background(), &buf, root, 64, 64, false)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(buf.Bytes(), s[64:128]) {
+	} else if !bytes.Equal(buf.Bytes(), sector[64:128]) {
 		t.Fatal("sector mismatch")
 	}
 
 	// try downloading out of bounds
 	err = h.DownloadSector(context.Background(), &buf, root, rhpv2.SectorSize, 64, false)
-	if err == nil || !strings.Contains(err.Error(), "out of bounds") {
+	if !errors.Is(err, errSectorOutOfBounds) {
 		t.Fatal("expected out of bounds error", err)
 	}
 }
 
-func newTestHost(hk types.PublicKey, c *mockContract) *mockHost {
+func newMockHost(hk types.PublicKey, c *mockContract) *mockHost {
 	return &mockHost{
 		hk: hk,
 		c:  c,
 	}
 }
 
-func newTestContract(fcid types.FileContractID) *mockContract {
+func newMockContract(fcid types.FileContractID) *mockContract {
 	return &mockContract{
 		rev:     types.FileContractRevision{ParentID: fcid},
 		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
 	}
 }
 
-func newTestSector() *[rhpv2.SectorSize]byte {
+func newMockSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
 	var sector [rhpv2.SectorSize]byte
 	frand.Read(sector[:])
-	return &sector
+	return &sector, rhpv2.SectorRoot(&sector)
 }

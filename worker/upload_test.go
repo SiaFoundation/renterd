@@ -157,7 +157,7 @@ func TestUpload(t *testing.T) {
 func newTestContracts(hosts []*mockHost) []*mockContract {
 	contracts := make([]*mockContract, len(hosts))
 	for i := range contracts {
-		contracts[i] = newTestContract(types.FileContractID{byte(i)})
+		contracts[i] = newMockContract(types.FileContractID{byte(i)})
 		hosts[i].c = contracts[i]
 	}
 	return contracts
@@ -174,7 +174,7 @@ func newTestContractLocker(contracts []*mockContract) ContractLocker {
 func newTestHosts(n int) []*mockHost {
 	hosts := make([]*mockHost, n)
 	for i := range hosts {
-		hosts[i] = newTestHost(types.PublicKey{byte(i)}, nil)
+		hosts[i] = newMockHost(types.PublicKey{byte(i)}, nil)
 	}
 	return hosts
 }
