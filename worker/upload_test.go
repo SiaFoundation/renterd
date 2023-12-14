@@ -34,7 +34,7 @@ var (
 	errBucketNotFound = errors.New("bucket not found")
 	errObjectNotFound = errors.New("object not found")
 
-	defaultBucket = "bucket	"
+	testBucket = "testbucket"
 )
 
 func (m *mockMemory) Release()           {}
@@ -117,8 +117,7 @@ func (os *mockObjectStore) FinishUpload(ctx context.Context, uID api.UploadID) e
 
 func TestUpload(t *testing.T) {
 	// create upload params
-	params := defaultParameters(defaultBucket, t.Name())
-	params.rs = api.RedundancySettings{MinShards: 2, TotalShards: 6}
+	params := testParameters(testBucket, t.Name())
 
 	// create test hosts and contracts
 	hosts := newMockHosts(params.rs.TotalShards)
@@ -156,21 +155,25 @@ func TestUpload(t *testing.T) {
 	}
 
 	// grab the object
-	o, err := os.Object(context.Background(), defaultBucket, t.Name(), api.GetObjectOptions{})
+	o, err := os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// download the data
+	// download the data and assert it matches
 	var buf bytes.Buffer
 	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), metadatas)
 	if err != nil {
 		t.Fatal(err)
+	} else if !bytes.Equal(data, buf.Bytes()) {
+		t.Fatal("data mismatch")
 	}
 
-	// assert it matches
-	if !bytes.Equal(data, buf.Bytes()) {
-		t.Fatal("data mismatch")
+	// try and upload into a bucket that does not exist
+	params.bucket = "doesnotexist"
+	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), metadatas, params, lockingPriorityUpload)
+	if !errors.Is(err, errBucketNotFound) {
+		t.Fatal("expected bucket not found error", err)
 	}
 }
 
@@ -181,6 +184,18 @@ func newMockContracts(hosts []*mockHost) []*mockContract {
 		hosts[i].c = contracts[i]
 	}
 	return contracts
+}
+
+func testParameters(bucket, path string) uploadParameters {
+	return uploadParameters{
+		bucket: bucket,
+		path:   path,
+
+		ec:               object.GenerateEncryptionKey(), // random key
+		encryptionOffset: 0,                              // from the beginning
+
+		rs: api.RedundancySettings{MinShards: 2, TotalShards: 6},
+	}
 }
 
 func newMockContractLocker(contracts []*mockContract) *mockContractLocker {
@@ -209,6 +224,6 @@ func newMockHostManager(hosts []*mockHost) *mockHostManager {
 
 func newMockObjectStore() *mockObjectStore {
 	os := &mockObjectStore{objects: make(map[string]map[string]object.Object)}
-	os.objects[defaultBucket] = make(map[string]object.Object)
+	os.objects[testBucket] = make(map[string]object.Object)
 	return os
 }
