@@ -167,8 +167,7 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
-			contractPrice = pt.ContractPrice
-			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
+			rev, txnSet, contractPrice, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err

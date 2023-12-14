@@ -1184,11 +1184,11 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	return
 }
 
-func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transportV3, pt *rhpv3.HostPriceTable, rev types.FileContractRevision, renterKey types.PrivateKey, l *zap.SugaredLogger) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
+func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transportV3, pt *rhpv3.HostPriceTable, rev types.FileContractRevision, renterKey types.PrivateKey, l *zap.SugaredLogger) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
 	defer wrapErr(&err, "RPCRenew")
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to dial stream: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, fmt.Errorf("failed to dial stream: %w", err)
 	}
 	defer s.Close()
 
@@ -1198,7 +1198,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		ptUID = pt.UID
 	}
 	if err = s.WriteRequest(rhpv3.RPCRenewContractID, &ptUID); err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to send ptUID: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to send ptUID: %w", err)
 	}
 
 	// If we didn't have a valid pricetable, read the temporary one from the
@@ -1206,28 +1206,31 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	if ptUID == (rhpv3.SettingsID{}) {
 		var ptResp rhpv3.RPCUpdatePriceTableResponse
 		if err = s.ReadResponse(&ptResp, defaultRPCResponseMaxSize); err != nil {
-			return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to read RPCUpdatePriceTableResponse: %w", err)
+			return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to read RPCUpdatePriceTableResponse: %w", err)
 		}
 		pt = new(rhpv3.HostPriceTable)
 		if err = json.Unmarshal(ptResp.PriceTableJSON, pt); err != nil {
-			return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to unmarshal price table: %w", err)
+			return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to unmarshal price table: %w", err)
 		}
 	}
+
+	// Remember contract price.
+	contractPrice := pt.ContractPrice
 
 	// Perform gouging checks.
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to get gouging checker: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to get gouging checker: %w", err)
 	}
 	if breakdown := gc.Check(nil, pt); breakdown.Gouging() {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("host gouging during renew: %v", breakdown)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("host gouging during renew: %v", breakdown)
 	}
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
 	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.MinNewCollateral, *pt, rrr.EndHeight, rrr.WindowSize, rrr.ExpectedNewStorage)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to prepare renew: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to prepare renew: %w", err)
 	}
 
 	// Starting from here, we need to make sure to release the txn on error.
@@ -1250,13 +1253,13 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		FinalRevisionSignature: finalRevisionSignature,
 	}
 	if err = s.WriteResponse(&req); err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to send RPCRenewContractRequest: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to send RPCRenewContractRequest: %w", err)
 	}
 
 	// Incorporate the host's additions.
 	var hostAdditions rhpv3.RPCRenewContractHostAdditions
 	if err = s.ReadResponse(&hostAdditions, defaultRPCResponseMaxSize); err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to read RPCRenewContractHostAdditions: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to read RPCRenewContractHostAdditions: %w", err)
 	}
 	parents = append(parents, hostAdditions.Parents...)
 	txn.SiacoinInputs = append(txn.SiacoinInputs, hostAdditions.SiacoinInputs...)
@@ -1288,7 +1291,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		Signatures:       []uint64{0, 1},
 	}
 	if err := bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to sign transaction: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
 	// Create a new no-op revision and sign it.
@@ -1312,13 +1315,13 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		RevisionSignature:     renterNoOpRevisionSignature,
 	}
 	if err = s.WriteResponse(&rs); err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to send RPCRenewSignatures: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to send RPCRenewSignatures: %w", err)
 	}
 
 	// Receive the host's signatures.
 	var hostSigs rhpv3.RPCRenewSignatures
 	if err = s.ReadResponse(&hostSigs, defaultRPCResponseMaxSize); err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("failed to read RPCRenewSignatures: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to read RPCRenewSignatures: %w", err)
 	}
 	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
@@ -1328,7 +1331,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	return rhpv2.ContractRevision{
 		Revision:   noOpRevision,
 		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostSigs.RevisionSignature},
-	}, txnSet, nil
+	}, txnSet, contractPrice, nil
 }
 
 // initialRevision returns the first revision of a file contract formation

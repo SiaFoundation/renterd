@@ -1441,10 +1441,15 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	}
 
 	// calculate the renter funds
-	renterFunds, err := c.refreshFundingEstimate(ctx, state.cfg, ci, state.fee)
-	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, true, err
+	var renterFunds types.Currency
+	if isOutOfFunds(state.cfg, ci.settings, ci.contract) {
+		renterFunds, err = c.refreshFundingEstimate(ctx, state.cfg, ci, state.fee)
+		if err != nil {
+			c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
+			return api.ContractMetadata{}, true, err
+		}
+	} else {
+		renterFunds = rev.ValidRenterPayout() // don't increase funds
 	}
 
 	// check our budget
@@ -1456,11 +1461,28 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	// calculate the new collateral
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
 	unallocatedCollateral := rev.MissedHostPayout().Sub(contract.ContractPrice)
-	minNewCollateral := minNewCollateral(unallocatedCollateral)
+
+	// calculate the expected new collateral to determine the minNewCollateral.
+	// If the contract isn't below the min collateral, we don't enforce a
+	// minimum.
+	var minNewColl types.Currency
+	_, _, expectedNewCollateral := rhpv3.RenewalCosts(contract.Revision.FileContract, ci.priceTable, expectedStorage, contract.EndHeight())
+	if isBelowCollateralThreshold(expectedNewCollateral, unallocatedCollateral) {
+		minNewColl = minNewCollateral(unallocatedCollateral)
+	}
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewColl, expectedStorage, settings.WindowSize)
 	if err != nil {
+		if strings.Contains(err.Error(), "new collateral is too low") {
+			c.logger.Debugw("refresh failed: contract wouldn't have enough collateral after refresh",
+				"hk", hk,
+				"fcid", fcid,
+				"unallocatedCollateral", unallocatedCollateral.String(),
+				"minNewCollateral", minNewColl.String(),
+			)
+			return api.ContractMetadata{}, true, err
+		}
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
 			return api.ContractMetadata{}, false, err
@@ -1484,6 +1506,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 		"fcid", refreshedContract.ID,
 		"renewedFrom", contract.ID,
 		"renterFunds", renterFunds.String(),
+		"minNewCollateral", minNewColl.String(),
 		"newCollateral", newCollateral.String(),
 	)
 	return refreshedContract, true, nil
