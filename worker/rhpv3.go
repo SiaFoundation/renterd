@@ -1214,9 +1214,6 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		}
 	}
 
-	// Remember contract price.
-	contractPrice := pt.ContractPrice
-
 	// Perform gouging checks.
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
@@ -1331,7 +1328,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	return rhpv2.ContractRevision{
 		Revision:   noOpRevision,
 		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostSigs.RevisionSignature},
-	}, txnSet, contractPrice, nil
+	}, txnSet, pt.ContractPrice, nil
 }
 
 // initialRevision returns the first revision of a file contract formation

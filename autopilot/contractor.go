@@ -1458,7 +1458,6 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
 	}
 
-	// calculate the new collateral
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
 	unallocatedCollateral := rev.MissedHostPayout().Sub(contract.ContractPrice)
 
