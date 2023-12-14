@@ -115,12 +115,12 @@ func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 func (os *mockObjectStore) TrackUpload(ctx context.Context, uID api.UploadID) error  { return nil }
 func (os *mockObjectStore) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
 
-func TestUpload(t *testing.T) {
+func TestUploadDownload(t *testing.T) {
 	// create upload params
 	params := testParameters(testBucket, t.Name())
 
 	// create test hosts and contracts
-	hosts := newMockHosts(params.rs.TotalShards)
+	hosts := newMockHosts(params.rs.TotalShards * 2)
 	contracts := newMockContracts(hosts)
 
 	// mock dependencies
@@ -128,15 +128,6 @@ func TestUpload(t *testing.T) {
 	hm := newMockHostManager(hosts)
 	os := newMockObjectStore()
 	mm := &mockMemoryManager{}
-
-	// create contract metadatas
-	metadatas := make([]api.ContractMetadata, len(contracts))
-	for i, h := range hosts {
-		metadatas[i] = api.ContractMetadata{
-			ID:      h.c.rev.ParentID,
-			HostKey: h.hk,
-		}
-	}
 
 	// create managers
 	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
@@ -146,6 +137,15 @@ func TestUpload(t *testing.T) {
 	data := make([]byte, 128)
 	if _, err := frand.Read(data); err != nil {
 		t.Fatal(err)
+	}
+
+	// create upload contracts
+	metadatas := make([]api.ContractMetadata, len(contracts))
+	for i, h := range hosts {
+		metadatas[i] = api.ContractMetadata{
+			ID:      h.c.rev.ParentID,
+			HostKey: h.hk,
+		}
 	}
 
 	// upload data
@@ -160,6 +160,12 @@ func TestUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// build used hosts
+	used := make(map[types.PublicKey]struct{})
+	for _, shard := range o.Object.Object.Slabs[0].Shards {
+		used[shard.LatestHost] = struct{}{}
+	}
+
 	// download the data and assert it matches
 	var buf bytes.Buffer
 	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), metadatas)
@@ -167,6 +173,47 @@ func TestUpload(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
 		t.Fatal("data mismatch")
+	}
+
+	// filter contracts to have (at most) min shards used contracts
+	var n int
+	var filtered []api.ContractMetadata
+	for _, md := range metadatas {
+		// add unused contracts
+		if _, used := used[md.HostKey]; !used {
+			filtered = append(filtered, md)
+			continue
+		}
+
+		// add min shards used contracts
+		if n < int(params.rs.MinShards) {
+			filtered = append(filtered, md)
+			n++
+		}
+	}
+
+	// download the data again and assert it matches
+	buf.Reset()
+	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), filtered)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, buf.Bytes()) {
+		t.Fatal("data mismatch")
+	}
+
+	// filter out one contract - expect download to fail
+	for i, md := range filtered {
+		if _, used := used[md.HostKey]; used {
+			filtered = append(filtered[:i], filtered[i+1:]...)
+			break
+		}
+	}
+
+	// download the data again and assert it fails
+	buf.Reset()
+	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), filtered)
+	if !errors.Is(err, errDownloadNotEnoughHosts) {
+		t.Fatal("expected not enough hosts error", err)
 	}
 
 	// try and upload into a bucket that does not exist
@@ -184,18 +231,6 @@ func newMockContracts(hosts []*mockHost) []*mockContract {
 		hosts[i].c = contracts[i]
 	}
 	return contracts
-}
-
-func testParameters(bucket, path string) uploadParameters {
-	return uploadParameters{
-		bucket: bucket,
-		path:   path,
-
-		ec:               object.GenerateEncryptionKey(), // random key
-		encryptionOffset: 0,                              // from the beginning
-
-		rs: api.RedundancySettings{MinShards: 2, TotalShards: 6},
-	}
 }
 
 func newMockContractLocker(contracts []*mockContract) *mockContractLocker {
@@ -226,4 +261,16 @@ func newMockObjectStore() *mockObjectStore {
 	os := &mockObjectStore{objects: make(map[string]map[string]object.Object)}
 	os.objects[testBucket] = make(map[string]object.Object)
 	return os
+}
+
+func testParameters(bucket, path string) uploadParameters {
+	return uploadParameters{
+		bucket: bucket,
+		path:   path,
+
+		ec:               object.GenerateEncryptionKey(), // random key
+		encryptionOffset: 0,                              // from the beginning
+
+		rs: api.RedundancySettings{MinShards: 2, TotalShards: 6},
+	}
 }

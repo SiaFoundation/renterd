@@ -34,6 +34,7 @@ const (
 
 var (
 	errDownloadManagerStopped = errors.New("download manager stopped")
+	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
 )
 
 type (
@@ -301,7 +302,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				}
 			}
 			if available < next.MinShards {
-				responseChan <- &slabDownloadResponse{err: fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, next.MinShards)}
+				responseChan <- &slabDownloadResponse{err: fmt.Errorf("%w: %v/%v", errDownloadNotEnoughHosts, available, next.MinShards)}
 				return
 			}
 
@@ -947,14 +948,16 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 		// grab unused hosts
 		var hosts []types.PublicKey
 		for host := range s.hostToSectors {
-			if _, used := s.used[host]; !used {
+			if _, used := s.used[host]; !used && host != s.curr {
 				hosts = append(hosts, host)
 			}
 		}
 
 		// make the fastest host the current host
-		s.curr = s.mgr.fastest(hosts)
-		s.used[s.curr] = struct{}{}
+		if len(hosts) > 0 {
+			s.curr = s.mgr.fastest(hosts)
+			s.used[s.curr] = struct{}{}
+		}
 
 		// no more sectors to download
 		if len(s.hostToSectors[s.curr]) == 0 {
@@ -1016,7 +1019,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 	for i := 0; i < int(s.minShards); {
 		req := s.nextRequest(ctx, resps, false)
 		if req == nil {
-			return nil, false, fmt.Errorf("no hosts available")
+			return nil, false, fmt.Errorf("no host available for shard %d", i)
 		} else if err := s.launch(req); err == nil {
 			i++
 		}
