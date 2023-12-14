@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,13 +27,17 @@ var (
 	_ Host = (*mockHost)(nil)
 )
 
+var (
+	errSectorOutOfBounds = errors.New("sector out of bounds")
+)
+
 func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
 	sector, exist := h.sectors[root]
 	if !exist {
-		return errors.New("sector not found")
+		return errSectorNotFound
 	}
 	if offset+length > rhpv2.SectorSize {
-		return errors.New("sector out of bounds")
+		return errSectorOutOfBounds
 	}
 	_, err := w.Write(sector[offset : offset+length])
 	return err
@@ -67,12 +70,15 @@ func (h *mockHost) SyncAccount(ctx context.Context, rev *types.FileContractRevis
 }
 
 func TestHost(t *testing.T) {
-	h := newTestHost()
-	s := newTestSector()
+	h := newMockHost()
+	sector, root := newMockSector()
 
-	root, err := h.UploadSector(context.Background(), s, types.FileContractRevision{})
+	// upload the sector
+	uploaded, err := h.UploadSector(context.Background(), sector, types.FileContractRevision{})
 	if err != nil {
 		t.Fatal(err)
+	} else if uploaded != root {
+		t.Fatal("root mismatch")
 	}
 
 	// download entire sector
@@ -80,8 +86,7 @@ func TestHost(t *testing.T) {
 	err = h.DownloadSector(context.Background(), &buf, root, 0, rhpv2.SectorSize, false)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(buf.Bytes(), s[:]) {
+	} else if !bytes.Equal(buf.Bytes(), sector[:]) {
 		t.Fatal("sector mismatch")
 	}
 
@@ -90,19 +95,18 @@ func TestHost(t *testing.T) {
 	err = h.DownloadSector(context.Background(), &buf, root, 64, 64, false)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(buf.Bytes(), s[64:128]) {
+	} else if !bytes.Equal(buf.Bytes(), sector[64:128]) {
 		t.Fatal("sector mismatch")
 	}
 
 	// try downloading out of bounds
 	err = h.DownloadSector(context.Background(), &buf, root, rhpv2.SectorSize, 64, false)
-	if err == nil || !strings.Contains(err.Error(), "out of bounds") {
+	if !errors.Is(err, errSectorOutOfBounds) {
 		t.Fatal("expected out of bounds error", err)
 	}
 }
 
-func newTestHost() Host {
+func newMockHost() *mockHost {
 	return &mockHost{
 		hk:      types.PublicKey{1},
 		fcid:    types.FileContractID{1},
@@ -110,8 +114,8 @@ func newTestHost() Host {
 	}
 }
 
-func newTestSector() *[rhpv2.SectorSize]byte {
+func newMockSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
 	var sector [rhpv2.SectorSize]byte
 	frand.Read(sector[:])
-	return &sector
+	return &sector, rhpv2.SectorRoot(&sector)
 }
