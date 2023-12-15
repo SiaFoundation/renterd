@@ -161,6 +161,21 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 	}
 	l := logger.Named("sql")
 
+	// Print SQLite version
+	var dbName string
+	var dbVersion string
+	if isSQLite(db) {
+		err = db.Raw("select sqlite_version()").Scan(&dbVersion).Error
+		dbName = "SQLite"
+	} else {
+		err = db.Raw("select version()").Scan(&dbVersion).Error
+		dbName = "MySQL"
+	}
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db version: %v", err)
+	}
+	l.Infof("Using %s version %s", dbName, dbVersion)
+
 	// Perform migrations.
 	if migrate {
 		if err := performMigrations(db, l); err != nil {

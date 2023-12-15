@@ -83,8 +83,8 @@ type (
 		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error)
 		Height() uint64
-		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error)
-		ReleaseInputs(txn types.Transaction)
+		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error)
+		ReleaseInputs(txn ...types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 		Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
@@ -602,22 +602,27 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 	}
 
 	cs := b.cm.TipState()
-	txn, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
+	txns, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
 	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 		return
 	}
 
-	err = b.w.SignTransaction(cs, &txn, toSign, types.CoveredFields{WholeTransaction: true})
-	if jc.Check("couldn't sign the transaction", err) != nil {
+	var ids []types.TransactionID
+	for i := 0; i < len(txns); i++ {
+		err = b.w.SignTransaction(cs, &txns[i], toSign, types.CoveredFields{WholeTransaction: true})
+		if jc.Check("couldn't sign the transaction", err) != nil {
+			b.w.ReleaseInputs(txns...)
+			return
+		}
+		ids = append(ids, txns[i].ID())
+	}
+
+	if jc.Check("couldn't broadcast the transaction", b.tp.AcceptTransactionSet(txns)) != nil {
+		b.w.ReleaseInputs(txns...)
 		return
 	}
 
-	if jc.Check("couldn't broadcast the transaction", b.tp.AcceptTransactionSet([]types.Transaction{txn})) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
-
-	jc.Encode(txn.ID())
+	jc.Encode(ids)
 }
 
 func (b *bus) walletDiscardHandler(jc jape.Context) {
@@ -2066,7 +2071,11 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("n", &n) != nil {
 		return
 	} else if n == 0 {
-		jc.Error(errors.New("parameter 'n' is required"), http.StatusBadRequest)
+		if jc.Request.FormValue("n") == "" {
+			jc.Error(errors.New("parameter 'n' is required"), http.StatusBadRequest)
+		} else {
+			jc.Error(errors.New("'n' has to be greater than zero"), http.StatusBadRequest)
+		}
 		return
 	}
 

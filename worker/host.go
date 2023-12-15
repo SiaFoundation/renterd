@@ -19,12 +19,15 @@ import (
 type (
 	Host interface {
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
+		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
+
 		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 		FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
-		RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error)
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
-		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
+
+		RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error)
 	}
 
 	HostManager interface {
@@ -49,7 +52,10 @@ type (
 	}
 )
 
-var _ Host = (*host)(nil)
+var (
+	_ Host        = (*host)(nil)
+	_ HostManager = (*worker)(nil)
+)
 
 func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	return &host{
@@ -107,7 +113,6 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	})
 }
 
-// UploadSector uploads a sector to the host.
 func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
 	// fetch price table
 	pt, err := h.priceTable(ctx, nil)
@@ -145,9 +150,6 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	return root, nil
 }
 
-// Renew renews a contract with a host. To avoid an edge case where the contract
-// is drained and can therefore not be used to pay for the revision, we simply
-// don't pay for it.
 func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
 	// Try to get a valid pricetable.
 	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -165,10 +167,12 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	var txnSet []types.Transaction
 	var renewErr error
 	err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
+		// NOTE: to avoid an edge case where the contract is drained and can
+		// therefore not be used to pay for the revision, we simply don't pay
+		// for it.
 		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
-			contractPrice = pt.ContractPrice
-			rev, txnSet, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
+			rev, txnSet, contractPrice, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
@@ -206,4 +210,67 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 		return hostdb.HostPriceTable{}, err
 	}
 	return fetchPT(h.preparePriceTableAccountPayment(cs.BlockHeight))
+}
+
+func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
+	// fetch pricetable
+	pt, err := h.priceTable(ctx, rev)
+	if err != nil {
+		return err
+	}
+
+	// calculate the amount to deposit
+	curr, err := h.acc.Balance(ctx)
+	if err != nil {
+		return err
+	}
+	if curr.Cmp(balance) >= 0 {
+		return nil
+	}
+	amount := balance.Sub(curr)
+
+	// cap the amount by the amount of money left in the contract
+	renterFunds := rev.ValidRenterPayout()
+	possibleFundCost := pt.FundAccountCost.Add(pt.UpdatePriceTableCost)
+	if renterFunds.Cmp(possibleFundCost) <= 0 {
+		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, possibleFundCost)
+	} else if maxAmount := renterFunds.Sub(possibleFundCost); maxAmount.Cmp(amount) < 0 {
+		amount = maxAmount
+	}
+
+	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
+		return amount, h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
+			cost := amount.Add(pt.FundAccountCost)
+			payment, err := payByContract(rev, cost, rhpv3.Account{}, h.renterKey) // no account needed for funding
+			if err != nil {
+				return err
+			}
+			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
+				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
+			}
+			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: cost})
+			return nil
+		})
+	})
+}
+
+func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
+	// fetch pricetable
+	pt, err := h.priceTable(ctx, rev)
+	if err != nil {
+		return err
+	}
+
+	return h.acc.WithSync(ctx, func() (types.Currency, error) {
+		var balance types.Currency
+		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
+			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			if err != nil {
+				return err
+			}
+			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
+			return err
+		})
+		return balance, err
+	})
 }

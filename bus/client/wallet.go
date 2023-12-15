@@ -116,13 +116,13 @@ func (c *Client) WalletPrepareRenew(ctx context.Context, revision types.FileCont
 // WalletRedistribute broadcasts a transaction that redistributes the money in
 // the wallet in the desired number of outputs of given amount. If the
 // transaction was successfully broadcasted it will return the transaction ID.
-func (c *Client) WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error) {
+func (c *Client) WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error) {
 	req := api.WalletRedistributeRequest{
 		Amount:  amount,
 		Outputs: outputs,
 	}
 
-	err = c.c.WithContext(ctx).POST("/wallet/redistribute", req, &id)
+	err = c.c.WithContext(ctx).POST("/wallet/redistribute", req, &ids)
 	return
 }
 

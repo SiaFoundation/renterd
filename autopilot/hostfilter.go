@@ -313,7 +313,7 @@ func isOutOfCollateral(c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceT
 		expectedStorage = s.RemainingStorage
 	}
 	_, _, newCollateral := rhpv3.RenewalCosts(c.Revision.FileContract, pt, expectedStorage, c.EndHeight())
-	return isBelowCollateralThreshold(newCollateral, c.RemainingCollateral(s))
+	return isBelowCollateralThreshold(newCollateral, c.RemainingCollateral())
 }
 
 // isBelowCollateralThreshold returns true if the remainingCollateral is below a
