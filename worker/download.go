@@ -656,7 +656,7 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 			// check if we need to abort
 			select {
 			case <-d.shutdownCtx.Done():
-				break
+				return
 			default:
 			}
 
