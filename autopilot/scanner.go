@@ -17,7 +17,7 @@ import (
 
 const (
 	scannerTimeoutInterval   = 10 * time.Minute
-	scannerTimeoutMinTimeout = time.Second * 5
+	scannerTimeoutMinTimeout = 10 * time.Second
 
 	trackerMinDataPoints     = 25
 	trackerNumDataPoints     = 1000
