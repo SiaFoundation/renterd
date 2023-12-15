@@ -130,12 +130,17 @@ type state struct {
 
 // New initializes an Autopilot.
 func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
+	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
+
 	ap := &Autopilot{
 		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
 		id:      id,
 		bus:     bus,
 		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
 		workers: newWorkerPool(workers),
+
+		shutdownCtx:       shutdownCtx,
+		shutdownCtxCancel: shutdownCtxCancel,
 
 		tickerDuration: heartbeat,
 	}
@@ -178,7 +183,6 @@ func (ap *Autopilot) Run() error {
 		return errors.New("already running")
 	}
 	ap.startTime = time.Now()
-	ap.shutdownCtx, ap.shutdownCtxCancel = context.WithCancel(context.Background())
 	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
