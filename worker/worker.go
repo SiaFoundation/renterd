@@ -119,12 +119,12 @@ type (
 	}
 
 	ObjectStore interface {
-		// NOTE: used for download (TODO: remove)
+		// NOTE: used for download
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
-		// NOTE: used for upload (TODO: remove)
+		// NOTE: used for upload
 		AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
@@ -137,10 +137,6 @@ type (
 
 	consensusState interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
-	}
-
-	revisionLocker interface {
-		withRevision(ctx context.Context, timeout time.Duration, contractID types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error
 	}
 )
 

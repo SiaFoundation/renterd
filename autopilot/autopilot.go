@@ -87,7 +87,7 @@ type Bus interface {
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
 	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
-	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (id types.TransactionID, err error)
+	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
 
 type Autopilot struct {
