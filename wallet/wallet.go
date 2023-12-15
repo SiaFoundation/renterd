@@ -366,7 +366,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 
 	for outputs > 0 {
 		var txn types.Transaction
-		for i := 0; outputs > 0 && i < redistributeBatchSize; i++ {
+		for i := 0; i < outputs && i < redistributeBatchSize; i++ {
 			txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
 				Value:   amount,
 				Address: w.Address(),
@@ -434,6 +434,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 			w.lastUsed[sce.ID] = time.Now()
 		}
 
+		outputs -= len(txn.SiacoinOutputs)
 		txns = append(txns, txn)
 	}
 
