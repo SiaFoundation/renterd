@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
-	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
 
@@ -122,9 +121,6 @@ func (m *migrator) performMigrations(p *workerPool) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 
-	ctx, span := tracing.Tracer.Start(m.ap.shutdownCtx, "migrator.performMigrations")
-	defer span.End()
-
 	// prepare a channel to push work to the workers
 	jobs := make(chan job)
 	var wg sync.WaitGroup
@@ -140,6 +136,10 @@ func (m *migrator) performMigrations(p *workerPool) {
 				wg.Add(1)
 				go func(w Worker) {
 					defer wg.Done()
+
+					// derive ctx from shutdown ctx
+					ctx, cancel := context.WithCancel(m.ap.shutdownCtx)
+					defer cancel()
 
 					// fetch worker id once
 					id, err := w.ID(ctx)
@@ -196,15 +196,15 @@ OUTER:
 
 		// recompute health.
 		start := time.Now()
-		if err := b.RefreshHealth(ctx); err != nil {
-			m.ap.RegisterAlert(ctx, newRefreshHealthFailedAlert(err))
+		if err := b.RefreshHealth(m.ap.shutdownCtx); err != nil {
+			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
 			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
 			return
 		}
 		m.logger.Debugf("recomputed slab health in %v", time.Since(start))
 
 		// fetch slabs for migration
-		toMigrateNew, err := b.SlabsForMigration(ctx, m.healthCutoff, set, migratorBatchSize)
+		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, set, migratorBatchSize)
 		if err != nil {
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
@@ -248,7 +248,7 @@ OUTER:
 
 		// register an alert to notify users about ongoing migrations.
 		if len(toMigrate) > 0 {
-			m.ap.RegisterAlert(ctx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
+			m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
 		}
 
 		// return if there are no slabs to migrate

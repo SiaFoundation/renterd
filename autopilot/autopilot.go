@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -20,7 +19,6 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -166,14 +164,14 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracingMiddleware(api.DefaultAutopilotID, map[string]jape.Handler{
+	return jape.Mux(map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
-	}))
+	})
 }
 
 func (ap *Autopilot) Run() error {
@@ -209,8 +207,10 @@ func (ap *Autopilot) Run() error {
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
-			ctx, span := tracing.Tracer.Start(ap.shutdownCtx, "Autopilot Iteration")
-			defer span.End()
+
+			// create a new context for this iteration
+			ctx, cancel := context.WithCancel(ap.shutdownCtx)
+			defer cancel()
 
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()
@@ -243,13 +243,12 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// Trace/Log worker id chosen for this maintenance iteration.
+			// Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ctx)
 			if err != nil {
 				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
 				return
 			}
-			span.SetAttributes(attribute.String("worker", workerID))
 			ap.logger.Infof("using worker %s for iteration", workerID)
 
 			// update the loop state
