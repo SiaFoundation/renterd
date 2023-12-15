@@ -65,7 +65,7 @@ func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID
 		return err
 	}
 	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		releaseCtx, cancel := context.WithTimeout(w.shutdownCtx, 10*time.Second)
 		_ = contractLock.Release(releaseCtx)
 		cancel()
 	}()
