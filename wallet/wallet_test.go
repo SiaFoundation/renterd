@@ -91,10 +91,12 @@ func TestWalletRedistribute(t *testing.T) {
 
 	// split into 3 outputs of 6SC each
 	amount := oneSC.Mul64(6)
-	if txn, _, err := w.Redistribute(cs, 3, amount, types.NewCurrency64(1), nil); err != nil {
+	if txns, _, err := w.Redistribute(cs, 3, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
+	} else if len(txns) != 1 {
+		t.Fatalf("unexpected number of txns, %v != 1", len(txns))
 	} else {
-		applyTxn(txn)
+		applyTxn(txns[0])
 	}
 
 	// assert number of outputs
@@ -117,10 +119,12 @@ func TestWalletRedistribute(t *testing.T) {
 
 	// split into 2 outputs of 9SC
 	amount = oneSC.Mul64(9)
-	if txn, _, err := w.Redistribute(cs, 2, amount, types.NewCurrency64(1), nil); err != nil {
+	if txns, _, err := w.Redistribute(cs, 2, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
+	} else if len(txns) != 1 {
+		t.Fatalf("unexpected number of txns, %v != 1", len(txns))
 	} else {
-		applyTxn(txn)
+		applyTxn(txns[0])
 	}
 
 	// assert number of outputs
@@ -137,10 +141,12 @@ func TestWalletRedistribute(t *testing.T) {
 
 	// split into 5 outputs of 3SC
 	amount = oneSC.Mul64(3)
-	if txn, _, err := w.Redistribute(cs, 5, amount, types.NewCurrency64(1), nil); err != nil {
+	if txns, _, err := w.Redistribute(cs, 5, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
+	} else if len(txns) != 1 {
+		t.Fatalf("unexpected number of txns, %v != 1", len(txns))
 	} else {
-		applyTxn(txn)
+		applyTxn(txns[0])
 	}
 
 	// assert number of outputs that hold 3SC
@@ -154,10 +160,12 @@ func TestWalletRedistribute(t *testing.T) {
 	}
 
 	// split into 6 outputs of 3SC
-	if txn, _, err := w.Redistribute(cs, 6, amount, types.NewCurrency64(1), nil); err != nil {
+	if txns, _, err := w.Redistribute(cs, 6, amount, types.NewCurrency64(1), nil); err != nil {
 		t.Fatal(err)
+	} else if len(txns) != 1 {
+		t.Fatalf("unexpected number of txns, %v != 1", len(txns))
 	} else {
-		applyTxn(txn)
+		applyTxn(txns[0])
 	}
 
 	// assert number of outputs that hold 3SC

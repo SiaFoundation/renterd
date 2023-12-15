@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -16,12 +15,17 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
-// BytesPerInput is the encoded size of a SiacoinInput and corresponding
-// TransactionSignature, assuming standard UnlockConditions.
-const BytesPerInput = 241
+const (
+	// BytesPerInput is the encoded size of a SiacoinInput and corresponding
+	// TransactionSignature, assuming standard UnlockConditions.
+	BytesPerInput = 241
+
+	// redistributeBatchSize is the number of outputs to redistribute per txn to
+	// avoid creating a txn that is too large.
+	redistributeBatchSize = 10
+)
 
 // ErrInsufficientBalance is returned when there aren't enough unused outputs to
 // cover the requested amount.
@@ -223,14 +227,22 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 		return nil, err
 	}
 
-	// choose outputs randomly
-	frand.Shuffle(len(utxos), reflect.Swapper(utxos))
+	// desc sort
+	sort.Slice(utxos, func(i, j int) bool {
+		return utxos[i].Value.Cmp(utxos[j].Value) > 0
+	})
 
 	// add all unconfirmed outputs to the end of the slice as a last resort
 	if useUnconfirmedTxns {
+		var tpoolUtxos []SiacoinElement
 		for _, sco := range w.tpoolUtxos {
-			utxos = append(utxos, sco)
+			tpoolUtxos = append(tpoolUtxos, sco)
 		}
+		// desc sort
+		sort.Slice(tpoolUtxos, func(i, j int) bool {
+			return tpoolUtxos[i].Value.Cmp(tpoolUtxos[j].Value) > 0
+		})
+		utxos = append(utxos, tpoolUtxos...)
 	}
 
 	var outputSum types.Currency
@@ -270,9 +282,17 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 // ReleaseInputs is a helper function that releases the inputs of txn for use in
 // other transactions. It should only be called on transactions that are invalid
 // or will never be broadcast.
-func (w *SingleAddressWallet) ReleaseInputs(txn types.Transaction) {
-	for _, in := range txn.SiacoinInputs {
-		delete(w.lastUsed, types.Hash256(in.ParentID))
+func (w *SingleAddressWallet) ReleaseInputs(txns ...types.Transaction) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.releaseInputs(txns...)
+}
+
+func (w *SingleAddressWallet) releaseInputs(txns ...types.Transaction) {
+	for _, txn := range txns {
+		for _, in := range txn.SiacoinInputs {
+			delete(w.lastUsed, types.Hash256(in.ParentID))
+		}
 	}
 }
 
@@ -303,7 +323,7 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 //
 // NOTE: we can not reuse 'FundTransaction' because it randomizes the unspent
 // transaction outputs it uses and we need a minimal set of inputs
-func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) (types.Transaction, []types.Hash256, error) {
+func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -318,7 +338,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	// fetch unspent transaction outputs
 	utxos, err := w.store.UnspentSiacoinElements(false)
 	if err != nil {
-		return types.Transaction{}, nil, err
+		return nil, nil, err
 	}
 
 	// check whether a redistribution is necessary, adjust number of desired
@@ -332,16 +352,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 		}
 	}
 	if outputs <= 0 {
-		return types.Transaction{}, nil, nil
-	}
-
-	// prepare all outputs
-	var txn types.Transaction
-	for i := 0; i < int(outputs); i++ {
-		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:   amount,
-			Address: w.Address(),
-		})
+		return nil, nil, nil
 	}
 
 	// desc sort
@@ -349,67 +360,84 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 		return utxos[i].Value.Cmp(utxos[j].Value) > 0
 	})
 
-	// estimate the fees
-	outputFees := feePerByte.Mul64(uint64(len(encoding.Marshal(txn.SiacoinOutputs))))
-	feePerInput := feePerByte.Mul64(BytesPerInput)
+	// prepare all outputs
+	var txns []types.Transaction
+	var toSign []types.Hash256
 
-	// collect outputs that cover the total amount
-	var inputs []SiacoinElement
-	want := amount.Mul64(uint64(outputs))
-	var amtInUse, amtSameValue, amtNotMatured types.Currency
-	for _, sce := range utxos {
-		inUse := w.isOutputUsed(sce.ID) || inPool[sce.ID]
-		matured := cs.Index.Height >= sce.MaturityHeight
-		sameValue := sce.Value.Equals(amount)
-		if inUse {
-			amtInUse = amtInUse.Add(sce.Value)
-			continue
-		} else if sameValue {
-			amtSameValue = amtSameValue.Add(sce.Value)
-			continue
-		} else if !matured {
-			amtNotMatured = amtNotMatured.Add(sce.Value)
-			continue
+	for outputs > 0 {
+		var txn types.Transaction
+		for i := 0; outputs > 0 && i < redistributeBatchSize; i++ {
+			txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
+				Value:   amount,
+				Address: w.Address(),
+			})
 		}
 
-		inputs = append(inputs, sce)
+		// estimate the fees
+		outputFees := feePerByte.Mul64(uint64(len(encoding.Marshal(txn.SiacoinOutputs))))
+		feePerInput := feePerByte.Mul64(BytesPerInput)
+
+		// collect outputs that cover the total amount
+		var inputs []SiacoinElement
+		want := amount.Mul64(uint64(outputs))
+		var amtInUse, amtSameValue, amtNotMatured types.Currency
+		for _, sce := range utxos {
+			inUse := w.isOutputUsed(sce.ID) || inPool[sce.ID]
+			matured := cs.Index.Height >= sce.MaturityHeight
+			sameValue := sce.Value.Equals(amount)
+			if inUse {
+				amtInUse = amtInUse.Add(sce.Value)
+				continue
+			} else if sameValue {
+				amtSameValue = amtSameValue.Add(sce.Value)
+				continue
+			} else if !matured {
+				amtNotMatured = amtNotMatured.Add(sce.Value)
+				continue
+			}
+
+			inputs = append(inputs, sce)
+			fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
+			if SumOutputs(inputs).Cmp(want.Add(fee)) > 0 {
+				break
+			}
+		}
+
+		// not enough outputs found
 		fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
-		if SumOutputs(inputs).Cmp(want.Add(fee)) > 0 {
-			break
+		if sumOut := SumOutputs(inputs); sumOut.Cmp(want.Add(fee)) < 0 {
+			// in case of an error we need to free all inputs
+			w.releaseInputs(txns...)
+			return nil, nil, fmt.Errorf("%w: inputs %v < needed %v + txnFee %v (usable: %v, inUse: %v, sameValue: %v, notMatured: %v)",
+				ErrInsufficientBalance, sumOut.String(), want.String(), fee.String(), sumOut.String(), amtInUse.String(), amtSameValue.String(), amtNotMatured.String())
 		}
+
+		// set the miner fee
+		txn.MinerFees = []types.Currency{fee}
+
+		// add the change output
+		change := SumOutputs(inputs).Sub(want.Add(fee))
+		if !change.IsZero() {
+			txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
+				Value:   change,
+				Address: w.addr,
+			})
+		}
+
+		// add the inputs
+		for _, sce := range inputs {
+			txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
+				ParentID:         types.SiacoinOutputID(sce.ID),
+				UnlockConditions: StandardUnlockConditions(w.priv.PublicKey()),
+			})
+			toSign = append(toSign, sce.ID)
+			w.lastUsed[sce.ID] = time.Now()
+		}
+
+		txns = append(txns, txn)
 	}
 
-	// not enough outputs found
-	fee := feePerInput.Mul64(uint64(len(inputs))).Add(outputFees)
-	if sumOut := SumOutputs(inputs); sumOut.Cmp(want.Add(fee)) < 0 {
-		return types.Transaction{}, nil, fmt.Errorf("%w: inputs %v < needed %v + txnFee %v (usable: %v, inUse: %v, sameValue: %v, notMatured: %v)",
-			ErrInsufficientBalance, sumOut.String(), want.String(), fee.String(), sumOut.String(), amtInUse.String(), amtSameValue.String(), amtNotMatured.String())
-	}
-
-	// set the miner fee
-	txn.MinerFees = []types.Currency{fee}
-
-	// add the change output
-	change := SumOutputs(inputs).Sub(want.Add(fee))
-	if !change.IsZero() {
-		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:   change,
-			Address: w.addr,
-		})
-	}
-
-	// add the inputs
-	toSign := make([]types.Hash256, len(inputs))
-	for i, sce := range inputs {
-		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
-			ParentID:         types.SiacoinOutputID(sce.ID),
-			UnlockConditions: StandardUnlockConditions(w.priv.PublicKey()),
-		})
-		toSign[i] = sce.ID
-		w.lastUsed[sce.ID] = time.Now()
-	}
-
-	return txn, toSign, nil
+	return txns, toSign, nil
 }
 
 func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {

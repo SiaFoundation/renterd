@@ -91,7 +91,7 @@ type (
 		resolver *ipResolver
 		logger   *zap.SugaredLogger
 
-		maintenanceTxnID types.TransactionID
+		maintenanceTxnIDs []types.TransactionID
 
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
@@ -579,9 +579,11 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		return nil
 	}
 	for _, txn := range pending {
-		if c.maintenanceTxnID == txn.ID() {
-			l.Debugf("wallet maintenance skipped, pending transaction found with id %v", c.maintenanceTxnID)
-			return nil
+		for _, mTxnID := range c.maintenanceTxnIDs {
+			if mTxnID == txn.ID() {
+				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
+				return nil
+			}
 		}
 	}
 
@@ -607,13 +609,13 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	}
 
 	// redistribute outputs
-	id, err := b.WalletRedistribute(ctx, int(outputs), amount)
+	ids, err := b.WalletRedistribute(ctx, int(outputs), amount)
 	if err != nil {
 		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", outputs, amount, balance, err)
 	}
 
-	l.Debugf("wallet maintenance succeeded, tx %v", id)
-	c.maintenanceTxnID = id
+	l.Debugf("wallet maintenance succeeded, txns %v", ids)
+	c.maintenanceTxnIDs = ids
 	return nil
 }
 
