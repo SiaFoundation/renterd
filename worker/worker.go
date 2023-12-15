@@ -1343,14 +1343,15 @@ func (w *worker) Handler() http.Handler {
 
 // Shutdown shuts down the worker.
 func (w *worker) Shutdown(_ context.Context) error {
-	w.shutdownCtxCancel()
-
 	w.interactionsMu.Lock()
 	if w.interactionsFlushTimer != nil {
 		w.interactionsFlushTimer.Stop()
 		w.flushInteractions()
 	}
 	w.interactionsMu.Unlock()
+
+	// Cancel shutdown context.
+	w.shutdownCtxCancel()
 
 	// Stop contract spending recorder.
 	w.contractSpendingRecorder.Stop()
