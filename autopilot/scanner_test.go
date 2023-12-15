@@ -141,7 +141,7 @@ func (s *scanner) isScanning() bool {
 
 func newTestScanner(b *mockBus, w *mockWorker) *scanner {
 	ap := &Autopilot{}
-	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
+	ap.shutdownCtx, ap.shutdownCtxCancel = context.WithCancel(context.Background())
 	return &scanner{
 		ap:     ap,
 		bus:    b,

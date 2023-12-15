@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -157,11 +155,6 @@ func (u *uploader) UpdateBlockHeight(bh uint64) {
 }
 
 func (u *uploader) enqueue(req *sectorUploadReq) {
-	// trace the request
-	span := trace.SpanFromContext(req.sector.ctx)
-	span.SetAttributes(attribute.Stringer("hk", u.hk))
-	span.AddEvent("enqueued")
-
 	// decorate the request
 	req.fcid = u.ContractID()
 	req.hk = u.hk
@@ -198,10 +191,6 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	fcid := u.fcid
 	u.mu.Unlock()
 
-	// fetch span from context
-	span := trace.SpanFromContext(req.sector.ctx)
-	span.AddEvent("execute")
-
 	// acquire contract lock
 	lockID, err := u.cl.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
 	if err != nil {
@@ -236,12 +225,8 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 		return types.Hash256{}, 0, err
 	}
 
-	// update span
+	// calculate elapsed time
 	elapsed := time.Since(start)
-	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-	span.RecordError(err)
-	span.End()
-
 	return root, elapsed, nil
 }
 

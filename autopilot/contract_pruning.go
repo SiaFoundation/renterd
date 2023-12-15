@@ -91,7 +91,7 @@ func (pr pruneResult) toMetric() api.ContractPruneMetric {
 
 func (c *contractor) fetchPrunableContracts() (prunable []api.ContractPrunableData, _ error) {
 	// use a sane timeout
-	ctx, cancel := context.WithTimeout(c.ap.stopCtx, time.Minute)
+	ctx, cancel := context.WithTimeout(c.ap.shutdownCtx, time.Minute)
 	defer cancel()
 
 	// fetch prunable data
@@ -156,7 +156,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 			}
 
 			// handle alert
-			ctx, cancel := context.WithTimeout(c.ap.stopCtx, time.Minute)
+			ctx, cancel := context.WithTimeout(c.ap.shutdownCtx, time.Minute)
 			if id, alert := result.toAlert(); alert != nil {
 				c.ap.RegisterAlert(ctx, *alert)
 			} else {
@@ -170,7 +170,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 	})
 
 	// record metrics
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(c.ap.shutdownCtx, time.Minute)
 	if err := c.ap.bus.RecordContractPruneMetric(ctx, metrics...); err != nil {
 		c.logger.Error(err)
 	}
@@ -182,7 +182,7 @@ func (c *contractor) performContractPruning(wp *workerPool) {
 
 func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneResult {
 	// create a sane timeout
-	ctx, cancel := context.WithTimeout(c.ap.stopCtx, 2*timeoutPruneContract)
+	ctx, cancel := context.WithTimeout(c.ap.shutdownCtx, 2*timeoutPruneContract)
 	defer cancel()
 
 	// fetch the host

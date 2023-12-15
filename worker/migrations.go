@@ -8,13 +8,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/tracing"
 )
 
 func (w *worker) migrate(ctx context.Context, s *object.Slab, contractSet string, dlContracts, ulContracts []api.ContractMetadata, bh uint64) (int, bool, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "migrateSlab")
-	defer span.End()
-
 	// make a map of good hosts
 	goodHosts := make(map[types.PublicKey]map[types.FileContractID]bool)
 	for _, c := range ulContracts {

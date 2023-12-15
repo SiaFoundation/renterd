@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
@@ -237,7 +236,7 @@ type bus struct {
 
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
-	return jape.Mux(tracing.TracingMiddleware("bus", map[string]jape.Handler{
+	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts":                 b.accountsHandlerGET,
 		"POST   /account/:id":              b.accountHandlerGET,
 		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
@@ -373,7 +372,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /webhooks":        b.webhookHandlerPost,
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
 		"POST   /webhook/delete":  b.webhookHandlerDelete,
-	}))
+	})
 }
 
 // Shutdown shuts down the bus.
@@ -2290,10 +2289,12 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 
 		startTime: time.Now(),
 	}
-	ctx, span := tracing.Tracer.Start(context.Background(), "bus.New")
-	defer span.End()
 
-	// Load default settings if the setting is not already set.
+	// ensure we don't hang indefinitely
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// load default settings if the setting is not already set
 	for key, value := range map[string]interface{}{
 		api.SettingGouging:       build.DefaultGougingSettings,
 		api.SettingRedundancy:    build.DefaultRedundancySettings,
@@ -2308,7 +2309,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		}
 	}
 
-	// Check redundancy settings for validity
+	// check redundancy settings for validity
 	var rs api.RedundancySettings
 	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
 		return nil, err
@@ -2322,7 +2323,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		}
 	}
 
-	// Check gouging settings for validity
+	// check gouging settings for validity
 	var gs api.GougingSettings
 	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
 		return nil, err
@@ -2358,15 +2359,15 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		}
 	}
 
-	// Load the accounts into memory. They're saved when the bus is stopped.
+	// load the accounts into memory, they're saved when the bus is stopped
 	accounts, err := eas.Accounts(ctx)
 	if err != nil {
 		return nil, err
 	}
 	b.accounts = newAccounts(accounts, b.logger)
 
-	// Mark the shutdown as unclean. This will be overwritten when/if the
-	// accounts are saved on shutdown.
+	// mark the shutdown as unclean, this will be overwritten when/if the
+	// accounts are saved on shutdown
 	if err := eas.SetUncleanShutdown(); err != nil {
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
