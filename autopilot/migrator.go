@@ -122,7 +122,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 	m.logger.Info("performing migrations")
 	b := m.ap.bus
 
-	ctx, span := tracing.Tracer.Start(context.Background(), "migrator.performMigrations")
+	ctx, span := tracing.Tracer.Start(m.ap.shutdownCtx, "migrator.performMigrations")
 	defer span.End()
 
 	// prepare a channel to push work to the workers
@@ -258,7 +258,7 @@ OUTER:
 
 		for i, slab := range toMigrate {
 			select {
-			case <-m.ap.stopCtx.Done():
+			case <-m.ap.shutdownCtx.Done():
 				return
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")

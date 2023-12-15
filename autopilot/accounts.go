@@ -95,7 +95,7 @@ func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 		}
 
 		a.w.withWorker(func(w Worker) {
-			a.refillWorkerAccounts(w)
+			a.refillWorkerAccounts(ctx, w)
 		})
 	}
 }
@@ -105,8 +105,8 @@ func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *accounts) refillWorkerAccounts(w Worker) {
-	ctx, span := tracing.Tracer.Start(context.Background(), "refillWorkerAccounts")
+func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
+	ctx, span := tracing.Tracer.Start(ctx, "refillWorkerAccounts")
 	defer span.End()
 
 	// fetch config

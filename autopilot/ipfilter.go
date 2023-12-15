@@ -88,11 +88,11 @@ type (
 	}
 
 	ipResolver struct {
-		resolver resolver
-		cache    map[string]ipCacheEntry
-		timeout  time.Duration
-
-		logger *zap.SugaredLogger
+		resolver    resolver
+		cache       map[string]ipCacheEntry
+		timeout     time.Duration
+		shutdownCtx context.Context
+		logger      *zap.SugaredLogger
 	}
 
 	ipCacheEntry struct {
@@ -101,15 +101,16 @@ type (
 	}
 )
 
-func newIPResolver(timeout time.Duration, logger *zap.SugaredLogger) *ipResolver {
+func newIPResolver(ctx context.Context, timeout time.Duration, logger *zap.SugaredLogger) *ipResolver {
 	if timeout == 0 {
 		panic("timeout must be greater than zero") // developer error
 	}
 	return &ipResolver{
-		resolver: &net.Resolver{},
-		cache:    make(map[string]ipCacheEntry),
-		timeout:  resolverLookupTimeout,
-		logger:   logger,
+		resolver:    &net.Resolver{},
+		cache:       make(map[string]ipCacheEntry),
+		timeout:     resolverLookupTimeout,
+		shutdownCtx: ctx,
+		logger:      logger,
 	}
 }
 
@@ -129,7 +130,7 @@ func (r *ipResolver) lookup(hostIP string) ([]string, error) {
 	}
 
 	// make sure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
+	ctx, cancel := context.WithTimeout(r.shutdownCtx, r.timeout)
 	defer cancel()
 
 	// lookup IP addresses

@@ -141,7 +141,7 @@ func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroad
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
-		resolver: newIPResolver(resolverLookupTimeout, ap.logger.Named("resolver")),
+		resolver: newIPResolver(ap.shutdownCtx, resolverLookupTimeout, ap.logger.Named("resolver")),
 	}
 }
 

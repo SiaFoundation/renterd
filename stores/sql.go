@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -74,6 +75,9 @@ type (
 		// Consensus related fields.
 		ccid       modules.ConsensusChangeID
 		chainIndex types.ChainIndex
+
+		shutdownCtx       context.Context
+		shutdownCtxCancel context.CancelFunc
 
 		mu           sync.Mutex
 		hasAllowlist bool
@@ -228,6 +232,7 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
 
+	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:                 alerts,
 		db:                     db,
@@ -251,6 +256,9 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 			Height: ci.Height,
 			ID:     types.BlockID(ci.BlockID),
 		},
+
+		shutdownCtx:       shutdownCtx,
+		shutdownCtxCancel: shutdownCtxCancel,
 	}
 
 	ss.slabBufferMgr, err = newSlabBufferManager(ss, slabBufferCompletionThreshold, partialSlabDir)
@@ -311,6 +319,8 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 
 // Close closes the underlying database connection of the store.
 func (s *SQLStore) Close() error {
+	s.shutdownCtxCancel()
+
 	db, err := s.db.DB()
 	if err != nil {
 		return err

@@ -109,12 +109,12 @@ type Autopilot struct {
 	stateMu sync.Mutex
 	state   state
 
-	startStopMu   sync.Mutex
-	startTime     time.Time
-	stopCtx       context.Context
-	stopCtxCancel context.CancelFunc
-	ticker        *time.Ticker
-	triggerChan   chan bool
+	startStopMu       sync.Mutex
+	startTime         time.Time
+	shutdownCtx       context.Context
+	shutdownCtxCancel context.CancelFunc
+	ticker            *time.Ticker
+	triggerChan       chan bool
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -178,7 +178,7 @@ func (ap *Autopilot) Run() error {
 		return errors.New("already running")
 	}
 	ap.startTime = time.Now()
-	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
+	ap.shutdownCtx, ap.shutdownCtxCancel = context.WithCancel(context.Background())
 	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
@@ -205,7 +205,7 @@ func (ap *Autopilot) Run() error {
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
-			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
+			ctx, span := tracing.Tracer.Start(ap.shutdownCtx, "Autopilot Iteration")
 			defer span.End()
 
 			// initiate a host scan - no need to be synced or configured for scanning
@@ -283,7 +283,7 @@ func (ap *Autopilot) Run() error {
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
 					ap.logger.Debug("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.stopCtx)
+					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
 			} else {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
@@ -301,7 +301,7 @@ func (ap *Autopilot) Run() error {
 		})
 
 		select {
-		case <-ap.stopCtx.Done():
+		case <-ap.shutdownCtx.Done():
 			return nil
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
@@ -319,7 +319,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 
 	if ap.isRunning() {
 		ap.ticker.Stop()
-		ap.stopCtxCancel()
+		ap.shutdownCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
 		ap.startTime = time.Time{}
@@ -368,7 +368,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 
 	for {
 		// try and fetch the config
-		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 		_, err := ap.bus.Autopilot(ctx, ap.id)
 		cancel()
 
@@ -380,7 +380,7 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 		}
 		if err != nil {
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return false, false
 			case <-interrupt:
 				return false, true
@@ -399,7 +399,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 	var once sync.Once
 
 	for {
-		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 		peers, err := ap.bus.SyncerPeers(ctx)
 		online = len(peers) > 0
 		cancel()
@@ -412,7 +412,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 
 		if err != nil || !online {
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return
 			case <-ticker.C:
 				continue
@@ -430,7 +430,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 
 	for {
 		// try and fetch consensus
-		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
 		synced = cs.Synced
 		cancel()
@@ -445,7 +445,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		if err != nil || !synced {
 			blocked = true
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return
 			case <-interrupt:
 				interrupted = true
@@ -459,7 +459,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 	wallet, err := ap.bus.Wallet(ctx)
 	cancel()
 
@@ -480,13 +480,13 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return
 			case <-ticker.C:
 			}
 
 			// fetch wallet info
-			ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+			ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 			if wallet, err = ap.bus.Wallet(ctx); err != nil {
 				ap.logger.Errorf("failed to get wallet info, err: %v", err)
 			}
@@ -583,7 +583,7 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 
 func (ap *Autopilot) isStopped() bool {
 	select {
-	case <-ap.stopCtx.Done():
+	case <-ap.shutdownCtx.Done():
 		return true
 	default:
 		return false

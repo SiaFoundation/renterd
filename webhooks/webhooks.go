@@ -59,11 +59,12 @@ type (
 )
 
 type Manager struct {
-	ctx       context.Context
-	ctxCancel context.CancelFunc
-	logger    *zap.SugaredLogger
-	wg        sync.WaitGroup
-	store     WebhookStore
+	logger *zap.SugaredLogger
+	wg     sync.WaitGroup
+	store  WebhookStore
+
+	shutdownCtx       context.Context
+	shutdownCtxCancel context.CancelFunc
 
 	mu       sync.Mutex
 	queues   map[string]*eventQueue // URL -> queue
@@ -80,18 +81,84 @@ type eventQueue struct {
 	events       []Event
 }
 
-func (w *Manager) Close() error {
-	w.ctxCancel()
-	w.wg.Wait()
+func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, hook := range m.webhooks {
+		if !hook.Matches(event) {
+			continue
+		}
+
+		// Find queue or create one.
+		queue, exists := m.queues[hook.URL]
+		if !exists {
+			queue = &eventQueue{
+				ctx:    m.shutdownCtx,
+				logger: m.logger,
+				url:    hook.URL,
+			}
+			m.queues[hook.URL] = queue
+		}
+
+		// Add event and launch goroutine to start dequeueing if necessary.
+		queue.mu.Lock()
+		queue.events = append(queue.events, event)
+		if !queue.isDequeueing {
+			queue.isDequeueing = true
+			m.wg.Add(1)
+			go func() {
+				queue.dequeue()
+				m.wg.Done()
+			}()
+		}
+		queue.mu.Unlock()
+	}
 	return nil
 }
 
-func (w Webhook) String() string {
-	return fmt.Sprintf("%v.%v.%v", w.URL, w.Module, w.Event)
+func (m *Manager) Close() error {
+	m.shutdownCtxCancel()
+	m.wg.Wait()
+	return nil
 }
 
-func (w *Manager) Register(wh Webhook) error {
-	ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
+func (m *Manager) Delete(wh Webhook) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.store.DeleteWebhook(wh); errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrWebhookNotFound
+	} else if err != nil {
+		return err
+	}
+	delete(m.webhooks, wh.String())
+	return nil
+}
+
+func (m *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var hooks []Webhook
+	for _, hook := range m.webhooks {
+		hooks = append(hooks, Webhook{
+			Event:  hook.Event,
+			Module: hook.Module,
+			URL:    hook.URL,
+		})
+	}
+	var queueInfos []WebhookQueueInfo
+	for _, queue := range m.queues {
+		queue.mu.Lock()
+		queueInfos = append(queueInfos, WebhookQueueInfo{
+			URL:  queue.url,
+			Size: len(queue.events),
+		})
+		queue.mu.Unlock()
+	}
+	return hooks, queueInfos
+}
+
+func (m *Manager) Register(wh Webhook) error {
+	ctx, cancel := context.WithTimeout(m.shutdownCtx, webhookTimeout)
 	defer cancel()
 
 	// Test URL.
@@ -103,87 +170,17 @@ func (w *Manager) Register(wh Webhook) error {
 	}
 
 	// Add Webhook.
-	if err := w.store.AddWebhook(wh); err != nil {
+	if err := m.store.AddWebhook(wh); err != nil {
 		return err
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.webhooks[wh.String()] = wh
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.webhooks[wh.String()] = wh
 	return nil
-}
-
-func (w *Manager) Delete(wh Webhook) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if err := w.store.DeleteWebhook(wh); errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrWebhookNotFound
-	} else if err != nil {
-		return err
-	}
-	delete(w.webhooks, wh.String())
-	return nil
-}
-
-func (w *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	var hooks []Webhook
-	for _, hook := range w.webhooks {
-		hooks = append(hooks, Webhook{
-			Event:  hook.Event,
-			Module: hook.Module,
-			URL:    hook.URL,
-		})
-	}
-	var queueInfos []WebhookQueueInfo
-	for _, queue := range w.queues {
-		queue.mu.Lock()
-		queueInfos = append(queueInfos, WebhookQueueInfo{
-			URL:  queue.url,
-			Size: len(queue.events),
-		})
-		queue.mu.Unlock()
-	}
-	return hooks, queueInfos
 }
 
 func (a Event) String() string {
 	return a.Module + "." + a.Event
-}
-
-func (w *Manager) BroadcastAction(_ context.Context, event Event) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for _, hook := range w.webhooks {
-		if !hook.Matches(event) {
-			continue
-		}
-
-		// Find queue or create one.
-		queue, exists := w.queues[hook.URL]
-		if !exists {
-			queue = &eventQueue{
-				ctx:    w.ctx,
-				logger: w.logger,
-				url:    hook.URL,
-			}
-			w.queues[hook.URL] = queue
-		}
-
-		// Add event and launch goroutine to start dequeueing if necessary.
-		queue.mu.Lock()
-		queue.events = append(queue.events, event)
-		if !queue.isDequeueing {
-			queue.isDequeueing = true
-			w.wg.Add(1)
-			go func() {
-				queue.dequeue()
-				w.wg.Done()
-			}()
-		}
-		queue.mu.Unlock()
-	}
-	return nil
 }
 
 func (q *eventQueue) dequeue() {
@@ -212,20 +209,28 @@ func (w Webhook) Matches(action Event) bool {
 	return w.Event == "" || w.Event == action.Event
 }
 
+func (w Webhook) String() string {
+	return fmt.Sprintf("%v.%v.%v", w.URL, w.Module, w.Event)
+}
+
 func NewManager(logger *zap.SugaredLogger, store WebhookStore) (*Manager, error) {
 	hooks, err := store.Webhooks()
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+
+	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		ctx:       ctx,
-		ctxCancel: cancel,
-		logger:    logger.Named("webhooks"),
-		queues:    make(map[string]*eventQueue),
-		store:     store,
-		webhooks:  make(map[string]Webhook),
+		logger: logger.Named("webhooks"),
+		store:  store,
+
+		shutdownCtx:       shutdownCtx,
+		shutdownCtxCancel: shutdownCtxCancel,
+
+		queues:   make(map[string]*eventQueue),
+		webhooks: make(map[string]Webhook),
 	}
+
 	for _, hook := range hooks {
 		m.webhooks[hook.String()] = hook
 	}

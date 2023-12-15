@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/gotd/contrib/http_range"
-	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -225,7 +224,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, f
 }
 
 func (w *worker) registerAlert(a alerts.Alert) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(w.shutdownCtx, time.Minute)
 	if err := w.alerts.RegisterAlert(ctx, a); err != nil {
 		w.logger.Error("failed to register alert", err)
 	}
@@ -373,8 +372,8 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	jc.Encode(hpt)
 }
 
-func (w *worker) discardTxnOnErr(ctx context.Context, txn types.Transaction, errContext string, err *error) {
-	discardTxnOnErr(ctx, w.bus, w.logger, txn, errContext, err)
+func (w *worker) discardTxnOnErr(txn types.Transaction, errContext string, err *error) {
+	discardTxnOnErr(w.shutdownCtx, w.bus, w.logger, txn, errContext, err)
 }
 
 func (w *worker) rhpFormHandler(jc jape.Context) {
@@ -429,7 +428,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 		if err != nil {
 			return err
 		}
-		defer w.discardTxnOnErr(ctx, renterTxnSet[len(renterTxnSet)-1], "rhpFormHandler", &err)
+		defer w.discardTxnOnErr(renterTxnSet[len(renterTxnSet)-1], "rhpFormHandler", &err)
 
 		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
 		if err != nil {
@@ -1286,7 +1285,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
@@ -1298,8 +1297,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		logger:                  l.Sugar().Named("worker").Named(id),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]bool),
-		shutdownCtx:             ctx,
-		shutdownCtxCancel:       cancel,
+		shutdownCtx:             shutdownCtx,
+		shutdownCtxCancel:       shutdownCtxCancel,
 	}
 	w.initAccounts(b)
 	w.initContractSpendingRecorder()
@@ -1424,13 +1423,16 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 	if *err == nil {
 		return
 	}
-	_, span := tracing.Tracer.Start(ctx, "discardTxn")
-	defer span.End()
-	// Attach the span to a new context derived from the background context.
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	// add timeout
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	timeoutCtx = trace.ContextWithSpan(timeoutCtx, span)
-	if err := bus.WalletDiscard(timeoutCtx, txn); err != nil {
+
+	// start trace
+	ctx, span := tracing.Tracer.Start(ctx, "discardTxn")
+	defer span.End()
+
+	if err := bus.WalletDiscard(ctx, txn); err != nil {
 		l.Errorf("%v: failed to discard txn: %v", err)
 	}
 }
