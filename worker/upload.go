@@ -41,8 +41,10 @@ type (
 		hm     HostManager
 		mm     MemoryManager
 		os     ObjectStore
-		rl     revisionLocker // TODO: host should implement revisionLocker, would allow us to remove it here
+		cl     ContractLocker
 		logger *zap.SugaredLogger
+
+		contractLockDuration time.Duration
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
@@ -66,16 +68,20 @@ type (
 	}
 
 	upload struct {
-		id           api.UploadID
-		allowed      map[types.PublicKey]struct{}
-		lockPriority int
-		shutdownCtx  context.Context
+		id api.UploadID
+
+		allowed map[types.PublicKey]struct{}
+
+		contractLockPriority int
+		contractLockDuration time.Duration
+
+		shutdownCtx context.Context
 	}
 
 	slabUpload struct {
-		uploadID     api.UploadID
-		mem          Memory
-		lockPriority int
+		uploadID             api.UploadID
+		contractLockPriority int
+		contractLockDuration time.Duration
 
 		maxOverdrive  uint64
 		lastOverdrive time.Time
@@ -88,6 +94,8 @@ type (
 		numOverdriving uint64
 		numUploaded    uint64
 		numSectors     uint64
+
+		mem Memory
 
 		errs HostErrorSet
 	}
@@ -114,9 +122,12 @@ type (
 	}
 
 	sectorUploadReq struct {
-		uploadID     api.UploadID
+		// upload fields
+		uploadID             api.UploadID
+		contractLockDuration time.Duration
+		contractLockPriority int
+
 		sector       *sectorUpload
-		lockPriority int
 		overdrive    bool
 		responseChan chan sectorUploadResp
 
@@ -138,7 +149,7 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	}
 
 	mm := newMemoryManager(logger, maxMemory)
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w, maxOverdrive, overdriveTimeout, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
 func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
@@ -255,7 +266,7 @@ func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Dur
 		go func(ps api.PackedSlab) {
 			defer mem.Release()
 			defer wg.Done()
-			err := w.uploadPackedSlab(ctx, ps, rs, contractSet, lockPriority, mem)
+			err := w.uploadPackedSlab(ctx, rs, ps, mem, contractSet, lockPriority)
 			mu.Lock()
 			if err != nil {
 				errs = errors.Join(errs, err)
@@ -275,7 +286,7 @@ func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Dur
 	return
 }
 
-func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int, mem Memory) error {
+func (w *worker) uploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem Memory, contractSet string, lockPriority int) error {
 	// create a context with sane timeout
 	ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
 	defer cancel()
@@ -296,7 +307,7 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// upload packed slab
-	err = w.uploadManager.UploadPackedSlab(ctx, rs, ps, contracts, up.CurrentHeight, lockPriority, mem)
+	err = w.uploadManager.UploadPackedSlab(ctx, rs, ps, mem, contracts, up.CurrentHeight, lockPriority)
 	if err != nil {
 		return fmt.Errorf("couldn't upload packed slab, err: %v", err)
 	}
@@ -304,13 +315,15 @@ func (w *worker) uploadPackedSlab(ctx context.Context, ps api.PackedSlab, rs api
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, rl revisionLocker, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cl ContractLocker, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		hm:     hm,
 		mm:     mm,
 		os:     os,
-		rl:     rl,
+		cl:     cl,
 		logger: logger,
+
+		contractLockDuration: contractLockDuration,
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
@@ -324,9 +337,11 @@ func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os 
 	}
 }
 
-func (mgr *uploadManager) newUploader(os ObjectStore, h Host, c api.ContractMetadata, bh uint64) *uploader {
+func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, h Host, c api.ContractMetadata, bh uint64) *uploader {
 	return &uploader{
-		os: os,
+		os:     os,
+		cl:     cl,
+		logger: mgr.logger,
 
 		// static
 		hk:              c.HostKey,
@@ -620,7 +635,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	return
 }
 
-func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem Memory, contracts []api.ContractMetadata, bh uint64, lockPriority int) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -712,10 +727,11 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 
 	// create upload
 	return &upload{
-		id:           api.NewUploadID(),
-		allowed:      allowed,
-		lockPriority: lockPriority,
-		shutdownCtx:  mgr.shutdownCtx,
+		id:                   api.NewUploadID(),
+		allowed:              allowed,
+		contractLockDuration: mgr.contractLockDuration,
+		contractLockPriority: lockPriority,
+		shutdownCtx:          mgr.shutdownCtx,
 	}, nil
 }
 
@@ -757,9 +773,9 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists {
 			host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
-			uploader := mgr.newUploader(mgr.os, host, c, bh)
+			uploader := mgr.newUploader(mgr.os, mgr.cl, host, c, bh)
 			refreshed = append(refreshed, uploader)
-			go uploader.Start(mgr.hm, mgr.rl)
+			go uploader.Start()
 		}
 	}
 
@@ -799,8 +815,11 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 
 	// create slab upload
 	return &slabUpload{
-		lockPriority: u.lockPriority,
-		uploadID:     u.id,
+		uploadID: u.id,
+
+		contractLockPriority: u.contractLockPriority,
+		contractLockDuration: u.contractLockDuration,
+
 		maxOverdrive: maxOverdrive,
 		mem:          mem,
 
@@ -862,11 +881,12 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	requests := make([]*sectorUploadReq, len(shards))
 	for sI := range shards {
 		requests[sI] = &sectorUploadReq{
-			uploadID:     slab.uploadID,
-			sector:       slab.sectors[sI],
-			lockPriority: slab.lockPriority,
-			overdrive:    false,
-			responseChan: respChan,
+			uploadID:             slab.uploadID,
+			sector:               slab.sectors[sI],
+			contractLockPriority: slab.contractLockPriority,
+			contractLockDuration: slab.contractLockDuration,
+			overdrive:            false,
+			responseChan:         respChan,
 		}
 	}
 
@@ -1054,11 +1074,12 @@ func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUplo
 	}
 
 	return &sectorUploadReq{
-		lockPriority: s.lockPriority,
-		overdrive:    true,
-		responseChan: responseChan,
-		sector:       nextSector,
-		uploadID:     s.uploadID,
+		contractLockDuration: s.contractLockDuration,
+		contractLockPriority: s.contractLockPriority,
+		overdrive:            true,
+		responseChan:         responseChan,
+		sector:               nextSector,
+		uploadID:             s.uploadID,
 	}
 }
 
@@ -1081,7 +1102,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// sanity check we receive the expected root
 	if resp.root != req.sector.root {
-		s.errs[req.hk] = errors.New("root mismatch")
+		s.errs[req.hk] = fmt.Errorf("root mismatch, %v != %v", resp.root, req.sector.root)
 		return false, false
 	}
 
