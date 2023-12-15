@@ -1401,12 +1401,12 @@ func performMigration00035_bufferedSlabsDropSizeAndComplete(txn *gorm.DB, logger
 	}
 
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "size") {
-		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "size"); err != nil {
+		if err := txn.Exec("ALTER TABLE buffered_slabs DROP COLUMN size").Error; err != nil {
 			return err
 		}
 	}
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "complete") {
-		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "complete"); err != nil {
+		if err := txn.Exec("ALTER TABLE buffered_slabs DROP COLUMN complete").Error; err != nil {
 			return err
 		}
 	}
