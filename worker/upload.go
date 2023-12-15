@@ -12,14 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
-	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
 
@@ -352,13 +349,6 @@ func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, sha
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "MigrateShards")
-	defer func() {
-		span.RecordError(err)
-		span.End()
-	}()
-
 	// create the upload
 	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
 	if err != nil {
@@ -450,13 +440,6 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "Upload")
-	defer func() {
-		span.RecordError(err)
-		span.End()
-	}()
 
 	// create the object
 	o := object.NewObject(up.ec)
@@ -625,13 +608,6 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "UploadPackedSlab")
-	defer func() {
-		span.RecordError(err)
-		span.End()
-	}()
-
 	// build the shards
 	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
 
@@ -776,11 +752,6 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 		// create the ctx
 		sCtx, sCancel := context.WithCancel(ctx)
 
-		// attach the upload's span
-		sCtx, span := tracing.Tracer.Start(sCtx, "uploadSector")
-		span.SetAttributes(attribute.Bool("overdrive", false))
-		span.SetAttributes(attribute.Int("sector", sI))
-
 		// create the sector
 		sectors[sI] = &sectorUpload{
 			data:   (*[rhpv2.SectorSize]byte)(shard),
@@ -813,10 +784,6 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 }
 
 func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (uploadSpeed int64, overdrivePct float64) {
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "uploadSlab")
-	defer span.End()
-
 	// create the response
 	resp := slabUploadResponse{
 		slab: object.SlabSlice{
@@ -846,10 +813,6 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
 	start := time.Now()
-
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "uploadShards")
-	defer span.End()
 
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
@@ -954,9 +917,6 @@ loop:
 	}
 	overdrivePct = float64(numOverdrive) / float64(slab.numSectors)
 
-	// register the amount of overdrive sectors
-	span.SetAttributes(attribute.Int("overdrive", int(numOverdrive)))
-
 	if slab.numUploaded < slab.numSectors {
 		remaining := slab.numSectors - slab.numUploaded
 		err = fmt.Errorf("failed to upload slab: launched=%d uploaded=%d remaining=%d inflight=%d pending=%d uploaders=%d errors=%d %w", slab.numLaunched, slab.numUploaded, remaining, slab.numInflight, len(buffer), len(slab.candidates), len(slab.errs), slab.errs)
@@ -1008,11 +968,7 @@ func (s *slabUpload) launch(req *sectorUploadReq) error {
 
 	// no candidate found
 	if candidate == nil {
-		err := errNoCandidateUploader
-		span := trace.SpanFromContext(req.sector.ctx)
-		span.RecordError(err)
-		span.End()
-		return err
+		return errNoCandidateUploader
 	}
 
 	// update the candidate

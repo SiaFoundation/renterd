@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
 	"go.sia.tech/siad/modules"
@@ -1311,7 +1310,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
-	return jape.Mux(tracing.TracingMiddleware("worker", interactionMiddleware(w, map[string]jape.Handler{
+	return jape.Mux(interactionMiddleware(w, map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
@@ -1339,7 +1338,7 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
-	})))
+	}))
 }
 
 // Shutdown shuts down the worker.
@@ -1424,17 +1423,11 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 		return
 	}
 
-	// add timeout
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// start trace
-	ctx, span := tracing.Tracer.Start(ctx, "discardTxn")
-	defer span.End()
-
-	if err := bus.WalletDiscard(ctx, txn); err != nil {
-		l.Errorf("%v: failed to discard txn: %v", err)
+	if dErr := bus.WalletDiscard(ctx, txn); dErr != nil {
+		l.Errorf("%w: failed to discard txn: %v", *err, dErr)
 	}
+	cancel()
 }
 
 func isErrDuplicateTransactionSet(err error) bool {

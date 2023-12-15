@@ -21,7 +21,6 @@ type (
 		Autopilot Autopilot `yaml:"autopilot"`
 
 		Database Database `yaml:"database"`
-		Tracing  Tracing  `yaml:"tracing"`
 	}
 
 	// HTTP contains the configuration for the HTTP server.
@@ -39,12 +38,6 @@ type (
 		Log DatabaseLog `yaml:"log"`
 		// optional fields depending on backend
 		MySQL MySQL `yaml:"mysql"`
-	}
-
-	// Tracing contains the configuration for tracing.
-	Tracing struct {
-		Enabled    bool   `yaml:"enabled"`
-		InstanceID string `yaml:"instanceID"`
 	}
 
 	// Bus contains the configuration for a bus.

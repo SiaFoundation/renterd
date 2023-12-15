@@ -13,14 +13,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
-	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -197,13 +194,6 @@ func newDownloader(ctx context.Context, host Host) *downloader {
 }
 
 func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, contracts []api.ContractMetadata) (err error) {
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "download")
-	defer func() {
-		span.RecordError(err)
-		span.End()
-	}()
-
 	// create identifier
 	id := newID()
 
@@ -582,10 +572,6 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 }
 
 func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
-	defer span.End()
-
 	// prepare new download
 	slab := mgr.newSlabDownload(ctx, dID, slice, migration)
 
@@ -768,11 +754,6 @@ func (d *downloader) estimate() float64 {
 }
 
 func (d *downloader) enqueue(download *sectorDownloadReq) {
-	// add tracing
-	span := trace.SpanFromContext(download.ctx)
-	span.SetAttributes(attribute.Float64("estimate", d.estimate()))
-	span.AddEvent("enqueued")
-
 	// enqueue the job
 	d.mu.Lock()
 	d.queue = append(d.queue, download)
@@ -819,17 +800,6 @@ func (d *downloader) trackFailure(err error) {
 }
 
 func (d *downloader) execute(req *sectorDownloadReq) (err error) {
-	// add tracing
-	start := time.Now()
-	span := trace.SpanFromContext(req.ctx)
-	span.AddEvent("execute")
-	defer func() {
-		elapsed := time.Since(start)
-		span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-		span.RecordError(err)
-		span.End()
-	}()
-
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, req.length))
 	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
@@ -966,15 +936,9 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	sector := s.hostToSectors[s.curr][0]
 	s.hostToSectors[s.curr] = s.hostToSectors[s.curr][1:]
 
-	// create the span
-	sCtx, span := tracing.Tracer.Start(ctx, "sectorDownloadReq")
-	span.SetAttributes(attribute.Stringer("hk", sector.LatestHost))
-	span.SetAttributes(attribute.Bool("overdrive", overdrive))
-	span.SetAttributes(attribute.Int("sector", sector.index))
-
 	// build the request
 	return &sectorDownloadReq{
-		ctx: sCtx,
+		ctx: ctx,
 
 		offset: s.offset,
 		length: s.length,
@@ -998,10 +962,6 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 	// cancel any sector downloads once the download is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "download")
-	defer span.End()
 
 	// create the responses queue
 	resps := &sectorResponses{
@@ -1164,9 +1124,6 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	// launch the req
 	err := s.mgr.launch(req)
 	if err != nil {
-		span := trace.SpanFromContext(req.ctx)
-		span.RecordError(err)
-		span.End()
 		return err
 	}
 

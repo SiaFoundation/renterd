@@ -11,14 +11,11 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
@@ -152,9 +149,6 @@ func (c *contractor) Status() (bool, time.Time) {
 }
 
 func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (bool, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "contractor.performContractMaintenance")
-	defer span.End()
-
 	// skip contract maintenance if we're stopped or not synced
 	if c.ap.isStopped() {
 		return false, nil
@@ -522,9 +516,6 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 }
 
 func (c *contractor) performWalletMaintenance(ctx context.Context) error {
-	ctx, span := tracing.Tracer.Start(ctx, "contractor.performWalletMaintenance")
-	defer span.End()
-
 	if c.ap.isStopped() {
 		return nil // skip contract maintenance if we're not synced
 	}
@@ -805,9 +796,6 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 }
 
 func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) ([]types.FileContractID, error) {
-	ctx, span := tracing.Tracer.Start(ctx, "runContractFormations")
-	defer span.End()
-
 	if c.ap.isStopped() {
 		return nil, nil
 	}
@@ -994,9 +982,6 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
-	ctx, span := tracing.Tracer.Start(ctx, "runContractRenewals")
-	defer span.End()
-
 	c.logger.Debugw(
 		"run contracts renewals",
 		"torenew", len(toRenew),
@@ -1055,9 +1040,6 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 }
 
 func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, toRefresh []contractInfo, budget *types.Currency) (refreshed []renewal, _ error) {
-	ctx, span := tracing.Tracer.Start(ctx, "runContractRefreshes")
-	defer span.End()
-
 	c.logger.Debugw(
 		"run contracts refreshes",
 		"torefresh", len(toRefresh),
@@ -1323,16 +1305,6 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
-	ctx, span := tracing.Tracer.Start(ctx, "renewContract")
-	defer span.End()
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to renew contract")
-		}
-	}()
-	span.SetAttributes(attribute.Stringer("host", ci.contract.HostKey))
-	span.SetAttributes(attribute.Stringer("contract", ci.contract.ID))
 
 	// convenience variables
 	state := c.ap.State()
@@ -1415,16 +1387,6 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
 	}
-	ctx, span := tracing.Tracer.Start(ctx, "refreshContract")
-	defer span.End()
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to refresh contract")
-		}
-	}()
-	span.SetAttributes(attribute.Stringer("host", ci.contract.HostKey))
-	span.SetAttributes(attribute.Stringer("contract", ci.contract.ID))
 
 	// convenience variables
 	state := c.ap.State()
@@ -1512,19 +1474,9 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 }
 
 func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
-	ctx, span := tracing.Tracer.Start(ctx, "formContract")
-	defer span.End()
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to form contract")
-		}
-	}()
-	hk := host.PublicKey
-	span.SetAttributes(attribute.Stringer("host", hk))
-
 	// convenience variables
 	state := c.ap.State()
+	hk := host.PublicKey
 
 	// fetch host settings
 	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
