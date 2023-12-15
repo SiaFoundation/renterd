@@ -276,8 +276,8 @@ go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca h1:aZMg2AKevn7jKx+wlusWQf
 go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca/go.mod h1:h/1afFwpxzff6/gG5i1XdAgPK7dEY6FaibhK7N5F86Y=
 go.sia.tech/web v0.0.0-20231213145933-3f175a86abff h1:/nE7nhewDRxzEdtSKT4SkiUwtjPSiy7Xz7CHEW3MaGQ=
 go.sia.tech/web v0.0.0-20231213145933-3f175a86abff/go.mod h1:RKODSdOmR3VtObPAcGwQqm4qnqntDVFylbvOBbWYYBU=
-go.sia.tech/web/renterd v0.36.0 h1:78FXkALF4ZiJw6IrZY1IZ9G0Z+Bp9hZbR8sXxk28Jxg=
-go.sia.tech/web/renterd v0.36.0/go.mod h1:FgXrdmAnu591a3h96RB/15pMZ74xO9457g902uE06BM=
+go.sia.tech/web/renterd v0.37.0 h1:Igfi0TcrYFufltmbts5TltpMf6hS6veJWyYiWRPPvt4=
+go.sia.tech/web/renterd v0.37.0/go.mod h1:FgXrdmAnu591a3h96RB/15pMZ74xO9457g902uE06BM=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/goleak v1.2.0 h1:xqgm/S+aQvhWFTtR0XK3Jvg7z8kGV8P4X14IzwN3Eqk=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=
