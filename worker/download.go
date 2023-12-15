@@ -945,24 +945,24 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 
 	// prepare next sectors to download
 	if len(s.hostToSectors[s.curr]) == 0 {
-		// grab unused hosts
+		// select all possible hosts
 		var hosts []types.PublicKey
-		for host := range s.hostToSectors {
-			if _, used := s.used[host]; !used && host != s.curr {
+		for host, sectors := range s.hostToSectors {
+			if len(sectors) == 0 {
+				continue // ignore hosts with no more sectors
+			} else if _, used := s.used[host]; !used {
 				hosts = append(hosts, host)
 			}
 		}
 
-		// make the fastest host the current host
-		if len(hosts) > 0 {
-			s.curr = s.mgr.fastest(hosts)
-			s.used[s.curr] = struct{}{}
-		}
-
 		// no more sectors to download
-		if len(s.hostToSectors[s.curr]) == 0 {
+		if len(hosts) == 0 {
 			return nil
 		}
+
+		// make the fastest host the current host
+		s.curr = s.mgr.fastest(hosts)
+		s.used[s.curr] = struct{}{}
 	}
 
 	// pop the next sector
