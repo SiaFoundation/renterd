@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
@@ -237,7 +236,7 @@ type bus struct {
 
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
-	return jape.Mux(tracing.TracingMiddleware("bus", map[string]jape.Handler{
+	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts":                 b.accountsHandlerGET,
 		"POST   /account/:id":              b.accountHandlerGET,
 		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
@@ -373,7 +372,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /webhooks":        b.webhookHandlerPost,
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
 		"POST   /webhook/delete":  b.webhookHandlerDelete,
-	}))
+	})
 }
 
 // Shutdown shuts down the bus.
@@ -2289,10 +2288,6 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	// ensure we don't hang indefinitely
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-
-	// attach tracing span
-	ctx, span := tracing.Tracer.Start(ctx, "bus.New")
-	defer span.End()
 
 	// load default settings if the setting is not already set
 	for key, value := range map[string]interface{}{

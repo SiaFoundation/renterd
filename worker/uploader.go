@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -160,11 +158,6 @@ func (u *uploader) UpdateBlockHeight(bh uint64) {
 }
 
 func (u *uploader) enqueue(req *sectorUploadReq) {
-	// trace the request
-	span := trace.SpanFromContext(req.sector.ctx)
-	span.SetAttributes(attribute.Stringer("hk", u.hk))
-	span.AddEvent("enqueued")
-
 	// decorate the request
 	req.fcid = u.ContractID()
 	req.hk = u.hk
@@ -199,29 +192,13 @@ func (u *uploader) execute(req *sectorUploadReq, rev types.FileContractRevision)
 	fcid := u.fcid
 	u.mu.Unlock()
 
-	// fetch span from context
-	span := trace.SpanFromContext(req.sector.ctx)
-	span.AddEvent("execute")
-
 	// update the bus
 	if err := u.os.AddUploadingSector(req.sector.ctx, req.uploadID, fcid, req.sector.root); err != nil {
 		return types.Hash256{}, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
 	}
 
 	// upload the sector
-	start := time.Now()
-	root, err := host.UploadSector(req.sector.ctx, req.sector.data, rev)
-	if err != nil {
-		return types.Hash256{}, err
-	}
-
-	// update span
-	elapsed := time.Since(start)
-	span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-	span.RecordError(err)
-	span.End()
-
-	return root, nil
+	return host.UploadSector(req.sector.ctx, req.sector.data, rev)
 }
 
 func (u *uploader) pop() *sectorUploadReq {
