@@ -320,9 +320,6 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 // Redistribute returns a transaction that redistributes money in the wallet by
 // selecting a minimal set of inputs to cover the creation of the requested
 // outputs. It also returns a list of output IDs that need to be signed.
-//
-// NOTE: we can not reuse 'FundTransaction' because it randomizes the unspent
-// transaction outputs it uses and we need a minimal set of inputs
 func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -372,6 +369,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 				Address: w.Address(),
 			})
 		}
+		outputs -= len(txn.SiacoinOutputs)
 
 		// estimate the fees
 		outputFees := feePerByte.Mul64(uint64(len(encoding.Marshal(txn.SiacoinOutputs))))
@@ -379,7 +377,7 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 
 		// collect outputs that cover the total amount
 		var inputs []SiacoinElement
-		want := amount.Mul64(uint64(outputs))
+		want := amount.Mul64(uint64(len(txn.SiacoinOutputs)))
 		var amtInUse, amtSameValue, amtNotMatured types.Currency
 		for _, sce := range utxos {
 			inUse := w.isOutputUsed(sce.ID) || inPool[sce.ID]
@@ -434,7 +432,6 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 			w.lastUsed[sce.ID] = time.Now()
 		}
 
-		outputs -= len(txn.SiacoinOutputs)
 		txns = append(txns, txn)
 	}
 

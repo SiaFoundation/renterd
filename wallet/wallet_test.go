@@ -1,4 +1,4 @@
-package wallet_test
+package wallet
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -17,15 +16,15 @@ import (
 // mockStore implements wallet.SingleAddressStore and allows to manipulate the
 // wallet's utxos
 type mockStore struct {
-	utxos []wallet.SiacoinElement
+	utxos []SiacoinElement
 }
 
 func (s *mockStore) Balance() (types.Currency, error) { return types.ZeroCurrency, nil }
 func (s *mockStore) Height() uint64                   { return 0 }
-func (s *mockStore) UnspentSiacoinElements(bool) ([]wallet.SiacoinElement, error) {
+func (s *mockStore) UnspentSiacoinElements(bool) ([]SiacoinElement, error) {
 	return s.utxos, nil
 }
-func (s *mockStore) Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error) {
+func (s *mockStore) Transactions(before, since time.Time, offset, limit int) ([]Transaction, error) {
 	return nil, nil
 }
 func (s *mockStore) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
@@ -47,16 +46,16 @@ func TestWalletRedistribute(t *testing.T) {
 	// create a wallet with one output
 	priv := types.GeneratePrivateKey()
 	pub := priv.PublicKey()
-	utxo := wallet.SiacoinElement{
+	utxo := SiacoinElement{
 		types.SiacoinOutput{
 			Value:   oneSC.Mul64(20),
-			Address: wallet.StandardAddress(pub),
+			Address: StandardAddress(pub),
 		},
 		randomOutputID(),
 		0,
 	}
-	s := &mockStore{utxos: []wallet.SiacoinElement{utxo}}
-	w := wallet.NewSingleAddressWallet(priv, s, 0, zap.NewNop().Sugar())
+	s := &mockStore{utxos: []SiacoinElement{utxo}}
+	w := NewSingleAddressWallet(priv, s, 0, zap.NewNop().Sugar())
 
 	numOutputsWithValue := func(v types.Currency) (c uint64) {
 		utxos, _ := w.UnspentOutputs()
@@ -78,7 +77,7 @@ func TestWalletRedistribute(t *testing.T) {
 			}
 		}
 		for _, output := range txn.SiacoinOutputs {
-			s.utxos = append(s.utxos, wallet.SiacoinElement{output, randomOutputID(), 0})
+			s.utxos = append(s.utxos, SiacoinElement{output, randomOutputID(), 0})
 		}
 	}
 
@@ -171,6 +170,22 @@ func TestWalletRedistribute(t *testing.T) {
 	// assert number of outputs that hold 3SC
 	if cnt := numOutputsWithValue(amount); cnt != 6 {
 		t.Fatalf("unexpected number of 3SC outputs, %v != 6", cnt)
+	}
+
+	// split into 2 times the redistributeBatchSize
+	amount = oneSC.Div64(10)
+	if txns, _, err := w.Redistribute(cs, 2*redistributeBatchSize, amount, types.NewCurrency64(1), nil); err != nil {
+		t.Fatal(err)
+	} else if len(txns) != 2 {
+		t.Fatalf("unexpected number of txns, %v != 2", len(txns))
+	} else {
+		applyTxn(txns[0])
+		applyTxn(txns[1])
+	}
+
+	// assert number of outputs that hold 0.1SC
+	if cnt := numOutputsWithValue(amount); cnt != 2*redistributeBatchSize {
+		t.Fatalf("unexpected number of 0.1SC outputs, %v != 20", cnt)
 	}
 }
 
