@@ -762,12 +762,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, priceTable: host.PriceTable.HostPriceTable, settings: host.Settings}
-		renterFunds, err := c.renewFundingEstimate(ctx, ci, state.fee, false)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("failed to compute renterFunds for contract: %v", err))
-		}
-
-		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.cfg, ci, cs.BlockHeight, renterFunds, ipFilter)
+		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.cfg, state, ci, cs.BlockHeight, ipFilter)
 		ci.usable = usable
 		ci.recoverable = recoverable
 		if !usable {
@@ -1406,7 +1401,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// calculate the renter funds
 	var renterFunds types.Currency
-	if isOutOfFunds(state.cfg, ci.settings, ci.contract) {
+	if isOutOfFunds(state.cfg, ci.priceTable, ci.contract) {
 		renterFunds, err = c.refreshFundingEstimate(ctx, state.cfg, ci, state.fee)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
@@ -1425,24 +1420,19 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
 	unallocatedCollateral := rev.MissedHostPayout().Sub(contract.ContractPrice)
 
-	// calculate the expected new collateral to determine the minNewCollateral.
-	// If the contract isn't below the min collateral, we don't enforce a
-	// minimum.
-	var minNewColl types.Currency
-	_, _, expectedNewCollateral := rhpv3.RenewalCosts(contract.Revision.FileContract, ci.priceTable, expectedStorage, contract.EndHeight())
-	if isBelowCollateralThreshold(expectedNewCollateral, unallocatedCollateral) {
-		minNewColl = minNewCollateral(unallocatedCollateral)
-	}
+	// a refresh should always result in at least double the minimum collateral
+	// to avoid refreshing again too soon
+	minNewCollateral := minRemainingCollateral(state.cfg, state.rs, contract, settings, ci.priceTable).Mul64(2)
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewColl, expectedStorage, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
 	if err != nil {
 		if strings.Contains(err.Error(), "new collateral is too low") {
 			c.logger.Debugw("refresh failed: contract wouldn't have enough collateral after refresh",
 				"hk", hk,
 				"fcid", fcid,
 				"unallocatedCollateral", unallocatedCollateral.String(),
-				"minNewCollateral", minNewColl.String(),
+				"minNewCollateral", minNewCollateral.String(),
 			)
 			return api.ContractMetadata{}, true, err
 		}
@@ -1469,7 +1459,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 		"fcid", refreshedContract.ID,
 		"renewedFrom", contract.ID,
 		"renterFunds", renterFunds.String(),
-		"minNewCollateral", minNewColl.String(),
+		"minNewCollateral", minNewCollateral.String(),
 		"newCollateral", newCollateral.String(),
 	)
 	return refreshedContract, true, nil
