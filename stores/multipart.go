@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"go.sia.tech/core/types"
@@ -390,6 +391,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			Key:        mu.Key,
 			Size:       int64(size),
 			MimeType:   mu.MimeType,
+			ModTime:    time.Now(), // TODO: PJ: CreateMultipartUpload docs have no mention of X-Amz-Meta-Mtime
 			Etag:       eTag,
 		}
 		if err := tx.Create(&obj).Error; err != nil {
