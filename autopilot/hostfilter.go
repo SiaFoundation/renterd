@@ -327,6 +327,11 @@ func minRemainingCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, 
 		expectedStorage = s.RemainingStorage
 	}
 
+	// If no storage is expected, return zero.
+	if expectedStorage == 0 {
+		return types.ZeroCurrency
+	}
+
 	// Computet the collateral for a single sector.
 	_, sectorCollateral := pt.BaseCost().
 		Add(pt.AppendSectorCost(cfg.Contracts.Period)).

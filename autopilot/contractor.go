@@ -1421,7 +1421,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	unallocatedCollateral := rev.MissedHostPayout().Sub(contract.ContractPrice)
 
 	// a refresh should always result in a contract that has enough collateral
-	minNewCollateral := minRemainingCollateral(state.cfg, state.rs, renterFunds, settings, ci.priceTable)
+	minNewCollateral := minRemainingCollateral(state.cfg, state.rs, renterFunds, settings, ci.priceTable).Mul64(2)
 
 	// renew the contract
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
