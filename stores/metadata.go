@@ -2168,7 +2168,7 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey 
 	}
 
 	err = s.db.Raw(`
-SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, objects.mod_time AS ModTime, sla.health as Health,
+SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, obj.mod_time AS ModTime, sla.health as Health
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
 INNER JOIN objects obj ON sli.db_object_id = obj.id
