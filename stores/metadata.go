@@ -185,16 +185,15 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectID        uint
-		ObjectIndex     uint64
-		ObjectKey       []byte
-		ObjectName      string
-		ObjectSize      int64
-		ObjectModTime   datetime
-		ObjectCreatedAt datetime
-		ObjectMimeType  string
-		ObjectHealth    float64
-		ObjectETag      string
+		ObjectID       uint
+		ObjectIndex    uint64
+		ObjectKey      []byte
+		ObjectName     string
+		ObjectSize     int64
+		ObjectModTime  datetime
+		ObjectMimeType string
+		ObjectHealth   float64
+		ObjectETag     string
 
 		// slice
 		SliceOffset uint32
@@ -458,19 +457,13 @@ func (raw rawObject) convert() (api.Object, error) {
 		}
 	}
 
-	// use mod time if it's not zero
-	mt := time.Time(raw[0].ObjectModTime)
-	if mt.Unix() == 0 {
-		mt = time.Time(raw[0].ObjectCreatedAt)
-	}
-
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
 			ETag:     raw[0].ObjectETag,
 			Health:   raw[0].ObjectHealth,
 			MimeType: raw[0].ObjectMimeType,
-			ModTime:  api.TimeRFC3339(mt),
+			ModTime:  api.TimeRFC3339(raw[0].ObjectModTime),
 			Name:     raw[0].ObjectName,
 			Size:     raw[0].ObjectSize,
 		},

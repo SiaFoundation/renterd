@@ -31,8 +31,8 @@ type contractLock struct {
 	stopWG                 sync.WaitGroup
 }
 
-func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
-	ctx, cancel := context.WithCancel(ctx)
+func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
+	ctx, cancel := context.WithCancel(context.Background())
 	cl := &contractLock{
 		lockID: lockID,
 		fcid:   fcid,
@@ -56,7 +56,7 @@ func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContrac
 	if err != nil {
 		return nil, err
 	}
-	return newContractLock(w.shutdownCtx, fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
+	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
 func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
