@@ -113,8 +113,9 @@ type (
 		Health float64   `gorm:"index;default:1.0; NOT NULL"`
 		Size   int64
 
-		MimeType string `json:"index"`
-		Etag     string `gorm:"index"`
+		ModTime  time.Time `gorm:"index"`
+		MimeType string    `json:"index"`
+		Etag     string    `gorm:"index"`
 	}
 
 	dbBucket struct {
@@ -184,15 +185,16 @@ type (
 	// rawObjectRow contains all necessary information to reconstruct the object.
 	rawObjectSector struct {
 		// object
-		ObjectID       uint
-		ObjectIndex    uint64
-		ObjectKey      []byte
-		ObjectName     string
-		ObjectSize     int64
-		ObjectModTime  time.Time
-		ObjectMimeType string
-		ObjectHealth   float64
-		ObjectETag     string
+		ObjectID        uint
+		ObjectIndex     uint64
+		ObjectKey       []byte
+		ObjectName      string
+		ObjectSize      int64
+		ObjectModTime   datetime
+		ObjectCreatedAt datetime
+		ObjectMimeType  string
+		ObjectHealth    float64
+		ObjectETag      string
 
 		// slice
 		SliceOffset uint32
@@ -392,7 +394,7 @@ func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 		ETag:     raw.ETag,
 		Health:   raw.Health,
 		MimeType: raw.MimeType,
-		ModTime:  api.TimeRFC3339(time.Time(raw.ModTime).UTC()),
+		ModTime:  api.TimeRFC3339(raw.ModTime),
 		Name:     raw.Name,
 		Size:     raw.Size,
 	}
@@ -456,13 +458,19 @@ func (raw rawObject) convert() (api.Object, error) {
 		}
 	}
 
+	// use mod time if it's not zero
+	mt := time.Time(raw[0].ObjectModTime)
+	if mt.Unix() == 0 {
+		mt = time.Time(raw[0].ObjectCreatedAt)
+	}
+
 	// return object
 	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{
 			ETag:     raw[0].ObjectETag,
 			Health:   raw[0].ObjectHealth,
 			MimeType: raw[0].ObjectMimeType,
-			ModTime:  api.TimeRFC3339(raw[0].ObjectModTime.UTC()),
+			ModTime:  api.TimeRFC3339(mt),
 			Name:     raw[0].ObjectName,
 			Size:     raw[0].ObjectSize,
 		},
@@ -1170,10 +1178,10 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 
 	// build objects query & parameters
 	objectsQuery := fmt.Sprintf(`
-SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
+SELECT ETag, oname as Name, Size, Health, MimeType, ModTime
 FROM (
 	SELECT ANY_VALUE(etag) AS ETag,
-	MAX(objects.created_at) AS ModTime,
+	MAX(objects.mod_time) AS ModTime,
 	%s AS oname,
 	SUM(size) AS Size,
 	MIN(health) as Health,
@@ -1495,7 +1503,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (om api.ObjectMetadata, err error) {
+func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, modTime time.Time) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
 		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
@@ -1515,10 +1523,13 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			// No copying is happening. We just update the metadata on the src
 			// object.
 			srcObj.MimeType = mimeType
+			if !modTime.IsZero() {
+				srcObj.ModTime = modTime
+			}
 			om = api.ObjectMetadata{
 				Health:   srcObjHealth,
 				MimeType: srcObj.MimeType,
-				ModTime:  api.TimeRFC3339(srcObj.CreatedAt.UTC()),
+				ModTime:  api.TimeRFC3339(srcObj.ModTime),
 				Name:     srcObj.ObjectID,
 				Size:     srcObj.Size,
 			}
@@ -1558,6 +1569,9 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 		if mimeType != "" {
 			dstObj.MimeType = mimeType // override mime type
 		}
+		if !modTime.IsZero() {
+			dstObj.ModTime = modTime // override mod time
+		}
 		if err := tx.Create(&dstObj).Error; err != nil {
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
@@ -1566,7 +1580,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			MimeType: dstObj.MimeType,
 			ETag:     dstObj.Etag,
 			Health:   srcObjHealth,
-			ModTime:  api.TimeRFC3339(dstObj.CreatedAt.UTC()),
+			ModTime:  api.TimeRFC3339(dstObj.ModTime),
 			Name:     dstObj.ObjectID,
 			Size:     dstObj.Size,
 		}
@@ -1644,7 +1658,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	})
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, modTime time.Time, o object.Object) error {
 	// Sanity check input.
 	for _, s := range o.Slabs {
 		for i, shard := range s.Shards {
@@ -1653,6 +1667,11 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 				return fmt.Errorf("missing hosts for slab %d", i)
 			}
 		}
+	}
+
+	// Sanitize mod time.
+	if modTime.IsZero() {
+		modTime = time.Now().UTC()
 	}
 
 	// collect all used contracts
@@ -1695,6 +1714,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			ObjectID:   path,
 			Key:        objKey,
 			Size:       o.TotalSize(),
+			ModTime:    modTime,
 			MimeType:   mimeType,
 			Etag:       eTag,
 		}
@@ -2077,7 +2097,7 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 	// accordingly
 	var rows rawObject
 	tx := s.db.
-		Select("o.id as ObjectID, o.health as ObjectHealth, sli.object_index as ObjectIndex, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
+		Select("o.id as ObjectID, o.health as ObjectHealth, sli.object_index as ObjectIndex, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.mod_time as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
@@ -2155,7 +2175,7 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey 
 	}
 
 	err = s.db.Raw(`
-SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
+SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, objects.mod_time AS ModTime, sla.health as Health,
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
 INNER JOIN objects obj ON sli.db_object_id = obj.id
@@ -2519,7 +2539,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 
 	var rows []rawObjectMetadata
 	if err := s.db.
-		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as mimeType, o.created_at as ModTime").
+		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as mimeType, o.mod_time as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").

@@ -266,7 +266,7 @@ func (dt *datetime) Scan(value interface{}) error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("failed to parse datetime value: %v", s)
+		return fmt.Errorf("failed to parse datetime value: '%v'", s)
 	}
 
 	*dt = datetime(t)

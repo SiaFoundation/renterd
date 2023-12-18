@@ -964,6 +964,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// decode the modtime from the query string
+	var modTime time.Time
+	if jc.DecodeForm("modtime", (*api.TimeRFC3339)(&modTime)) != nil {
+		return
+	}
+
 	// decode the bucket from the query string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -1007,6 +1013,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithMimeType(mimeType),
+		WithModTime(modTime),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
 	}

@@ -17,6 +17,7 @@ func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string
 		ContractSet: contractSet,
 		Object:      o,
 		MimeType:    opts.MimeType,
+		ModTime:     opts.ModTime,
 		ETag:        opts.ETag,
 	})
 	return
@@ -32,6 +33,7 @@ func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, 
 		DestinationPath:   dstPath,
 
 		MimeType: opts.MimeType,
+		ModTime:  opts.ModTime,
 	}, &om)
 	return
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.sia.tech/renterd/api"
@@ -315,6 +316,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID: "00036_contractPruneCfg",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00036_contractPruneCfg(tx, logger)
+			},
+		},
+		{
+			ID: "00037_objectModTime",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00037_objectModTime(tx, logger)
 			},
 		},
 	}
@@ -1442,5 +1449,22 @@ func performMigration00036_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLog
 	}
 
 	logger.Info("migration 00036_contractPruneCfg complete")
+	return nil
+}
+
+func performMigration00037_objectModTime(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00037_objectModTime")
+
+	if err := txn.Table("objects").Migrator().AutoMigrate(&struct {
+		ModTime time.Time `gorm:"index"`
+	}{}); err != nil {
+		return err
+	}
+
+	if err := txn.Exec("UPDATE objects SET mod_time = created_at WHERE mod_time IS NULL").Error; err != nil {
+		return err
+	}
+
+	logger.Info("migration 00037_objectModTime complete")
 	return nil
 }

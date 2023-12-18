@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
@@ -281,14 +284,14 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 //
 // HeadObject should return a NotFound() error if the object does not
 // exist.
-func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
+func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (obj *gofakes3.Object, err error) {
 	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
-	// TODO: When we support metadata we need to add it here.
+
 	metadata := map[string]string{
 		"Content-Type":  mime.TypeByExtension(objectName),
 		"Last-Modified": res.Object.LastModified(),
@@ -343,6 +346,13 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct
 	}
+	if mt, ok := meta["X-Amz-Meta-Mtime"]; ok {
+		if mtf, err := strconv.ParseFloat(mt, 64); err == nil {
+			sec, dec := math.Modf(mtf)
+			opts.ModTime = api.TimeRFC3339(time.Unix(int64(sec), int64(dec*(1e9))))
+		}
+	}
+
 	ur, err := s.w.UploadObject(ctx, input, bucketName, key, opts)
 	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
@@ -380,6 +390,13 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 	if ct, ok := meta["Content-Type"]; ok {
 		opts.MimeType = ct
 	}
+	if mt, ok := meta["X-Amz-Meta-Mtime"]; ok {
+		if mtf, err := strconv.ParseFloat(mt, 64); err == nil {
+			sec, dec := math.Modf(mtf)
+			opts.ModTime = api.TimeRFC3339(time.Unix(int64(sec), int64(dec*(1e9))))
+		}
+	}
+
 	obj, err := s.b.CopyObject(ctx, srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, opts)
 	if err != nil {
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())

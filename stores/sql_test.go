@@ -28,6 +28,10 @@ const (
 	testETag            = "d34db33f"
 )
 
+var (
+	testModTime time.Time
+)
+
 type testSQLStore struct {
 	t *testing.T
 	*SQLStore

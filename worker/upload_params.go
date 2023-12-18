@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"time"
+
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/object"
@@ -22,6 +24,7 @@ type uploadParameters struct {
 	contractSet string
 	packing     bool
 	mimeType    string
+	modTime     time.Time
 }
 
 func defaultParameters(bucket, path string) uploadParameters {
@@ -81,6 +84,12 @@ func WithCustomEncryptionOffset(offset uint64) UploadOption {
 func WithMimeType(mimeType string) UploadOption {
 	return func(up *uploadParameters) {
 		up.mimeType = mimeType
+	}
+}
+
+func WithModTime(modTime time.Time) UploadOption {
+	return func(up *uploadParameters) {
+		up.modTime = modTime
 	}
 }
 

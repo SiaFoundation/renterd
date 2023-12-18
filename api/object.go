@@ -64,6 +64,7 @@ type (
 		ContractSet string        `json:"contractSet"`
 		Object      object.Object `json:"object"`
 		MimeType    string        `json:"mimeType"`
+		ModTime     TimeRFC3339   `json:"modTime"`
 		ETag        string        `json:"eTag"`
 	}
 
@@ -82,7 +83,8 @@ type (
 		DestinationBucket string `json:"destinationBucket"`
 		DestinationPath   string `json:"destinationPath"`
 
-		MimeType string `json:"mimeType"`
+		MimeType string      `json:"mimeType"`
+		ModTime  TimeRFC3339 `json:"modTime"`
 	}
 
 	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
@@ -144,11 +146,13 @@ func (o ObjectMetadata) ContentType() string {
 
 type (
 	AddObjectOptions struct {
+		ModTime  TimeRFC3339
 		MimeType string
 		ETag     string
 	}
 
 	CopyObjectOptions struct {
+		ModTime  TimeRFC3339
 		MimeType string
 	}
 
@@ -195,6 +199,7 @@ type (
 		TotalShards                  int
 		ContractSet                  string
 		MimeType                     string
+		ModTime                      TimeRFC3339
 		DisablePreshardingEncryption bool
 		ContentLength                int64
 	}
@@ -221,6 +226,9 @@ func (opts UploadObjectOptions) Apply(values url.Values) {
 	}
 	if opts.MimeType != "" {
 		values.Set("mimetype", opts.MimeType)
+	}
+	if !opts.ModTime.IsZero() {
+		values.Set("modtime", opts.ModTime.String())
 	}
 	if opts.DisablePreshardingEncryption {
 		values.Set("disablepreshardingencryption", "true")
