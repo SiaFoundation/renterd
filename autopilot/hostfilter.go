@@ -297,19 +297,19 @@ func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contra
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
 func isOutOfCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) bool {
-	min := minRemainingCollateral(cfg, rs, c, s, pt)
+	min := minRemainingCollateral(cfg, rs, c.RenterFunds(), s, pt)
 	return c.RemainingCollateral().Cmp(min) < 0
 }
 
 // minNewCollateral returns the minimum amount of unallocated collateral that a
 // contract should contain after a refresh given the current amount of
 // unallocated collateral.
-func minRemainingCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) types.Currency {
+func minRemainingCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, renterFunds types.Currency, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) types.Currency {
 	// Compute the expected storage for the contract given its remaining funds.
 	// Note: we use the full period here even though we are checking whether to
 	// do a refresh. Otherwise, the 'expectedStorage' would would become
 	// ridiculously large the closer the contract is to its end height.
-	expectedStorage := renterFundsToExpectedStorage(c.RenterFunds(), cfg.Contracts.Period, pt)
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, cfg.Contracts.Period, pt)
 
 	// Cap the expected storage at twice the ideal amount of data we expect to
 	// store on a host. Even if we could afford more storage, there is no point

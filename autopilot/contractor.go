@@ -1420,9 +1420,8 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
 	unallocatedCollateral := rev.MissedHostPayout().Sub(contract.ContractPrice)
 
-	// a refresh should always result in at least double the minimum collateral
-	// to avoid refreshing again too soon
-	minNewCollateral := minRemainingCollateral(state.cfg, state.rs, contract, settings, ci.priceTable).Mul64(2)
+	// a refresh should always result in a contract that has enough collateral
+	minNewCollateral := minRemainingCollateral(state.cfg, state.rs, renterFunds, settings, ci.priceTable)
 
 	// renew the contract
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
