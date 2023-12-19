@@ -139,7 +139,6 @@ type (
 		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
-		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
@@ -339,7 +338,6 @@ func (b *bus) Handler() http.Handler {
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,
@@ -1403,22 +1401,6 @@ func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	if jc.Check("failed to mark sector as lost", err) != nil {
 		return
 	}
-}
-
-func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
-	var key object.EncryptionKey
-	if jc.DecodeParam("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), bucket, key)
-	if jc.Check("failed to retrieve objects by slab", err) != nil {
-		return
-	}
-	jc.Encode(objects)
 }
 
 func (b *bus) slabHandlerGET(jc jape.Context) {

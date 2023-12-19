@@ -1637,22 +1637,25 @@ func TestUploadPacking(t *testing.T) {
 		return nil
 	})
 
-	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
-	// and file2 share the same slab.
-	res, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
+	// fetch both objects
+	res1, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
 	tt.OK(err)
-	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].Key)
+	res2, err := b.Object(context.Background(), api.DefaultBucketName, "file2", api.GetObjectOptions{})
 	tt.OK(err)
-	if len(objs) != 2 {
-		t.Fatal("expected 2 objects", len(objs))
+
+	// assert they share a slab
+	var found bool
+	if len(res1.Object.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %v", len(res1.Object.Slabs))
 	}
-	sort.Slice(objs, func(i, j int) bool {
-		return objs[i].Name < objs[j].Name // make result deterministic
-	})
-	if objs[0].Name != "/file1" {
-		t.Fatal("expected file1", objs[0].Name)
-	} else if objs[1].Name != "/file2" {
-		t.Fatal("expected file2", objs[1].Name)
+	for _, slab := range res2.Object.Slabs {
+		if slab.Key.Equals(res1.Object.Slabs[0].Key) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("object should share a slab")
 	}
 }
 

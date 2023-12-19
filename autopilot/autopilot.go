@@ -63,7 +63,6 @@ type Bus interface {
 	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
 	// objects
-	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
 	RefreshHealth(ctx context.Context) error
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)

@@ -41,6 +41,11 @@ func (k *EncryptionKey) UnmarshalBinary(b []byte) error {
 	return nil
 }
 
+// Equals implements the Equaler interface.
+func (k EncryptionKey) Equals(o EncryptionKey) bool {
+	return bytes.Equal(k.entropy[:], o.entropy[:])
+}
+
 // String implements fmt.Stringer.
 func (k EncryptionKey) String() string {
 	return "key:" + hex.EncodeToString(k.entropy[:])
