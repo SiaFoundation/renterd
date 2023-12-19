@@ -779,13 +779,13 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 	// fetch all contracts, their hosts and the contract set name
 	var dbContracts []struct {
 		Contract dbContract `gorm:"embedded"`
-		Host     dbHost     `gorm:"embedded,embeddedPrefix:Host__"`
+		Host     dbHost     `gorm:"embedded"`
 		Name     string
 	}
 	err := s.db.
 		Model(&dbContract{}).
-		Select("contracts.*, Host.*, cs.name as Name").
-		Joins("Host").
+		Select("contracts.*, h.*, cs.name as Name").
+		Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
 		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
 		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
 		Order("contracts.id ASC").
