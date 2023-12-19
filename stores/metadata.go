@@ -782,8 +782,19 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 		Host     dbHost     `gorm:"embedded"`
 		Name     string
 	}
-	err := s.db.
-		Model(&dbContract{}).
+	tx := s.db
+	if opts.ContractSet == "" {
+		// no filter, use all contracts
+		tx = tx.Table("contracts")
+	} else {
+		// filter contracts by contract set first
+		tx = tx.Table("(?) contracts", s.db.Model(&dbContract{}).
+			Select("contracts.*").
+			Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
+			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", opts.ContractSet))
+	}
+	err := tx.
 		Select("contracts.*, h.*, cs.name as Name").
 		Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
 		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
@@ -808,33 +819,15 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 		dbContracts = append(dbContracts, dbContract)
 	}
 
-	// filter out contracts that don't contain the required contract set
-	var contracts []api.ContractMetadata
-	appendContract := func(c api.ContractMetadata) {
-		if opts.ContractSet == "" {
-			contracts = append(contracts, c)
-			return
-		}
-		var found bool
-		for _, cs := range c.Sets {
-			if cs == opts.ContractSet {
-				found = true
-				break
-			}
-		}
-		if found {
-			contracts = append(contracts, c)
-		}
-	}
-
 	// merge contract sets
+	var contracts []api.ContractMetadata
 	current, dbContracts := dbContracts[0], dbContracts[1:]
 	for {
 		if len(dbContracts) == 0 {
-			appendContract(current.convert())
+			contracts = append(contracts, current.convert())
 			break
 		} else if current.ID != dbContracts[0].ID {
-			appendContract(current.convert())
+			contracts = append(contracts, current.convert())
 		} else if len(dbContracts[0].ContractSets) > 0 {
 			current.ContractSets = append(current.ContractSets, dbContracts[0].ContractSets...)
 		}
