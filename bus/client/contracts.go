@@ -107,7 +107,7 @@ func (c *Client) Contracts(ctx context.Context, opts api.ContractsOpts) (contrac
 	if opts.ContractSet != "" {
 		values.Set("contractset", opts.ContractSet)
 	}
-	err = c.c.WithContext(ctx).GET("/contracts"+values.Encode(), &contracts)
+	err = c.c.WithContext(ctx).GET("/contracts?"+values.Encode(), &contracts)
 	return
 }
 

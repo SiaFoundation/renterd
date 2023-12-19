@@ -788,6 +788,7 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 		Joins("Host").
 		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
 		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
+		Order("contracts.id ASC").
 		Scan(&dbContracts).
 		Error
 	if err != nil {
