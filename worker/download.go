@@ -930,8 +930,14 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 			return nil
 		}
 
+		// select the fastest host
+		fastest := s.mgr.fastest(hosts)
+		if fastest == (types.PublicKey{}) {
+			return nil // can happen if downloader got stopped
+		}
+
 		// make the fastest host the current host
-		s.curr = s.mgr.fastest(hosts)
+		s.curr = fastest
 		s.used[s.curr] = struct{}{}
 	}
 
