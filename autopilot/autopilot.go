@@ -271,7 +271,9 @@ func (ap *Autopilot) Run() error {
 
 			// perform maintenance
 			setChanged, err := ap.c.performContractMaintenance(ctx, w)
-			if err != nil {
+			if err != nil && isErr(err, context.Canceled) {
+				return
+			} else if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 			maintenanceSuccess := err == nil
@@ -288,8 +290,6 @@ func (ap *Autopilot) Run() error {
 					ap.logger.Debug("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
-			} else {
-				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 
 			// migration
@@ -376,7 +376,9 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 		cancel()
 
 		// if the config was not found, or we were unable to fetch it, keep blocking
-		if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		if isErr(err, context.Canceled) {
+			return
+		} else if isErr(err, api.ErrAutopilotNotFound) {
 			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
@@ -407,7 +409,9 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 		online = len(peers) > 0
 		cancel()
 
-		if err != nil {
+		if isErr(err, context.Canceled) {
+			return
+		} else if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
 			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
@@ -439,7 +443,9 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		cancel()
 
 		// if an error occurred, or if we're not synced, we continue
-		if err != nil {
+		if isErr(err, context.Canceled) {
+			return
+		} else if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
 		} else if !synced {
 			once.Do(func() { ap.logger.Info("autopilot is waiting for consensus to sync...") })

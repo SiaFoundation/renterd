@@ -198,7 +198,7 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	}
 
 	// defer the release
-	lock := newContractLock(fcid, lockID, req.contractLockDuration, u.cl, u.logger)
+	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
 	defer func() {
 		ctx, cancel := context.WithTimeout(u.shutdownCtx, 10*time.Second)
 		lock.Release(ctx)
