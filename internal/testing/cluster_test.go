@@ -77,12 +77,25 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("TotalCost and ContractPrice shouldn't be zero")
 	}
 
+	// Make sure the contracts are part of the set.
+	busContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range busContracts {
+		if len(c.Sets) != 1 {
+			t.Fatal("contract should be part of one set", len(c.Sets))
+		} else if c.Sets[0] != sets[0] {
+			t.Fatalf("contract should be part of set %v but was %v", sets[0], c.Sets[0])
+		}
+	}
+
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
 
 	// Wait for the contract to be renewed.
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.Contracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
 		}
@@ -120,7 +133,7 @@ func TestNewTestCluster(t *testing.T) {
 		cluster.MineBlocks(1)
 
 		// Fetch renewed contract and make sure we caught the proof and revision.
-		contracts, err := cluster.Bus.Contracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -567,7 +580,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// fetch the contracts.
-	contracts, err := cluster.Bus.Contracts(context.Background())
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 
 	// broadcast the revision for each contract and assert the revision height
@@ -585,7 +598,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	// check the revision height was updated.
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		// fetch the contracts.
-		contracts, err := cluster.Bus.Contracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
 		}
@@ -755,7 +768,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// check that the funding was recorded
 	tt.Retry(100, testBusFlushInterval, func() error {
-		cms, err := cluster.Bus.Contracts(context.Background())
+		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
 		if len(cms) == 0 {
 			t.Fatal("no contracts found")
@@ -849,7 +862,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	// wait for the contract to be renewed
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		// fetch contracts
-		cms, err := cluster.Bus.Contracts(context.Background())
+		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
 		if len(cms) == 0 {
 			t.Fatal("no contracts found")
@@ -880,7 +893,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// check that the spending was recorded
 	tt.Retry(100, testBusFlushInterval, func() error {
-		cms, err := cluster.Bus.Contracts(context.Background())
+		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1301,7 +1314,7 @@ func TestContractArchival(t *testing.T) {
 	tt := cluster.tt
 
 	// check that we have 1 contract
-	contracts, err := cluster.Bus.Contracts(context.Background())
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
@@ -1318,7 +1331,7 @@ func TestContractArchival(t *testing.T) {
 
 	// check that we have 0 contracts
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.Contracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
 		}
@@ -1346,7 +1359,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	tt.OK(err)
 
 	// we should have a contract with the host
-	contracts, err := cluster.Bus.Contracts(context.Background())
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 1 {
 		t.Fatalf("expected 1 contract, got %v", len(contracts))
@@ -1377,7 +1390,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	tt.OK(err)
 
 	// should have 2 contracts now
-	contracts, err = cluster.Bus.Contracts(context.Background())
+	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 2 {
 		t.Fatalf("expected 2 contracts, got %v", len(contracts))
@@ -1388,7 +1401,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	cluster.MineBlocks(20)
 
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.Contracts(context.Background())
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
 		if len(contracts) != 1 {
 			return fmt.Errorf("expected 1 contract, got %v", len(contracts))
@@ -2158,7 +2171,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// There shouldn't be any contracts at this point.
-	contracts, err := b.Contracts(context.Background())
+	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 0 {
 		t.Fatal("expected 0 contracts", len(contracts))

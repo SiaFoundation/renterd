@@ -160,7 +160,7 @@ func TestSectorPruning(t *testing.T) {
 	cluster.ShutdownAutopilot(context.Background())
 
 	// create a contracts dict
-	contracts, err := b.Contracts(context.Background())
+	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 
 	// compare database against roots returned by the host

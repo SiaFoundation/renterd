@@ -41,8 +41,7 @@ type AccountStore interface {
 }
 
 type ContractStore interface {
-	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
-	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 }
 
 func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, l *zap.SugaredLogger, refillInterval time.Duration) *accounts {
@@ -114,7 +113,7 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 	}
 
 	// fetch all contracts
-	contracts, err := a.c.Contracts(ctx)
+	contracts, err := a.c.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		a.l.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
 		return
@@ -123,7 +122,7 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 	}
 
 	// fetch all contract set contracts
-	contractSetContracts, err := a.c.ContractSetContracts(ctx, state.cfg.Contracts.Set)
+	contractSetContracts, err := a.c.Contracts(ctx, api.ContractsOpts{ContractSet: state.cfg.Contracts.Set})
 	if err != nil {
 		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
 		return

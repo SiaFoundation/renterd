@@ -78,7 +78,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	}
 
 	// fetch contracts
-	contracts, err := b.Contracts(context.Background())
+	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 
 	// fetch pending roots for all contracts
