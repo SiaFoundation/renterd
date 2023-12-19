@@ -1978,6 +1978,19 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal("unexpected part:", part3)
 	}
 
+	// Check objects stats.
+	os, err := b.ObjectsStats()
+	tt.OK(err)
+	if os.NumObjects != 0 {
+		t.Fatalf("expected 0 object, got %v", os.NumObjects)
+	} else if os.TotalObjectsSize != 0 {
+		t.Fatalf("expected object size of 0, got %v", os.TotalObjectsSize)
+	} else if os.NumUnfinishedObjects != 1 {
+		t.Fatalf("expected 1 unfinished object, got %v", os.NumUnfinishedObjects)
+	} else if os.TotalUnfinishedObjectsSize != uint64(size) {
+		t.Fatalf("expected unfinished object size of %v, got %v", size, os.TotalUnfinishedObjectsSize)
+	}
+
 	// Complete upload
 	ui, err := b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
 		{
@@ -2022,6 +2035,19 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	} else if expectedData := data1[:1]; !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
+	}
+
+	// Check objects stats.
+	os, err = b.ObjectsStats()
+	tt.OK(err)
+	if os.NumObjects != 1 {
+		t.Fatalf("expected 1 object, got %v", os.NumObjects)
+	} else if os.TotalObjectsSize != uint64(size) {
+		t.Fatalf("expected object size of %v, got %v", size, os.TotalObjectsSize)
+	} else if os.NumUnfinishedObjects != 0 {
+		t.Fatalf("expected 0 unfinished object, got %v", os.NumUnfinishedObjects)
+	} else if os.TotalUnfinishedObjectsSize != 0 {
+		t.Fatalf("expected unfinished object size of 0, got %v", os.TotalUnfinishedObjectsSize)
 	}
 }
 

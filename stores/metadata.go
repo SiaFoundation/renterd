@@ -636,7 +636,7 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
 func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
-	// Number of objects.
+	// number of objects
 	var objInfo struct {
 		NumObjects       uint64
 		MinHealth        float64
@@ -646,6 +646,28 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		Model(&dbObject{}).
 		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
 		Scan(&objInfo).
+		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
+
+	// number of unfinished objects
+	var unfinishedObjects uint64
+	err = s.db.
+		Model(&dbMultipartUpload{}).
+		Select("COUNT(*)").
+		Scan(&unfinishedObjects).
+		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
+
+	// size of unfinished objects
+	var totalUnfinishedObjectsSize uint64
+	err = s.db.
+		Model(&dbMultipartPart{}).
+		Select("COALESCE(SUM(size), 0)").
+		Scan(&totalUnfinishedObjectsSize).
 		Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
@@ -683,11 +705,13 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	}
 
 	return api.ObjectsStatsResponse{
-		MinHealth:         objInfo.MinHealth,
-		NumObjects:        objInfo.NumObjects,
-		TotalObjectsSize:  objInfo.TotalObjectsSize,
-		TotalSectorsSize:  totalSectors * rhpv2.SectorSize,
-		TotalUploadedSize: uint64(totalUploaded) * rhpv2.SectorSize,
+		MinHealth:                  objInfo.MinHealth,
+		NumObjects:                 objInfo.NumObjects,
+		NumUnfinishedObjects:       unfinishedObjects,
+		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
+		TotalObjectsSize:           objInfo.TotalObjectsSize,
+		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
+		TotalUploadedSize:          uint64(totalUploaded) * rhpv2.SectorSize,
 	}, nil
 }
 
