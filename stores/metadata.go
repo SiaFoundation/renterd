@@ -777,7 +777,7 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 	}
 
 	// fetch all contracts, their hosts and the contract set name
-	var dbContracts []struct {
+	var rows []struct {
 		Contract dbContract `gorm:"embedded"`
 		Host     dbHost     `gorm:"embedded"`
 		Name     string
@@ -789,20 +789,23 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
 		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
 		Order("contracts.id ASC").
-		Scan(&dbContracts).
+		Scan(&rows).
 		Error
 	if err != nil {
 		return nil, err
-	} else if len(dbContracts) == 0 {
+	} else if len(rows) == 0 {
 		return nil, hasContractSet()
 	}
 
-	// merge 'Host' and 'Name' into 'Contract'
-	for i := range dbContracts {
-		dbContracts[i].Contract.Host = dbContracts[i].Host
-		if dbContracts[i].Name != "" {
-			dbContracts[i].Contract.ContractSets = append(dbContracts[i].Contract.ContractSets, dbContractSet{Name: dbContracts[i].Name})
+	// merge 'Host', 'Name' and 'Contract' into dbContracts
+	var dbContracts []dbContract
+	for i := range rows {
+		dbContract := rows[i].Contract
+		dbContract.Host = rows[i].Host
+		if rows[i].Name != "" {
+			dbContract.ContractSets = append(dbContract.ContractSets, dbContractSet{Name: rows[i].Name})
 		}
+		dbContracts = append(dbContracts, dbContract)
 	}
 
 	// filter out contracts that don't contain the required contract set
@@ -824,15 +827,16 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 		}
 	}
 
+	// merge contract sets
 	current, dbContracts := dbContracts[0], dbContracts[1:]
 	for {
 		if len(dbContracts) == 0 {
-			appendContract(current.Contract.convert())
+			appendContract(current.convert())
 			break
-		} else if current.Contract.ID != dbContracts[0].Contract.ID {
-			appendContract(current.Contract.convert())
-		} else if len(dbContracts[0].Contract.ContractSets) > 0 {
-			current.Contract.ContractSets = append(current.Contract.ContractSets, dbContracts[0].Contract.ContractSets...)
+		} else if current.ID != dbContracts[0].ID {
+			appendContract(current.convert())
+		} else if len(dbContracts[0].ContractSets) > 0 {
+			current.ContractSets = append(current.ContractSets, dbContracts[0].ContractSets...)
 		}
 		current, dbContracts = dbContracts[0], dbContracts[1:]
 	}
