@@ -355,7 +355,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		ProofHeight:    c.ProofHeight,
 		RevisionHeight: c.RevisionHeight,
 		RevisionNumber: revisionNumber,
-		Sets:           contractSets,
+		ContractSets:   contractSets,
 		Size:           c.Size,
 		StartHeight:    c.StartHeight,
 		State:          c.State.String(),

@@ -83,10 +83,10 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range busContracts {
-		if len(c.Sets) != 1 {
-			t.Fatal("contract should be part of one set", len(c.Sets))
-		} else if c.Sets[0] != sets[0] {
-			t.Fatalf("contract should be part of set %v but was %v", sets[0], c.Sets[0])
+		if len(c.ContractSets) != 1 {
+			t.Fatal("contract should be part of one set", len(c.ContractSets))
+		} else if c.ContractSets[0] != sets[0] {
+			t.Fatalf("contract should be part of set %v but was %v", sets[0], c.ContractSets[0])
 		}
 	}
 

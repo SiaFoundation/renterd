@@ -67,7 +67,7 @@ type (
 		Spending      ContractSpending     `json:"spending"`
 		TotalCost     types.Currency       `json:"totalCost"`
 
-		Sets []string `json:"sets"`
+		ContractSets []string `json:"contractsets"`
 	}
 
 	// ContractPrunableData wraps a contract's size information with its id.
