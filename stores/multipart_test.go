@@ -46,7 +46,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	totalSize := int64(nParts * partSize)
 
 	// Upload parts until we have enough data for 2 buffers.
-	resp, err := ss.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType)
+	resp, err := ss.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}

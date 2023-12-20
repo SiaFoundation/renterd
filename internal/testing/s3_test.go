@@ -15,6 +15,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -166,6 +167,55 @@ func TestS3Basic(t *testing.T) {
 	if exists {
 		t.Fatal("expected bucket to not exist")
 	}
+}
+
+func TestS3ObjectMeta(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	// create cluster
+	opts := testClusterOptions{
+		hosts:  testRedundancySettings.TotalShards,
+		logger: zap.NewNop(),
+	}
+	cluster := newTestCluster(t, opts)
+	defer cluster.Shutdown()
+
+	// convenience variables
+	s3 := cluster.S3
+	tt := cluster.tt
+
+	// add object to the bucket
+	_, err := s3.PutObject(context.Background(), api.DefaultBucketName, t.Name(), bytes.NewReader([]byte(t.Name())), int64(len([]byte(t.Name()))), minio.PutObjectOptions{UserMetadata: map[string]string{
+		"X-Amz-Meta-Foo": "bar",
+		"X-Amz-Meta-Baz": "qux",
+	}})
+	tt.OK(err)
+
+	// create helper to assert metadata is present
+	assertMetadata := func(metadata minio.StringMap) {
+		t.Helper()
+		if val1, ok1 := metadata["Foo"]; !ok1 || val1 != "bar" {
+			t.Fatal("expected metadata", metadata, ok1, val1)
+		}
+		if val2, ok2 := metadata["Baz"]; !ok2 || val2 != "qux" {
+			t.Fatal("expected metadata", metadata)
+		}
+	}
+
+	// perform GET request
+	obj, err := s3.GetObject(context.Background(), api.DefaultBucketName, t.Name(), minio.GetObjectOptions{})
+	tt.OK(err)
+
+	// assert metadata is set
+	get, err := obj.Stat()
+	tt.OK(err)
+	assertMetadata(get.UserMetadata)
+
+	// perform HEAD request
+	head, err := s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(head.UserMetadata)
 }
 
 func TestS3Authentication(t *testing.T) {

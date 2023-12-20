@@ -22,6 +22,8 @@ type uploadParameters struct {
 	contractSet string
 	packing     bool
 	mimeType    string
+
+	metadata api.ObjectUserMetadata
 }
 
 func defaultParameters(bucket, path string) uploadParameters {
@@ -93,5 +95,11 @@ func WithPacking(packing bool) UploadOption {
 func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
 	return func(up *uploadParameters) {
 		up.rs = rs
+	}
+}
+
+func WithUserMetadata(metadata api.ObjectUserMetadata) UploadOption {
+	return func(up *uploadParameters) {
+		up.metadata = metadata
 	}
 }

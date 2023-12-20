@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.sia.tech/renterd/api"
@@ -26,6 +27,8 @@ var (
 		&dbSlab{},
 		&dbSector{},
 		&dbSlice{},
+		&dbObjectUserMetadata{},
+		&dbMultipartMetadata{},
 
 		// bus.HostDB tables
 		&dbAnnouncement{},
@@ -315,6 +318,18 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID: "00036_contractPruneCfg",
 			Migrate: func(tx *gorm.DB) error {
 				return performMigration00036_contractPruneCfg(tx, logger)
+			},
+		},
+		{
+			ID: "00037_objectUserMetadata",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00037_objectUserMetadata(tx, logger)
+			},
+		},
+		{
+			ID: "00038_multipartUserMetadata",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00038_multipartUserMetadata(tx, logger)
 			},
 		},
 	}
@@ -1442,5 +1457,41 @@ func performMigration00036_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLog
 	}
 
 	logger.Info("migration 00036_contractPruneCfg complete")
+	return nil
+}
+
+func performMigration00037_objectUserMetadata(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00037_objectUserMetadata")
+
+	if err := txn.Table(dbObjectUserMetadata{}.TableName()).Migrator().AutoMigrate(&struct {
+		ID        uint `gorm:"primarykey"`
+		CreatedAt time.Time
+
+		DBObjectID uint   `gorm:"index:uniqueIndex:idx_object_meta_key"`
+		Key        string `gorm:"index:uniqueIndex:idx_object_meta_key"`
+		Value      string
+	}{}); err != nil {
+		return err
+	}
+
+	logger.Info("migration 00037_objectUserMetadata complete")
+	return nil
+}
+
+func performMigration00038_multipartUserMetadata(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00038_multipartUserMetadata")
+
+	if err := txn.Table(dbMultipartMetadata{}.TableName()).Migrator().AutoMigrate(&struct {
+		ID        uint `gorm:"primarykey"`
+		CreatedAt time.Time
+
+		DBMultipartUploadID uint   `gorm:"index:uniqueIndex:idx_multipart_meta_key"`
+		Key                 string `gorm:"index:uniqueIndex:idx_multipart_meta_key"`
+		Value               string
+	}{}); err != nil {
+		return err
+	}
+
+	logger.Info("migration 00038_multipartUserMetadata complete")
 	return nil
 }

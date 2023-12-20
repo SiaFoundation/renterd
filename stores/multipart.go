@@ -22,12 +22,13 @@ type (
 		Model
 
 		Key        secretKey
-		UploadID   string            `gorm:"uniqueIndex;NOT NULL;size:64"`
-		ObjectID   string            `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
-		DBBucket   dbBucket          `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
-		DBBucketID uint              `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
-		Parts      []dbMultipartPart `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
-		MimeType   string            `gorm:"index:idx_multipart_uploads_mime_type"`
+		UploadID   string                `gorm:"uniqueIndex;NOT NULL;size:64"`
+		ObjectID   string                `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
+		DBBucket   dbBucket              `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
+		DBBucketID uint                  `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
+		Parts      []dbMultipartPart     `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
+		Metadata   []dbMultipartMetadata `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete metadata too
+		MimeType   string                `gorm:"index:idx_multipart_uploads_mime_type"`
 	}
 
 	dbMultipartPart struct {
@@ -37,7 +38,14 @@ type (
 		Size                uint64
 		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
 		Slabs               []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+	}
 
+	dbMultipartMetadata struct {
+		Model
+
+		DBMultipartUploadID uint   `gorm:"index:uniqueIndex:idx_multipart_meta_key"`
+		Key                 string `gorm:"index:uniqueIndex:idx_multipart_meta_key"`
+		Value               string
 	}
 )
 
@@ -49,7 +57,11 @@ func (dbMultipartPart) TableName() string {
 	return "multipart_parts"
 }
 
-func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string) (api.MultipartCreateResponse, error) {
+func (dbMultipartMetadata) TableName() string {
+	return "multipart_metadata"
+}
+
+func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error) {
 	// Marshal key
 	key, err := ec.MarshalBinary()
 	if err != nil {
@@ -66,18 +78,26 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		} else if err != nil {
 			return fmt.Errorf("failed to fetch bucket id: %w", err)
 		}
+
 		// Create multipart upload
 		uploadIDEntropy := frand.Entropy256()
 		uploadID = hex.EncodeToString(uploadIDEntropy[:])
-		if err := s.db.Create(&dbMultipartUpload{
+		multipartUpload := dbMultipartUpload{
 			DBBucketID: bucketID,
 			Key:        key,
 			UploadID:   uploadID,
 			ObjectID:   path,
 			MimeType:   mimeType,
-		}).Error; err != nil {
+		}
+		if err := tx.Create(&multipartUpload).Error; err != nil {
 			return fmt.Errorf("failed to create multipart upload: %w", err)
 		}
+
+		// Create multipart metadata
+		if err := s.createMultipartMeta(tx, multipartUpload.ID, metadata); err != nil {
+			return fmt.Errorf("failed to create multipart metadata: %w", err)
+		}
+
 		return nil
 	})
 	return api.MultipartCreateResponse{
@@ -379,6 +399,14 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			}
 		}
 
+		// Find multipart metadata.
+		var mpMetadata []dbMultipartMetadata
+		if err := tx.Model(&dbMultipartMetadata{}).
+			Where("db_multipart_upload_id = ?", mu.ID).
+			Find(&mpMetadata).Error; err != nil {
+			return fmt.Errorf("failed to fetch multipart metadata: %w", err)
+		}
+
 		// Compute ETag.
 		sum := h.Sum()
 		eTag = hex.EncodeToString(sum[:])
@@ -409,6 +437,17 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 				}).Error
 			if err != nil {
 				return fmt.Errorf("failed to update slice %v: %w", i, err)
+			}
+		}
+
+		// Convert metadata to object metadata
+		if len(mpMetadata) > 0 {
+			metadata := make(api.ObjectUserMetadata)
+			for _, meta := range mpMetadata {
+				metadata[meta.Key] = meta.Value
+			}
+			if err := s.createObjectMeta(tx, obj.ID, metadata); err != nil {
+				return fmt.Errorf("failed to create object metadata: %w", err)
 			}
 		}
 

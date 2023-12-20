@@ -12,12 +12,13 @@ import (
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error) {
 	path = api.ObjectPathEscape(path)
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.ObjectAddRequest{
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
 		Bucket:      bucket,
 		ContractSet: contractSet,
 		Object:      o,
-		MimeType:    opts.MimeType,
 		ETag:        opts.ETag,
+		MimeType:    opts.MimeType,
+		Metadata:    opts.Metadata,
 	})
 	return
 }
@@ -25,13 +26,13 @@ func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
 func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
-	err = c.c.WithContext(ctx).POST("/objects/copy", api.ObjectsCopyRequest{
+	err = c.c.WithContext(ctx).POST("/objects/copy", api.CopyObjectsRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
 		SourcePath:        srcPath,
 		DestinationPath:   dstPath,
-
-		MimeType: opts.MimeType,
+		MimeType:          opts.MimeType,
+		Metadata:          opts.Metadata,
 	}, &om)
 	return
 }
