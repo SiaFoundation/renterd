@@ -83,12 +83,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, testMetadata, want); err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch the object
-	got, err := ss.Object(context.Background(), api.DefaultBucketName, t.Name())
+	got, err := ss.addTestObject(t.Name(), want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,12 +114,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, testMetadata, want2); err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch the object
-	got2, err := ss.Object(context.Background(), api.DefaultBucketName, t.Name())
+	got2, err := ss.addTestObject(t.Name(), want2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,12 +169,7 @@ func TestObjectMeta(t *testing.T) {
 	}
 
 	// add the object
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, testMetadata, want); err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch the object
-	got, err := ss.Object(context.Background(), api.DefaultBucketName, t.Name())
+	got, err := ss.addTestObject(t.Name(), want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,10 +461,12 @@ func TestContractRoots(t *testing.T) {
 	}
 
 	// add the object.
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, t.Name(), testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	_, err = ss.addTestObject(t.Name(), obj)
+	if err != nil {
 		t.Fatal(err)
 	}
 
+	// fetch roots
 	roots, err := ss.ContractRoots(context.Background(), fcids[0])
 	if err != nil {
 		t.Fatal(err)
@@ -578,7 +565,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -966,7 +953,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	// Store it.
 	ctx := context.Background()
 	objID := "key1"
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, testMetadata, obj1); err != nil {
+	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1028,7 +1015,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Try to store it again. Should work.
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, testMetadata, obj1); err != nil {
+	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1171,10 +1158,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Remove the first slab of the object.
 	obj1.Slabs = obj1.Slabs[1:]
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, objID, testContractSet, testETag, testMimeType, testMetadata, obj1); err != nil {
-		t.Fatal(err)
-	}
-	fullObj, err = ss.Object(ctx, api.DefaultBucketName, objID)
+	fullObj, err = ss.addTestObject(objID, obj1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1280,7 +1264,7 @@ func TestObjectHealth(t *testing.T) {
 		},
 	}
 
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "/foo", testContractSet, testETag, testMimeType, testMetadata, add); err != nil {
+	if _, err := ss.addTestObject("/foo", add); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1355,18 +1339,11 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal("wrong health", obj.Slabs[1].Health)
 	}
 
-	// add an empty object
-	add = object.Object{
+	// add an empty object and assert health is 1
+	if obj, err := ss.addTestObject("/bar", object.Object{
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: nil,
-	}
-	if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, "/bar", testContractSet, testETag, testMimeType, testMetadata, add); err != nil {
-		t.Fatal(err)
-	}
-
-	// assert the health is 1
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, "/bar")
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
 		t.Fatal("wrong health", obj.Health)
@@ -1399,7 +1376,7 @@ func TestObjectEntries(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, testMetadata, obj)
+		_, err := ss.addTestObject(o.path, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1537,7 +1514,7 @@ func TestSearchObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+		if _, err := ss.addTestObject(o.path, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1688,15 +1665,14 @@ func TestUnhealthySlabs(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1717,7 +1693,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(ctx, 0.49, testContractSet, -1)
+	slabs, err = ss.UnhealthySlabs(context.Background(), 0.49, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1737,7 +1713,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(ctx, 0.49, "foo", -1)
+	slabs, err = ss.UnhealthySlabs(context.Background(), 0.49, t.Name(), -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1788,8 +1764,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	}
 
 	// add the object
-	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1797,7 +1772,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1845,8 +1820,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 
 	// add the object
-	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1854,7 +1828,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1876,7 +1850,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	slabs, err = ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1937,15 +1911,14 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1996,13 +1969,12 @@ func TestContractSectors(t *testing.T) {
 			},
 		},
 	}
-	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete the contract.
-	err = ss.ArchiveContract(ctx, fcid1, api.ContractArchivalReasonRemoved)
+	err = ss.ArchiveContract(context.Background(), fcid1, api.ContractArchivalReasonRemoved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2023,12 +1995,12 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Add the object again.
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete the object.
-	if err := ss.RemoveObject(ctx, api.DefaultBucketName, "foo"); err != nil {
+	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2080,7 +2052,7 @@ func TestUpdateSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := ss.UpdateObject(ctx, api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2194,7 +2166,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := ss.dbObject("foo"); err != nil {
+	if obj, err := ss.dbObject(t.Name()); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
@@ -2350,8 +2322,7 @@ func TestRenameObjects(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, path := range objects {
-		obj := newTestObject(1)
-		if err := ss.UpdateObject(ctx, api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+		if _, err := ss.addTestObject(path, newTestObject(1)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2469,8 +2440,7 @@ func TestObjectsStats(t *testing.T) {
 		}
 
 		key := hex.EncodeToString(frand.Bytes(32))
-		err := ss.UpdateObject(context.Background(), api.DefaultBucketName, key, testContractSet, testETag, testMimeType, testMetadata, obj)
-		if err != nil {
+		if _, err := ss.addTestObject(key, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2641,11 +2611,7 @@ func TestPartialSlab(t *testing.T) {
 		return obj
 	}
 	obj := testObject(slabs)
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key", testContractSet, testETag, testMimeType, testMetadata, obj)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fetched, err := ss.Object(context.Background(), api.DefaultBucketName, "key")
+	fetched, err := ss.addTestObject("key", obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2681,11 +2647,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj2 := testObject(slabs)
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key2", testContractSet, testETag, testMimeType, testMetadata, obj2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fetched, err = ss.Object(context.Background(), api.DefaultBucketName, "key2")
+	fetched, err = ss.addTestObject("key2", obj2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2733,11 +2695,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj3 := testObject(slabs)
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "key3", testContractSet, testETag, testMimeType, testMetadata, obj3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fetched, err = ss.Object(context.Background(), api.DefaultBucketName, "key3")
+	fetched, err = ss.addTestObject("key3", obj3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2815,11 +2773,10 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Associate them with an object.
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	if _, err := ss.addTestObject(t.Name(), object.Object{
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: append(slices1, slices2...),
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2897,7 +2854,7 @@ func TestContractSizes(t *testing.T) {
 
 	// add an object to both contracts
 	for i := 0; i < 2; i++ {
-		if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("obj_%d", i+1), testContractSet, testETag, testMimeType, testMetadata, object.Object{
+		if _, err := ss.addTestObject(fmt.Sprintf("obj_%d", i+1), object.Object{
 			Key: object.GenerateEncryptionKey(),
 			Slabs: []object.SlabSlice{
 				{
@@ -3055,8 +3012,7 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 	for _, name := range []string{"obj1", "obj2", "obj3"} {
 		obj.Slabs[0].Length++
-		err = ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, testMetadata, obj)
-		if err != nil {
+		if _, err := ss.addTestObject(name, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3362,7 +3318,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 
 	// add it to an object to prevent it from getting pruned.
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	_, err = ss.addTestObject(t.Name(), object.Object{
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: slabs,
 	})
@@ -3446,7 +3402,7 @@ func TestListObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if err := ss.UpdateObject(ctx, api.DefaultBucketName, o.path, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+		if _, err := ss.addTestObject(o.path, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3664,7 +3620,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	}
 
 	// set slab.
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "foo", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	_, err = ss.addTestObject(t.Name(), object.Object{
 		Key:   object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: slab}},
 	})
@@ -3750,7 +3706,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 
 	// prepare a slab with pieces on h1 and h2
 	s1 := object.GenerateEncryptionKey()
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o1", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	_, err = ss.addTestObject("o1", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			Key: s1,

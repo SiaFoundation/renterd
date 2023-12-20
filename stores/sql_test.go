@@ -146,7 +146,6 @@ func (s *testSQLStore) Reopen() *testSQLStore {
 	return newTestSQLStore(s.t, cfg)
 }
 
-// TODO PJ: update metadata_test to use this helper to avoid changing all tests if we pass more metadata
 func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, error) {
 	if err := s.UpdateObject(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err

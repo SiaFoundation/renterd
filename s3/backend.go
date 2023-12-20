@@ -337,7 +337,6 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // The size can be used if the backend needs to read the whole reader; use
 // gofakes3.ReadAll() for this job rather than ioutil.ReadAll().
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	fmt.Printf("DEBUG PJ: s3 backend: PutObject: meta %+v \n", meta)
 	if ur, err := s.w.UploadObject(ctx, input, bucketName, key, api.UploadObjectOptions{
 		ContentLength: size,
 		Metadata:      meta,

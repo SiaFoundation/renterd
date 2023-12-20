@@ -1962,8 +1962,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 }
 
 func (s *SQLStore) createObjectMeta(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
-	fmt.Printf("DEBUG PJ: db: creating meta %+v \n", metadata)
-
 	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
 	for k, v := range metadata {
 		entities = append(entities, &dbObjectUserMetadata{
