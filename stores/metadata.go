@@ -64,6 +64,8 @@ type (
 
 		HostID uint `gorm:"index"`
 		Host   dbHost
+
+		ContractSets []dbContractSet `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
 	ContractCommon struct {
@@ -330,6 +332,10 @@ func (c dbArchivedContract) convert() api.ArchivedContract {
 func (c dbContract) convert() api.ContractMetadata {
 	var revisionNumber uint64
 	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
+	var contractSets []string
+	for _, cs := range c.ContractSets {
+		contractSets = append(contractSets, cs.Name)
+	}
 	return api.ContractMetadata{
 		ContractPrice: types.Currency(c.ContractPrice),
 		ID:            types.FileContractID(c.FCID),
@@ -349,6 +355,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		ProofHeight:    c.ProofHeight,
 		RevisionHeight: c.RevisionHeight,
 		RevisionNumber: revisionNumber,
+		ContractSets:   contractSets,
 		Size:           c.Size,
 		StartHeight:    c.StartHeight,
 		State:          c.State.String(),
@@ -756,20 +763,80 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 	return added.convert(), nil
 }
 
-func (s *SQLStore) Contracts(ctx context.Context) ([]api.ContractMetadata, error) {
-	var dbContracts []dbContract
-	err := s.db.
-		Model(&dbContract{}).
-		Joins("Host").
-		Find(&dbContracts).
+func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
+	// helper to check whether a contract set exists
+	hasContractSet := func() error {
+		if opts.ContractSet == "" {
+			return nil
+		}
+		err := s.db.Where("name", opts.ContractSet).Take(&dbContractSet{}).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrContractSetNotFound
+		}
+		return err
+	}
+
+	// fetch all contracts, their hosts and the contract set name
+	var rows []struct {
+		Contract dbContract `gorm:"embedded"`
+		Host     dbHost     `gorm:"embedded"`
+		Name     string
+	}
+	tx := s.db
+	if opts.ContractSet == "" {
+		// no filter, use all contracts
+		tx = tx.Table("contracts")
+	} else {
+		// filter contracts by contract set first
+		tx = tx.Table("(?) contracts", s.db.Model(&dbContract{}).
+			Select("contracts.*").
+			Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
+			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", opts.ContractSet))
+	}
+	err := tx.
+		Select("contracts.*, h.*, cs.name as Name").
+		Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
+		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
+		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
+		Order("contracts.id ASC").
+		Scan(&rows).
 		Error
 	if err != nil {
 		return nil, err
+	} else if len(rows) == 0 {
+		return nil, hasContractSet()
 	}
 
-	contracts := make([]api.ContractMetadata, len(dbContracts))
-	for i, c := range dbContracts {
-		contracts[i] = c.convert()
+	// merge 'Host', 'Name' and 'Contract' into dbContracts
+	var dbContracts []dbContract
+	for i := range rows {
+		dbContract := rows[i].Contract
+		dbContract.Host = rows[i].Host
+		if rows[i].Name != "" {
+			dbContract.ContractSets = append(dbContract.ContractSets, dbContractSet{Name: rows[i].Name})
+		}
+		dbContracts = append(dbContracts, dbContract)
+	}
+
+	// merge contract sets
+	var contracts []api.ContractMetadata
+	current, dbContracts := dbContracts[0], dbContracts[1:]
+	for {
+		if len(dbContracts) == 0 {
+			contracts = append(contracts, current.convert())
+			break
+		} else if current.ID != dbContracts[0].ID {
+			contracts = append(contracts, current.convert())
+		} else if len(dbContracts[0].ContractSets) > 0 {
+			current.ContractSets = append(current.ContractSets, dbContracts[0].ContractSets...)
+		}
+		current, dbContracts = dbContracts[0], dbContracts[1:]
+	}
+
+	// if no contracts are left, check if the set existed in the first place
+	if len(contracts) == 0 {
+		return nil, hasContractSet()
 	}
 	return contracts, nil
 }
@@ -915,15 +982,9 @@ WHERE c.fcid = ?
 }
 
 func (s *SQLStore) ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error) {
-	dbContracts, err := s.contracts(ctx, set)
-	if err != nil {
-		return nil, err
-	}
-	contracts := make([]api.ContractMetadata, len(dbContracts))
-	for i, c := range dbContracts {
-		contracts[i] = c.convert()
-	}
-	return contracts, nil
+	return s.Contracts(ctx, api.ContractsOpts{
+		ContractSet: set,
+	})
 }
 
 func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
@@ -2334,7 +2395,8 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 
 func newContract(hostID uint, fcid, renewedFrom types.FileContractID, contractPrice, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64, state contractState) dbContract {
 	return dbContract{
-		HostID: hostID,
+		HostID:       hostID,
+		ContractSets: nil, // new contract isn't in a set yet
 
 		ContractCommon: ContractCommon{
 			FCID:        fileContractID(fcid),

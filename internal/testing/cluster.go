@@ -881,7 +881,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		contracts, err := c.Bus.Contracts(context.Background())
+		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
 		}

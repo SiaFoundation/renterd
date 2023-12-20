@@ -66,6 +66,8 @@ type (
 		RenewedFrom   types.FileContractID `json:"renewedFrom"`
 		Spending      ContractSpending     `json:"spending"`
 		TotalCost     types.Currency       `json:"totalCost"`
+
+		ContractSets []string `json:"contractsets"`
 	}
 
 	// ContractPrunableData wraps a contract's size information with its id.
@@ -175,6 +177,10 @@ type (
 		Contracts     []ContractPrunableData `json:"contracts"`
 		TotalPrunable uint64                 `json:"totalPrunable"`
 		TotalSize     uint64                 `json:"totalSize"`
+	}
+
+	ContractsOpts struct {
+		ContractSet string `json:"contractset"`
 	}
 )
 

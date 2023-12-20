@@ -45,8 +45,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
-	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)

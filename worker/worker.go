@@ -78,8 +78,7 @@ type (
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
-		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
-		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
@@ -766,13 +765,13 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// fetch all contracts
-	dlContracts, err := w.bus.Contracts(ctx)
+	dlContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	// fetch upload contracts
-	ulContracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
+	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -907,7 +906,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	// fetch all contracts
-	contracts, err := w.bus.Contracts(ctx)
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -1015,7 +1014,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// fetch contracts
-	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -1154,7 +1153,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// fetch contracts
-	contracts, err := w.bus.ContractSetContracts(ctx, up.ContractSet)
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -1197,7 +1196,7 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// fetch contracts
-	busContracts, err := w.bus.Contracts(ctx)
+	busContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
 	if jc.Check("failed to fetch contracts from bus", err) != nil {
 		return
 	}
