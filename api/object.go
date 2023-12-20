@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	ObjectMetaPrefix = "X-Amz-Meta-"
+	ObjectUserMetadataPrefix = "X-Amz-Meta-"
 
 	ObjectsRenameModeSingle = "single"
 	ObjectsRenameModeMulti  = "multi"
@@ -124,8 +124,8 @@ type (
 func ObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadata {
 	oum := make(map[string]string)
 	for k, v := range metadata {
-		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectMetaPrefix)) {
-			oum[k[len(ObjectMetaPrefix):]] = v
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectUserMetadataPrefix)) {
+			oum[k[len(ObjectUserMetadataPrefix):]] = v
 		}
 	}
 	return oum
@@ -269,7 +269,7 @@ func (opts UploadObjectOptions) ApplyValues(values url.Values) {
 
 func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 	for k, v := range opts.Metadata {
-		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectMetaPrefix)) {
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectUserMetadataPrefix)) {
 			h.Set(k, v)
 		}
 	}

@@ -287,7 +287,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 		// set user metadata
 		metadata := make(map[string]string)
 		for k, v := range res.Object.Metadata {
-			metadata[fmt.Sprintf("%s%s", api.ObjectMetaPrefix, k)] = v
+			metadata[fmt.Sprintf("%s%s", api.ObjectUserMetadataPrefix, k)] = v
 		}
 
 		// decorate metadata

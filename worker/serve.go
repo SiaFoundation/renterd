@@ -94,7 +94,7 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 
 	// set the user metadata headers
 	for k, v := range obj.Metadata {
-		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectMetaPrefix, k), v)
+		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectUserMetadataPrefix, k), v)
 	}
 
 	http.ServeContent(rw, req, obj.Name, obj.ModTime.Std(), rs)

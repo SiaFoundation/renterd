@@ -1004,8 +1004,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// parse headers and extract object meta
 	metadata := make(api.ObjectUserMetadata)
 	for k, v := range jc.Request.Header {
-		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(api.ObjectMetaPrefix)) && len(v) > 0 {
-			metadata[k[len(api.ObjectMetaPrefix):]] = v[0]
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(api.ObjectUserMetadataPrefix)) && len(v) > 0 {
+			metadata[k[len(api.ObjectUserMetadataPrefix):]] = v[0]
 		}
 	}
 
