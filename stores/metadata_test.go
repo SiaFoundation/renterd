@@ -123,7 +123,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 }
 
-func TestObjectMeta(t *testing.T) {
+func TestObjectMetadata(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -182,6 +182,26 @@ func TestObjectMeta(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Metadata, testMetadata) {
 		t.Fatal("meta mismatch", cmp.Diff(got.Metadata, testMetadata))
+	}
+
+	// assert metadata CASCADE on object delete
+	var cnt int64
+	if err := ss.db.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
+		t.Fatal(err)
+	} else if cnt != 2 {
+		t.Fatal("unexpected number of metadata entries", cnt)
+	}
+
+	// remove the object
+	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert records are gone
+	if err := ss.db.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
+		t.Fatal(err)
+	} else if cnt != 0 {
+		t.Fatal("unexpected number of metadata entries", cnt)
 	}
 }
 

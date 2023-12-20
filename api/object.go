@@ -248,7 +248,6 @@ type (
 		Metadata map[string]string
 	}
 
-	// TODO PJ: add meta (?)
 	UploadMultipartUploadPartOptions struct {
 		DisablePreshardingEncryption bool
 		EncryptionOffset             int

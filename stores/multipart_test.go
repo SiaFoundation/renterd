@@ -3,9 +3,11 @@ package stores
 import (
 	"context"
 	"encoding/hex"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -90,6 +92,11 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatalf("expected object size to be %v, got %v", totalSize, obj.Size)
 	} else if obj.TotalSize() != totalSize {
 		t.Fatalf("expected object total size to be %v, got %v", totalSize, obj.TotalSize())
+	}
+
+	// Assert it has the metadata
+	if !reflect.DeepEqual(obj.Metadata, testMetadata) {
+		t.Fatal("meta mismatch", cmp.Diff(obj.Metadata, testMetadata))
 	}
 
 	// Upload buffers.

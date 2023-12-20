@@ -255,7 +255,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 			res.Metadata = make(map[string]string)
 		}
 
-		// decorate metadata (TODO PJ: not sure if necessary)
+		// decorate metadata
 		res.Metadata["Content-Type"] = res.ContentType
 		res.Metadata["Last-Modified"] = res.LastModified
 

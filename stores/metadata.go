@@ -2617,7 +2617,6 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Group("o.object_id").
 		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
 		Order(orderBy).
 		Order(markerOrderBy).
