@@ -981,12 +981,6 @@ WHERE c.fcid = ?
 	return
 }
 
-func (s *SQLStore) ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error) {
-	return s.Contracts(ctx, api.ContractsOpts{
-		ContractSet: set,
-	})
-}
-
 func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
 	var sets []string
 	err := s.db.Raw("SELECT name FROM contract_sets").

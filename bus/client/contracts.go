@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"time"
@@ -88,16 +87,6 @@ func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
 // ContractSize returns the contract's size.
 func (c *Client) ContractSize(ctx context.Context, contractID types.FileContractID) (size api.ContractSize, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/size", contractID), &size)
-	return
-}
-
-// ContractSetContracts returns the contracts for the given set from the
-// metadata store.
-func (c *Client) ContractSetContracts(ctx context.Context, set string) (contracts []api.ContractMetadata, err error) {
-	if set == "" {
-		return nil, errors.New("set cannot be empty")
-	}
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/set/%s", set), &contracts)
 	return
 }
 
