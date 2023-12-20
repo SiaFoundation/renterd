@@ -317,6 +317,10 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00036_contractPruneCfg(tx, logger)
 			},
 		},
+		{
+			ID:      "00001_init",
+			Migrate: func(tx *gorm.DB) error { return nil },
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
