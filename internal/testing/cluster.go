@@ -865,7 +865,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
-		contracts, err := c.Bus.ContractSetContracts(ctx, set)
+		contracts, err := c.Bus.Contracts(ctx, api.ContractsOpts{ContractSet: set})
 		if err != nil {
 			return err
 		}

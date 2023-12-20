@@ -725,7 +725,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OK(b.SetContractSet(context.Background(), t.Name(), nil))
 
 	// assert there are no contracts in the set
-	csc, err := b.ContractSetContracts(context.Background(), t.Name())
+	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
 	tt.OK(err)
 	if len(csc) != 0 {
 		t.Fatalf("expected no contracts, got %v", len(csc))
@@ -869,7 +869,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		// fetch contract set contracts
-		contracts, err := cluster.Bus.ContractSetContracts(context.Background(), testAutopilotConfig.Contracts.Set)
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		currentSet := make(map[types.FileContractID]struct{})
 		for _, c := range contracts {

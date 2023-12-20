@@ -268,12 +268,12 @@ func TestSQLContractStore(t *testing.T) {
 	if err := ss.SetContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	if contracts, err := ss.ContractSetContracts(ctx, "foo"); err != nil {
+	if contracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "foo"}); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := ss.ContractSetContracts(ctx, "bar"); !errors.Is(err, api.ErrContractSetNotFound) {
+	if _, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
@@ -3749,7 +3749,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// assert there are 0 contracts in the contract set
-	cscs, err := ss.ContractSetContracts(context.Background(), testContractSet)
+	cscs, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cscs) != 0 {
@@ -3777,7 +3777,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	assertHealthValid(s2, false)
 
 	// assert there are 2 contracts in the contract set
-	cscs, err = ss.ContractSetContracts(context.Background(), testContractSet)
+	cscs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cscs) != 2 {
