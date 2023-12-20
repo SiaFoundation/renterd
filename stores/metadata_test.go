@@ -1482,7 +1482,7 @@ func TestObjectEntries(t *testing.T) {
 			}
 			assertMetadata(got)
 
-			if len(got) != 1 || !got[0].Equals(test.want[offset]) {
+			if len(got) != 1 || got[0] != test.want[offset] {
 				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", offset, test.path, test.prefix, got, test.want[offset])
 			}
 
@@ -1502,7 +1502,7 @@ func TestObjectEntries(t *testing.T) {
 			}
 			assertMetadata(got)
 
-			if len(got) != 1 || !got[0].Equals(test.want[offset+1]) {
+			if len(got) != 1 || got[0] != test.want[offset+1] {
 				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", offset+1, test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
 			}
 
@@ -1539,16 +1539,21 @@ func TestSearchObjects(t *testing.T) {
 		}
 	}
 
+	metadataEquals := func(got api.ObjectMetadata, want api.ObjectMetadata) bool {
+		t.Helper()
+		return got.Name == want.Name &&
+			got.Size == want.Size &&
+			got.Health == want.Health
+	}
+
 	assertEqual := func(got []api.ObjectMetadata, want []api.ObjectMetadata) {
+		t.Helper()
 		if len(got) != len(want) {
 			t.Fatalf("unexpected result, we want %d items and we got %d items \ndiff: %v", len(want), len(got), cmp.Diff(got, want))
 		}
 		for i := range got {
-			wantt := want[i]
-			if got[i].Name != wantt.Name ||
-				got[i].Size != wantt.Size ||
-				got[i].Health != wantt.Health {
-				t.Fatalf("unexpected result, got %v, want %v", got[i], wantt)
+			if !metadataEquals(got[i], want[i]) {
+				t.Fatalf("unexpected result, got %v, want %v", got, want)
 			}
 		}
 	}
@@ -1569,11 +1574,11 @@ func TestSearchObjects(t *testing.T) {
 		}
 		assertEqual(got, test.want)
 		for offset := 0; offset < len(test.want); offset++ {
-			got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, offset, 1)
-			if err != nil {
+			if got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, offset, 1); err != nil {
 				t.Fatal(err)
-			}
-			if len(got) != 1 || (got[0].Equals(test.want[offset])) {
+			} else if len(got) != 1 {
+				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.path, len(got))
+			} else if !metadataEquals(got[0], test.want[offset]) {
 				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want[offset])
 			}
 		}

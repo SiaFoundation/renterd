@@ -152,15 +152,6 @@ func (o ObjectMetadata) ContentType() string {
 	return ""
 }
 
-func (o ObjectMetadata) Equals(other ObjectMetadata) bool {
-	return o.ETag == other.ETag &&
-		o.Health == other.Health &&
-		o.MimeType == other.MimeType &&
-		o.ModTime == other.ModTime &&
-		o.Name == other.Name &&
-		o.Size == other.Size
-}
-
 type (
 	// AddObjectOptions is the options type for the bus client.
 	AddObjectOptions struct {

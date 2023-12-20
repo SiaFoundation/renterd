@@ -355,7 +355,7 @@ func TestObjectEntries(t *testing.T) {
 			}
 			assertMetadata(res.Entries)
 
-			if len(res.Entries) != 1 || !res.Entries[0].Equals(test.want[offset]) {
+			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
 				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
 			}
 			moreRemaining := len(test.want)-offset-1 > 0
@@ -374,7 +374,7 @@ func TestObjectEntries(t *testing.T) {
 			}
 			assertMetadata(res.Entries)
 
-			if len(res.Entries) != 1 || !res.Entries[0].Equals(test.want[offset+1]) {
+			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
 				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
 			}
 
