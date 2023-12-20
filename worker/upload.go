@@ -289,7 +289,7 @@ func (w *worker) uploadPackedSlab(ctx context.Context, rs api.RedundancySettings
 	defer cancel()
 
 	// fetch contracts
-	contracts, err := w.bus.ContractSetContracts(ctx, contractSet)
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
 		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
 	}

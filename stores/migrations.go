@@ -321,15 +321,21 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00037_objectUserMetadata",
+			ID: "00001_init",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00037_objectUserMetadata(tx, logger)
+				return nil
 			},
 		},
 		{
-			ID: "00038_multipartUserMetadata",
+			ID: "00002_objectUserMetadata",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration00038_multipartUserMetadata(tx, logger)
+				return performMigration00001_objectUserMetadata(tx, logger)
+			},
+		},
+		{
+			ID: "00003_multipartUserMetadata",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration00002_multipartUserMetadata(tx, logger)
 			},
 		},
 	}
@@ -1460,8 +1466,8 @@ func performMigration00036_contractPruneCfg(txn *gorm.DB, logger *zap.SugaredLog
 	return nil
 }
 
-func performMigration00037_objectUserMetadata(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00037_objectUserMetadata")
+func performMigration00001_objectUserMetadata(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00001_objectUserMetadata")
 
 	if err := txn.Table(dbObjectUserMetadata{}.TableName()).Migrator().AutoMigrate(&struct {
 		ID        uint `gorm:"primarykey"`
@@ -1474,12 +1480,12 @@ func performMigration00037_objectUserMetadata(txn *gorm.DB, logger *zap.SugaredL
 		return err
 	}
 
-	logger.Info("migration 00037_objectUserMetadata complete")
+	logger.Info("migration 00001_objectUserMetadata complete")
 	return nil
 }
 
-func performMigration00038_multipartUserMetadata(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00038_multipartUserMetadata")
+func performMigration00002_multipartUserMetadata(txn *gorm.DB, logger *zap.SugaredLogger) error {
+	logger.Info("performing migration 00002_multipartUserMetadata")
 
 	if err := txn.Table(dbMultipartMetadata{}.TableName()).Migrator().AutoMigrate(&struct {
 		ID        uint `gorm:"primarykey"`
@@ -1492,6 +1498,6 @@ func performMigration00038_multipartUserMetadata(txn *gorm.DB, logger *zap.Sugar
 		return err
 	}
 
-	logger.Info("migration 00038_multipartUserMetadata complete")
+	logger.Info("migration 00002_multipartUserMetadata complete")
 	return nil
 }

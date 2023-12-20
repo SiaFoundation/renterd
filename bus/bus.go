@@ -115,8 +115,7 @@ type (
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-		Contracts(ctx context.Context) ([]api.ContractMetadata, error)
-		ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
@@ -903,9 +902,15 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 }
 
 func (b *bus) contractsHandlerGET(jc jape.Context) {
-	cs, err := b.ms.Contracts(jc.Request.Context())
+	var cs string
+	if jc.DecodeForm("contractset", &cs) != nil {
+		return
+	}
+	contracts, err := b.ms.Contracts(jc.Request.Context(), api.ContractsOpts{
+		ContractSet: cs,
+	})
 	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(cs)
+		jc.Encode(contracts)
 	}
 }
 
@@ -931,7 +936,10 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 }
 
 func (b *bus) contractsSetHandlerGET(jc jape.Context) {
-	cs, err := b.ms.ContractSetContracts(jc.Request.Context(), jc.PathParam("set"))
+	cs, err := b.ms.Contracts(jc.Request.Context(),
+		api.ContractsOpts{
+			ContractSet: jc.PathParam("set"),
+		})
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(cs)
 	}

@@ -101,9 +101,14 @@ func (c *Client) ContractSetContracts(ctx context.Context, set string) (contract
 	return
 }
 
-// Contracts returns all contracts in the metadata store.
-func (c *Client) Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).GET("/contracts", &contracts)
+// Contracts retrieves contracts from the metadata store. If no filter is set,
+// all contracts are returned.
+func (c *Client) Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error) {
+	values := url.Values{}
+	if opts.ContractSet != "" {
+		values.Set("contractset", opts.ContractSet)
+	}
+	err = c.c.WithContext(ctx).GET("/contracts?"+values.Encode(), &contracts)
 	return
 }
 

@@ -180,7 +180,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// fetch current contract set
-	currentSet, err := c.ap.bus.ContractSetContracts(ctx, state.cfg.Contracts.Set)
+	currentSet, err := c.ap.bus.Contracts(ctx, api.ContractsOpts{ContractSet: state.cfg.Contracts.Set})
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
 		return false, err
 	}

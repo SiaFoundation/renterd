@@ -103,7 +103,7 @@ func (c *contractor) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 	}
 
 	// fetch contract set contracts
-	csc, err := c.ap.bus.ContractSetContracts(ctx, c.ap.state.cfg.Contracts.Set)
+	csc, err := c.ap.bus.Contracts(ctx, api.ContractsOpts{ContractSet: c.ap.state.cfg.Contracts.Set})
 	if err != nil {
 		return nil, err
 	}
