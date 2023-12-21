@@ -1273,7 +1273,6 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	}
-
 	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath, orr.MimeType, orr.Metadata)
 	if jc.Check("couldn't copy object", err) != nil {
 		return

@@ -1578,6 +1578,10 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
 
+		if err := s.createObjectMeta(tx, dstObj.ID, metadata); err != nil {
+			return fmt.Errorf("failed to create object metadata: %w", err)
+		}
+
 		om = api.ObjectMetadata{
 			MimeType: dstObj.MimeType,
 			ETag:     dstObj.Etag,
