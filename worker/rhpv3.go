@@ -38,7 +38,7 @@ const (
 	// defaultWithdrawalExpiryBlocks is the number of blocks we add to the
 	// current blockheight when we define an expiry block height for withdrawal
 	// messages.
-	defaultWithdrawalExpiryBlocks = 6
+	defaultWithdrawalExpiryBlocks = 12
 
 	// maxPriceTableSize defines the maximum size of a price table
 	maxPriceTableSize = 16 * 1024
