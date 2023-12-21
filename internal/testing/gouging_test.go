@@ -53,7 +53,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// fetch current contract set
-	contracts, err := b.ContractSetContracts(context.Background(), cfg.Set)
+	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: cfg.Set})
 	tt.OK(err)
 
 	// update the host settings so it's gouging

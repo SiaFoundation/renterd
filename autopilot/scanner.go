@@ -17,7 +17,7 @@ import (
 
 const (
 	scannerTimeoutInterval   = 10 * time.Minute
-	scannerTimeoutMinTimeout = time.Second * 5
+	scannerTimeoutMinTimeout = 10 * time.Second
 
 	trackerMinDataPoints     = 25
 	trackerNumDataPoints     = 1000
@@ -264,7 +264,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 		cutoff := time.Now().Add(-s.scanMinInterval)
 		for !s.ap.isStopped() && !exhausted {
 			// fetch next batch
-			hosts, err := s.bus.HostsForScanning(s.ap.stopCtx, api.HostsForScanningOptions{
+			hosts, err := s.bus.HostsForScanning(s.ap.shutdownCtx, api.HostsForScanningOptions{
 				MaxLastScan: api.TimeRFC3339(cutoff),
 				Offset:      offset,
 				Limit:       int(s.scanBatchSize),
@@ -286,7 +286,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 			// add batch to scan queue
 			for _, h := range hosts {
 				select {
-				case <-s.ap.stopCtx.Done():
+				case <-s.ap.shutdownCtx.Done():
 					return
 				case reqChan <- scanReq{
 					hostKey: h.PublicKey,

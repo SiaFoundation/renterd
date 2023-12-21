@@ -26,13 +26,13 @@ type contractLock struct {
 	locker ContractLocker
 	logger *zap.SugaredLogger
 
-	stopCtx       context.Context
-	stopCtxCancel context.CancelFunc
-	stopWG        sync.WaitGroup
+	keepaliveLoopCtx       context.Context
+	keepaliveLoopCtxCancel context.CancelFunc
+	stopWG                 sync.WaitGroup
 }
 
-func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
-	ctx, cancel := context.WithCancel(context.Background())
+func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *contractLock {
+	ctx, cancel := context.WithCancel(ctx)
 	cl := &contractLock{
 		lockID: lockID,
 		fcid:   fcid,
@@ -40,8 +40,8 @@ func newContractLock(fcid types.FileContractID, lockID uint64, d time.Duration, 
 		locker: locker,
 		logger: logger,
 
-		stopCtx:       ctx,
-		stopCtxCancel: cancel,
+		keepaliveLoopCtx:       ctx,
+		keepaliveLoopCtxCancel: cancel,
 	}
 	cl.stopWG.Add(1)
 	go func() {
@@ -56,7 +56,7 @@ func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContrac
 	if err != nil {
 		return nil, err
 	}
-	return newContractLock(fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
+	return newContractLock(w.shutdownCtx, fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
 func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
@@ -65,7 +65,7 @@ func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID
 		return err
 	}
 	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		releaseCtx, cancel := context.WithTimeout(w.shutdownCtx, 10*time.Second)
 		_ = contractLock.Release(releaseCtx)
 		cancel()
 	}()
@@ -75,7 +75,7 @@ func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID
 
 func (cl *contractLock) Release(ctx context.Context) error {
 	// Stop background loop.
-	cl.stopCtxCancel()
+	cl.keepaliveLoopCtxCancel()
 	cl.stopWG.Wait()
 
 	// Release the contract.
@@ -101,11 +101,11 @@ func (cl *contractLock) keepaliveLoop() {
 	// Loop until stopped.
 	for {
 		select {
-		case <-cl.stopCtx.Done():
+		case <-cl.keepaliveLoopCtx.Done():
 			return // released
 		case <-t.C:
 		}
-		if err := cl.locker.KeepaliveContract(cl.stopCtx, cl.fcid, cl.lockID, cl.d); err != nil && !errors.Is(err, context.Canceled) {
+		if err := cl.locker.KeepaliveContract(cl.keepaliveLoopCtx, cl.fcid, cl.lockID, cl.d); err != nil && !errors.Is(err, context.Canceled) {
 			cl.logger.Errorw(fmt.Sprintf("failed to send keepalive: %v", err),
 				"contract", cl.fcid,
 				"lockID", cl.lockID,

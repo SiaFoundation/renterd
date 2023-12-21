@@ -8,7 +8,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +20,7 @@ type (
 	contractSpendingRecorder struct {
 		bus           Bus
 		flushInterval time.Duration
+		shutdownCtx   context.Context
 		logger        *zap.SugaredLogger
 
 		mu                          sync.Mutex
@@ -37,6 +37,7 @@ func (w *worker) initContractSpendingRecorder() {
 		bus:               w.bus,
 		contractSpendings: make(map[types.FileContractID]api.ContractSpendingRecord),
 		flushInterval:     w.busFlushInterval,
+		shutdownCtx:       w.shutdownCtx,
 		logger:            w.logger,
 	}
 }
@@ -76,13 +77,11 @@ func (sr *contractSpendingRecorder) Record(rev types.FileContractRevision, cs ap
 
 func (sr *contractSpendingRecorder) flush() {
 	if len(sr.contractSpendings) > 0 {
-		ctx, span := tracing.Tracer.Start(context.Background(), "worker: flushContractSpending")
-		defer span.End()
 		records := make([]api.ContractSpendingRecord, 0, len(sr.contractSpendings))
 		for _, cs := range sr.contractSpendings {
 			records = append(records, cs)
 		}
-		if err := sr.bus.RecordContractSpending(ctx, records); err != nil {
+		if err := sr.bus.RecordContractSpending(sr.shutdownCtx, records); err != nil {
 			sr.logger.Errorw(fmt.Sprintf("failed to record contract spending: %v", err))
 		} else {
 			sr.contractSpendings = make(map[types.FileContractID]api.ContractSpendingRecord)

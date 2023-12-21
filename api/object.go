@@ -113,11 +113,13 @@ type (
 
 	// ObjectsStatsResponse is the response type for the /bus/stats/objects endpoint.
 	ObjectsStatsResponse struct {
-		NumObjects        uint64  `json:"numObjects"`        // number of objects
-		MinHealth         float64 `json:"minHealth"`         // minimum health of all objects
-		TotalObjectsSize  uint64  `json:"totalObjectsSize"`  // size of all objects
-		TotalSectorsSize  uint64  `json:"totalSectorsSize"`  // uploaded size of all objects
-		TotalUploadedSize uint64  `json:"totalUploadedSize"` // uploaded size of all objects including redundant sectors
+		NumObjects                 uint64  `json:"numObjects"`                 // number of objects
+		NumUnfinishedObjects       uint64  `json:"numUnfinishedObjects"`       // number of unfinished objects
+		MinHealth                  float64 `json:"minHealth"`                  // minimum health of all objects
+		TotalObjectsSize           uint64  `json:"totalObjectsSize"`           // size of all objects
+		TotalUnfinishedObjectsSize uint64  `json:"totalUnfinishedObjectsSize"` // size of all unfinished objects
+		TotalSectorsSize           uint64  `json:"totalSectorsSize"`           // uploaded size of all objects
+		TotalUploadedSize          uint64  `json:"totalUploadedSize"`          // uploaded size of all objects including redundant sectors
 	}
 )
 

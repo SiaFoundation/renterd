@@ -11,19 +11,13 @@ require (
 	github.com/minio/minio-go/v7 v7.0.65
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.46.1
-	go.opentelemetry.io/otel v1.21.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.21.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.21.0
-	go.opentelemetry.io/otel/sdk v1.21.0
-	go.opentelemetry.io/otel/trace v1.21.0
 	go.sia.tech/core v0.1.12-0.20231211182757-77190f04f90b
 	go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2
 	go.sia.tech/hostd v0.2.2
 	go.sia.tech/jape v0.11.1
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.37.0
+	go.sia.tech/web/renterd v0.39.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/crypto v0.16.0
 	golang.org/x/term v0.15.0
@@ -37,20 +31,14 @@ require (
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/aws/aws-sdk-go v1.49.1 // indirect
-	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cloudflare/cloudflare-go v0.75.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-logr/logr v1.3.0 // indirect
-	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.18.1 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.5 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
@@ -84,8 +72,6 @@ require (
 	gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e // indirect
 	gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259 // indirect
 	gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 // indirect
-	go.opentelemetry.io/otel/metric v1.21.0 // indirect
-	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	go.sia.tech/web v0.0.0-20231213145933-3f175a86abff // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.19.0 // indirect
@@ -93,10 +79,6 @@ require (
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.16.1 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20231212172506-995d672761c0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231212172506-995d672761c0 // indirect
-	google.golang.org/grpc v1.60.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	nhooyr.io/websocket v1.8.10 // indirect
 )

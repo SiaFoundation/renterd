@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -20,7 +19,6 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/tracing"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -47,8 +45,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-	Contracts(ctx context.Context) (contracts []api.ContractMetadata, err error)
-	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
@@ -109,12 +106,12 @@ type Autopilot struct {
 	stateMu sync.Mutex
 	state   state
 
-	startStopMu   sync.Mutex
-	startTime     time.Time
-	stopCtx       context.Context
-	stopCtxCancel context.CancelFunc
-	ticker        *time.Ticker
-	triggerChan   chan bool
+	startStopMu       sync.Mutex
+	startTime         time.Time
+	shutdownCtx       context.Context
+	shutdownCtxCancel context.CancelFunc
+	ticker            *time.Ticker
+	triggerChan       chan bool
 }
 
 // state holds a bunch of variables that are used by the autopilot and updated
@@ -130,12 +127,17 @@ type state struct {
 
 // New initializes an Autopilot.
 func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
+	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
+
 	ap := &Autopilot{
 		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
 		id:      id,
 		bus:     bus,
 		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
 		workers: newWorkerPool(workers),
+
+		shutdownCtx:       shutdownCtx,
+		shutdownCtxCancel: shutdownCtxCancel,
 
 		tickerDuration: heartbeat,
 	}
@@ -161,14 +163,14 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
-	return jape.Mux(tracing.TracingMiddleware(api.DefaultAutopilotID, map[string]jape.Handler{
+	return jape.Mux(map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
-	}))
+	})
 }
 
 func (ap *Autopilot) Run() error {
@@ -178,7 +180,6 @@ func (ap *Autopilot) Run() error {
 		return errors.New("already running")
 	}
 	ap.startTime = time.Now()
-	ap.stopCtx, ap.stopCtxCancel = context.WithCancel(context.Background())
 	ap.triggerChan = make(chan bool, 1)
 	ap.ticker = time.NewTicker(ap.tickerDuration)
 
@@ -205,8 +206,10 @@ func (ap *Autopilot) Run() error {
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
-			ctx, span := tracing.Tracer.Start(context.Background(), "Autopilot Iteration")
-			defer span.End()
+
+			// create a new context for this iteration
+			ctx, cancel := context.WithCancel(ap.shutdownCtx)
+			defer cancel()
 
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()
@@ -239,13 +242,12 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// Trace/Log worker id chosen for this maintenance iteration.
+			// Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ctx)
 			if err != nil {
 				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
 				return
 			}
-			span.SetAttributes(attribute.String("worker", workerID))
 			ap.logger.Infof("using worker %s for iteration", workerID)
 
 			// update the loop state
@@ -268,7 +270,9 @@ func (ap *Autopilot) Run() error {
 
 			// perform maintenance
 			setChanged, err := ap.c.performContractMaintenance(ctx, w)
-			if err != nil {
+			if err != nil && isErr(err, context.Canceled) {
+				return
+			} else if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 			maintenanceSuccess := err == nil
@@ -283,10 +287,8 @@ func (ap *Autopilot) Run() error {
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
 					ap.logger.Debug("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.stopCtx)
+					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
-			} else {
-				ap.logger.Errorf("contract maintenance failed, err: %v", err)
 			}
 
 			// migration
@@ -301,7 +303,7 @@ func (ap *Autopilot) Run() error {
 		})
 
 		select {
-		case <-ap.stopCtx.Done():
+		case <-ap.shutdownCtx.Done():
 			return nil
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
@@ -319,7 +321,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 
 	if ap.isRunning() {
 		ap.ticker.Stop()
-		ap.stopCtxCancel()
+		ap.shutdownCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
 		ap.startTime = time.Time{}
@@ -368,19 +370,21 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 
 	for {
 		// try and fetch the config
-		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 		_, err := ap.bus.Autopilot(ctx, ap.id)
 		cancel()
 
 		// if the config was not found, or we were unable to fetch it, keep blocking
-		if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		if isErr(err, context.Canceled) {
+			return
+		} else if isErr(err, api.ErrAutopilotNotFound) {
 			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
 		}
 		if err != nil {
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return false, false
 			case <-interrupt:
 				return false, true
@@ -399,12 +403,14 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 	var once sync.Once
 
 	for {
-		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 		peers, err := ap.bus.SyncerPeers(ctx)
 		online = len(peers) > 0
 		cancel()
 
-		if err != nil {
+		if isErr(err, context.Canceled) {
+			return
+		} else if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
 			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
@@ -412,7 +418,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 
 		if err != nil || !online {
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return
 			case <-ticker.C:
 				continue
@@ -430,13 +436,15 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 
 	for {
 		// try and fetch consensus
-		ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 		cs, err := ap.bus.ConsensusState(ctx)
 		synced = cs.Synced
 		cancel()
 
 		// if an error occurred, or if we're not synced, we continue
-		if err != nil {
+		if isErr(err, context.Canceled) {
+			return
+		} else if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
 		} else if !synced {
 			once.Do(func() { ap.logger.Info("autopilot is waiting for consensus to sync...") })
@@ -445,7 +453,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		if err != nil || !synced {
 			blocked = true
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return
 			case <-interrupt:
 				interrupted = true
@@ -459,7 +467,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 	wallet, err := ap.bus.Wallet(ctx)
 	cancel()
 
@@ -480,13 +488,13 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ap.stopCtx.Done():
+			case <-ap.shutdownCtx.Done():
 				return
 			case <-ticker.C:
 			}
 
 			// fetch wallet info
-			ctx, cancel := context.WithTimeout(ap.stopCtx, 30*time.Second)
+			ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
 			if wallet, err = ap.bus.Wallet(ctx); err != nil {
 				ap.logger.Errorf("failed to get wallet info, err: %v", err)
 			}
@@ -583,7 +591,7 @@ func (ap *Autopilot) updateState(ctx context.Context) error {
 
 func (ap *Autopilot) isStopped() bool {
 	select {
-	case <-ap.stopCtx.Done():
+	case <-ap.shutdownCtx.Done():
 		return true
 	default:
 		return false

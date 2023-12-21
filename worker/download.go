@@ -13,14 +13,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
-	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -34,6 +31,7 @@ const (
 
 var (
 	errDownloadManagerStopped = errors.New("download manager stopped")
+	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
 )
 
 type (
@@ -197,13 +195,6 @@ func newDownloader(ctx context.Context, host Host) *downloader {
 }
 
 func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, contracts []api.ContractMetadata) (err error) {
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "download")
-	defer func() {
-		span.RecordError(err)
-		span.End()
-	}()
-
 	// create identifier
 	id := newID()
 
@@ -301,7 +292,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				}
 			}
 			if available < next.MinShards {
-				responseChan <- &slabDownloadResponse{err: fmt.Errorf("not enough hosts available to download the slab: %v/%v", available, next.MinShards)}
+				responseChan <- &slabDownloadResponse{err: fmt.Errorf("%w: %v/%v", errDownloadNotEnoughHosts, available, next.MinShards)}
 				return
 			}
 
@@ -582,10 +573,6 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 }
 
 func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "downloadSlab")
-	defer span.End()
-
 	// prepare new download
 	slab := mgr.newSlabDownload(ctx, dID, slice, migration)
 
@@ -655,7 +642,7 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 			// check if we need to abort
 			select {
 			case <-d.shutdownCtx.Done():
-				break
+				return
 			default:
 			}
 
@@ -768,11 +755,6 @@ func (d *downloader) estimate() float64 {
 }
 
 func (d *downloader) enqueue(download *sectorDownloadReq) {
-	// add tracing
-	span := trace.SpanFromContext(download.ctx)
-	span.SetAttributes(attribute.Float64("estimate", d.estimate()))
-	span.AddEvent("enqueued")
-
 	// enqueue the job
 	d.mu.Lock()
 	d.queue = append(d.queue, download)
@@ -819,17 +801,6 @@ func (d *downloader) trackFailure(err error) {
 }
 
 func (d *downloader) execute(req *sectorDownloadReq) (err error) {
-	// add tracing
-	start := time.Now()
-	span := trace.SpanFromContext(req.ctx)
-	span.AddEvent("execute")
-	defer func() {
-		elapsed := time.Since(start)
-		span.SetAttributes(attribute.Int64("duration", elapsed.Milliseconds()))
-		span.RecordError(err)
-		span.End()
-	}()
-
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, req.length))
 	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
@@ -944,37 +915,39 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 
 	// prepare next sectors to download
 	if len(s.hostToSectors[s.curr]) == 0 {
-		// grab unused hosts
+		// select all possible hosts
 		var hosts []types.PublicKey
-		for host := range s.hostToSectors {
-			if _, used := s.used[host]; !used {
+		for host, sectors := range s.hostToSectors {
+			if len(sectors) == 0 {
+				continue // ignore hosts with no more sectors
+			} else if _, used := s.used[host]; !used {
 				hosts = append(hosts, host)
 			}
 		}
 
-		// make the fastest host the current host
-		s.curr = s.mgr.fastest(hosts)
-		s.used[s.curr] = struct{}{}
-
 		// no more sectors to download
-		if len(s.hostToSectors[s.curr]) == 0 {
+		if len(hosts) == 0 {
 			return nil
 		}
+
+		// select the fastest host
+		fastest := s.mgr.fastest(hosts)
+		if fastest == (types.PublicKey{}) {
+			return nil // can happen if downloader got stopped
+		}
+
+		// make the fastest host the current host
+		s.curr = fastest
+		s.used[s.curr] = struct{}{}
 	}
 
 	// pop the next sector
 	sector := s.hostToSectors[s.curr][0]
 	s.hostToSectors[s.curr] = s.hostToSectors[s.curr][1:]
 
-	// create the span
-	sCtx, span := tracing.Tracer.Start(ctx, "sectorDownloadReq")
-	span.SetAttributes(attribute.Stringer("hk", sector.LatestHost))
-	span.SetAttributes(attribute.Bool("overdrive", overdrive))
-	span.SetAttributes(attribute.Int("sector", sector.index))
-
 	// build the request
 	return &sectorDownloadReq{
-		ctx: sCtx,
+		ctx: ctx,
 
 		offset: s.offset,
 		length: s.length,
@@ -999,10 +972,6 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "download")
-	defer span.End()
-
 	// create the responses queue
 	resps := &sectorResponses{
 		c: make(chan struct{}, 1),
@@ -1016,7 +985,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 	for i := 0; i < int(s.minShards); {
 		req := s.nextRequest(ctx, resps, false)
 		if req == nil {
-			return nil, false, fmt.Errorf("no hosts available")
+			return nil, false, fmt.Errorf("no host available for shard %d", i)
 		} else if err := s.launch(req); err == nil {
 			i++
 		}
@@ -1164,9 +1133,6 @@ func (s *slabDownload) launch(req *sectorDownloadReq) error {
 	// launch the req
 	err := s.mgr.launch(req)
 	if err != nil {
-		span := trace.SpanFromContext(req.ctx)
-		span.RecordError(err)
-		span.End()
 		return err
 	}
 

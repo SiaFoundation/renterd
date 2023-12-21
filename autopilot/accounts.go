@@ -8,12 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/tracing"
 	"go.uber.org/zap"
 )
 
@@ -44,8 +41,7 @@ type AccountStore interface {
 }
 
 type ContractStore interface {
-	Contracts(ctx context.Context) ([]api.ContractMetadata, error)
-	ContractSetContracts(ctx context.Context, set string) ([]api.ContractMetadata, error)
+	Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 }
 
 func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, l *zap.SugaredLogger, refillInterval time.Duration) *accounts {
@@ -95,7 +91,7 @@ func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 		}
 
 		a.w.withWorker(func(w Worker) {
-			a.refillWorkerAccounts(w)
+			a.refillWorkerAccounts(ctx, w)
 		})
 	}
 }
@@ -105,27 +101,20 @@ func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *accounts) refillWorkerAccounts(w Worker) {
-	ctx, span := tracing.Tracer.Start(context.Background(), "refillWorkerAccounts")
-	defer span.End()
-
+func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 	// fetch config
 	state := a.ap.State()
 
 	// fetch worker id
 	workerID, err := w.ID(ctx)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to fetch worker id")
 		a.l.Errorw(fmt.Sprintf("failed to fetch worker id for refill: %v", err))
 		return
 	}
 
 	// fetch all contracts
-	contracts, err := a.c.Contracts(ctx)
+	contracts, err := a.c.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "failed to fetch contracts")
 		a.l.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
 		return
 	} else if len(contracts) == 0 {
@@ -133,10 +122,8 @@ func (a *accounts) refillWorkerAccounts(w Worker) {
 	}
 
 	// fetch all contract set contracts
-	contractSetContracts, err := a.c.ContractSetContracts(ctx, state.cfg.Contracts.Set)
+	contractSetContracts, err := a.c.Contracts(ctx, api.ContractsOpts{ContractSet: state.cfg.Contracts.Set})
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, fmt.Sprintf("failed to fetch contracts for set '%s'", state.cfg.Contracts.Set))
 		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
 		return
 	}
@@ -212,17 +199,6 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 		}
 	}
 
-	// add tracing
-	ctx, span := tracing.Tracer.Start(ctx, "refillAccount")
-	span.SetAttributes(attribute.Stringer("host", contract.HostKey))
-	defer func() {
-		if rerr != nil {
-			span.RecordError(rerr.err)
-			span.SetStatus(codes.Error, "failed to refill account")
-		}
-		span.End()
-	}()
-
 	// fetch the account
 	accountID, err := w.Account(ctx, contract.HostKey)
 	if err != nil {
@@ -235,10 +211,6 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID
 		rerr = wrapErr(err)
 		return
 	}
-
-	// update span
-	span.SetAttributes(attribute.Stringer("account", account.ID))
-	span.SetAttributes(attribute.Stringer("balance", account.Balance))
 
 	// check if a host is potentially cheating before refilling.
 	// We only check against the max drift if the account's drift is

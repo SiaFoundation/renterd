@@ -317,6 +317,10 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration00036_contractPruneCfg(tx, logger)
 			},
 		},
+		{
+			ID:      "00001_init",
+			Migrate: func(tx *gorm.DB) error { return nil },
+		},
 	}
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
@@ -1401,12 +1405,12 @@ func performMigration00035_bufferedSlabsDropSizeAndComplete(txn *gorm.DB, logger
 	}
 
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "size") {
-		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "size"); err != nil {
+		if err := txn.Exec("ALTER TABLE buffered_slabs DROP COLUMN size").Error; err != nil {
 			return err
 		}
 	}
 	if txn.Migrator().HasColumn(&dbBufferedSlab{}, "complete") {
-		if err := txn.Migrator().DropColumn(&dbBufferedSlab{}, "complete"); err != nil {
+		if err := txn.Exec("ALTER TABLE buffered_slabs DROP COLUMN complete").Error; err != nil {
 			return err
 		}
 	}

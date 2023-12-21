@@ -47,6 +47,10 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 			Rollback: nil,
 		},
+		{
+			ID:      "00001_init",
+			Migrate: func(tx *gorm.DB) error { return nil },
+		},
 	}
 
 	// Create migrator.

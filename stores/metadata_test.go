@@ -207,7 +207,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := ss.Contracts(ctx)
+	contracts, err := ss.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !reflect.DeepEqual(fetched, expected) {
 		t.Fatal("contract mismatch")
 	}
-	contracts, err = ss.Contracts(ctx)
+	contracts, err = ss.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,12 +268,12 @@ func TestSQLContractStore(t *testing.T) {
 	if err := ss.SetContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	if contracts, err := ss.ContractSetContracts(ctx, "foo"); err != nil {
+	if contracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "foo"}); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := ss.ContractSetContracts(ctx, "bar"); !errors.Is(err, api.ErrContractSetNotFound) {
+	if _, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
@@ -304,7 +304,7 @@ func TestSQLContractStore(t *testing.T) {
 	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = ss.Contracts(ctx)
+	contracts, err = ss.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// make sure the contract set was updated.
-	setContracts, err := ss.ContractSetContracts(context.Background(), "test")
+	setContracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +770,7 @@ func TestArchiveContracts(t *testing.T) {
 	}
 
 	// assert the first one is still active
-	active, err := ss.Contracts(context.Background())
+	active, err := ss.Contracts(context.Background(), api.ContractsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3749,7 +3749,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// assert there are 0 contracts in the contract set
-	cscs, err := ss.ContractSetContracts(context.Background(), testContractSet)
+	cscs, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cscs) != 0 {
@@ -3777,7 +3777,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	assertHealthValid(s2, false)
 
 	// assert there are 2 contracts in the contract set
-	cscs, err = ss.ContractSetContracts(context.Background(), testContractSet)
+	cscs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cscs) != 2 {

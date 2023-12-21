@@ -243,7 +243,7 @@ func (c *TestCluster) Reboot(ctx context.Context) *TestCluster {
 // AutopilotConfig returns the autopilot's config and current period.
 func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, uint64) {
 	c.tt.Helper()
-	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
+	ap, err := c.Bus.Autopilot(ctx, c.apID)
 	c.tt.OK(err)
 	return ap.Config, ap.CurrentPeriod
 }
@@ -251,7 +251,7 @@ func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig,
 // UpdateAutopilotConfig updates the cluster's autopilot with given config.
 func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) {
 	c.tt.Helper()
-	c.tt.OK(c.Bus.UpdateAutopilot(context.Background(), api.Autopilot{
+	c.tt.OK(c.Bus.UpdateAutopilot(ctx, api.Autopilot{
 		ID:     c.apID,
 		Config: cfg,
 	}))
@@ -303,6 +303,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		t.SkipNow()
 	}
 	tt := &TT{t}
+
+	// Ensure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 
 	// Apply options.
 	dbName := opts.dbName
@@ -508,30 +512,30 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
-	tt.OK(busClient.SetContractSet(context.Background(), testContractSet, []types.FileContractID{}))
+	tt.OK(busClient.SetContractSet(ctx, testContractSet, []types.FileContractID{}))
 
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
-		tt.OK(busClient.UpdateAutopilot(context.Background(), api.Autopilot{
+		tt.OK(busClient.UpdateAutopilot(ctx, api.Autopilot{
 			ID:     apCfg.ID,
 			Config: apSettings,
 		}))
 	}
 
 	// Update the bus settings.
-	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingGouging, testGougingSettings))
-	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingRedundancy, testRedundancySettings))
-	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingContractSet, testContractSetSettings))
-	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, testGougingSettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, testRedundancySettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, testContractSetSettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
 		V4Keypairs: map[string]string{testS3AccessKeyID: testS3SecretAccessKey},
 	}))
-	tt.OK(busClient.UpdateSetting(context.Background(), api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
 
 	// Fund the bus.
 	if funding {
 		cluster.MineBlocks(latestHardforkHeight)
 		tt.Retry(1000, 100*time.Millisecond, func() error {
-			resp, err := busClient.ConsensusState(context.Background())
+			resp, err := busClient.ConsensusState(ctx)
 			if err != nil {
 				return err
 			}
@@ -539,7 +543,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
 				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
 			}
-			res, err := cluster.Bus.Wallet(context.Background())
+			res, err := cluster.Bus.Wallet(ctx)
 			if err != nil {
 				return err
 			}
@@ -861,7 +865,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
-		contracts, err := c.Bus.ContractSetContracts(ctx, set)
+		contracts, err := c.Bus.Contracts(ctx, api.ContractsOpts{ContractSet: set})
 		if err != nil {
 			return err
 		}
@@ -877,7 +881,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		contracts, err := c.Bus.Contracts(context.Background())
+		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
 		}

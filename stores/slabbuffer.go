@@ -88,7 +88,7 @@ func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int6
 		// Open the file.
 		file, err := os.OpenFile(filepath.Join(partialSlabDir, buffer.Filename), os.O_RDWR, 0600)
 		if err != nil {
-			_ = sqlStore.alerts.RegisterAlert(context.Background(), alerts.Alert{
+			_ = sqlStore.alerts.RegisterAlert(sqlStore.shutdownCtx, alerts.Alert{
 				ID:       types.HashBytes([]byte(buffer.Filename)),
 				Severity: alerts.SeverityCritical,
 				Message:  "failed to read buffer file on startup",
