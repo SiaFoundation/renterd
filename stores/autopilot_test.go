@@ -41,9 +41,6 @@ func TestAutopilotStore(t *testing.T) {
 			MinRecentScanFailures: 10,
 			AllowRedundantIPs:     true, // allow for integration tests by default
 		},
-		Wallet: api.WalletConfig{
-			DefragThreshold: 1234,
-		},
 	}
 
 	// add an autopilot with that config

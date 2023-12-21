@@ -39,7 +39,6 @@ type (
 	AutopilotConfig struct {
 		Contracts ContractsConfig `json:"contracts"`
 		Hosts     HostsConfig     `json:"hosts"`
-		Wallet    WalletConfig    `json:"wallet"`
 	}
 
 	// ContractsConfig contains all contract settings used in the autopilot.
@@ -61,11 +60,6 @@ type (
 		MaxDowntimeHours      uint64                      `json:"maxDowntimeHours"`
 		MinRecentScanFailures uint64                      `json:"minRecentScanFailures"`
 		ScoreOverrides        map[types.PublicKey]float64 `json:"scoreOverrides"`
-	}
-
-	// WalletConfig contains all wallet settings used in the autopilot.
-	WalletConfig struct {
-		DefragThreshold uint64 `json:"defragThreshold"`
 	}
 )
 
