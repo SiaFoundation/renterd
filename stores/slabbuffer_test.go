@@ -15,6 +15,7 @@ func TestMarkBufferCompleteTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer mgr.Close()
 
 	// get contract set for its id
 	var set dbContractSet
