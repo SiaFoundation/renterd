@@ -177,9 +177,6 @@ formed.
 
 ```json
 {
-	"wallet": {
-		"defragThreshold": 1000
-	},
 	"hosts": {
 		"allowRedundantIPs": false,
 		"maxDowntimeHours": 1440,

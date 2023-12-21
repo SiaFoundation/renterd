@@ -29,9 +29,6 @@ var cfg = api.AutopilotConfig{
 		MaxDowntimeHours:      24 * 7 * 2,
 		MinRecentScanFailures: 10,
 	},
-	Wallet: api.WalletConfig{
-		DefragThreshold: 1000,
-	},
 }
 
 func TestHostScore(t *testing.T) {
