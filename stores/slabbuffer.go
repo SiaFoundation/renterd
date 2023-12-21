@@ -437,12 +437,16 @@ func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferG
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	if _, exists := mgr.incompleteBuffers[gid]; exists {
-		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], buffer)
+		var found bool
 		for i := range mgr.incompleteBuffers[gid] {
 			if mgr.incompleteBuffers[gid][i] == buffer {
 				mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid][:i], mgr.incompleteBuffers[gid][i+1:]...)
+				found = true
 				break
 			}
+		}
+		if found {
+			mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], buffer)
 		}
 	}
 }
