@@ -290,7 +290,7 @@ func main() {
 
 	flag.Parse()
 
-	log.Println("renterd v0.7.1")
+	log.Println("renterd v1.0.0")
 	log.Println("Network", build.NetworkName())
 	if flag.Arg(0) == "version" {
 		log.Println("Commit:", githash)
