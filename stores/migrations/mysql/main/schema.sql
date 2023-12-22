@@ -1,10 +1,3 @@
---migrations table
-DROP TABLE IF EXISTS `migrations`;
-CREATE TABLE `migrations` (
-  `id` varchar(255) NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbArchivedContract
 CREATE TABLE `archived_contracts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

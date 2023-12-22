@@ -3,6 +3,7 @@ package stores
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"os"
@@ -27,6 +28,9 @@ const (
 	// 1000. This is also lower than the mysql default of 65535.
 	maxSQLVars = 32000
 )
+
+//go:embed all:migrations/*
+var migrations embed.FS
 
 var (
 	exprTRUE = gorm.Expr("TRUE")

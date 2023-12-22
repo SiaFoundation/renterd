@@ -1,6 +1,3 @@
---migrations table
-CREATE TABLE `migrations` (`id` text,PRIMARY KEY (`id`));
-
 --dbArchivedContract
 CREATE TABLE `archived_contracts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`fcid` blob NOT NULL UNIQUE,`renewed_from` blob,`contract_price` text,`state` integer NOT NULL DEFAULT 0,`total_cost` text,`proof_height` integer DEFAULT 0,`revision_height` integer DEFAULT 0,`revision_number` text NOT NULL DEFAULT "0",`size` integer,`start_height` integer NOT NULL,`window_start` integer NOT NULL DEFAULT 0,`window_end` integer NOT NULL DEFAULT 0,`upload_spending` text,`download_spending` text,`fund_account_spending` text,`delete_spending` text,`list_spending` text,`renewed_to` blob,`host` blob NOT NULL,`reason` text);
 CREATE INDEX `idx_archived_contracts_start_height` ON `archived_contracts`(`start_height`);

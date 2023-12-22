@@ -1,6 +1,3 @@
---migrations table
-CREATE TABLE `migrations` (`id` text,PRIMARY KEY (`id`));
-
 --dbContractMetric
 CREATE TABLE `contracts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`fcid` blob NOT NULL,`host` blob NOT NULL,`remaining_collateral_lo` BIGINT NOT NULL,`remaining_collateral_hi` BIGINT NOT NULL,`remaining_funds_lo` BIGINT NOT NULL,`remaining_funds_hi` BIGINT NOT NULL,`revision_number` BIGINT NOT NULL,`upload_spending_lo` BIGINT NOT NULL,`upload_spending_hi` BIGINT NOT NULL,`download_spending_lo` BIGINT NOT NULL,`download_spending_hi` BIGINT NOT NULL,`fund_account_spending_lo` BIGINT NOT NULL,`fund_account_spending_hi` BIGINT NOT NULL,`delete_spending_lo` BIGINT NOT NULL,`delete_spending_hi` BIGINT NOT NULL,`list_spending_lo` BIGINT NOT NULL,`list_spending_hi` BIGINT NOT NULL);
 CREATE INDEX `idx_list_spending` ON `contracts`(`list_spending_lo`,`list_spending_hi`);
