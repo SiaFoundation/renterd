@@ -36,7 +36,7 @@ CREATE TABLE `archived_contracts` (
   KEY `idx_archived_contracts_renewed_to` (`renewed_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbAutopilot
+-- dbAutopilot
 CREATE TABLE `autopilots` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE `autopilots` (
   UNIQUE KEY `identifier` (`identifier`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbBucket
+-- dbBucket
 CREATE TABLE `buckets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE `buckets` (
   KEY `idx_buckets_name` (`name`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbBufferedSlab
+-- dbBufferedSlab
 CREATE TABLE `buffered_slabs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE `buffered_slabs` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbConsensusInfo
+-- dbConsensusInfo
 CREATE TABLE `consensus_infos` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -76,7 +76,7 @@ CREATE TABLE `consensus_infos` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContract <-> dbSector
+-- dbContract <-> dbSector
 CREATE TABLE `contract_sectors` (
   `db_sector_id` bigint unsigned NOT NULL,
   `db_contract_id` bigint unsigned NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE `contract_sectors` (
   CONSTRAINT `fk_contract_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContractSet <-> dbContract
+-- dbContractSet <-> dbContract
 CREATE TABLE `contract_set_contracts` (
   `db_contract_set_id` bigint unsigned NOT NULL,
   `db_contract_id` bigint unsigned NOT NULL,
@@ -97,7 +97,7 @@ CREATE TABLE `contract_set_contracts` (
   CONSTRAINT `fk_contract_set_contracts_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContractSet
+-- dbContractSet
 CREATE TABLE `contract_sets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -107,7 +107,7 @@ CREATE TABLE `contract_sets` (
   KEY `idx_contract_sets_name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContract
+-- dbContract
 CREATE TABLE `contracts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -143,7 +143,7 @@ CREATE TABLE `contracts` (
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbAccount
+-- dbAccount
 CREATE TABLE `ephemeral_accounts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -158,7 +158,7 @@ CREATE TABLE `ephemeral_accounts` (
   KEY `idx_ephemeral_accounts_requires_sync` (`requires_sync`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbAllowlistEntry
+-- dbAllowlistEntry
 CREATE TABLE `host_allowlist_entries` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -168,7 +168,7 @@ CREATE TABLE `host_allowlist_entries` (
   KEY `idx_host_allowlist_entries_entry` (`entry`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbAllowlistEntry <-> dbHost
+-- dbAllowlistEntry <-> dbHost
 CREATE TABLE `host_allowlist_entry_hosts` (
   `db_allowlist_entry_id` bigint unsigned NOT NULL,
   `db_host_id` bigint unsigned NOT NULL,
@@ -178,7 +178,7 @@ CREATE TABLE `host_allowlist_entry_hosts` (
   CONSTRAINT `fk_host_allowlist_entry_hosts_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbHostAnnouncement
+-- dbHostAnnouncement
 CREATE TABLE `host_announcements` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -189,7 +189,7 @@ CREATE TABLE `host_announcements` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbBlocklistEntry
+-- dbBlocklistEntry
 CREATE TABLE `host_blocklist_entries` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -199,7 +199,7 @@ CREATE TABLE `host_blocklist_entries` (
   KEY `idx_host_blocklist_entries_entry` (`entry`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbBlocklistEntry <-> dbHost
+-- dbBlocklistEntry <-> dbHost
 CREATE TABLE `host_blocklist_entry_hosts` (
   `db_blocklist_entry_id` bigint unsigned NOT NULL,
   `db_host_id` bigint unsigned NOT NULL,
@@ -209,7 +209,7 @@ CREATE TABLE `host_blocklist_entry_hosts` (
   CONSTRAINT `fk_host_blocklist_entry_hosts_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbHost
+-- dbHost
 CREATE TABLE `hosts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -241,7 +241,7 @@ CREATE TABLE `hosts` (
   KEY `idx_hosts_net_address` (`net_address`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbMultipartPart
+-- dbMultipartPart
 CREATE TABLE `multipart_parts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -256,7 +256,7 @@ CREATE TABLE `multipart_parts` (
   CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbMultipartUpload
+-- dbMultipartUpload
 CREATE TABLE `multipart_uploads` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -273,7 +273,7 @@ CREATE TABLE `multipart_uploads` (
   CONSTRAINT `fk_multipart_uploads_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbObject
+-- dbObject
 CREATE TABLE `objects` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -293,7 +293,7 @@ CREATE TABLE `objects` (
   CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbSector
+-- dbSector
 CREATE TABLE `sectors` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -310,7 +310,7 @@ CREATE TABLE `sectors` (
   CONSTRAINT `fk_slabs_shards` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbSetting
+-- dbSetting
 CREATE TABLE `settings` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -321,7 +321,7 @@ CREATE TABLE `settings` (
   KEY `idx_settings_key` (`key`)
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbSiacoinElement
+-- dbSiacoinElement
 CREATE TABLE `siacoin_elements` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -335,7 +335,7 @@ CREATE TABLE `siacoin_elements` (
   KEY `idx_siacoin_elements_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbSlab
+-- dbSlab
 CREATE TABLE `slabs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -358,7 +358,7 @@ CREATE TABLE `slabs` (
   CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbSlice
+-- dbSlice
 CREATE TABLE `slices` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -378,7 +378,7 @@ CREATE TABLE `slices` (
   CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbTransaction
+-- dbTransaction
 CREATE TABLE `transactions` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -395,7 +395,7 @@ CREATE TABLE `transactions` (
   KEY `idx_transactions_timestamp` (`timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbWebhook
+-- dbWebhook
 CREATE TABLE `webhooks` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,

@@ -1,4 +1,4 @@
---dbContractPruneMetric
+-- dbContractPruneMetric
 CREATE TABLE `contract_prunes` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE `contract_prunes` (
   KEY `idx_contract_prunes_duration` (`duration`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContractSetMetric
+-- dbContractSetMetric
 CREATE TABLE `contract_sets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE `contract_sets` (
   KEY `idx_contract_sets_contracts` (`contracts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContractSetChurnMetric
+-- dbContractSetChurnMetric
 CREATE TABLE `contract_sets_churn` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE `contract_sets_churn` (
   KEY `idx_contract_sets_churn_reason` (`reason`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbContractMetric
+-- dbContractMetric
 CREATE TABLE `contracts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -85,7 +85,7 @@ CREATE TABLE `contracts` (
   KEY `idx_list_spending` (`list_spending_lo`,`list_spending_hi`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbPerformanceMetric
+-- dbPerformanceMetric
 CREATE TABLE `performance` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
@@ -102,7 +102,7 @@ CREATE TABLE `performance` (
   KEY `idx_performance_action` (`action`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
---dbWalletMetric
+-- dbWalletMetric
 CREATE TABLE `wallets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
