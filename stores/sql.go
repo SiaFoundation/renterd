@@ -132,7 +132,7 @@ func NewMetricsSQLiteConnection(path string) gorm.Dialector {
 
 // NewMySQLConnection creates a connection to a MySQL database.
 func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
-	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", user, password, addr, dbName))
+	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
 }
 
 func DBConfigFromEnv() (uri, user, password, dbName string) {
