@@ -12,7 +12,8 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	mgr, err := newSlabBufferManager(ss.SQLStore, 1000, t.TempDir())
+	completionThreshold := int64(1000)
+	mgr, err := newSlabBufferManager(ss.SQLStore, completionThreshold, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,15 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 		t.Fatalf("expected 1 complete buffer, got %v", len(mgr.completeBuffers[gid]))
 	} else if len(mgr.incompleteBuffers[gid]) != 0 {
 		t.Fatalf("expected 0 incomplete buffers, got %v", len(mgr.incompleteBuffers[gid]))
+	}
+
+	// fetch the complete buffer and try to manually append to it - shouldn't happen
+	cb := mgr.completeBuffers[gid][0]
+	_, _, used, err := cb.recordAppend(frand.Bytes(1), false, 1, completionThreshold)
+	if err != nil {
+		t.Fatal(err)
+	} else if used {
+		t.Fatal("expected buffer to not be used")
 	}
 
 	// add a slab that should fit in the buffer but since the first buffer is
@@ -86,7 +96,7 @@ func TestMarkBufferCompleteTwice(t *testing.T) {
 	}
 	b := incompleteBuffers[0]
 
-	// mark the buffer as complete twice which might happen
+	// mark the buffer as complete
 	if err := mgr.markBufferComplete(b, gid); err != nil {
 		t.Fatal(err)
 	}
