@@ -18,6 +18,7 @@ const (
 
 	ObjectSortByHealth = "health"
 	ObjectSortByName   = "name"
+	ObjectSortBySize   = "size"
 
 	ObjectSortDirAsc  = "asc"
 	ObjectSortDirDesc = "desc"
