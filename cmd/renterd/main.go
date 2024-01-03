@@ -294,6 +294,10 @@ func main() {
 		log.Println("Seed phrase:")
 		fmt.Println(wallet.NewSeedPhrase())
 		return
+	} else if flag.Arg(0) != "" {
+		log.Printf("Unknown subcommand 'renterd %s' - available subcommands are 'renterd version' and 'renterd seed'\n", flag.Arg(0))
+		log.Println("Run 'renterd --help' for more information on the root 'renterd' command")
+		return
 	}
 
 	// Overwrite flags from environment if set.
