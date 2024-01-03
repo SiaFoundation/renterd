@@ -38,7 +38,7 @@ const (
 	// defaultWithdrawalExpiryBlocks is the number of blocks we add to the
 	// current blockheight when we define an expiry block height for withdrawal
 	// messages.
-	defaultWithdrawalExpiryBlocks = 6
+	defaultWithdrawalExpiryBlocks = 12
 
 	// maxPriceTableSize defines the maximum size of a price table
 	maxPriceTableSize = 16 * 1024
@@ -79,6 +79,10 @@ var (
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
 	errWithdrawalsInactive = errors.New("ephemeral account withdrawals are inactive because the host is not synced")
+
+	// errWithdrawalExpired is returned by the host when the withdrawal request
+	// has an expiry block height that is in the past.
+	errWithdrawalExpired = errors.New("withdrawal request expired")
 )
 
 func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
@@ -94,6 +98,7 @@ func isSectorNotFound(err error) bool {
 	return isError(err, errSectorNotFound) || isError(err, errSectorNotFoundOld)
 }
 func isWithdrawalsInactive(err error) bool { return isError(err, errWithdrawalsInactive) }
+func isWithdrawalExpired(err error) bool   { return isError(err, errWithdrawalExpired) }
 
 func isError(err error, target error) bool {
 	if err == nil {
@@ -250,7 +255,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	ctx, cancel := timeoutCtx()
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, blockHeight, h.fcid)
-	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
+	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
