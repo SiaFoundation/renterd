@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -422,6 +423,26 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 	if jc.Decode(&addr) == nil {
 		jc.Check("couldn't connect to peer", b.s.Connect(addr))
 	}
+}
+
+func (b *bus) consensusStateHandlerPrometheus(jc jape.Context) {
+	bitSet := b.consensusState().Synced
+	var bitSetVar int8
+	if bitSet {
+		bitSetVar = 1
+	}
+
+	var buf bytes.Buffer
+
+	text := `renterd_consensus_state_synced %d
+renterd_consensus_state_chain_index_height %d
+renterd_consensus_state_chain_index_height_exp1{synced="%d"} %d`
+	fmt.Fprintf(&buf, text,
+		bitSetVar,
+		b.consensusState().BlockHeight,
+		bitSetVar, b.consensusState().BlockHeight)
+
+	jc.ResponseWriter.Write(buf.Bytes())
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
