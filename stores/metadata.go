@@ -2115,18 +2115,37 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		}
 
 		for j, shard := range ss.Shards {
-			var sector dbSector
+			sector := dbSector{
+				DBSlabID:   slab.ID,
+				SlabIndex:  j + 1,
+				LatestHost: publicKey(shard.LatestHost),
+				Root:       shard.Root[:],
+			}
+			// try creating the sector - this is a bit faster than FirstOrCreate
+			// since usually the sector doesn't exist.
 			err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{
-					DBSlabID:   slab.ID,
-					SlabIndex:  j + 1,
-					LatestHost: publicKey(shard.LatestHost),
+				Clauses(clause.OnConflict{
+					DoNothing: true,
 				}).
-				FirstOrCreate(&sector).
+				Create(&sector).
 				Error
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
+			} else if sector.ID == 0 {
+				// sector already exists, fetch and update it.
+				err := tx.
+					Where(dbSector{Root: shard.Root[:]}).
+					Assign(dbSector{
+						DBSlabID:   slab.ID,
+						SlabIndex:  j + 1,
+						LatestHost: publicKey(shard.LatestHost),
+					}).
+					FirstOrCreate(&sector).
+					Error
+				if err != nil {
+					return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
+				}
 			}
 			// Add contract and host to join tables.
 			var associatedContracts []dbContract
