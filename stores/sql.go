@@ -396,7 +396,7 @@ func (ss *SQLStore) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 // applyUpdates applies all unapplied updates to the database.
-func (ss *SQLStore) applyUpdates(force bool) (err error) {
+func (ss *SQLStore) applyUpdates(force bool) error {
 	// Check if we need to apply changes
 	persistIntervalPassed := time.Since(ss.lastSave) > ss.persistInterval                           // enough time has passed since last persist
 	softLimitReached := len(ss.unappliedAnnouncements) >= announcementBatchSoftLimit                // enough announcements have accumulated
@@ -425,7 +425,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		ss.logger.Error(fmt.Sprintf("failed to fetch blocklist, err: %v", err))
 	}
 
-	err = ss.retryTransaction(func(tx *gorm.DB) (err error) {
+	err := ss.retryTransaction(func(tx *gorm.DB) (err error) {
 		if len(ss.unappliedAnnouncements) > 0 {
 			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
 				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
@@ -478,6 +478,9 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 		}
 		return updateCCID(tx, ss.ccid, ss.chainIndex)
 	})
+	if err != nil {
+		return fmt.Errorf("%w; failed to apply updates", err)
+	}
 
 	ss.unappliedContractState = make(map[types.FileContractID]contractState)
 	ss.unappliedProofs = make(map[types.FileContractID]uint64)
@@ -487,7 +490,7 @@ func (ss *SQLStore) applyUpdates(force bool) (err error) {
 	ss.lastSave = time.Now()
 	ss.unappliedOutputChanges = nil
 	ss.unappliedTxnChanges = nil
-	return
+	return nil
 }
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
