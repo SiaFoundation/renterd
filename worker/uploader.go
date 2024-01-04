@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	sectorUploadTimeout = 30 * time.Second
+	sectorUploadTimeout = 60 * time.Second
 )
 
 type (
