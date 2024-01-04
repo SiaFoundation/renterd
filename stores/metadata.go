@@ -2126,26 +2126,13 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
 				Clauses(clause.OnConflict{
-					DoNothing: true,
+					UpdateAll: true,
+					Columns:   []clause.Column{{Name: "root"}},
 				}).
 				Create(&sector).
 				Error
 			if err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
-			} else if sector.ID == 0 {
-				// sector already exists, fetch and update it.
-				err := tx.
-					Where(dbSector{Root: shard.Root[:]}).
-					Assign(dbSector{
-						DBSlabID:   slab.ID,
-						SlabIndex:  j + 1,
-						LatestHost: publicKey(shard.LatestHost),
-					}).
-					FirstOrCreate(&sector).
-					Error
-				if err != nil {
-					return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
-				}
 			}
 			// Add contract and host to join tables.
 			var associatedContracts []dbContract
