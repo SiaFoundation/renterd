@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -508,6 +509,8 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 			errors.Is(err, api.ErrContractNotFound) ||
 			errors.Is(err, api.ErrMultipartUploadNotFound) ||
 			errors.Is(err, api.ErrObjectExists) ||
+			strings.Contains(err.Error(), "no such table") ||
+			strings.Contains(err.Error(), "Duplicate entry") ||
 			errors.Is(err, api.ErrPartNotFound) {
 			return true
 		}
