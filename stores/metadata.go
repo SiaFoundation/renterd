@@ -1473,9 +1473,28 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 }
 
 func pruneSlabs(tx *gorm.DB) error {
-	return tx.Exec(`DELETE FROM slabs WHERE slabs.id IN (SELECT * FROM (SELECT sla.id FROM slabs sla
-		LEFT JOIN slices sli ON sli.db_slab_id  = sla.id
-		WHERE db_object_id IS NULL AND db_multipart_part_id IS NULL AND sla.db_buffered_slab_id IS NULL) toDelete)`).Error
+	if !isSQLite(tx) {
+		return tx.Exec(`
+			DELETE slabs
+			FROM slabs
+			LEFT JOIN slices ON slices.db_slab_id = slabs.id
+			WHERE slices.db_object_id IS NULL
+			AND slices.db_multipart_part_id IS NULL
+			AND slabs.db_buffered_slab_id IS NULL;
+		`).Error
+	} else {
+		return tx.Exec(`
+			DELETE FROM slabs
+				WHERE id IN (
+				SELECT slabs.id
+				FROM slabs
+				LEFT JOIN slices ON slices.db_slab_id = slabs.id
+				WHERE slices.db_object_id IS NULL
+				AND slices.db_multipart_part_id IS NULL
+				AND slabs.db_buffered_slab_id IS NULL
+			);
+		`).Error
+	}
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
