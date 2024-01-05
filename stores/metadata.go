@@ -2884,8 +2884,20 @@ func createOrUpdateSector(tx *gorm.DB, sector *dbSector) error {
 	err := tx.
 		Where(dbSector{Root: sector.Root[:]}).
 		Clauses(clause.OnConflict{
-			UpdateAll: true,
-			Columns:   []clause.Column{{Name: "root"}},
+			DoUpdates: clause.Set{
+				{
+					Column: clause.Column{Name: "db_slab_id"},
+					Value:  sector.DBSlabID,
+				},
+				{
+					Column: clause.Column{Name: "slab_index"},
+					Value:  sector.SlabIndex,
+				},
+				{
+					Column: clause.Column{Name: "latest_host"},
+					Value:  sector.LatestHost,
+				},
+			},
 		}).
 		Create(&sector).
 		Error
