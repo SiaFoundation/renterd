@@ -1924,17 +1924,19 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// loop updated shards
 		for i, shard := range s.Shards {
 			// ensure the sector exists
-			var sector dbSector
+			sector := dbSector{
+				DBSlabID:   slab.ID,
+				SlabIndex:  i + 1,
+				LatestHost: publicKey(shard.LatestHost),
+				Root:       shard.Root[:],
+			}
 			if err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{
-					DBSlabID:   slab.ID,
-					SlabIndex:  i + 1,
-					LatestHost: publicKey(shard.LatestHost),
-					Root:       shard.Root[:],
-				},
-				).
-				FirstOrCreate(&sector).
+				Clauses(clause.OnConflict{
+					UpdateAll: true,
+					Columns:   []clause.Column{{Name: "root"}},
+				}).
+				Create(&sector).
 				Error; err != nil {
 				return err
 			}
@@ -2081,7 +2083,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	for i, ss := range slices {
-		// Create Slab if it doesn't exist yet.
+		// create Slab if it doesn't exist yet
 		slabKey, err := ss.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal slab key: %w", err)
@@ -2092,8 +2094,13 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			MinShards:       ss.MinShards,
 			TotalShards:     uint8(len(ss.Shards)),
 		}
-		err = tx.Where(dbSlab{Key: slabKey}).
-			FirstOrCreate(&slab).Error
+		err = tx.
+			Where(dbSlab{Key: slabKey}).
+			Clauses(clause.OnConflict{
+				UpdateAll: true,
+				Columns:   []clause.Column{{Name: "key"}},
+			}).
+			Create(&slab).Error
 		if err != nil {
 			return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(slices), err)
 		} else if slab.DBContractSetID != contractSetID {
@@ -2121,8 +2128,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 				LatestHost: publicKey(shard.LatestHost),
 				Root:       shard.Root[:],
 			}
-			// try creating the sector - this is a bit faster than FirstOrCreate
-			// since usually the sector doesn't exist.
+			// create sector if it doesn't exist yet
 			err := tx.
 				Where(dbSector{Root: shard.Root[:]}).
 				Clauses(clause.OnConflict{
