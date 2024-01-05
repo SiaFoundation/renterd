@@ -614,7 +614,8 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 		if res.Error != nil {
 			return res.Error
 		}
-		return pruneSlabs(tx)
+		s.scheduleSlabPruning()
+		return nil
 	})
 }
 
@@ -1472,9 +1473,18 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 	return found
 }
 
-func pruneSlabs(tx *gorm.DB) error {
-	if !isSQLite(tx) {
-		return tx.Exec(`
+func (s *SQLStore) scheduleSlabPruning() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.isSlabPruning {
+		s.slabPruningScheduled = true
+		return
+	}
+
+	prune := func() {
+		var err error
+		if !isSQLite(s.db) {
+			err = s.db.Exec(`
 			DELETE slabs
 			FROM slabs
 			LEFT JOIN slices ON slices.db_slab_id = slabs.id
@@ -1482,8 +1492,8 @@ func pruneSlabs(tx *gorm.DB) error {
 			AND slices.db_multipart_part_id IS NULL
 			AND slabs.db_buffered_slab_id IS NULL;
 		`).Error
-	} else {
-		return tx.Exec(`
+		} else {
+			err = s.db.Exec(`
 			DELETE FROM slabs
 				WHERE id IN (
 				SELECT slabs.id
@@ -1494,7 +1504,39 @@ func pruneSlabs(tx *gorm.DB) error {
 				AND slabs.db_buffered_slab_id IS NULL
 			);
 		`).Error
+		}
+		if err != nil {
+			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+		}
 	}
+
+	go func() {
+		for {
+			// prune slabs
+			prune()
+
+			// wait for a bit to allow for more pruning to be scheduled for
+			// batching
+			select {
+			case <-s.shutdownCtx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+
+			// if no more pruning is scheduled we are done
+			s.mu.Lock()
+			if !s.slabPruningScheduled {
+				s.isSlabPruning = false
+				s.mu.Unlock()
+				return
+			}
+
+			// otherwise we set the flag to false and prune again
+			s.slabPruningScheduled = false
+			s.mu.Unlock()
+		}
+
+	}()
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
@@ -1529,7 +1571,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if force {
 			// delete potentially existing object at destination
-			if _, err := deleteObject(tx, bucket, keyNew); err != nil {
+			if _, err := s.deleteObject(tx, bucket, keyNew); err != nil {
 				return err
 			}
 		}
@@ -1561,9 +1603,7 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				return err
 			}
 			if resp.RowsAffected > 0 {
-				if err := pruneSlabs(tx); err != nil {
-					return err
-				}
+				s.scheduleSlabPruning()
 			}
 		}
 		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
@@ -1622,7 +1662,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			}
 			return tx.Save(&srcObj).Error
 		}
-		_, err = deleteObject(tx, dstBucket, dstPath)
+		_, err = s.deleteObject(tx, dstBucket, dstPath)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
@@ -1770,7 +1810,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// NOTE: please note that the object's created_at is currently used as
 		// its ModTime, if we ever stop recreating the object but update it
 		// instead we need to take this into account
-		_, err := deleteObject(tx, bucket, path)
+		_, err := s.deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
@@ -1819,7 +1859,7 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = deleteObject(tx, bucket, key)
+		rowsAffected, err = s.deleteObject(tx, bucket, key)
 		return err
 	})
 	if err != nil {
@@ -1835,7 +1875,7 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = deleteObjects(tx, bucket, prefix)
+		rowsAffected, err = s.deleteObjects(tx, bucket, prefix)
 		return err
 	})
 	if err != nil {
@@ -2504,7 +2544,7 @@ func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, 
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
+func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
 	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
 		Delete(&dbObject{})
 	if tx.Error != nil {
@@ -2514,21 +2554,19 @@ func deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ 
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	}
-	if err := pruneSlabs(tx); err != nil {
-		return 0, err
-	}
+	s.scheduleSlabPruning()
 	return
 }
 
-func deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
+func (s *SQLStore) deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
 	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
 		utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
 	numDeleted = tx.RowsAffected
-	if err := pruneSlabs(tx); err != nil {
-		return 0, err
+	if numDeleted > 0 {
+		s.scheduleSlabPruning()
 	}
 	return numDeleted, nil
 }

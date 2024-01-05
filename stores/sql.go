@@ -80,10 +80,12 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
-		mu           sync.Mutex
-		hasAllowlist bool
-		hasBlocklist bool
-		closed       bool
+		mu                   sync.Mutex
+		hasAllowlist         bool
+		hasBlocklist         bool
+		closed               bool
+		isSlabPruning        bool
+		slabPruningScheduled bool
 
 		knownContracts map[types.FileContractID]struct{}
 	}
@@ -266,6 +268,9 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+
+	// Prune slabs on startup
+	ss.scheduleSlabPruning()
 
 	return ss, ccid, nil
 }
