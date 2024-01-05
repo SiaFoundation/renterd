@@ -1485,9 +1485,9 @@ func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
 		case <-s.slabPruneSigChan:
 		}
 
-		var err error
-		if !isSQLite(s.db) {
-			err = s.db.Exec(`
+		err := s.retryTransaction(func(tx *gorm.DB) error {
+			if !isSQLite(s.db) {
+				return s.db.Exec(`
 			DELETE slabs
 			FROM slabs
 			LEFT JOIN slices ON slices.db_slab_id = slabs.id
@@ -1495,8 +1495,8 @@ func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
 			AND slices.db_multipart_part_id IS NULL
 			AND slabs.db_buffered_slab_id IS NULL;
 		`).Error
-		} else {
-			err = s.db.Exec(`
+			} else {
+				return s.db.Exec(`
 			DELETE FROM slabs
 				WHERE id IN (
 				SELECT slabs.id
@@ -1507,7 +1507,8 @@ func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
 				AND slabs.db_buffered_slab_id IS NULL
 			);
 		`).Error
-		}
+			}
+		})
 		if err != nil {
 			s.logger.Errorw("failed to prune slabs", zap.Error(err))
 		}

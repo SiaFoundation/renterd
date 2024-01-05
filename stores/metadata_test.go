@@ -1190,9 +1190,10 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err := ss.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0); err != nil {
-		t.Fatal(err)
-	}
+	ss.scheduleSlabPruning()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		return countCheck(0, 0, 0, 0)
+	})
 }
 
 // TestObjectHealth verifies the object's health is returned correctly by all
