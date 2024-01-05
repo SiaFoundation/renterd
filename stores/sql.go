@@ -80,12 +80,13 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
-		mu                   sync.Mutex
-		hasAllowlist         bool
-		hasBlocklist         bool
-		closed               bool
-		isSlabPruning        bool
-		slabPruningScheduled bool
+		slabPruneSigChan chan struct{}
+
+		wg           sync.WaitGroup
+		mu           sync.Mutex
+		hasAllowlist bool
+		hasBlocklist bool
+		closed       bool
 
 		knownContracts map[types.FileContractID]struct{}
 	}
@@ -247,6 +248,7 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		hasAllowlist:           allowlistCnt > 0,
 		hasBlocklist:           blocklistCnt > 0,
 		settings:               make(map[string]string),
+		slabPruneSigChan:       make(chan struct{}, 1),
 		unappliedContractState: make(map[types.FileContractID]contractState),
 		unappliedHostKeys:      make(map[types.PublicKey]struct{}),
 		unappliedRevisions:     make(map[types.FileContractID]revisionUpdate),
@@ -269,7 +271,12 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
-	// Prune slabs on startup
+	// Start slab pruning loop.
+	ss.wg.Add(1)
+	go func() {
+		ss.slabPruningLoop()
+		ss.wg.Done()
+	}()
 	ss.scheduleSlabPruning()
 
 	return ss, ccid, nil

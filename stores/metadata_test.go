@@ -1017,9 +1017,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[0].DBSlabID = 1
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 4
+	expectedObj.Slabs[1].DBSlabID = 2
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1041,7 +1041,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   3,
+				DBSlabID:   1,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1081,7 +1081,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   4,
+				DBSlabID:   2,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -1180,9 +1180,10 @@ func TestSQLMetadataStore(t *testing.T) {
 		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1); err != nil {
-		t.Fatal(err)
-	}
+	ss.scheduleSlabPruning()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		return countCheck(1, 1, 1, 1)
+	})
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.

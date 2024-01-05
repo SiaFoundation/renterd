@@ -117,6 +117,20 @@ func (s *testSQLStore) Reopen() *testSQLStore {
 	return newTestSQLStore(s.t, cfg)
 }
 
+func (s *testSQLStore) Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) {
+	s.t.Helper()
+	for i := 1; i < tries; i++ {
+		err := fn()
+		if err == nil {
+			return
+		}
+		time.Sleep(durationBetweenAttempts)
+	}
+	if err := fn(); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
 // newTestLogger creates a console logger used for testing.
 func newTestLogger() logger.Interface {
 	config := zap.NewProductionEncoderConfig()

@@ -1473,15 +1473,18 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 	return found
 }
 
-func (s *SQLStore) scheduleSlabPruning() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.isSlabPruning {
-		s.slabPruningScheduled = true
-		return
-	}
+func (s *SQLStore) slabPruningLoop() {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		// wait for trigger
+		select {
+		case <-s.shutdownCtx.Done():
+			return
+		case <-ticker.C:
+		case <-s.slabPruneSigChan:
+		}
 
-	prune := func() {
 		var err error
 		if !isSQLite(s.db) {
 			err = s.db.Exec(`
@@ -1509,34 +1512,13 @@ func (s *SQLStore) scheduleSlabPruning() {
 			s.logger.Errorw("failed to prune slabs", zap.Error(err))
 		}
 	}
+}
 
-	go func() {
-		for {
-			// prune slabs
-			prune()
-
-			// wait for a bit to allow for more pruning to be scheduled for
-			// batching
-			select {
-			case <-s.shutdownCtx.Done():
-				return
-			case <-time.After(30 * time.Second):
-			}
-
-			// if no more pruning is scheduled we are done
-			s.mu.Lock()
-			if !s.slabPruningScheduled {
-				s.isSlabPruning = false
-				s.mu.Unlock()
-				return
-			}
-
-			// otherwise we set the flag to false and prune again
-			s.slabPruningScheduled = false
-			s.mu.Unlock()
-		}
-
-	}()
+func (s *SQLStore) scheduleSlabPruning() {
+	select {
+	case s.slabPruneSigChan <- struct{}{}:
+	default:
+	}
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
