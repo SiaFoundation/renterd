@@ -2097,14 +2097,18 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		err = tx.
 			Where(dbSlab{Key: slabKey}).
 			Clauses(clause.OnConflict{
-				UpdateAll: true,
-				Columns:   []clause.Column{{Name: "key"}},
+				DoNothing: true,
 			}).
 			Create(&slab).Error
 		if err != nil {
 			return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(slices), err)
 		} else if slab.DBContractSetID != contractSetID {
 			return fmt.Errorf("slab already exists in another contract set %v != %v", slab.DBContractSetID, contractSetID)
+		} else if slab.ID == 0 {
+			// if it already exists, fetch it
+			if err := tx.Where(dbSlab{Key: slabKey}).Take(&slab).Error; err != nil {
+				return fmt.Errorf("failed to fetch slab: %w", err)
+			}
 		}
 
 		// Create Slice.
