@@ -350,6 +350,7 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 // Close closes the underlying database connection of the store.
 func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
+	s.wg.Wait()
 
 	db, err := s.db.DB()
 	if err != nil {

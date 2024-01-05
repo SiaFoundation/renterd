@@ -33,11 +33,13 @@ import (
 
 type BusConfig struct {
 	config.Bus
-	Network            *consensus.Network
-	Miner              *Miner
-	DBLoggerConfig     stores.LoggerConfig
-	DBDialector        gorm.Dialector
-	DBMetricsDialector gorm.Dialector
+	Network             *consensus.Network
+	Miner               *Miner
+	DBLoggerConfig      stores.LoggerConfig
+	DBDialector         gorm.Dialector
+	DBMetricsDialector  gorm.Dialector
+	SlabPruningInterval time.Duration
+	SlabPruningCooldown time.Duration
 }
 
 type AutopilotConfig struct {
@@ -120,8 +122,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        l.Sugar(),
 		GormLogger:                    sqlLogger,
-		SlabPruningInterval:           time.Hour,
-		SlabPruningCooldown:           30 * time.Second,
+		SlabPruningInterval:           cfg.SlabPruningInterval,
+		SlabPruningCooldown:           cfg.SlabPruningCooldown,
 	})
 	if err != nil {
 		return nil, nil, err
