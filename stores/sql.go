@@ -47,6 +47,7 @@ type (
 		db        *gorm.DB
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
+		wg        sync.WaitGroup
 
 		slabBufferMgr *SlabBufferManager
 
@@ -267,7 +268,39 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
+	// Run maintenance once on startup.
+	ss.performMaintenance()
+
+	// Launch maintenance loop.
+	ss.wg.Add(1)
+	go func() {
+		ss.maintenanceLoop()
+		ss.wg.Done()
+	}()
+
 	return ss, ccid, nil
+}
+
+func (s *SQLStore) maintenanceLoop() {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+		case <-s.shutdownCtx.Done():
+			return
+		}
+		s.logger.Info("running database maintenance")
+		s.performMaintenance()
+		s.logger.Info("finished database maintenance")
+	}
+}
+
+func (s *SQLStore) performMaintenance() {
+	// prune slabs
+	if err := pruneSlabs(s.db); err != nil {
+		s.logger.Errorw("failed to prune slabs", zap.Error(err))
+	}
 }
 
 func isSQLite(db *gorm.DB) bool {
@@ -321,6 +354,8 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 // Close closes the underlying database connection of the store.
 func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
+
+	s.wg.Wait()
 
 	db, err := s.db.DB()
 	if err != nil {
