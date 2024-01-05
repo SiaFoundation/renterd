@@ -287,7 +287,7 @@ func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string
 		if err != nil {
 			return fmt.Errorf("failed to delete multipart upload: %w", err)
 		}
-		return nil
+		return pruneSlabs(tx)
 	})
 }
 

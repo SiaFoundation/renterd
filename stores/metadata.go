@@ -614,7 +614,7 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 		if res.Error != nil {
 			return res.Error
 		}
-		return nil
+		return pruneSlabs(tx)
 	})
 }
 
@@ -1540,6 +1540,11 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				Delete(&dbObject{})
 			if err := resp.Error; err != nil {
 				return err
+			}
+			if resp.RowsAffected > 0 {
+				if err := pruneSlabs(tx); err != nil {
+					return err
+				}
 			}
 		}
 		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
@@ -2490,6 +2495,9 @@ func deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ 
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	}
+	if err := pruneSlabs(tx); err != nil {
+		return 0, err
+	}
 	return
 }
 
@@ -2500,6 +2508,9 @@ func deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _
 		return 0, tx.Error
 	}
 	numDeleted = tx.RowsAffected
+	if err := pruneSlabs(tx); err != nil {
+		return 0, err
+	}
 	return numDeleted, nil
 }
 
