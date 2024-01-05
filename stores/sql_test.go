@@ -76,7 +76,21 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(conn, connMetrics, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(Config{
+		Conn:                          conn,
+		ConnMetrics:                   connMetrics,
+		Alerts:                        alerts,
+		PartialSlabDir:                dir,
+		Migrate:                       !cfg.skipMigrate,
+		AnnouncementMaxAge:            time.Hour,
+		PersistInterval:               time.Second,
+		WalletAddress:                 walletAddrs,
+		SlabBufferCompletionThreshold: 0,
+		Logger:                        zap.NewNop().Sugar(),
+		GormLogger:                    newTestLogger(),
+		SlabPruningInterval:           time.Hour,
+		SlabPruningCooldown:           10 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}

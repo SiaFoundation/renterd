@@ -1473,8 +1473,8 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 	return found
 }
 
-func (s *SQLStore) slabPruningLoop() {
-	ticker := time.NewTicker(time.Hour)
+func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		// wait for trigger
@@ -1510,6 +1510,13 @@ func (s *SQLStore) slabPruningLoop() {
 		}
 		if err != nil {
 			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+		}
+
+		// cooldown
+		select {
+		case <-s.shutdownCtx.Done():
+			return
+		case <-time.After(cooldown):
 		}
 	}
 }
