@@ -397,7 +397,7 @@ func TestObjectEntries(t *testing.T) {
 				Limit:   1,
 			})
 			if err != nil {
-				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, err)
+				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %vmarker: %v\n\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, err)
 			}
 			assertMetadata(res.Entries)
 
