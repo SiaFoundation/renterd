@@ -180,6 +180,16 @@ func tryLoadConfig() {
 
 	// If the config file doesn't exist, don't try to load it.
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		// create an empty config file if it doesn't exist
+		f, err := os.Create(configPath)
+		if err != nil {
+			log.Fatal("failed to create config file:", err)
+		}
+		defer f.Close()
+		f.WriteString(`
+# Renterd config file
+# Any values set here will be overwritten by CLI flags and environment variables
+`)
 		return
 	}
 
