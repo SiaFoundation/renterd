@@ -151,12 +151,10 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) 
 }
 
 // ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, bucket, path string, opts api.ObjectEntriesOptions) (entries []api.ObjectMetadata, err error) {
+func (c *Client) ObjectEntries(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (entries []api.ObjectMetadata, err error) {
 	path = api.ObjectPathEscape(path)
 	body, _, err := c.object(ctx, bucket, path, api.DownloadObjectOptions{
-		Prefix: opts.Prefix,
-		Offset: opts.Offset,
-		Limit:  opts.Limit,
+		GetObjectOptions: opts,
 	})
 	if err != nil {
 		return nil, err

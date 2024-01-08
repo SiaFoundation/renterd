@@ -1302,7 +1302,7 @@ FROM (
 		case api.ObjectSortByHealth:
 			var markerHealth float64
 			if err = s.db.
-				Raw(fmt.Sprintf(`SELECT Health FROM (%s WHERE Name >= ? ORDER BY Name LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Health FROM (%s WHERE oname >= ? ORDER BY oname LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerHealth).
 				Error; err != nil {
 				return
@@ -1314,6 +1314,22 @@ FROM (
 			} else {
 				markerExpr = "(Health = ? AND Name > ?) OR Health < ?"
 				markerParams = []interface{}{markerHealth, marker, markerHealth}
+			}
+		case api.ObjectSortBySize:
+			var markerSize float64
+			if err = s.db.
+				Raw(fmt.Sprintf(`SELECT Size FROM (%s WHERE oname >= ? ORDER BY oname LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Scan(&markerSize).
+				Error; err != nil {
+				return
+			}
+
+			if sortDir == api.ObjectSortDirAsc {
+				markerExpr = "(Size > ? OR (Size = ? AND Name > ?))"
+				markerParams = []interface{}{markerSize, markerSize, marker}
+			} else {
+				markerExpr = "(Size = ? AND Name > ?) OR Size < ?"
+				markerParams = []interface{}{markerSize, marker, markerSize}
 			}
 		case api.ObjectSortByName:
 			if sortDir == api.ObjectSortDirAsc {
@@ -1329,7 +1345,7 @@ FROM (
 
 	// build order clause
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
-	if sortBy == api.ObjectSortByHealth {
+	if sortBy != api.ObjectSortByName {
 		orderByClause += ", Name"
 	}
 
@@ -2815,6 +2831,28 @@ func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string
 		} else {
 			markerExpr = gorm.Expr("Health > ? OR (Health >= ? AND object_id > ?)", markerHealth, markerHealth, marker)
 		}
+	case api.ObjectSortBySize:
+		// fetch marker size
+		var markerSize float64
+		if marker != "" && sortBy == api.ObjectSortBySize {
+			if err := db.
+				Select("o.size").
+				Model(&dbObject{}).
+				Table("objects o").
+				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
+				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
+				Limit(1).
+				Scan(&markerSize).
+				Error; err != nil {
+				return exprTRUE, clause.OrderBy{}, err
+			}
+		}
+
+		if desc {
+			markerExpr = gorm.Expr("(Size <= ? AND object_id > ?) OR Size < ?", markerSize, marker, markerSize)
+		} else {
+			markerExpr = gorm.Expr("Size > ? OR (Size >= ? AND object_id > ?)", markerSize, markerSize, marker)
+		}
 	default:
 		err = fmt.Errorf("unhandled sortBy parameter '%s'", sortBy)
 	}
@@ -2830,6 +2868,7 @@ func buildOrderClause(sortBy, sortDir string) (clause.OrderByColumn, error) {
 		"":                     "object_id",
 		api.ObjectSortByName:   "object_id",
 		api.ObjectSortByHealth: "Health",
+		api.ObjectSortBySize:   "Size",
 	}
 
 	return clause.OrderByColumn{
@@ -2871,8 +2910,8 @@ func validateSort(sortBy, sortDir string) error {
 		return fmt.Errorf("invalid dir '%v', allowed values are '%v' and '%v'; %w", sortDir, api.ObjectSortDirAsc, api.ObjectSortDirDesc, api.ErrInvalidObjectSortParameters)
 	}
 
-	if !allowed(sortBy, "", api.ObjectSortByHealth, api.ObjectSortByName) {
-		return fmt.Errorf("invalid sort by '%v', allowed values are '%v' and '%v'; %w", sortBy, api.ObjectSortByHealth, api.ObjectSortByName, api.ErrInvalidObjectSortParameters)
+	if !allowed(sortBy, "", api.ObjectSortByHealth, api.ObjectSortByName, api.ObjectSortBySize) {
+		return fmt.Errorf("invalid sort by '%v', allowed values are '%v', '%v' and '%v'; %w", sortBy, api.ObjectSortByHealth, api.ObjectSortByName, api.ObjectSortBySize, api.ErrInvalidObjectSortParameters)
 	}
 	return nil
 }
