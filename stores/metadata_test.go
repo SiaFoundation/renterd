@@ -1017,9 +1017,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[0].DBSlabID = 1
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 4
+	expectedObj.Slabs[1].DBSlabID = 2
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1041,7 +1041,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   3,
+				DBSlabID:   1,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1081,7 +1081,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   4,
+				DBSlabID:   2,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -1180,18 +1180,20 @@ func TestSQLMetadataStore(t *testing.T) {
 		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1); err != nil {
-		t.Fatal(err)
-	}
+	ss.scheduleSlabPruning()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		return countCheck(1, 1, 1, 1)
+	})
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
 	if err := ss.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0); err != nil {
-		t.Fatal(err)
-	}
+	ss.scheduleSlabPruning()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		return countCheck(0, 0, 0, 0)
+	})
 }
 
 // TestObjectHealth verifies the object's health is returned correctly by all
@@ -2909,27 +2911,39 @@ func TestContractSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// prune slabs
+	ss.scheduleSlabPruning()
+
 	// assert there's one sector that can be pruned and assert it's from fcid 1
-	if n := prunableData(nil); n != rhpv2.SectorSize {
-		t.Fatal("unexpected amount of prunable data", n)
-	}
-	if n := prunableData(&fcids[1]); n != 0 {
-		t.Fatal("expected no prunable data", n)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if n := prunableData(nil); n != rhpv2.SectorSize {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		}
+		if n := prunableData(&fcids[1]); n != 0 {
+			return fmt.Errorf("expected no prunable data %v", n)
+		}
+		return nil
+	})
 
 	// remove the second object
 	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
+	// prune slabs
+	ss.scheduleSlabPruning()
+
 	// assert there's now two sectors that can be pruned
-	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
-		t.Fatal("unexpected amount of prunable data", n)
-	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
-		t.Fatal("unexpected amount of prunable data", n)
-	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
-		t.Fatal("unexpected amount of prunable data", n)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		}
+		return nil
+	})
 
 	if size, err := ss.ContractSize(context.Background(), fcids[0]); err != nil {
 		t.Fatal("unexpected err", err)

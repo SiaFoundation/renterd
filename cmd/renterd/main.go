@@ -351,8 +351,10 @@ func main() {
 
 	network, _ := build.Network()
 	busCfg := node.BusConfig{
-		Bus:     cfg.Bus,
-		Network: network,
+		Bus:                 cfg.Bus,
+		Network:             network,
+		SlabPruningInterval: time.Hour,
+		SlabPruningCooldown: 30 * time.Second,
 	}
 	// Init db dialector
 	if cfg.Database.MySQL.URI != "" {

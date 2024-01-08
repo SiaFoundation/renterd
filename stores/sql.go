@@ -45,6 +45,23 @@ type (
 		CreatedAt time.Time
 	}
 
+	// Config contains all params for creating a SQLStore
+	Config struct {
+		Conn                          gorm.Dialector
+		ConnMetrics                   gorm.Dialector
+		Alerts                        alerts.Alerter
+		PartialSlabDir                string
+		Migrate                       bool
+		AnnouncementMaxAge            time.Duration
+		PersistInterval               time.Duration
+		WalletAddress                 types.Address
+		SlabBufferCompletionThreshold int64
+		Logger                        *zap.SugaredLogger
+		GormLogger                    glogger.Interface
+		SlabPruningInterval           time.Duration
+		SlabPruningCooldown           time.Duration
+	}
+
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		alerts    alerts.Alerter
@@ -84,6 +101,9 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
+		slabPruneSigChan chan struct{}
+
+		wg           sync.WaitGroup
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
@@ -147,28 +167,28 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partialSlabDir string, migrate bool, announcementMaxAge, persistInterval time.Duration, walletAddress types.Address, slabBufferCompletionThreshold int64, logger *zap.SugaredLogger, gormLogger glogger.Interface) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	// Sanity check announcement max age.
-	if announcementMaxAge == 0 {
+	if cfg.AnnouncementMaxAge == 0 {
 		return nil, modules.ConsensusChangeID{}, errors.New("announcementMaxAge must be non-zero")
 	}
 
-	if err := os.MkdirAll(partialSlabDir, 0700); err != nil {
+	if err := os.MkdirAll(cfg.PartialSlabDir, 0700); err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
-	db, err := gorm.Open(conn, &gorm.Config{
-		Logger: gormLogger, // custom logger
+	db, err := gorm.Open(cfg.Conn, &gorm.Config{
+		Logger: cfg.GormLogger, // custom logger
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
 	}
-	dbMetrics, err := gorm.Open(connMetrics, &gorm.Config{
-		Logger: gormLogger, // custom logger
+	dbMetrics, err := gorm.Open(cfg.ConnMetrics, &gorm.Config{
+		Logger: cfg.GormLogger, // custom logger
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open metrics db")
 	}
-	l := logger.Named("sql")
+	l := cfg.Logger.Named("sql")
 
 	// Print SQLite version
 	var dbName string
@@ -186,7 +206,7 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 	l.Infof("Using %s version %s", dbName, dbVersion)
 
 	// Perform migrations.
-	if migrate {
+	if cfg.Migrate {
 		if err := performMigrations(db, l); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
 		}
@@ -201,7 +221,7 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		if t.Kind() == reflect.Ptr {
 			t = t.Elem()
 		}
-		logger.Warnw("missing index", "table", t.Name(), "field", name)
+		l.Warnw("missing index", "table", t.Name(), "field", name)
 	})
 
 	// Get latest consensus change ID or init db.
@@ -239,24 +259,25 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		alerts:                 alerts,
+		alerts:                 cfg.Alerts,
 		db:                     db,
 		dbMetrics:              dbMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
-		persistInterval:        persistInterval,
+		persistInterval:        cfg.PersistInterval,
 		hasAllowlist:           allowlistCnt > 0,
 		hasBlocklist:           blocklistCnt > 0,
 		settings:               make(map[string]string),
+		slabPruneSigChan:       make(chan struct{}, 1),
 		unappliedContractState: make(map[types.FileContractID]contractState),
 		unappliedHostKeys:      make(map[types.PublicKey]struct{}),
 		unappliedRevisions:     make(map[types.FileContractID]revisionUpdate),
 		unappliedProofs:        make(map[types.FileContractID]uint64),
 
-		announcementMaxAge: announcementMaxAge,
+		announcementMaxAge: cfg.AnnouncementMaxAge,
 
-		walletAddress: walletAddress,
+		walletAddress: cfg.WalletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
 			ID:     types.BlockID(ci.BlockID),
@@ -266,10 +287,18 @@ func NewSQLStore(conn, connMetrics gorm.Dialector, alerts alerts.Alerter, partia
 		shutdownCtxCancel: shutdownCtxCancel,
 	}
 
-	ss.slabBufferMgr, err = newSlabBufferManager(ss, slabBufferCompletionThreshold, partialSlabDir)
+	ss.slabBufferMgr, err = newSlabBufferManager(ss, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+
+	// Start slab pruning loop.
+	ss.wg.Add(1)
+	go func() {
+		ss.slabPruningLoop(cfg.SlabPruningInterval, cfg.SlabPruningCooldown)
+		ss.wg.Done()
+	}()
+	ss.scheduleSlabPruning()
 
 	return ss, ccid, nil
 }
@@ -325,6 +354,7 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 // Close closes the underlying database connection of the store.
 func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
+	s.wg.Wait()
 
 	db, err := s.db.DB()
 	if err != nil {
