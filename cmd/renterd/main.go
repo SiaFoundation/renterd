@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -186,9 +188,8 @@ func tryLoadConfig() {
 			log.Fatal("failed to create config file:", err)
 		}
 		defer f.Close()
-		f.WriteString(`
-# Renterd config file
-# Any values set here will be overwritten by CLI flags and environment variables
+		f.WriteString(`# Renterd config file
+# Any values set here will be overwritten by CLI flags and environment variables if set
 `)
 		return
 	}
@@ -202,7 +203,7 @@ func tryLoadConfig() {
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)
 
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		log.Fatal("failed to decode config file:", err)
 	}
 }
@@ -294,6 +295,28 @@ func main() {
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
+	// custom usage
+	flag.Usage = func() {
+		log.Print(`
+Renterd is the official Sia renter daemon. It provides a REST API for forming
+contracts with hosts, uploading data to them and downloading data from them.
+
+There are 3 ways to configure renterd:
+  - CLI flags
+  - Environment variables
+  - A YAML config file called 'renterd.yaml' in 'renterd's data directory
+
+An empty config file will be created if it doesn't exist when 'renterd' runs for
+the first time. So if you are reading this, the file should already exist.
+
+See the documentation (https://docs.sia.tech/) for more information and examples
+on how to configure and use renterd.
+
+Usage:
+`)
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
 	if flag.Arg(0) == "version" {
@@ -303,6 +326,9 @@ func main() {
 	} else if flag.Arg(0) == "seed" {
 		log.Println("Seed phrase:")
 		fmt.Println(wallet.NewSeedPhrase())
+		return
+	} else if flag.Arg(0) != "" {
+		flag.Usage()
 		return
 	}
 
