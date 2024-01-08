@@ -1344,7 +1344,7 @@ FROM (
 
 	// build order clause
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
-	if sortBy == api.ObjectSortByHealth {
+	if sortBy != api.ObjectSortByName {
 		orderByClause += ", Name"
 	}
 
