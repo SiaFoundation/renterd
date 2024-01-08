@@ -46,6 +46,31 @@ const (
 	// minutes. That's why we assume 10 seconds to be more than frequent enough
 	// to refill an account when it's due for another refill.
 	defaultAccountRefillInterval = 10 * time.Second
+
+	// emptyConfigFile is the default config file that will be created on disk
+	// if no config file exists.
+	emptyConfigFile = `# Renterd config file
+# Any values set here will be overwritten by CLI flags and environment variables if set
+`
+
+	// usageHeader is the header for the CLI usage text.
+	usageHeader = `
+Renterd is the official Sia renter daemon. It provides a REST API for forming
+contracts with hosts, uploading data to them and downloading data from them.
+
+There are 3 ways to configure renterd:
+  - CLI flags
+  - Environment variables
+  - A YAML config file called 'renterd.yaml' in 'renterd's data directory
+
+An empty config file will be created if it doesn't exist when 'renterd' runs for
+the first time. So if you are reading this, the file should already exist.
+
+See the documentation (https://docs.sia.tech/) for more information and examples
+on how to configure and use renterd.
+
+Usage:
+`
 )
 
 var (
@@ -188,9 +213,7 @@ func tryLoadConfig() {
 			log.Fatal("failed to create config file:", err)
 		}
 		defer f.Close()
-		f.WriteString(`# Renterd config file
-# Any values set here will be overwritten by CLI flags and environment variables if set
-`)
+		f.WriteString(emptyConfigFile)
 		return
 	}
 
@@ -297,23 +320,7 @@ func main() {
 
 	// custom usage
 	flag.Usage = func() {
-		log.Print(`
-Renterd is the official Sia renter daemon. It provides a REST API for forming
-contracts with hosts, uploading data to them and downloading data from them.
-
-There are 3 ways to configure renterd:
-  - CLI flags
-  - Environment variables
-  - A YAML config file called 'renterd.yaml' in 'renterd's data directory
-
-An empty config file will be created if it doesn't exist when 'renterd' runs for
-the first time. So if you are reading this, the file should already exist.
-
-See the documentation (https://docs.sia.tech/) for more information and examples
-on how to configure and use renterd.
-
-Usage:
-`)
+		log.Print(usageHeader)
 		flag.PrintDefaults()
 	}
 
