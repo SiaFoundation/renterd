@@ -241,3 +241,25 @@ func TestQueryPlan(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyUpdatesErr(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	before := ss.lastSave
+
+	// drop consensus_infos table to cause update to fail
+	if err := ss.db.Exec("DROP TABLE consensus_infos").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// call applyUpdates with 'force' set to true
+	if err := ss.applyUpdates(true); err == nil {
+		t.Fatal("expected error")
+	}
+
+	// save shouldn't have happened
+	if ss.lastSave != before {
+		t.Fatal("lastSave should not have changed")
+	}
+}

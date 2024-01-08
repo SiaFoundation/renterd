@@ -1941,19 +1941,14 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// loop updated shards
 		for i, shard := range s.Shards {
 			// ensure the sector exists
-			var sector dbSector
-			if err := tx.
-				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{
-					DBSlabID:   slab.ID,
-					SlabIndex:  i + 1,
-					LatestHost: publicKey(shard.LatestHost),
-					Root:       shard.Root[:],
-				},
-				).
-				FirstOrCreate(&sector).
-				Error; err != nil {
-				return err
+			sector := dbSector{
+				DBSlabID:   slab.ID,
+				SlabIndex:  i + 1,
+				LatestHost: publicKey(shard.LatestHost),
+				Root:       shard.Root[:],
+			}
+			if err := createOrUpdateSector(tx, &sector); err != nil {
+				return fmt.Errorf("failed to create sector: %w", err)
 			}
 
 			// ensure the associations are updated
@@ -2098,7 +2093,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	for i, ss := range slices {
-		// Create Slab if it doesn't exist yet.
+		// create Slab if it doesn't exist yet
 		slabKey, err := ss.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal slab key: %w", err)
@@ -2109,12 +2104,21 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			MinShards:       ss.MinShards,
 			TotalShards:     uint8(len(ss.Shards)),
 		}
-		err = tx.Where(dbSlab{Key: slabKey}).
-			FirstOrCreate(&slab).Error
+		err = tx.
+			Where(dbSlab{Key: slabKey}).
+			Clauses(clause.OnConflict{
+				DoNothing: true,
+			}).
+			Create(&slab).Error
 		if err != nil {
 			return fmt.Errorf("failed to create slab %v/%v: %w", i+1, len(slices), err)
 		} else if slab.DBContractSetID != contractSetID {
 			return fmt.Errorf("slab already exists in another contract set %v != %v", slab.DBContractSetID, contractSetID)
+		} else if slab.ID == 0 {
+			// if it already exists, fetch it
+			if err := tx.Where(dbSlab{Key: slabKey}).Take(&slab).Error; err != nil {
+				return fmt.Errorf("failed to fetch slab: %w", err)
+			}
 		}
 
 		// Create Slice.
@@ -2132,17 +2136,14 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		}
 
 		for j, shard := range ss.Shards {
-			var sector dbSector
-			err := tx.
-				Where(dbSector{Root: shard.Root[:]}).
-				Assign(dbSector{
-					DBSlabID:   slab.ID,
-					SlabIndex:  j + 1,
-					LatestHost: publicKey(shard.LatestHost),
-				}).
-				FirstOrCreate(&sector).
-				Error
-			if err != nil {
+			sector := dbSector{
+				DBSlabID:   slab.ID,
+				SlabIndex:  j + 1,
+				LatestHost: publicKey(shard.LatestHost),
+				Root:       shard.Root[:],
+			}
+			// create sector if it doesn't exist yet
+			if err := createOrUpdateSector(tx, &sector); err != nil {
 				return fmt.Errorf("failed to create sector %v/%v: %w", j+1, len(ss.Shards), err)
 			}
 			// Add contract and host to join tables.
@@ -2865,6 +2866,30 @@ func validateSort(sortBy, sortDir string) error {
 
 	if !allowed(sortBy, "", api.ObjectSortByHealth, api.ObjectSortByName, api.ObjectSortBySize) {
 		return fmt.Errorf("invalid sort by '%v', allowed values are '%v', '%v' and '%v'; %w", sortBy, api.ObjectSortByHealth, api.ObjectSortByName, api.ObjectSortBySize, api.ErrInvalidObjectSortParameters)
+	}
+	return nil
+}
+
+// createOrUpdateSector creates a sector or updates it if it exists already. The
+// resulting ID is set on the input sector.
+// NOTE: don't rely on any other fields of the returned sector than the ID
+func createOrUpdateSector(tx *gorm.DB, sector *dbSector) error {
+	err := tx.
+		Where(dbSector{Root: sector.Root[:]}).
+		Clauses(clause.OnConflict{
+			UpdateAll: true,
+			Columns:   []clause.Column{{Name: "root"}},
+		}).
+		Create(&sector).
+		Error
+	if err != nil {
+		return err
+	} else if sector.ID == 0 {
+		// if it already exists, fetch it - this fallback is needed for MySQL
+		// since it doesn't support returning the ID on conflict
+		if err := tx.Where(dbSector{Root: sector.Root[:]}).Take(&sector).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
