@@ -8,22 +8,23 @@ import (
 	"gorm.io/gorm"
 )
 
-var (
-	metricsTables = []interface{}{
-		&dbContractMetric{},
-		&dbContractPruneMetric{},
-		&dbContractSetMetric{},
-		&dbContractSetChurnMetric{},
-		&dbPerformanceMetric{},
-		&dbWalletMetric{},
-	}
-)
-
 // initMetricsSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initMetricsSchema(tx *gorm.DB) error {
-	// Run auto migrations.
-	err := tx.AutoMigrate(metricsTables...)
+	// Pick the right migrations.
+	var schema []byte
+	var err error
+	if isSQLite(tx) {
+		schema, err = migrations.ReadFile("migrations/sqlite/metrics/schema.sql")
+	} else {
+		schema, err = migrations.ReadFile("migrations/mysql/metrics/schema.sql")
+	}
+	if err != nil {
+		return err
+	}
+
+	// Run it.
+	err = tx.Exec(string(schema)).Error
 	if err != nil {
 		return fmt.Errorf("failed to init schema: %w", err)
 	}

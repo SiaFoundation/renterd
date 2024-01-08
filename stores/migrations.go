@@ -60,26 +60,21 @@ func initSchema(tx *gorm.DB) error {
 		return fmt.Errorf("failed to setup join tables: %w", err)
 	}
 
-	// Run auto migrations.
-	err = tx.AutoMigrate(tables...)
+	// Pick the right migrations.
+	var schema []byte
+	if isSQLite(tx) {
+		schema, err = migrations.ReadFile("migrations/sqlite/main/schema.sql")
+	} else {
+		schema, err = migrations.ReadFile("migrations/mysql/main/schema.sql")
+	}
 	if err != nil {
-		return fmt.Errorf("failed to init schema: %w", err)
+		return err
 	}
 
-	// Change the collation of columns that we need to be case sensitive.
-	if !isSQLite(tx) {
-		err = tx.Exec("ALTER TABLE objects MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change object_id collation: %w", err)
-		}
-		err = tx.Exec("ALTER TABLE buckets MODIFY COLUMN name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change buckets_name collation: %w", err)
-		}
-		err = tx.Exec("ALTER TABLE multipart_uploads MODIFY COLUMN object_id VARCHAR(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;").Error
-		if err != nil {
-			return fmt.Errorf("failed to change object_id collation: %w", err)
-		}
+	// Run it.
+	err = tx.Exec(string(schema)).Error
+	if err != nil {
+		return fmt.Errorf("failed to init schema: %w", err)
 	}
 
 	// Add default bucket.
