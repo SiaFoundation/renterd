@@ -1360,7 +1360,6 @@ FROM (
 		Raw(query, parameters...).
 		Scan(&rows).
 		Error; err != nil {
-		fmt.Println("query:", query)
 		return
 	}
 
