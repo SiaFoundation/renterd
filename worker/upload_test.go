@@ -20,9 +20,13 @@ const (
 	testContractSet = "testcontractset"
 )
 
+var (
+	testRedundancySettings = api.RedundancySettings{MinShards: 2, TotalShards: 6}
+)
+
 func TestUpload(t *testing.T) {
 	// create upload params
-	params := testParameters(testBucket, t.Name(), testContractSet)
+	params := testParameters(t.Name())
 
 	// create test hosts and contracts
 	hosts := newMockHosts(params.rs.TotalShards * 2)
@@ -131,7 +135,7 @@ func TestUpload(t *testing.T) {
 
 func TestUploadPackedSlab(t *testing.T) {
 	// create upload params
-	params := testParameters(testBucket, t.Name(), testContractSet)
+	params := testParameters(t.Name())
 
 	// create test hosts and contracts
 	hosts := newMockHosts(params.rs.TotalShards * 2)
@@ -230,7 +234,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 func TestMigrateShards(t *testing.T) {
 	// create upload params
-	params := testParameters(testBucket, t.Name(), testContractSet)
+	params := testParameters(t.Name())
 
 	// create test hosts and contracts
 	hosts := newMockHosts(params.rs.TotalShards * 2)
@@ -364,15 +368,15 @@ func TestMigrateShards(t *testing.T) {
 	}
 }
 
-func testParameters(bucket, path, contractSet string) uploadParameters {
+func testParameters(path string) uploadParameters {
 	return uploadParameters{
-		bucket: bucket,
+		bucket: testBucket,
 		path:   path,
 
 		ec:               object.GenerateEncryptionKey(), // random key
 		encryptionOffset: 0,                              // from the beginning
 
-		contractSet: contractSet,
-		rs:          api.RedundancySettings{MinShards: 2, TotalShards: 6},
+		contractSet: testContractSet,
+		rs:          testRedundancySettings,
 	}
 }
