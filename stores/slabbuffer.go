@@ -20,6 +20,10 @@ import (
 	"lukechampine.com/frand"
 )
 
+var (
+	errBufferNotFound = errors.New("buffer not found")
+)
+
 type SlabBuffer struct {
 	dbID     uint
 	filename string
@@ -184,7 +188,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	var usedBuffers []*SlabBuffer
 	for _, buffer := range buffers {
 		var used bool
-		slab, data, used, err = buffer.recordAppend(data, len(usedBuffers) > 0, minShards)
+		slab, data, used, err = buffer.recordAppend(data, len(usedBuffers) > 0, minShards, mgr.bufferedSlabCompletionThreshold)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -208,7 +212,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 			return nil, 0, err
 		}
 		var used bool
-		slab, data, used, err = sb.recordAppend(data, true, minShards)
+		slab, data, used, err = sb.recordAppend(data, true, minShards, mgr.bufferedSlabCompletionThreshold)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -378,11 +382,15 @@ func (buf *SlabBuffer) acquireForUpload(lockingDuration time.Duration) bool {
 	return true
 }
 
-func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool, minShards uint8) (object.SlabSlice, []byte, bool, error) {
+func isCompleteBuffer(size, maxSize, completionThreshold int64) bool {
+	return size+completionThreshold >= maxSize
+}
+
+func (buf *SlabBuffer) recordAppend(data []byte, mustFit bool, minShards uint8, completionThreshold int64) (object.SlabSlice, []byte, bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	remainingSpace := buf.maxSize - buf.size
-	if remainingSpace == 0 {
+	if isCompleteBuffer(buf.size, buf.maxSize, completionThreshold) {
 		return object.SlabSlice{}, data, false, nil
 	} else if int64(len(data)) <= remainingSpace {
 		_, err := buf.file.WriteAt(data, buf.size)
@@ -430,21 +438,27 @@ func (buf *SlabBuffer) commitAppend(completionThreshold int64) (bool, error) {
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
 	buf.syncErr = err
-	return syncSize+completionThreshold >= buf.maxSize, err
+	return isCompleteBuffer(syncSize, buf.maxSize, completionThreshold), nil
 }
 
-func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferGroupID) {
+func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferGroupID) error {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	if _, exists := mgr.incompleteBuffers[gid]; exists {
-		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], buffer)
+		var found bool
 		for i := range mgr.incompleteBuffers[gid] {
 			if mgr.incompleteBuffers[gid][i] == buffer {
 				mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid][:i], mgr.incompleteBuffers[gid][i+1:]...)
+				found = true
 				break
 			}
 		}
+		if !found {
+			return fmt.Errorf("%w: %v", errBufferNotFound, buffer.filename)
+		}
+		mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], buffer)
 	}
+	return nil
 }
 
 func bufferFilename(contractSetID uint, minShards, totalShards uint8) string {

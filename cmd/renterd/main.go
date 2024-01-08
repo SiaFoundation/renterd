@@ -47,10 +47,6 @@ const (
 )
 
 var (
-	// to be supplied at build time
-	githash   = "?"
-	builddate = "?"
-
 	cfg = config.Config{
 		Directory: ".",
 		Seed:      os.Getenv("RENTERD_SEED"),
@@ -290,11 +286,9 @@ func main() {
 
 	flag.Parse()
 
-	log.Println("renterd v1.0.0")
-	log.Println("Network", build.NetworkName())
 	if flag.Arg(0) == "version" {
-		log.Println("Commit:", githash)
-		log.Println("Build Date:", builddate)
+		log.Println("Commit:", build.Commit())
+		log.Println("Build Date:", build.BuildTime())
 		return
 	} else if flag.Arg(0) == "seed" {
 		log.Println("Seed phrase:")
@@ -357,8 +351,10 @@ func main() {
 
 	network, _ := build.Network()
 	busCfg := node.BusConfig{
-		Bus:     cfg.Bus,
-		Network: network,
+		Bus:                 cfg.Bus,
+		Network:             network,
+		SlabPruningInterval: time.Hour,
+		SlabPruningCooldown: 30 * time.Second,
 	}
 	// Init db dialector
 	if cfg.Database.MySQL.URI != "" {
@@ -400,6 +396,8 @@ func main() {
 		log.Fatalln("failed to create logger:", err)
 	}
 	defer closeFn(context.Background())
+
+	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", build.NetworkName()), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
 
 	busCfg.DBLoggerConfig = stores.LoggerConfig{
 		LogLevel:                  level,

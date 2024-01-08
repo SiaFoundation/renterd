@@ -861,6 +861,14 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
 	}
+	var sortBy string
+	if jc.DecodeForm("sortBy", &sortBy) != nil {
+		return
+	}
+	var sortDir string
+	if jc.DecodeForm("sortDir", &sortDir) != nil {
+		return
+	}
 	var marker string
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
@@ -873,12 +881,19 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
+	var ignoreDelim bool
+	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+		return
+	}
 
 	opts := api.GetObjectOptions{
-		Prefix: prefix,
-		Marker: marker,
-		Offset: off,
-		Limit:  limit,
+		Prefix:      prefix,
+		Marker:      marker,
+		Offset:      off,
+		Limit:       limit,
+		IgnoreDelim: ignoreDelim,
+		SortBy:      sortBy,
+		SortDir:     sortDir,
 	}
 
 	path := jc.PathParam("path")
