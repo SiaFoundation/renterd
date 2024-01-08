@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -47,12 +45,6 @@ const (
 	// to refill an account when it's due for another refill.
 	defaultAccountRefillInterval = 10 * time.Second
 
-	// emptyConfigFile is the default config file that will be created on disk
-	// if no config file exists.
-	emptyConfigFile = `# Renterd config file
-# Any values set here will be overwritten by CLI flags and environment variables if set
-`
-
 	// usageHeader is the header for the CLI usage text.
 	usageHeader = `
 Renterd is the official Sia renter daemon. It provides a REST API for forming
@@ -61,10 +53,7 @@ contracts with hosts, uploading data to them and downloading data from them.
 There are 3 ways to configure renterd:
   - CLI flags
   - Environment variables
-  - A YAML config file called 'renterd.yaml' in 'renterd's data directory
-
-An empty config file will be created if it doesn't exist when 'renterd' runs for
-the first time. So if you are reading this, the file should already exist.
+  - A YAML config file
 
 See the documentation (https://docs.sia.tech/) for more information and examples
 on how to configure and use renterd.
@@ -207,13 +196,6 @@ func tryLoadConfig() {
 
 	// If the config file doesn't exist, don't try to load it.
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// create an empty config file if it doesn't exist
-		f, err := os.Create(configPath)
-		if err != nil {
-			log.Fatal("failed to create config file:", err)
-		}
-		defer f.Close()
-		f.WriteString(emptyConfigFile)
 		return
 	}
 
@@ -226,7 +208,7 @@ func tryLoadConfig() {
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)
 
-	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+	if err := dec.Decode(&cfg); err != nil {
 		log.Fatal("failed to decode config file:", err)
 	}
 }
