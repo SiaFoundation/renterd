@@ -2093,9 +2093,9 @@ func (s *SQLStore) createObjectMeta(tx *gorm.DB, objID uint, metadata api.Object
 }
 
 func (s *SQLStore) createMultipartMeta(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
-	entities := make([]*dbMultipartMetadata, 0, len(metadata))
+	entities := make([]*dbMultipartUploadUserMetadata, 0, len(metadata))
 	for k, v := range metadata {
-		entities = append(entities, &dbMultipartMetadata{
+		entities = append(entities, &dbMultipartUploadUserMetadata{
 			DBMultipartUploadID: multipartUploadID,
 			Key:                 k,
 			Value:               v,

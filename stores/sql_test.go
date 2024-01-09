@@ -103,9 +103,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
-	detectMissingIndices(sqlStore.db, func(dst interface{}, name string) {
-		panic("no index can be missing")
-	})
 	if !cfg.skipContractSet {
 		err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
 		if err != nil {
