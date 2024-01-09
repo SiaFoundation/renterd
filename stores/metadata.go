@@ -2077,9 +2077,10 @@ LIMIT ?
 									SELECT slices.db_object_id, MIN(s.health) AS health
 									FROM slices
 									INNER JOIN src s ON s.id = slices.db_slab_id
+									INNER JOIN objects o ON o.id = slices.db_object_id
 									GROUP BY slices.db_object_id
 								) i
-								WHERE i.db_object_id = objects.id`).Error
+								WHERE i.db_object_id = objects.id AND objects.health <> i.health`).Error
 			} else {
 				return tx.Exec(`UPDATE objects
 								INNER JOIN (
@@ -2088,7 +2089,9 @@ LIMIT ?
 									INNER JOIN src s ON s.id = slices.db_slab_id
 									GROUP BY slices.db_object_id
 								) i ON objects.id = i.db_object_id
-								SET objects.health = i.health`).Error
+								SET objects.health = i.health
+								WHERE objects.health <> i.health
+								`).Error
 			}
 		})
 		if err != nil {
