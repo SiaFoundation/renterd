@@ -2060,8 +2060,6 @@ LIMIT ?
 				return err
 			} else if err = tx.Exec("CREATE INDEX src_id ON src (id)").Error; err != nil {
 				return err
-			} else if err = tx.Exec("CREATE INDEX src_health ON src (health)").Error; err != nil {
-				return err
 			}
 
 			var res *gorm.DB
