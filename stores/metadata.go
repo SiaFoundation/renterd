@@ -2002,25 +2002,36 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			return fmt.Errorf("failed to create sector: %w", err)
 		}
 
-		// loop updated shards
+		// build contract <-> sector links
+		var contractSectors []dbContractSector
 		for i, shard := range s.Shards {
 			sector := sectors[i]
 
 			// ensure the associations are updated
-			var associatedContracts []dbContract
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
-						associatedContracts = append(associatedContracts, contracts[fcid])
+						contractSectors = append(contractSectors, dbContractSector{
+							DBSectorID:   sector.ID,
+							DBContractID: contracts[fcid].ID,
+						})
 					}
 				}
 			}
-			if err := tx.
-				Model(&sector).
-				Association("Contracts").
-				Append(&associatedContracts); err != nil {
-				return err
-			}
+		}
+
+		// if there are no associations we are done
+		if len(contractSectors) == 0 {
+			return nil
+		}
+
+		// create associations
+		if err := tx.Table("contract_sectors").
+			Clauses(clause.OnConflict{
+				DoNothing: true,
+			}).
+			Create(&contractSectors).Error; err != nil {
+			return err
 		}
 		return nil
 	})
@@ -2230,27 +2241,39 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		return fmt.Errorf("failed to create sectors: %w", err)
 	}
 
-	// create sector-contract associations
+	// build contract <-> sector links
 	sectorIdx := 0
+	var contractSectors []dbContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
 			sector := sectors[sectorIdx]
-			var associatedContracts []dbContract
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
-						associatedContracts = append(associatedContracts, contracts[fcid])
+						contractSectors = append(contractSectors, dbContractSector{
+							DBSectorID:   sector.ID,
+							DBContractID: contracts[fcid].ID,
+						})
 					}
 				}
 			}
-			if err := tx.
-				Model(&sector).
-				Association("Contracts").
-				Append(&associatedContracts); err != nil {
-				return err
-			}
 			sectorIdx++
 		}
+	}
+
+	// if there are no associations we are done
+	if len(contractSectors) == 0 {
+		return nil
+	}
+
+	// create associations
+	if err := tx.
+		Table("contract_sectors").
+		Clauses(clause.OnConflict{
+			DoNothing: true,
+		}).
+		Create(&contractSectors).Error; err != nil {
+		return err
 	}
 	return nil
 }
