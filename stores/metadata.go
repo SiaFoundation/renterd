@@ -2192,6 +2192,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	err := tx.
 		Clauses(clause.OnConflict{
 			DoNothing: true,
+			Columns:   []clause.Column{{Name: "key"}},
 		}).
 		Create(&slabs).Error
 	if err != nil {
@@ -2202,11 +2203,10 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	for i := range slabs {
 		if slabs[i].DBContractSetID != contractSetID {
 			return fmt.Errorf("slab already exists in another contract set %v != %v", slabs[i].DBContractSetID, contractSetID)
-		} else if slabs[i].ID == 0 {
-			// if it already exists, fetch it
-			if err := tx.Where(dbSlab{Key: slabs[i].Key}).Take(&slabs[i]).Error; err != nil {
-				return fmt.Errorf("failed to fetch slab: %w", err)
-			}
+		}
+		// fetch the upserted slabs
+		if err := tx.Where(dbSlab{Key: slabs[i].Key}).Take(&slabs[i]).Error; err != nil {
+			return fmt.Errorf("failed to fetch slab: %w", err)
 		}
 	}
 
@@ -2995,14 +2995,13 @@ func validateSort(sortBy, sortDir string) error {
 
 // createOrUpdateSector creates a sector or updates it if it exists already. The
 // resulting ID is set on the input sector.
-// NOTE: don't rely on any other fields of the returned sector than the ID
 func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 	if len(sectors) == 0 {
 		return nil // nothing to do
 	}
 	err := tx.
 		Clauses(clause.OnConflict{
-			DoNothing: true,
+			UpdateAll: true,
 			Columns:   []clause.Column{{Name: "root"}},
 		}).
 		Create(&sectors).
@@ -3011,18 +3010,9 @@ func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 		return err
 	}
 	for i, sector := range sectors {
-		if sector.ID == 0 {
-			// for the ones that already existed and caused a conflict, fetch
-			// and overwrite it - this fallback is needed for MySQL since it
-			// doesn't support returning the ID on conflict
-			err = tx.
-				Where(dbSector{Root: sector.Root[:]}).
-				Assign(sector).
-				FirstOrCreate(&sectors[i]).
-				Error
-			if err != nil {
-				return err
-			}
+		// fetch the upserted sectors
+		if err := tx.Where(dbSector{Root: sector.Root[:]}).Take(&sectors[i]).Error; err != nil {
+			return err
 		}
 	}
 	return nil
