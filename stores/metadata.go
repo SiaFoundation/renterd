@@ -2015,7 +2015,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 							DBSectorID:   sector.ID,
 							DBContractID: contracts[fcid].ID,
 						})
-						fmt.Println("DEBUG: link", sector.ID, contracts[fcid].ID)
 					}
 				}
 			}
@@ -2032,7 +2031,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 				DoNothing: true,
 			}).
 			Create(&contractSectors).Error; err != nil {
-			fmt.Println("DEBUG: error", contractSectors)
 			return err
 		}
 		return nil
@@ -2991,7 +2989,7 @@ func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 	}
 	err := tx.
 		Clauses(clause.OnConflict{
-			UpdateAll: true,
+			DoNothing: true,
 			Columns:   []clause.Column{{Name: "root"}},
 		}).
 		Create(&sectors).
@@ -3001,14 +2999,17 @@ func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 	}
 	for i, sector := range sectors {
 		if sector.ID == 0 {
-			// if it already exists, fetch it - this fallback is needed for MySQL
-			// since it doesn't support returning the ID on conflict
-			if err := tx.Where(dbSector{Root: sector.Root[:]}).Take(&sectors[i]).Error; err != nil {
+			// for the ones that already existed and caused a conflict, fetch
+			// and overwrite it - this fallback is needed for MySQL since it
+			// doesn't support returning the ID on conflict
+			err = tx.
+				Where(dbSector{Root: sector.Root[:]}).
+				Assign(sector).
+				FirstOrCreate(&sectors[i]).
+				Error
+			if err != nil {
 				return err
 			}
-			fmt.Println("DEBUG: fetch sector", sectors[i].ID)
-		} else {
-			fmt.Println("DEBUG: created sector", sectors[i].ID)
 		}
 	}
 	return nil
