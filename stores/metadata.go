@@ -2076,6 +2076,8 @@ LIMIT ?
 				return err
 			} else if err = tx.Exec("CREATE TEMPORARY TABLE src AS ?", healthQuery).Error; err != nil {
 				return err
+			} else if err = tx.Exec("CREATE INDEX src_id ON src (id)").Error; err != nil {
+				return err
 			}
 
 			var res *gorm.DB
@@ -2091,14 +2093,25 @@ LIMIT ?
 
 			// Update the health of the objects associated with the updated slabs.
 			if isSQLite(s.db) {
-				return tx.Exec(`UPDATE objects SET health = src.health FROM src
-								INNER JOIN slices ON slices.db_slab_id = src.id
-								WHERE slices.db_object_id = objects.id`).Error
+				return tx.Exec(`UPDATE objects SET health = i.health FROM (
+									SELECT slices.db_object_id, MIN(s.health) AS health
+									FROM slices
+									INNER JOIN src s ON s.id = slices.db_slab_id
+									INNER JOIN objects o ON o.id = slices.db_object_id
+									GROUP BY slices.db_object_id
+								) i
+								WHERE i.db_object_id = objects.id AND objects.health != i.health`).Error
 			} else {
 				return tx.Exec(`UPDATE objects
-								INNER JOIN slices sli ON sli.db_object_id = objects.id
-								INNER JOIN src s ON s.id = sli.db_slab_id
-								SET objects.health = s.health`).Error
+								INNER JOIN (
+									SELECT slices.db_object_id, MIN(s.health) as health
+									FROM slices
+									INNER JOIN src s ON s.id = slices.db_slab_id
+									GROUP BY slices.db_object_id
+								) i ON objects.id = i.db_object_id
+								SET objects.health = i.health
+								WHERE objects.health != i.health
+								`).Error
 			}
 		})
 		if err != nil {

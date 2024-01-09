@@ -581,18 +581,20 @@ func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID,
 }
 
 func (s *SQLStore) ResetConsensusSubscription() error {
-	// drop tables
-	err := s.db.Migrator().DropTable(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
-	if err != nil {
-		return err
-	}
-	// recreate the tables.
-	err = s.db.Migrator().AutoMigrate(&dbConsensusInfo{}, &dbSiacoinElement{}, &dbTransaction{})
-	if err != nil {
-		return err
-	}
-	// initialise the consenus_info table.
-	ci, _, err := initConsensusInfo(s.db)
+	// empty tables and reinit consensus_infos
+	var ci dbConsensusInfo
+	err := s.retryTransaction(func(tx *gorm.DB) error {
+		if err := s.db.Exec("DELETE FROM consensus_infos").Error; err != nil {
+			return err
+		} else if err := s.db.Exec("DELETE FROM siacoin_elements").Error; err != nil {
+			return err
+		} else if err := s.db.Exec("DELETE FROM transactions").Error; err != nil {
+			return err
+		} else if ci, _, err = initConsensusInfo(tx); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
