@@ -2145,6 +2145,8 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
 	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
 		return fmt.Errorf("either objID or multiPartID must be set")
+	} else if len(slices) == 0 {
+		return nil // nothing to do
 	}
 
 	// build slabs
@@ -2196,6 +2198,11 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			Offset:            slices[i].Offset,
 			Length:            slices[i].Length,
 		}
+	}
+
+	// if there are no slices we are done
+	if len(dbSlices) == 0 {
+		return nil
 	}
 
 	// create slices
