@@ -27,6 +27,8 @@ const (
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
 
+	sectorInsertionBatchSize = 500
+
 	refreshHealthMinHealthValidity = 12 * time.Hour
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
@@ -2199,16 +2201,14 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		return fmt.Errorf("failed to create slabs %w", err)
 	}
 
-	// slabs that exist already need to be fetched
+	// fetch the upserted slabs
 	for i := range slabs {
-		if slabs[i].DBContractSetID != contractSetID {
-			return fmt.Errorf("slab already exists in another contract set %v != %v", slabs[i].DBContractSetID, contractSetID)
-		}
-		// fetch the upserted slabs
-		if err := tx.Raw("SELECT * FROM slabs WHERE key = ?", slabs[i].Key).
+		if err := tx.Raw("SELECT * FROM slabs WHERE `key` = ?", slabs[i].Key).
 			Scan(&slabs[i]).
 			Error; err != nil {
 			return fmt.Errorf("failed to fetch slab: %w", err)
+		} else if slabs[i].DBContractSetID != contractSetID {
+			return fmt.Errorf("slab already exists in another contract set %v != %v", slabs[i].DBContractSetID, contractSetID)
 		}
 	}
 
@@ -2287,7 +2287,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 		Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).
-		Create(&contractSectors).Error; err != nil {
+		CreateInBatches(&contractSectors, sectorInsertionBatchSize).Error; err != nil {
 		return err
 	}
 	return nil
@@ -3006,13 +3006,13 @@ func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 			UpdateAll: true,
 			Columns:   []clause.Column{{Name: "root"}},
 		}).
-		Create(&sectors).
+		CreateInBatches(&sectors, sectorInsertionBatchSize).
 		Error
 	if err != nil {
 		return err
 	}
+	// fetch the upserted sectors
 	for i, sector := range sectors {
-		// fetch the upserted sectors
 		if err := tx.Raw("SELECT * FROM sectors WHERE root = ?", sector.Root[:]).
 			Scan(&sectors[i]).
 			Error; err != nil {
