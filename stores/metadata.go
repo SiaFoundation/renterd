@@ -1594,7 +1594,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 				Name:     srcObj.ObjectID,
 				Size:     srcObj.Size,
 			}
-			if err := s.createObjectMeta(tx, srcObj.ID, metadata); err != nil {
+			if err := s.createObjectMetadata(tx, srcObj.ID, metadata); err != nil {
 				return fmt.Errorf("failed to create object metadata: %w", err)
 			}
 			return tx.Save(&srcObj).Error
@@ -1637,7 +1637,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
 
-		if err := s.createObjectMeta(tx, dstObj.ID, metadata); err != nil {
+		if err := s.createObjectMetadata(tx, dstObj.ID, metadata); err != nil {
 			return fmt.Errorf("failed to create object metadata: %w", err)
 		}
 
@@ -1798,8 +1798,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// Create all object meta.
-		if err := s.createObjectMeta(tx, obj.ID, metadata); err != nil {
-			return fmt.Errorf("failed to object meta: %w", err)
+		if err := s.createObjectMetadata(tx, obj.ID, metadata); err != nil {
+			return fmt.Errorf("failed to create object metadata: %w", err)
 		}
 
 		return nil
@@ -2080,7 +2080,15 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createObjectMeta(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+func (s *SQLStore) createObjectMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+	err := tx.
+		Where("db_object_id = ?", objID).
+		Delete(&dbObjectUserMetadata{}).
+		Error
+	if err != nil {
+		return err
+	}
+
 	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
 	for k, v := range metadata {
 		entities = append(entities, &dbObjectUserMetadata{
@@ -2089,10 +2097,19 @@ func (s *SQLStore) createObjectMeta(tx *gorm.DB, objID uint, metadata api.Object
 			Value:      v,
 		})
 	}
-	return tx.Clauses(clause.OnConflict{UpdateAll: true}).CreateInBatches(&entities, 1000).Error
+
+	return tx.CreateInBatches(&entities, 1000).Error
 }
 
-func (s *SQLStore) createMultipartMeta(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
+func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
+	err := tx.
+		Where("db_multipart_upload_id = ?", multipartUploadID).
+		Delete(&dbMultipartUploadUserMetadata{}).
+		Error
+	if err != nil {
+		return err
+	}
+
 	entities := make([]*dbMultipartUploadUserMetadata, 0, len(metadata))
 	for k, v := range metadata {
 		entities = append(entities, &dbMultipartUploadUserMetadata{

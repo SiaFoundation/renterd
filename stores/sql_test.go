@@ -99,6 +99,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		GormLogger:                    newTestLogger(),
 		SlabPruningInterval:           time.Hour,
 		SlabPruningCooldown:           10 * time.Millisecond,
+		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
 	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)

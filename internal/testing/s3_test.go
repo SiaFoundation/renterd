@@ -222,7 +222,6 @@ func TestS3ObjectMetadata(t *testing.T) {
 
 	// perform metadata update (same src/dst copy)
 	metadata["Baz"] = "updated"
-	t.Log(metadata)
 	_, err = s3.CopyObject(
 		context.Background(),
 		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name(), UserMetadata: metadata, ReplaceMetadata: true},
@@ -237,7 +236,6 @@ func TestS3ObjectMetadata(t *testing.T) {
 
 	// perform copy
 	metadata["Baz"] = "copied"
-	t.Log(metadata)
 	_, err = s3.CopyObject(
 		context.Background(),
 		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name() + "copied", UserMetadata: metadata, ReplaceMetadata: true},

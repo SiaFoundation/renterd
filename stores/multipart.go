@@ -94,7 +94,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		}
 
 		// Create multipart metadata
-		if err := s.createMultipartMeta(tx, multipartUpload.ID, metadata); err != nil {
+		if err := s.createMultipartMetadata(tx, multipartUpload.ID, metadata); err != nil {
 			return fmt.Errorf("failed to create multipart metadata: %w", err)
 		}
 
@@ -447,7 +447,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			for _, meta := range mpMetadata {
 				metadata[meta.Key] = meta.Value
 			}
-			if err := s.createObjectMeta(tx, obj.ID, metadata); err != nil {
+			if err := s.createObjectMetadata(tx, obj.ID, metadata); err != nil {
 				return fmt.Errorf("failed to create object metadata: %w", err)
 			}
 		}
