@@ -69,7 +69,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		// Create multipart upload
 		uploadIDEntropy := frand.Entropy256()
 		uploadID = hex.EncodeToString(uploadIDEntropy[:])
-		if err := s.db.Create(&dbMultipartUpload{
+		if err := tx.Create(&dbMultipartUpload{
 			DBBucketID: bucketID,
 			Key:        key,
 			UploadID:   uploadID,

@@ -177,7 +177,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
 	db, err := gorm.Open(cfg.Conn, &gorm.Config{
-		Logger: cfg.GormLogger, // custom logger
+		Logger:                 cfg.GormLogger, // custom logger
+		SkipDefaultTransaction: true,
 	})
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
