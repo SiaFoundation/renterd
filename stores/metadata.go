@@ -2073,14 +2073,22 @@ LIMIT ?
 
 			// Update the health of the objects associated with the updated slabs.
 			if isSQLite(s.db) {
-				return tx.Exec(`UPDATE objects SET health = src.health FROM src
-								INNER JOIN slices ON slices.db_slab_id = src.id
-								WHERE slices.db_object_id = objects.id`).Error
+				return tx.Exec(`UPDATE objects SET health = i.health FROM (
+									SELECT slices.db_object_id, MIN(s.health) AS health
+									FROM slices
+									INNER JOIN src s ON s.id = slices.db_slab_id
+									GROUP BY slices.db_object_id
+								) i
+								WHERE i.db_object_id = objects.id`).Error
 			} else {
 				return tx.Exec(`UPDATE objects
-								INNER JOIN slices sli ON sli.db_object_id = objects.id
-								INNER JOIN src s ON s.id = sli.db_slab_id
-								SET objects.health = s.health`).Error
+								INNER JOIN (
+									SELECT slices.db_object_id, MIN(s.health) as health
+									FROM slices
+									INNER JOIN src s ON s.id = slices.db_slab_id
+									GROUP BY slices.db_object_id
+								) i ON objects.id = i.db_object_id
+								SET objects.health = i.health`).Error
 			}
 		})
 		if err != nil {
