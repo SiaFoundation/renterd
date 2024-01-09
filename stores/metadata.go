@@ -2205,7 +2205,9 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 			return fmt.Errorf("slab already exists in another contract set %v != %v", slabs[i].DBContractSetID, contractSetID)
 		}
 		// fetch the upserted slabs
-		if err := tx.Where(dbSlab{Key: slabs[i].Key}).Take(&slabs[i]).Error; err != nil {
+		if err := tx.Raw("SELECT * FROM slabs WHERE key = ?", slabs[i].Key).
+			Scan(&slabs[i]).
+			Error; err != nil {
 			return fmt.Errorf("failed to fetch slab: %w", err)
 		}
 	}
@@ -3011,7 +3013,9 @@ func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 	}
 	for i, sector := range sectors {
 		// fetch the upserted sectors
-		if err := tx.Where(dbSector{Root: sector.Root[:]}).Take(&sectors[i]).Error; err != nil {
+		if err := tx.Raw("SELECT * FROM sectors WHERE root = ?", sector.Root[:]).
+			Scan(&sectors[i]).
+			Error; err != nil {
 			return err
 		}
 	}
