@@ -340,12 +340,12 @@ func TestSQLContractStore(t *testing.T) {
 	if err := ss.SetContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	if contracts, err := ss.ContractSetContracts(ctx, "foo"); err != nil {
+	if contracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "foo"}); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := ss.ContractSetContracts(ctx, "bar"); !errors.Is(err, api.ErrContractSetNotFound) {
+	if _, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
@@ -1057,9 +1057,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[0].DBSlabID = 1
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 4
+	expectedObj.Slabs[1].DBSlabID = 2
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1081,7 +1081,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   3,
+				DBSlabID:   1,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1121,7 +1121,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   4,
+				DBSlabID:   2,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -1217,18 +1217,20 @@ func TestSQLMetadataStore(t *testing.T) {
 		}
 		return nil
 	}
-	if err := countCheck(1, 1, 1, 1); err != nil {
-		t.Fatal(err)
-	}
+	ss.scheduleSlabPruning()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		return countCheck(1, 1, 1, 1)
+	})
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
 	if err := ss.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
-	if err := countCheck(0, 0, 0, 0); err != nil {
-		t.Fatal(err)
-	}
+	ss.scheduleSlabPruning()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		return countCheck(0, 0, 0, 0)
+	})
 }
 
 // TestObjectHealth verifies the object's health is returned correctly by all
@@ -1463,6 +1465,9 @@ func TestObjectEntries(t *testing.T) {
 
 		{"/", "", "health", "ASC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
 		{"/", "", "health", "DESC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
+
+		{"/", "", "size", "DESC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
 	}
 	for _, test := range tests {
 		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
@@ -2923,27 +2928,39 @@ func TestContractSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// prune slabs
+	ss.scheduleSlabPruning()
+
 	// assert there's one sector that can be pruned and assert it's from fcid 1
-	if n := prunableData(nil); n != rhpv2.SectorSize {
-		t.Fatal("unexpected amount of prunable data", n)
-	}
-	if n := prunableData(&fcids[1]); n != 0 {
-		t.Fatal("expected no prunable data", n)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if n := prunableData(nil); n != rhpv2.SectorSize {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		}
+		if n := prunableData(&fcids[1]); n != 0 {
+			return fmt.Errorf("expected no prunable data %v", n)
+		}
+		return nil
+	})
 
 	// remove the second object
 	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
+	// prune slabs
+	ss.scheduleSlabPruning()
+
 	// assert there's now two sectors that can be pruned
-	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
-		t.Fatal("unexpected amount of prunable data", n)
-	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
-		t.Fatal("unexpected amount of prunable data", n)
-	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
-		t.Fatal("unexpected amount of prunable data", n)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
+			return fmt.Errorf("unexpected amount of prunable data %v", n)
+		}
+		return nil
+	})
 
 	if size, err := ss.ContractSize(context.Background(), fcids[0]); err != nil {
 		t.Fatal("unexpected err", err)
@@ -3460,6 +3477,8 @@ func TestListObjects(t *testing.T) {
 		{"/foo/b", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"o/baz/quu", "", "", "", []api.ObjectMetadata{}},
 		{"/foo", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
 	}
 	for _, test := range tests {
 		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
@@ -3762,7 +3781,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// assert there are 0 contracts in the contract set
-	cscs, err := ss.ContractSetContracts(context.Background(), testContractSet)
+	cscs, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cscs) != 0 {
@@ -3790,7 +3809,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	assertHealthValid(s2, false)
 
 	// assert there are 2 contracts in the contract set
-	cscs, err = ss.ContractSetContracts(context.Background(), testContractSet)
+	cscs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cscs) != 2 {

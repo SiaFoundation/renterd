@@ -2,29 +2,29 @@ package stores
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
-var (
-	metricsTables = []interface{}{
-		&dbContractMetric{},
-		&dbContractPruneMetric{},
-		&dbContractSetMetric{},
-		&dbContractSetChurnMetric{},
-		&dbPerformanceMetric{},
-		&dbWalletMetric{},
-	}
-)
-
 // initMetricsSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
 func initMetricsSchema(tx *gorm.DB) error {
-	// Run auto migrations.
-	err := tx.AutoMigrate(metricsTables...)
+	// Pick the right migrations.
+	var schema []byte
+	var err error
+	if isSQLite(tx) {
+		schema, err = migrations.ReadFile("migrations/sqlite/metrics/schema.sql")
+	} else {
+		schema, err = migrations.ReadFile("migrations/mysql/metrics/schema.sql")
+	}
+	if err != nil {
+		return err
+	}
+
+	// Run it.
+	err = tx.Exec(string(schema)).Error
 	if err != nil {
 		return fmt.Errorf("failed to init schema: %w", err)
 	}
@@ -34,22 +34,8 @@ func initMetricsSchema(tx *gorm.DB) error {
 func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	migrations := []*gormigrate.Migration{
 		{
-			ID: "00001_wallet_metrics",
-			Migrate: func(tx *gorm.DB) error {
-				return performMigration00001_wallet_metrics(tx, logger)
-			},
-			Rollback: nil,
-		},
-		{
-			ID: "00002_contract_prune_metrics",
-			Migrate: func(tx *gorm.DB) error {
-				return performMigration00002_contract_prune_metrics(tx, logger)
-			},
-			Rollback: nil,
-		},
-		{
 			ID:      "00001_init",
-			Migrate: func(tx *gorm.DB) error { return nil },
+			Migrate: func(tx *gorm.DB) error { return errRunV072 },
 		},
 	}
 
@@ -63,48 +49,5 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate: %v", err)
 	}
-	return nil
-}
-
-func performMigration00001_wallet_metrics(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00001_wallet_metrics")
-	if err := txn.Table("wallets").Migrator().AutoMigrate(&struct {
-		ID        uint `gorm:"primarykey"`
-		CreatedAt time.Time
-
-		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
-
-		ConfirmedLo   unsigned64 `gorm:"index:idx_confirmed;NOT NULL"`
-		ConfirmedHi   unsigned64 `gorm:"index:idx_confirmed;NOT NULL"`
-		SpendableLo   unsigned64 `gorm:"index:idx_spendable;NOT NULL"`
-		SpendableHi   unsigned64 `gorm:"index:idx_spendable;NOT NULL"`
-		UnconfirmedLo unsigned64 `gorm:"index:idx_unconfirmed;NOT NULL"`
-		UnconfirmedHi unsigned64 `gorm:"index:idx_unconfirmed;NOT NULL"`
-	}{}); err != nil {
-		return err
-	}
-	logger.Info("migration 00001_wallet_metrics complete")
-	return nil
-}
-
-func performMigration00002_contract_prune_metrics(txn *gorm.DB, logger *zap.SugaredLogger) error {
-	logger.Info("performing migration 00002_contract_prune_metrics")
-	if err := txn.Table("contract_prunes").Migrator().AutoMigrate(&struct {
-		ID        uint `gorm:"primarykey"`
-		CreatedAt time.Time
-
-		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
-
-		FCID        fileContractID `gorm:"index;size:32;NOT NULL;column:fcid"`
-		Host        publicKey      `gorm:"index;size:32;NOT NULL"`
-		HostVersion string         `gorm:"index"`
-
-		Pruned    unsigned64    `gorm:"index;NOT NULL"`
-		Remaining unsigned64    `gorm:"index;NOT NULL"`
-		Duration  time.Duration `gorm:"index;NOT NULL"`
-	}{}); err != nil {
-		return err
-	}
-	logger.Info("migration 00002_contract_prune_metrics complete")
 	return nil
 }

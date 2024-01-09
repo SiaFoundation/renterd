@@ -207,13 +207,9 @@ func (ap *Autopilot) Run() error {
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 
-			// create a new context for this iteration
-			ctx, cancel := context.WithCancel(ap.shutdownCtx)
-			defer cancel()
-
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ctx, w, forceScan)
+			ap.s.tryPerformHostScan(ap.shutdownCtx, w, forceScan)
 
 			// reset forceScan
 			forceScan = false
@@ -228,7 +224,7 @@ func (ap *Autopilot) Run() error {
 				return
 			} else if blocked {
 				if scanning, _ := ap.s.Status(); !scanning {
-					ap.s.tryPerformHostScan(ctx, w, true)
+					ap.s.tryPerformHostScan(ap.shutdownCtx, w, true)
 				}
 			}
 
@@ -243,7 +239,7 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// Log worker id chosen for this maintenance iteration.
-			workerID, err := w.ID(ctx)
+			workerID, err := w.ID(ap.shutdownCtx)
 			if err != nil {
 				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
 				return
@@ -256,20 +252,20 @@ func (ap *Autopilot) Run() error {
 			// iteration of the loop, keeping a state object ensures we use the
 			// same state throughout the entire iteration and we don't needless
 			// fetch the same information twice
-			err = ap.updateState(ctx)
+			err = ap.updateState(ap.shutdownCtx)
 			if err != nil {
 				ap.logger.Errorf("failed to update state, err: %v", err)
 				return
 			}
 
 			// perform wallet maintenance
-			err = ap.c.performWalletMaintenance(ctx)
+			err = ap.c.performWalletMaintenance(ap.shutdownCtx)
 			if err != nil {
 				ap.logger.Errorf("wallet maintenance failed, err: %v", err)
 			}
 
 			// perform maintenance
-			setChanged, err := ap.c.performContractMaintenance(ctx, w)
+			setChanged, err := ap.c.performContractMaintenance(ap.shutdownCtx, w)
 			if err != nil && isErr(err, context.Canceled) {
 				return
 			} else if err != nil {
@@ -292,11 +288,11 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.tryPerformMigrations(ctx, ap.workers)
+			ap.m.tryPerformMigrations(ap.shutdownCtx, ap.workers)
 
 			// pruning
 			if ap.state.cfg.Contracts.Prune {
-				ap.c.tryPerformPruning(ctx, ap.workers)
+				ap.c.tryPerformPruning(ap.shutdownCtx, ap.workers)
 			} else {
 				ap.logger.Debug("pruning disabled")
 			}

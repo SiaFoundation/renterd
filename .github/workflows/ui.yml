@@ -1,0 +1,71 @@
+name: Update UI
+
+on:
+  # Run daily
+  schedule:
+    - cron: '0 0 * * *'
+  # Enable manual trigger
+  workflow_dispatch:
+
+jobs:
+  update-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.20.0'
+
+      - name: Check for new renterd tag in SiaFoundation/web
+        id: check-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fetch tags with pagination
+          TAGS_JSON=$(gh api --paginate repos/SiaFoundation/web/tags)
+
+          # Extract tags that start with "renterd/", sort them in version order, and pick the highest version
+          LATEST_RENTERD_GO_TAG=$(echo "$TAGS_JSON" | jq -r '.[] | select(.name | startswith("renterd/")).name' | sort -Vr | head -n 1)
+          LATEST_RENTERD_VERSION=$(echo "$LATEST_RENTERD_GO_TAG" | sed 's/renterd\///')
+
+          echo "Latest renterd tag is $LATEST_RENTERD_GO_TAG"
+          echo "GO_TAG=$LATEST_RENTERD_GO_TAG" >> $GITHUB_ENV
+          echo "VERSION=$LATEST_RENTERD_VERSION" >> $GITHUB_ENV
+
+      - name: Fetch release notes for the release
+        id: release-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        if: env.GO_TAG != 'null'
+        run: |
+          RELEASE_TAG_FORMATTED=$(echo "$GO_TAG" | sed 's/\/v/@/')
+          RELEASES_JSON=$(gh api --paginate repos/SiaFoundation/web/releases)
+
+          RELEASE_NOTES=$(echo "$RELEASES_JSON" | jq -r --arg TAG_NAME "$RELEASE_TAG_FORMATTED" '.[] | select(.name == $TAG_NAME).body')
+          echo "Release notes for $RELEASE_TAG_FORMATTED: $RELEASE_NOTES"
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+          echo "$RELEASE_NOTES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Update go.mod with latest module
+        if: env.GO_TAG != 'null'
+        run: |
+          GO_MODULE_FORMATTED=$(echo "$GO_TAG" | sed 's/\//@/')
+          echo "Updating go.mod to use $GO_MODULE_FORMATTED"
+          go clean -modcache
+          go get go.sia.tech/web/$GO_MODULE_FORMATTED
+          go mod tidy
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        if: env.GO_TAG != 'null'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "ui: ${{ env.VERSION }}"
+          title: "ui: ${{ env.VERSION }}"
+          body: ${{ env.RELEASE_NOTES }}
+          branch: "ui/update"
+          delete-branch: true

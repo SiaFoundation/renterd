@@ -270,7 +270,6 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"GET    /contracts/set/:set":     b.contractsSetHandlerGET,
 		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
@@ -933,16 +932,6 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	}
 
 	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive))
-}
-
-func (b *bus) contractsSetHandlerGET(jc jape.Context) {
-	cs, err := b.ms.Contracts(jc.Request.Context(),
-		api.ContractsOpts{
-			ContractSet: jc.PathParam("set"),
-		})
-	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(cs)
-	}
 }
 
 func (b *bus) contractsSetsHandlerGET(jc jape.Context) {

@@ -26,7 +26,7 @@ func TestBlocklist(t *testing.T) {
 	tt := cluster.tt
 
 	// fetch contracts
-	contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
+	contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
 	tt.OK(err)
 	if len(contracts) != 3 {
 		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
@@ -40,7 +40,7 @@ func TestBlocklist(t *testing.T) {
 
 	// assert h3 is no longer in the contract set
 	tt.Retry(5, time.Second, func() error {
-		contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
+		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		if len(contracts) != 2 {
 			return fmt.Errorf("unexpected number of contracts, %v != 2", len(contracts))
@@ -60,7 +60,7 @@ func TestBlocklist(t *testing.T) {
 
 	// assert h1 is no longer in the contract set
 	tt.Retry(5, time.Second, func() error {
-		contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
+		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		if len(contracts) != 1 {
 			return fmt.Errorf("unexpected number of contracts, %v != 1", len(contracts))
@@ -77,7 +77,7 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false))
 	tt.OK(b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false))
 	tt.Retry(5, time.Second, func() error {
-		contracts, err := b.ContractSetContracts(ctx, testAutopilotConfig.Contracts.Set)
+		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		if len(contracts) != 3 {
 			return fmt.Errorf("unexpected number of contracts, %v != 3", len(contracts))

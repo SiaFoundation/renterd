@@ -201,11 +201,14 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// assert amount of prunable data
-	res, err = b.PrunableData(context.Background())
-	tt.OK(err)
-	if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
-		t.Fatal("unexpected prunable data", n)
-	}
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		res, err = b.PrunableData(context.Background())
+		tt.OK(err)
+		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
+			return fmt.Errorf("unexpected prunable data %v", n)
+		}
+		return nil
+	})
 
 	// prune all contracts
 	for _, c := range contracts {

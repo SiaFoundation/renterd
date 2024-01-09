@@ -72,12 +72,15 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 	client := client.New("http://"+l.Addr().String(), "test")
 	b, cleanup, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
-			AnnouncementMaxAgeHours: 24 * 7 * 52, // 1 year
-			Bootstrap:               false,
-			GatewayAddr:             "127.0.0.1:0",
-			UsedUTXOExpiry:          time.Minute,
+			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
+			Bootstrap:                     false,
+			GatewayAddr:                   "127.0.0.1:0",
+			UsedUTXOExpiry:                time.Minute,
+			SlabBufferCompletionThreshold: 0,
 		},
-		Miner: node.NewMiner(client),
+		Miner:               node.NewMiner(client),
+		SlabPruningInterval: time.Minute,
+		SlabPruningCooldown: time.Minute,
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err

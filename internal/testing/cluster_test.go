@@ -319,48 +319,69 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	tests := []struct {
-		path   string
-		prefix string
-		want   []api.ObjectMetadata
+		path    string
+		prefix  string
+		sortBy  string
+		sortDir string
+		want    []api.ObjectMetadata
 	}{
-		{"/", "", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"//", "", []api.ObjectMetadata{{Name: "///", Size: 8, Health: 1}, {Name: "//double/", Size: 7, Health: 1}}},
-		{"///", "", []api.ObjectMetadata{{Name: "///triple", Size: 8, Health: 1}}},
-		{"/foo/", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
-		{"/FOO/", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 9, Health: 1}}},
-		{"/foo/baz/", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/gab/", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/fileś/", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"//", "", "", "", []api.ObjectMetadata{{Name: "///", Size: 8, Health: 1}, {Name: "//double/", Size: 7, Health: 1}}},
+		{"///", "", "", "", []api.ObjectMetadata{{Name: "///triple", Size: 8, Health: 1}}},
+		{"/foo/", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
+		{"/FOO/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 9, Health: 1}}},
+		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/gab/", "", "", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", "", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
-		{"/foo/", "fo", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
-		{"/gab/", "/guub", []api.ObjectMetadata{}},
+		{"/", "f", "", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
+		{"/foo/", "fo", "", "", []api.ObjectMetadata{}},
+		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
+		{"/gab/", "/guub", "", "", []api.ObjectMetadata{}},
+
+		{"/", "", "name", "ASC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "name", "DESC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "//", Size: 15, Health: 1}}},
+
+		{"/", "", "health", "ASC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "health", "DESC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+
+		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "//", Size: 15, Health: 1}}},
+		{"/", "", "size", "DESC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{Prefix: test.prefix})
+		res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
+			Prefix:  test.prefix,
+			SortBy:  test.sortBy,
+			SortDir: test.sortDir,
+		})
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
 		assertMetadata(res.Entries)
 
 		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
-			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want)
+			t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Entries, test.want)
 		}
 		for offset := 0; offset < len(test.want); offset++ {
-			res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{Prefix: test.prefix, Offset: offset, Limit: 1})
+			res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
+				Prefix:  test.prefix,
+				SortBy:  test.sortBy,
+				SortDir: test.sortDir,
+				Offset:  offset,
+				Limit:   1,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertMetadata(res.Entries)
 
 			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
-				t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, res.Entries, test.want[offset])
+				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Entries, test.want[offset])
 			}
 			moreRemaining := len(test.want)-offset-1 > 0
 			if res.HasMore != moreRemaining {
-				t.Errorf("invalid value for hasMore (%t) at offset (%d) test (%+v)", res.HasMore, offset, test)
+				t.Fatalf("invalid value for hasMore (%t) at offset (%d) test (%+v)", res.HasMore, offset, test)
 			}
 
 			// make sure we stay within bounds
@@ -368,9 +389,15 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			res, err = b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{Prefix: test.prefix, Marker: test.want[offset].Name, Limit: 1})
+			res, err = b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
+				Prefix:  test.prefix,
+				SortBy:  test.sortBy,
+				SortDir: test.sortDir,
+				Marker:  test.want[offset].Name,
+				Limit:   1,
+			})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %vmarker: %v\n\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, err)
 			}
 			assertMetadata(res.Entries)
 
@@ -385,7 +412,11 @@ func TestObjectEntries(t *testing.T) {
 		}
 
 		// use the worker client
-		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, api.ObjectEntriesOptions{Prefix: test.prefix})
+		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
+			Prefix:  test.prefix,
+			SortBy:  test.sortBy,
+			SortDir: test.sortDir,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -409,7 +440,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// assert root dir is empty
-	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.ObjectEntriesOptions{}); err != nil {
+	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.GetObjectOptions{}); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Fatal("there should be no entries left", entries)
@@ -643,7 +674,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", api.ObjectEntriesOptions{})
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", api.GetObjectOptions{})
 	tt.OK(err)
 
 	if len(entries) != 1 {
@@ -668,7 +699,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", api.ObjectEntriesOptions{})
+	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", api.GetObjectOptions{})
 	tt.OK(err)
 	if len(entries) != 0 {
 		t.Fatal("expected no entries to be returned", len(entries))
@@ -725,7 +756,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OK(b.SetContractSet(context.Background(), t.Name(), nil))
 
 	// assert there are no contracts in the set
-	csc, err := b.ContractSetContracts(context.Background(), t.Name())
+	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
 	tt.OK(err)
 	if len(csc) != 0 {
 		t.Fatalf("expected no contracts, got %v", len(csc))
@@ -869,7 +900,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		// fetch contract set contracts
-		contracts, err := cluster.Bus.ContractSetContracts(context.Background(), testAutopilotConfig.Contracts.Set)
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		currentSet := make(map[types.FileContractID]struct{})
 		for _, c := range contracts {
@@ -1557,7 +1588,7 @@ func TestUploadPacking(t *testing.T) {
 		if res.Object.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", res.Object.Size, len(data))
 		}
-		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.ObjectEntriesOptions{})
+		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.GetObjectOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

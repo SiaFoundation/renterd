@@ -865,7 +865,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
-		contracts, err := c.Bus.ContractSetContracts(ctx, set)
+		contracts, err := c.Bus.Contracts(ctx, api.ContractsOpts{ContractSet: set})
 		if err != nil {
 			return err
 		}
@@ -939,13 +939,16 @@ func testNetwork() *consensus.Network {
 func testBusCfg() node.BusConfig {
 	return node.BusConfig{
 		Bus: config.Bus{
-			AnnouncementMaxAgeHours: 24 * 7 * 52, // 1 year
-			Bootstrap:               false,
-			GatewayAddr:             "127.0.0.1:0",
-			PersistInterval:         testPersistInterval,
-			UsedUTXOExpiry:          time.Minute,
+			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
+			Bootstrap:                     false,
+			GatewayAddr:                   "127.0.0.1:0",
+			PersistInterval:               testPersistInterval,
+			UsedUTXOExpiry:                time.Minute,
+			SlabBufferCompletionThreshold: 0,
 		},
-		Network: testNetwork(),
+		Network:             testNetwork(),
+		SlabPruningInterval: time.Second,
+		SlabPruningCooldown: 10 * time.Millisecond,
 	}
 }
 
