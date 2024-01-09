@@ -2015,6 +2015,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 							DBSectorID:   sector.ID,
 							DBContractID: contracts[fcid].ID,
 						})
+						fmt.Println("DEBUG: link", sector.ID, contracts[fcid].ID)
 					}
 				}
 			}
@@ -2031,6 +2032,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 				DoNothing: true,
 			}).
 			Create(&contractSectors).Error; err != nil {
+			fmt.Println("DEBUG: error", contractSectors)
 			return err
 		}
 		return nil
@@ -3004,6 +3006,9 @@ func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
 			if err := tx.Where(dbSector{Root: sector.Root[:]}).Take(&sectors[i]).Error; err != nil {
 				return err
 			}
+			fmt.Println("DEBUG: fetch sector", sectors[i].ID)
+		} else {
+			fmt.Println("DEBUG: created sector", sectors[i].ID)
 		}
 	}
 	return nil
