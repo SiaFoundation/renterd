@@ -2084,7 +2084,7 @@ LIMIT ?
 									INNER JOIN objects o ON o.id = slices.db_object_id
 									GROUP BY slices.db_object_id
 								) i
-								WHERE i.db_object_id = objects.id AND objects.health <> i.health`).Error
+								WHERE i.db_object_id = objects.id AND objects.health != i.health`).Error
 			} else {
 				return tx.Exec(`UPDATE objects
 								INNER JOIN (
@@ -2094,7 +2094,7 @@ LIMIT ?
 									GROUP BY slices.db_object_id
 								) i ON objects.id = i.db_object_id
 								SET objects.health = i.health
-								WHERE objects.health <> i.health
+								WHERE objects.health != i.health
 								`).Error
 			}
 		})
