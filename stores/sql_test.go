@@ -190,6 +190,10 @@ func TestConsensusReset(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Reopen the SQLStore.
+	ss = ss.Reopen()
+	defer ss.Close()
+
 	// Check tables.
 	var count int64
 	if err := ss.db.Model(&dbConsensusInfo{}).Count(&count).Error; err != nil || count != 1 {
