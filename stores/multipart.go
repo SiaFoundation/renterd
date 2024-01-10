@@ -22,13 +22,13 @@ type (
 		Model
 
 		Key        secretKey
-		UploadID   string                          `gorm:"uniqueIndex;NOT NULL;size:64"`
-		ObjectID   string                          `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
-		DBBucket   dbBucket                        `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
-		DBBucketID uint                            `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
-		Parts      []dbMultipartPart               `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete parts too
-		Metadata   []dbMultipartUploadUserMetadata `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete metadata too
-		MimeType   string                          `gorm:"index:idx_multipart_uploads_mime_type"`
+		UploadID   string                 `gorm:"uniqueIndex;NOT NULL;size:64"`
+		ObjectID   string                 `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
+		DBBucket   dbBucket               `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
+		DBBucketID uint                   `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
+		Parts      []dbMultipartPart      `gorm:"constraint:OnDelete:CASCADE"`  // CASCADE to delete parts too
+		Metadata   []dbObjectUserMetadata `gorm:"constraint:OnDelete:SET NULL"` // CASCADE to delete parts too
+		MimeType   string                 `gorm:"index:idx_multipart_uploads_mime_type"`
 	}
 
 	dbMultipartPart struct {
@@ -39,14 +39,6 @@ type (
 		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
 		Slabs               []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
 	}
-
-	dbMultipartUploadUserMetadata struct {
-		Model
-
-		DBMultipartUploadID uint   `gorm:"index:uniqueIndex:idx_multipart_meta_key"`
-		Key                 string `gorm:"index:uniqueIndex:idx_multipart_meta_key"`
-		Value               string
-	}
 )
 
 func (dbMultipartUpload) TableName() string {
@@ -55,10 +47,6 @@ func (dbMultipartUpload) TableName() string {
 
 func (dbMultipartPart) TableName() string {
 	return "multipart_parts"
-}
-
-func (dbMultipartUploadUserMetadata) TableName() string {
-	return "multipart_upload_user_metadatas"
 }
 
 func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error) {
@@ -400,14 +388,6 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			}
 		}
 
-		// Find multipart metadata.
-		var mpMetadata []dbMultipartUploadUserMetadata
-		if err := tx.Model(&dbMultipartUploadUserMetadata{}).
-			Where("db_multipart_upload_id = ?", mu.ID).
-			Find(&mpMetadata).Error; err != nil {
-			return fmt.Errorf("failed to fetch multipart metadata: %w", err)
-		}
-
 		// Compute ETag.
 		sum := h.Sum()
 		eTag = hex.EncodeToString(sum[:])
@@ -441,15 +421,15 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			}
 		}
 
-		// Convert metadata to object metadata
-		if len(mpMetadata) > 0 {
-			metadata := make(api.ObjectUserMetadata)
-			for _, meta := range mpMetadata {
-				metadata[meta.Key] = meta.Value
-			}
-			if err := s.createObjectMetadata(tx, obj.ID, metadata); err != nil {
-				return fmt.Errorf("failed to create object metadata: %w", err)
-			}
+		// Update user metadata.
+		if err := tx.
+			Model(&dbObjectUserMetadata{}).
+			Where("db_multipart_upload_id = ?", mu.ID).
+			Updates(map[string]interface{}{
+				"db_object_id":           obj.ID,
+				"db_multipart_upload_id": nil,
+			}).Error; err != nil {
+			return fmt.Errorf("failed to update user metadata: %w", err)
 		}
 
 		// Delete the multipart upload.

@@ -13,8 +13,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// maxKeysDefault is the default maxKeys value used in the AWS SDK
-const maxKeysDefault = 1000
+const (
+	// amazonMetadataPrefix is a header prefix used by the AWS SDK.
+	amazonMetadataPrefix = "X-Amz-Meta-"
+
+	// maxKeysDefault is the default maxKeys value used in the AWS SDK
+	maxKeysDefault = 1000
+)
 
 var (
 	_ gofakes3.Backend          = (*s3)(nil)
@@ -162,7 +167,8 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 // If the bucket already exists, a gofakes3.ResourceError with
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(ctx context.Context, name string) error {
-	if err := s.b.CreateBucket(ctx, name, api.CreateBucketOptions{}); err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+	err := s.b.CreateBucket(ctx, name, api.CreateBucketOptions{})
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
 		return gofakes3.ErrBucketAlreadyExists
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -195,7 +201,8 @@ func (s *s3) BucketExists(ctx context.Context, name string) (bool, error) {
 // TODO: This check is not atomic. The backend needs to be updated to support
 // atomically checking whether a bucket is empty.
 func (s *s3) DeleteBucket(ctx context.Context, name string) error {
-	if err := s.b.DeleteBucket(ctx, name); err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
+	err := s.b.DeleteBucket(ctx, name)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
 		return gofakes3.ErrBucketNotEmpty
 	} else if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.BucketNotFound(name)
@@ -234,39 +241,40 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 		opts.Range = api.DownloadRange{Offset: rangeRequest.Start, Length: length}
 	}
 
-	if res, err := s.w.GetObject(ctx, bucketName, objectName, opts); err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return nil, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	} else {
-		// build range
-		var objectRange *gofakes3.ObjectRange
-		if res.Range != nil {
-			objectRange = &gofakes3.ObjectRange{
-				Start:  res.Range.Offset,
-				Length: res.Range.Length,
-			}
-		}
-
-		// ensure metadata is not nil
-		if res.Metadata == nil {
-			res.Metadata = make(map[string]string)
-		}
-
-		// decorate metadata
-		res.Metadata["Content-Type"] = res.ContentType
-		res.Metadata["Last-Modified"] = res.LastModified
-
-		return &gofakes3.Object{
-			Name:     gofakes3.URLEncode(objectName),
-			Metadata: res.Metadata,
-			Size:     res.Size,
-			Contents: res.Content,
-			Range:    objectRange,
-		}, nil
 	}
+
+	// build range
+	var objectRange *gofakes3.ObjectRange
+	if res.Range != nil {
+		objectRange = &gofakes3.ObjectRange{
+			Start:  res.Range.Offset,
+			Length: res.Range.Length,
+		}
+	}
+
+	// ensure metadata is not nil
+	if res.Metadata == nil {
+		res.Metadata = make(map[string]string)
+	}
+
+	// decorate metadata
+	res.Metadata["Content-Type"] = res.ContentType
+	res.Metadata["Last-Modified"] = res.LastModified
+
+	return &gofakes3.Object{
+		Name:     gofakes3.URLEncode(objectName),
+		Metadata: res.Metadata,
+		Size:     res.Size,
+		Contents: res.Content,
+		Range:    objectRange,
+	}, nil
 }
 
 // HeadObject fetches the Object from the backend, but reading the Contents
@@ -279,28 +287,29 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	if res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true}); err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true})
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	} else {
-		// set user metadata
-		metadata := make(map[string]string)
-		for k, v := range res.Object.Metadata {
-			metadata[fmt.Sprintf("%s%s", api.ObjectUserMetadataPrefix, k)] = v
-		}
-
-		// decorate metadata
-		metadata["Content-Type"] = res.Object.MimeType
-		metadata["Last-Modified"] = res.Object.LastModified()
-
-		return &gofakes3.Object{
-			Name:     gofakes3.URLEncode(objectName),
-			Metadata: metadata,
-			Size:     res.Object.Size,
-			Contents: io.NopCloser(bytes.NewReader(nil)),
-		}, nil
 	}
+
+	// set user metadata
+	metadata := make(map[string]string)
+	for k, v := range res.Object.Metadata {
+		metadata[amazonMetadataPrefix+k] = v
+	}
+
+	// decorate metadata
+	metadata["Content-Type"] = res.Object.MimeType
+	metadata["Last-Modified"] = res.Object.LastModified()
+
+	return &gofakes3.Object{
+		Name:     gofakes3.URLEncode(objectName),
+		Metadata: metadata,
+		Size:     res.Object.Size,
+		Contents: io.NopCloser(bytes.NewReader(nil)),
+	}, nil
 }
 
 // DeleteObject deletes an object from the bucket.
@@ -325,6 +334,7 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
+
 	return gofakes3.ObjectDeleteResult{
 		IsDeleteMarker: false, // not supported
 		VersionID:      "",    // not supported
@@ -337,19 +347,23 @@ func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (g
 // The size can be used if the backend needs to read the whole reader; use
 // gofakes3.ReadAll() for this job rather than ioutil.ReadAll().
 func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[string]string, input io.Reader, size int64) (gofakes3.PutObjectResult, error) {
-	if ur, err := s.w.UploadObject(ctx, input, bucketName, key, api.UploadObjectOptions{
-		ContentLength: size,
-		Metadata:      meta,
-	}); err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	convertToSiaMetadataHeaders(meta)
+	opts := api.UploadObjectOptions{Metadata: api.ExtractObjectUserMetadataFrom(meta), ContentLength: size}
+	if ct, ok := meta["Content-Type"]; ok {
+		opts.MimeType = ct
+	}
+
+	ur, err := s.w.UploadObject(ctx, input, bucketName, key, opts)
+	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	} else {
-		return gofakes3.PutObjectResult{
-			ETag:      ur.ETag,
-			VersionID: "", // not supported
-		}, nil
 	}
+
+	return gofakes3.PutObjectResult{
+		ETag:      ur.ETag,
+		VersionID: "", // not supported
+	}, nil
 }
 
 func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
@@ -373,40 +387,45 @@ func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...stri
 }
 
 func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (gofakes3.CopyObjectResult, error) {
-	if obj, err := s.b.CopyObject(ctx, srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, api.CopyObjectOptions{
+	convertToSiaMetadataHeaders(meta)
+	obj, err := s.b.CopyObject(ctx, srcBucket, dstBucket, "/"+srcKey, "/"+dstKey, api.CopyObjectOptions{
 		MimeType: meta["Content-Type"],
-		Metadata: api.ObjectUserMetadataFrom(meta),
-	}); err != nil {
+		Metadata: api.ExtractObjectUserMetadataFrom(meta),
+	})
+	if err != nil {
 		return gofakes3.CopyObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	} else {
-		return gofakes3.CopyObjectResult{
-			ETag:         api.FormatETag(obj.ETag),
-			LastModified: gofakes3.NewContentTime(obj.ModTime.Std()),
-		}, nil
 	}
+
+	return gofakes3.CopyObjectResult{
+		ETag:         api.FormatETag(obj.ETag),
+		LastModified: gofakes3.NewContentTime(obj.ModTime.Std()),
+	}, nil
 }
 
 func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
-	if resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, api.CreateMultipartOptions{
+	convertToSiaMetadataHeaders(meta)
+	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, api.CreateMultipartOptions{
 		Key:      object.NoOpKey,
 		MimeType: meta["Content-Type"],
-		Metadata: api.ObjectUserMetadataFrom(meta),
-	}); err != nil {
+		Metadata: api.ExtractObjectUserMetadataFrom(meta),
+	})
+	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	} else {
-		return gofakes3.UploadID(resp.UploadID), nil
 	}
+
+	return gofakes3.UploadID(resp.UploadID), nil
 }
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
-	if res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
+	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
 		DisablePreshardingEncryption: true,
 		ContentLength:                contentLength,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-	} else {
-		return &gofakes3.UploadPartResult{ETag: res.ETag}, nil
 	}
+
+	return &gofakes3.UploadPartResult{ETag: res.ETag}, nil
 }
 
 func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
@@ -496,4 +515,23 @@ func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string,
 	return &gofakes3.CompleteMultipartUploadResult{
 		ETag: api.FormatETag(resp.ETag),
 	}, nil
+}
+
+func convertToSiaMetadataHeaders(metadata map[string]string) {
+	for k, v := range metadata {
+		if key := extractMetadataKey(k); key != "" {
+			key = api.ObjectMetadataPrefix + key
+			if strings.ToLower(k) == k {
+				key = strings.ToLower(key)
+			}
+			metadata[key] = v
+		}
+	}
+}
+
+func extractMetadataKey(key string) string {
+	if strings.HasPrefix(strings.ToLower(key), strings.ToLower(amazonMetadataPrefix)) {
+		return key[len(amazonMetadataPrefix):]
+	}
+	return ""
 }

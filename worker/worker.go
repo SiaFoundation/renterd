@@ -1019,8 +1019,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// parse headers and extract object meta
 	metadata := make(api.ObjectUserMetadata)
 	for k, v := range jc.Request.Header {
-		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(api.ObjectUserMetadataPrefix)) && len(v) > 0 {
-			metadata[k[len(api.ObjectUserMetadataPrefix):]] = v[0]
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(api.ObjectMetadataPrefix)) && len(v) > 0 {
+			metadata[k[len(api.ObjectMetadataPrefix):]] = v[0]
 		}
 	}
 
@@ -1031,7 +1031,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		WithMimeType(mimeType),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
-		WithUserMetadata(metadata),
+		WithObjectUserMetadata(metadata),
 	}
 
 	// attach gouging checker to the context

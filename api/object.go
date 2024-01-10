@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	ObjectUserMetadataPrefix = "X-Amz-Meta-"
+	ObjectMetadataPrefix = "X-Sia-Meta-"
 
 	ObjectsRenameModeSingle = "single"
 	ObjectsRenameModeMulti  = "multi"
@@ -63,8 +63,13 @@ type (
 		MimeType string      `json:"mimeType,omitempty"`
 	}
 
-	// ObjectUserMetadata contains user-defined metadata about an object,
-	// usually provided through `X-Amz-Meta-` meta headers.
+	// ObjectUserMetadata contains user-defined metadata about an object and can
+	// be provided through `X-Sia-Meta-` meta headers.
+	//
+	// NOTE: `X-Amz-Meta-` headers are supported and will be converted to sia
+	// metadata headers internally, this means that S3 clients can safely keep
+	// using Amazon headers and find the metadata will be persisted in Sia as
+	// well
 	ObjectUserMetadata map[string]string
 
 	// ObjectsResponse is the response type for the /bus/objects endpoint.
@@ -122,11 +127,11 @@ type (
 	}
 )
 
-func ObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadata {
+func ExtractObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadata {
 	oum := make(map[string]string)
 	for k, v := range metadata {
-		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectUserMetadataPrefix)) {
-			oum[k[len(ObjectUserMetadataPrefix):]] = v
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectMetadataPrefix)) {
+			oum[k[len(ObjectMetadataPrefix):]] = v
 		}
 	}
 	return oum
@@ -228,10 +233,8 @@ type (
 		ContractSet                  string
 		DisablePreshardingEncryption bool
 		ContentLength                int64
-
-		// Metadata contains all object metadata and will contain things like
-		// the Content-Type as well as all user-defined metadata.
-		Metadata map[string]string
+		MimeType                     string
+		Metadata                     ObjectUserMetadata
 	}
 
 	UploadMultipartUploadPartOptions struct {
@@ -254,8 +257,8 @@ func (opts UploadObjectOptions) ApplyValues(values url.Values) {
 	if opts.ContractSet != "" {
 		values.Set("contractset", opts.ContractSet)
 	}
-	if ct, ok := opts.Metadata["Content-Type"]; ok {
-		values.Set("mimetype", ct)
+	if opts.MimeType != "" {
+		values.Set("mimetype", opts.MimeType)
 	}
 	if opts.DisablePreshardingEncryption {
 		values.Set("disablepreshardingencryption", "true")
@@ -264,9 +267,7 @@ func (opts UploadObjectOptions) ApplyValues(values url.Values) {
 
 func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 	for k, v := range opts.Metadata {
-		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectUserMetadataPrefix)) {
-			h.Set(k, v)
-		}
+		h.Set(ObjectMetadataPrefix+k, v)
 	}
 }
 

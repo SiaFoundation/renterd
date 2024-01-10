@@ -130,7 +130,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 		LastModified: header.Get("Last-Modified"),
 		Range:        r,
 		Size:         size,
-		Metadata:     api.ObjectUserMetadataFrom(headers),
+		Metadata:     api.ExtractObjectUserMetadataFrom(headers),
 	}, nil
 }
 

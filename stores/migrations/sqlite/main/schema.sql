@@ -52,20 +52,12 @@ CREATE INDEX `idx_objects_health` ON `objects`(`health`);
 CREATE INDEX `idx_objects_object_id` ON `objects`(`object_id`);
 CREATE UNIQUE INDEX `idx_object_bucket` ON `objects`(`db_bucket_id`,`object_id`);
 
--- dbObjectUserMetadata
-CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer NOT NULL,`key` text NOT NULL,`value` text, CONSTRAINT `fk_object_metadata` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE);
-CREATE UNIQUE INDEX `idx_object_metadata_key` ON `object_user_metadata`(`db_object_id`,`key`);
-
 -- dbMultipartUpload
 CREATE TABLE `multipart_uploads` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`key` blob,`upload_id` text NOT NULL,`object_id` text NOT NULL,`db_bucket_id` integer NOT NULL,`mime_type` text,CONSTRAINT `fk_multipart_uploads_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`) ON DELETE CASCADE);
 CREATE INDEX `idx_multipart_uploads_mime_type` ON `multipart_uploads`(`mime_type`);
 CREATE INDEX `idx_multipart_uploads_db_bucket_id` ON `multipart_uploads`(`db_bucket_id`);
 CREATE INDEX `idx_multipart_uploads_object_id` ON `multipart_uploads`(`object_id`);
 CREATE UNIQUE INDEX `idx_multipart_uploads_upload_id` ON `multipart_uploads`(`upload_id`);
-
--- dbMultipartUploadUserMetadata
-CREATE TABLE `multipart_upload_user_metadatas` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_multipart_upload_id` integer NOT NULL,`key` text NOT NULL,`value` text,CONSTRAINT `fk_multipart_upload_user_metadatas` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE);
-CREATE UNIQUE INDEX `idx_multipart_metadata_key` ON `multipart_upload_user_metadatas`(`db_multipart_upload_id`,`key`);
 
 -- dbBufferedSlab
 CREATE TABLE `buffered_slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`filename` text);
@@ -150,3 +142,7 @@ CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` d
 -- dbWebhook
 CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL);
 CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`);
+
+-- dbObjectUserMetadata
+CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer DEFAULT NULL,`db_multipart_upload_id` integer DEFAULT NULL,`key` text NOT NULL,`value` text, CONSTRAINT `fk_object_user_metadata` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE, CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL);
+CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db_object_id`,`db_multipart_upload_id`,`key`);

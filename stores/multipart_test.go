@@ -69,6 +69,19 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		})
 	}
 
+	// Assert metadata was persisted and is linked to the multipart upload
+	var metadatas []dbObjectUserMetadata
+	if err := ss.db.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
+		t.Fatal(err)
+	} else if len(metadatas) != len(testMetadata) {
+		t.Fatal("expected metadata to be persisted")
+	}
+	for _, m := range metadatas {
+		if m.DBMultipartUploadID == nil || m.DBObjectID != nil {
+			t.Fatal("unexpected")
+		}
+	}
+
 	// Complete the upload. Check that the number of slices stays the same.
 	var nSlicesBefore int64
 	var nSlicesAfter int64
@@ -97,6 +110,18 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	// Assert it has the metadata
 	if !reflect.DeepEqual(obj.Metadata, testMetadata) {
 		t.Fatal("meta mismatch", cmp.Diff(obj.Metadata, testMetadata))
+	}
+
+	// Assert metadata was converted and the multipart upload id was nullified
+	if err := ss.db.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
+		t.Fatal(err)
+	} else if len(metadatas) != len(testMetadata) {
+		t.Fatal("expected metadata to be persisted")
+	}
+	for _, m := range metadatas {
+		if m.DBMultipartUploadID != nil || m.DBObjectID == nil {
+			t.Fatal("unexpected")
+		}
 	}
 
 	// Upload buffers.

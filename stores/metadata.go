@@ -98,11 +98,6 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
-	dbContractSetContract struct {
-		DBContractSetID uint `gorm:"primaryKey;"`
-		DBContractID    uint `gorm:"primaryKey;index"`
-	}
-
 	dbObject struct {
 		Model
 
@@ -123,9 +118,10 @@ type (
 	dbObjectUserMetadata struct {
 		Model
 
-		DBObjectID uint   `gorm:"index:uniqueIndex:idx_object_meta_key"`
-		Key        string `gorm:"index:uniqueIndex:idx_object_meta_key"`
-		Value      string
+		DBObjectID          *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
+		DBMultipartUploadID *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
+		Key                 string `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
+		Value               string
 	}
 
 	dbBucket struct {
@@ -284,9 +280,6 @@ func (dbBucket) TableName() string { return "buckets" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContract) TableName() string { return "contracts" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }
@@ -1594,8 +1587,8 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 				Name:     srcObj.ObjectID,
 				Size:     srcObj.Size,
 			}
-			if err := s.createObjectMetadata(tx, srcObj.ID, metadata); err != nil {
-				return fmt.Errorf("failed to create object metadata: %w", err)
+			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
+				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
 			return tx.Save(&srcObj).Error
 		}
@@ -1637,7 +1630,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
 
-		if err := s.createObjectMetadata(tx, dstObj.ID, metadata); err != nil {
+		if err := s.createUserMetadata(tx, dstObj.ID, metadata); err != nil {
 			return fmt.Errorf("failed to create object metadata: %w", err)
 		}
 
@@ -1797,9 +1790,9 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
 
-		// Create all object meta.
-		if err := s.createObjectMetadata(tx, obj.ID, metadata); err != nil {
-			return fmt.Errorf("failed to create object metadata: %w", err)
+		// Create all user metadata.
+		if err := s.createUserMetadata(tx, obj.ID, metadata); err != nil {
+			return fmt.Errorf("failed to create user metadata: %w", err)
 		}
 
 		return nil
@@ -2080,7 +2073,34 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createObjectMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+func (s *SQLStore) createUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
+	for k, v := range metadata {
+		metadata := &dbObjectUserMetadata{
+			DBObjectID: &objID,
+			Key:        k,
+			Value:      v,
+		}
+		entities = append(entities, metadata)
+	}
+	return tx.CreateInBatches(&entities, 1000).Error
+}
+
+func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
+	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
+	for k, v := range metadata {
+		metadata := &dbObjectUserMetadata{
+			DBMultipartUploadID: &multipartUploadID,
+			Key:                 k,
+			Value:               v,
+		}
+		entities = append(entities, metadata)
+	}
+	return tx.CreateInBatches(&entities, 1000).Error
+}
+
+func (s *SQLStore) updateUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+	// delete all existing metadata
 	err := tx.
 		Where("db_object_id = ?", objID).
 		Delete(&dbObjectUserMetadata{}).
@@ -2089,36 +2109,7 @@ func (s *SQLStore) createObjectMetadata(tx *gorm.DB, objID uint, metadata api.Ob
 		return err
 	}
 
-	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		entities = append(entities, &dbObjectUserMetadata{
-			DBObjectID: objID,
-			Key:        k,
-			Value:      v,
-		})
-	}
-
-	return tx.CreateInBatches(&entities, 1000).Error
-}
-
-func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
-	err := tx.
-		Where("db_multipart_upload_id = ?", multipartUploadID).
-		Delete(&dbMultipartUploadUserMetadata{}).
-		Error
-	if err != nil {
-		return err
-	}
-
-	entities := make([]*dbMultipartUploadUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		entities = append(entities, &dbMultipartUploadUserMetadata{
-			DBMultipartUploadID: multipartUploadID,
-			Key:                 k,
-			Value:               v,
-		})
-	}
-	return tx.CreateInBatches(&entities, 1000).Error
+	return s.createUserMetadata(tx, objID, metadata)
 }
 
 func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
@@ -2295,8 +2286,8 @@ func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path
 	var rows []dbObjectUserMetadata
 	err := tx.
 		Model(&dbObjectUserMetadata{}).
-		Table("object_user_metadata om").
-		Joins("INNER JOIN objects o ON om.db_object_id = o.id").
+		Table("object_user_metadata oum").
+		Joins("INNER JOIN objects o ON oum.db_object_id = o.id").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Where("o.object_id = ? AND b.name = ?", path, bucket).
 		Find(&rows).

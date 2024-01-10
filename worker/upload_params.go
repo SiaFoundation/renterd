@@ -98,7 +98,7 @@ func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
 	}
 }
 
-func WithUserMetadata(metadata api.ObjectUserMetadata) UploadOption {
+func WithObjectUserMetadata(metadata api.ObjectUserMetadata) UploadOption {
 	return func(up *uploadParameters) {
 		up.metadata = metadata
 	}
