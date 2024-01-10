@@ -318,15 +318,6 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	return
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	h := w.Host(hk, types.FileContractID{}, siamuxAddr) // TODO: passing a nil fcid is hacky
-	hpt, err = h.FetchPriceTable(ctx, rev)
-	if err != nil {
-		return hostdb.HostPriceTable{}, err
-	}
-	return hpt, nil
-}
-
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 

@@ -1593,7 +1593,7 @@ func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, 
 
 func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 	// return early if the host's pricetable is not expired yet
-	if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
+	if time.Now().Before(host.PriceTable.Expiry) {
 		return nil
 	}
 
