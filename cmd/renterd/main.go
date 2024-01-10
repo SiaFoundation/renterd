@@ -50,10 +50,10 @@ const (
 Renterd is the official Sia renter daemon. It provides a REST API for forming
 contracts with hosts, uploading data to them and downloading data from them.
 
-There are 3 ways to configure renterd:
+There are 3 ways to configure renterd (sorted from lowest to highest precedence):
+  - A YAML config file
   - CLI flags
   - Environment variables
-  - A YAML config file
 
 See the documentation (https://docs.sia.tech/) for more information and examples
 on how to configure and use renterd.
