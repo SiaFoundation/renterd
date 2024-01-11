@@ -2618,14 +2618,14 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 		var rowsAffected int64
 		if err := s.retryTransaction(func(tx *gorm.DB) error {
 			start := time.Now()
-			err := tx.Exec("DELETE FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ? LIMIT ?",
+			res := tx.Exec("DELETE FROM objects WHERE id IN (SELECT id FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ? LIMIT ?)",
 				path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket),
-				objectDeleteBatchSizes[batchSizeIdx]).Error
-			if err != nil {
-				return err
+				objectDeleteBatchSizes[batchSizeIdx])
+			if err := res.Error; err != nil {
+				return res.Error
 			}
 			duration = time.Since(start)
-			rowsAffected = tx.RowsAffected
+			rowsAffected = res.RowsAffected
 			return nil
 		}); err != nil {
 			return 0, fmt.Errorf("failed to delete objects: %w", err)
