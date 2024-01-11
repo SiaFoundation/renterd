@@ -66,6 +66,7 @@ type (
 		db        *gorm.DB
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
+		cs        *chainSubscriber
 
 		slabBufferMgr *SlabBufferManager
 
