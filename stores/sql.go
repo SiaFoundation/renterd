@@ -293,6 +293,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	// Start slab pruning loop.
+	if cfg.SlabPruningInterval == 0 || cfg.SlabPruningCooldown == 0 {
+		return nil, modules.ConsensusChangeID{}, errors.New("slab pruning interval and cooldown must be non-zero")
+	}
 	ss.wg.Add(1)
 	go func() {
 		ss.slabPruningLoop(cfg.SlabPruningInterval, cfg.SlabPruningCooldown)
