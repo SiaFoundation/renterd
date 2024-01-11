@@ -76,7 +76,21 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(conn, connMetrics, alerts, dir, !cfg.skipMigrate, time.Hour, time.Second, walletAddrs, 0, zap.NewNop().Sugar(), newTestLogger())
+	sqlStore, ccid, err := NewSQLStore(Config{
+		Conn:                          conn,
+		ConnMetrics:                   connMetrics,
+		Alerts:                        alerts,
+		PartialSlabDir:                dir,
+		Migrate:                       !cfg.skipMigrate,
+		AnnouncementMaxAge:            time.Hour,
+		PersistInterval:               time.Second,
+		WalletAddress:                 walletAddrs,
+		SlabBufferCompletionThreshold: 0,
+		Logger:                        zap.NewNop().Sugar(),
+		GormLogger:                    newTestLogger(),
+		SlabPruningInterval:           time.Hour,
+		SlabPruningCooldown:           10 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
@@ -115,6 +129,20 @@ func (s *testSQLStore) Reopen() *testSQLStore {
 	cfg.skipContractSet = true
 	cfg.skipMigrate = true
 	return newTestSQLStore(s.t, cfg)
+}
+
+func (s *testSQLStore) Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) {
+	s.t.Helper()
+	for i := 1; i < tries; i++ {
+		err := fn()
+		if err == nil {
+			return
+		}
+		time.Sleep(durationBetweenAttempts)
+	}
+	if err := fn(); err != nil {
+		s.t.Fatal(err)
+	}
 }
 
 // newTestLogger creates a console logger used for testing.
@@ -161,6 +189,10 @@ func TestConsensusReset(t *testing.T) {
 	if err := ss.ResetConsensusSubscription(); err != nil {
 		t.Fatal(err)
 	}
+
+	// Reopen the SQLStore.
+	ss = ss.Reopen()
+	defer ss.Close()
 
 	// Check tables.
 	var count int64

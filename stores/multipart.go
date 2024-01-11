@@ -287,7 +287,8 @@ func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string
 		if err != nil {
 			return fmt.Errorf("failed to delete multipart upload: %w", err)
 		}
-		return pruneSlabs(tx)
+		s.scheduleSlabPruning()
+		return nil
 	})
 }
 
@@ -326,7 +327,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		}
 
 		// Delete potentially existing object.
-		_, err := deleteObject(tx, bucket, path)
+		_, err := s.deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}

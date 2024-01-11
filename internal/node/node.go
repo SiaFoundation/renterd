@@ -33,11 +33,13 @@ import (
 
 type BusConfig struct {
 	config.Bus
-	Network            *consensus.Network
-	Miner              *Miner
-	DBLoggerConfig     stores.LoggerConfig
-	DBDialector        gorm.Dialector
-	DBMetricsDialector gorm.Dialector
+	Network             *consensus.Network
+	Miner               *Miner
+	DBLoggerConfig      stores.LoggerConfig
+	DBDialector         gorm.Dialector
+	DBMetricsDialector  gorm.Dialector
+	SlabPruningInterval time.Duration
+	SlabPruningCooldown time.Duration
 }
 
 type AutopilotConfig struct {
@@ -108,7 +110,21 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	sqlStore, ccid, err := stores.NewSQLStore(dbConn, dbMetricsConn, alerts.WithOrigin(alertsMgr, "bus"), sqlStoreDir, true, announcementMaxAge, cfg.PersistInterval, walletAddr, cfg.SlabBufferCompletionThreshold, l.Sugar(), sqlLogger)
+	sqlStore, ccid, err := stores.NewSQLStore(stores.Config{
+		Conn:                          dbConn,
+		ConnMetrics:                   dbMetricsConn,
+		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
+		PartialSlabDir:                sqlStoreDir,
+		Migrate:                       true,
+		AnnouncementMaxAge:            announcementMaxAge,
+		PersistInterval:               cfg.PersistInterval,
+		WalletAddress:                 walletAddr,
+		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
+		Logger:                        l.Sugar(),
+		GormLogger:                    sqlLogger,
+		SlabPruningInterval:           cfg.SlabPruningInterval,
+		SlabPruningCooldown:           cfg.SlabPruningCooldown,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
