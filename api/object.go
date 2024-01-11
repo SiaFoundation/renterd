@@ -40,6 +40,10 @@ var (
 	// ErrInvalidObjectSortParameters is returned when invalid sort parameters
 	// were provided
 	ErrInvalidObjectSortParameters = errors.New("invalid sort parameters")
+
+	// ErrSlabNotFound is returned when a slab can't be retrieved from the
+	// database.
+	ErrSlabNotFound = errors.New("slab not found")
 )
 
 type (

@@ -1424,7 +1424,7 @@ func (b *bus) slabHandlerGET(jc jape.Context) {
 		return
 	}
 	slab, err := b.ms.Slab(jc.Request.Context(), key)
-	if errors.Is(err, api.ErrObjectNotFound) {
+	if errors.Is(err, api.ErrSlabNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
