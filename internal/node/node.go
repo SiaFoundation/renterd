@@ -124,6 +124,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		GormLogger:                    sqlLogger,
 		SlabPruningInterval:           cfg.SlabPruningInterval,
 		SlabPruningCooldown:           cfg.SlabPruningCooldown,
+		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
 	})
 	if err != nil {
 		return nil, nil, err

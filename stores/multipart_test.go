@@ -3,9 +3,11 @@ package stores
 import (
 	"context"
 	"encoding/hex"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -46,7 +48,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	totalSize := int64(nParts * partSize)
 
 	// Upload parts until we have enough data for 2 buffers.
-	resp, err := ss.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType)
+	resp, err := ss.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +67,19 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			PartNumber: i,
 			ETag:       etag,
 		})
+	}
+
+	// Assert metadata was persisted and is linked to the multipart upload
+	var metadatas []dbObjectUserMetadata
+	if err := ss.db.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
+		t.Fatal(err)
+	} else if len(metadatas) != len(testMetadata) {
+		t.Fatal("expected metadata to be persisted")
+	}
+	for _, m := range metadatas {
+		if m.DBMultipartUploadID == nil || m.DBObjectID != nil {
+			t.Fatal("unexpected")
+		}
 	}
 
 	// Complete the upload. Check that the number of slices stays the same.
@@ -90,6 +105,23 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatalf("expected object size to be %v, got %v", totalSize, obj.Size)
 	} else if obj.TotalSize() != totalSize {
 		t.Fatalf("expected object total size to be %v, got %v", totalSize, obj.TotalSize())
+	}
+
+	// Assert it has the metadata
+	if !reflect.DeepEqual(obj.Metadata, testMetadata) {
+		t.Fatal("meta mismatch", cmp.Diff(obj.Metadata, testMetadata))
+	}
+
+	// Assert metadata was converted and the multipart upload id was nullified
+	if err := ss.db.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
+		t.Fatal(err)
+	} else if len(metadatas) != len(testMetadata) {
+		t.Fatal("expected metadata to be persisted")
+	}
+	for _, m := range metadatas {
+		if m.DBMultipartUploadID != nil || m.DBObjectID == nil {
+			t.Fatal("unexpected")
+		}
 	}
 
 	// Upload buffers.

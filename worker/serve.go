@@ -92,6 +92,11 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	rw.Header().Set("ETag", api.FormatETag(obj.ETag))
 	rw.Header().Set("Content-Type", contentType)
 
+	// set the user metadata headers
+	for k, v := range obj.Metadata {
+		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectMetadataPrefix, k), v)
+	}
+
 	http.ServeContent(rw, req, obj.Name, obj.ModTime.Std(), rs)
 	return http.StatusOK, nil
 }

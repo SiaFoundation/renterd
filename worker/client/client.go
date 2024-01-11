@@ -115,18 +115,22 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 		// range.
 		size = dr.Size
 	}
-	// Parse Last-Modified
-	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
-	if err != nil {
-		return nil, err
+
+	// Parse headers.
+	headers := make(map[string]string)
+	for k, v := range header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
 	}
 
 	return &api.GetObjectResponse{
-		Content:     body,
-		ContentType: header.Get("Content-Type"),
-		ModTime:     api.TimeRFC3339(modTime.UTC()),
-		Range:       r,
-		Size:        size,
+		Content:      body,
+		ContentType:  header.Get("Content-Type"),
+		LastModified: header.Get("Last-Modified"),
+		Range:        r,
+		Size:         size,
+		Metadata:     api.ExtractObjectUserMetadataFrom(headers),
 	}, nil
 }
 
@@ -217,7 +221,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 
 	values := make(url.Values)
 	values.Set("bucket", bucket)
-	opts.Apply(values)
+	opts.ApplyValues(values)
 	u, err := url.Parse(fmt.Sprintf("%v/objects/%v", c.c.BaseURL, path))
 	if err != nil {
 		panic(err)
@@ -228,6 +232,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	opts.ApplyHeaders(req.Header)
 	if opts.ContentLength != 0 {
 		req.ContentLength = opts.ContentLength
 	} else if req.ContentLength, err = sizeFromSeeker(r); err != nil {

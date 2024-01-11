@@ -50,6 +50,7 @@ func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string,
 		Path:     path,
 		Key:      opts.Key,
 		MimeType: opts.MimeType,
+		Metadata: opts.Metadata,
 	}, &resp)
 	return
 }
