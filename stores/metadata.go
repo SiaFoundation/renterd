@@ -1522,23 +1522,28 @@ func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
 				res = tx.Exec(`
 			DELETE slabs
 			FROM slabs
-			LEFT JOIN slices ON slices.db_slab_id = slabs.id
-			WHERE slices.db_object_id IS NULL
-			AND slices.db_multipart_part_id IS NULL
-			AND slabs.db_buffered_slab_id IS NULL
-			LIMIT ?;
+			INNER JOIN (
+			    SELECT slabs.id
+			    FROM slabs
+			    LEFT JOIN slices ON slices.db_slab_id = slabs.id
+			    WHERE slices.db_object_id IS NULL
+			    AND slices.db_multipart_part_id IS NULL
+			    AND slabs.db_buffered_slab_id IS NULL
+			    LIMIT ?
+			) i ON slabs.id = i.id;
 		`, slabDeleteBatchSizes[limitIdx])
 			} else {
 				res = tx.Exec(`
 			DELETE FROM slabs
-				WHERE id IN (
+			WHERE id IN (
 				SELECT slabs.id
 				FROM slabs
 				LEFT JOIN slices ON slices.db_slab_id = slabs.id
 				WHERE slices.db_object_id IS NULL
 				AND slices.db_multipart_part_id IS NULL
 				AND slabs.db_buffered_slab_id IS NULL
-			) LIMIT ?;
+				LIMIT ?
+			);
 		`, slabDeleteBatchSizes[limitIdx])
 			}
 			duration = time.Since(start)
