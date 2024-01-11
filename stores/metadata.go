@@ -22,6 +22,11 @@ import (
 )
 
 const (
+	// batchDurationThreshold is the upper bound for the duration of a batch
+	// operation on the database. As long as we are below the threshold, we
+	// increase the batch size.
+	batchDurationThreshold = time.Second
+
 	// refreshHealthBatchSize is the number of slabs for which we update the
 	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
@@ -34,6 +39,8 @@ const (
 var (
 	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
 	errShardRootChanged      = errors.New("shard root changed")
+
+	objectDeleteBatchSizes = []int64{10000, 50000, 100000}
 )
 
 const (
@@ -1883,10 +1890,7 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) error {
 	var rowsAffected int64
 	var err error
-	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = s.deleteObjects(tx, bucket, prefix)
-		return err
-	})
+	rowsAffected, err = s.deleteObjects(bucket, prefix)
 	if err != nil {
 		return err
 	}
@@ -2580,13 +2584,36 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDel
 	return
 }
 
-func (s *SQLStore) deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
-		path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
-	if tx.Error != nil {
-		return 0, tx.Error
+func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, _ error) {
+	batchSizeIdx := 0
+	for {
+		start := time.Now()
+
+		var rowsAffected int64
+		if err := s.retryTransaction(func(tx *gorm.DB) error {
+			err := tx.Exec("DELETE FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ? LIMIT ?",
+				path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket),
+				objectDeleteBatchSizes[batchSizeIdx]).Error
+			if err != nil {
+				return err
+			}
+			rowsAffected = tx.RowsAffected
+			return nil
+		}); err != nil {
+			return 0, fmt.Errorf("failed to delete objects: %w", err)
+		}
+
+		// if nothing got deleted we are done
+		if rowsAffected == 0 {
+			break
+		}
+		numDeleted += rowsAffected
+
+		// increase the batch size if deletion was faster than the threshold
+		if time.Since(start) < batchDurationThreshold && batchSizeIdx < len(objectDeleteBatchSizes)-1 {
+			batchSizeIdx++
+		}
 	}
-	numDeleted = tx.RowsAffected
 	if numDeleted > 0 {
 		s.scheduleSlabPruning()
 	}
