@@ -1260,7 +1260,7 @@ FROM (
 	ANY_VALUE(mime_type) as MimeType
 	FROM objects
 	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
+	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
 	GROUP BY oname
 ) baseQuery
 `,
@@ -1277,6 +1277,8 @@ FROM (
 		utf8.RuneCountInString(path) + 1,       // onameExpr
 		path, utf8.RuneCountInString(path) + 1, // onameExpr
 		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+
+		path + "%",
 
 		utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
 		path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
@@ -1599,9 +1601,10 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if force {
 			// delete potentially existing objects at destination
-			inner := tx.Raw("SELECT ? FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")),
-				prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+			inner := tx.Raw("SELECT ? FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")), prefixNew,
+				utf8.RuneCountInString(prefixOld)+1, prefixOld+"%",
+				utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
 			resp := tx.Model(&dbObject{}).
 				Where("object_id IN (?)", inner).
 				Delete(&dbObject{})
@@ -1612,8 +1615,8 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				s.scheduleSlabPruning()
 			}
 		}
-		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-			prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
 		if tx.Error != nil &&
 			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
 			return api.ErrObjectExists
@@ -2578,8 +2581,8 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDel
 }
 
 func (s *SQLStore) deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-		utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
+	tx = tx.Exec("DELETE FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+		path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
@@ -2892,7 +2895,7 @@ func buildOrderClause(sortBy, sortDir string) (clause.OrderByColumn, error) {
 
 func buildPrefixExpr(prefix string) clause.Expr {
 	if prefix != "" {
-		return gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+		return gorm.Expr("o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?", prefix+"%", utf8.RuneCountInString(prefix), prefix)
 	} else {
 		return exprTRUE
 	}
