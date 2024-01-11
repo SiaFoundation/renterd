@@ -309,6 +309,8 @@ func main() {
 	flag.Parse()
 
 	if flag.Arg(0) == "version" {
+		fmt.Println("renterd", build.Version())
+		fmt.Println("Network", build.NetworkName())
 		log.Println("Commit:", build.Commit())
 		log.Println("Build Date:", build.BuildTime())
 		return
