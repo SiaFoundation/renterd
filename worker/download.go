@@ -2,7 +2,6 @@ package worker
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -19,14 +17,11 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 const (
 	downloadMemoryLimitDenom       = 6 // 1/6th of the available download memory can be used by a single download
-	downloadOverheadB              = 284
 	downloadOverpayHealthThreshold = 0.25
-	maxConcurrentSectorsPerHost    = 3
 )
 
 var (
@@ -35,9 +30,6 @@ var (
 )
 
 type (
-	// id is a unique identifier used for debugging
-	id [8]byte
-
 	downloadManager struct {
 		hm     HostManager
 		mm     MemoryManager
@@ -55,21 +47,6 @@ type (
 		mu            sync.Mutex
 		downloaders   map[types.PublicKey]*downloader
 		lastRecompute time.Time
-	}
-
-	downloader struct {
-		host Host
-
-		statsDownloadSpeedBytesPerMS    *stats.DataPoints // keep track of this separately for stats (no decay is applied)
-		statsSectorDownloadEstimateInMS *stats.DataPoints
-
-		signalWorkChan chan struct{}
-		shutdownCtx    context.Context
-
-		mu                  sync.Mutex
-		consecutiveFailures uint64
-		numDownloads        uint64
-		queue               []*sectorDownloadReq
 	}
 
 	downloaderStats struct {
@@ -180,24 +157,7 @@ func newDownloadManager(ctx context.Context, hm HostManager, mm MemoryManager, o
 	}
 }
 
-func newDownloader(ctx context.Context, host Host) *downloader {
-	return &downloader{
-		host: host,
-
-		statsSectorDownloadEstimateInMS: stats.Default(),
-		statsDownloadSpeedBytesPerMS:    stats.NoDecay(),
-
-		signalWorkChan: make(chan struct{}, 1),
-		shutdownCtx:    ctx,
-
-		queue: make([]*sectorDownloadReq, 0),
-	}
-}
-
 func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, contracts []api.ContractMetadata) (err error) {
-	// create identifier
-	id := newID()
-
 	// calculate what slabs we need
 	var ss []slabSlice
 	for _, s := range o.Slabs {
@@ -306,7 +266,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
-				shards, surchargeApplied, err := mgr.downloadSlab(ctx, id, next.SlabSlice, false)
+				shards, surchargeApplied, err := mgr.downloadSlab(ctx, next.SlabSlice, false)
 				select {
 				case responseChan <- &slabDownloadResponse{
 					mem:              mem,
@@ -421,16 +381,13 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	// NOTE: we don't acquire memory here since DownloadSlab is only used for
 	// migrations which already have memory acquired
 
-	// create identifier
-	id := newID()
-
 	// download the slab
 	slice := object.SlabSlice{
 		Slab:   slab,
 		Offset: 0,
 		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
 	}
-	shards, surchargeApplied, err := mgr.downloadSlab(ctx, id, slice, true)
+	shards, surchargeApplied, err := mgr.downloadSlab(ctx, slice, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -543,7 +500,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	}
 }
 
-func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice object.SlabSlice, migration bool) *slabDownload {
+func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.SlabSlice, migration bool) *slabDownload {
 	// calculate the offset and length
 	offset, length := slice.SectorRegion()
 
@@ -572,249 +529,12 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, dID id, slice o
 	}
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, dID id, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
 	// prepare new download
-	slab := mgr.newSlabDownload(ctx, dID, slice, migration)
+	slab := mgr.newSlabDownload(ctx, slice, migration)
 
 	// execute download
 	return slab.download(ctx)
-}
-
-func (d *downloader) Stop() {
-	for {
-		download := d.pop()
-		if download == nil {
-			break
-		}
-		if !download.done() {
-			download.fail(errors.New("downloader stopped"))
-		}
-	}
-}
-
-func (d *downloader) stats() downloaderStats {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return downloaderStats{
-		avgSpeedMBPS: d.statsDownloadSpeedBytesPerMS.Average() * 0.008,
-		healthy:      d.consecutiveFailures == 0,
-		numDownloads: d.numDownloads,
-	}
-}
-
-func (d *downloader) fillBatch() (batch []*sectorDownloadReq) {
-	for len(batch) < maxConcurrentSectorsPerHost {
-		if req := d.pop(); req == nil {
-			break
-		} else if req.done() {
-			continue
-		} else {
-			batch = append(batch, req)
-		}
-	}
-	return
-}
-
-func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
-	doneChan := make(chan struct{})
-
-	// define some state to keep track of stats
-	var mu sync.Mutex
-	var start time.Time
-	var concurrent int64
-	var downloadedB int64
-	trackStatsFn := func() {
-		if start.IsZero() || time.Since(start).Milliseconds() == 0 || downloadedB == 0 {
-			return
-		}
-		durationMS := time.Since(start).Milliseconds()
-		d.statsDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
-		d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
-		start = time.Time{}
-		downloadedB = 0
-	}
-
-	// define a worker to process download requests
-	inflight := uint64(len(batch))
-	reqsChan := make(chan *sectorDownloadReq)
-	workerFn := func() {
-		for req := range reqsChan {
-			// check if we need to abort
-			select {
-			case <-d.shutdownCtx.Done():
-				return
-			default:
-			}
-
-			// update state
-			mu.Lock()
-			if start.IsZero() {
-				start = time.Now()
-			}
-			concurrent++
-			mu.Unlock()
-
-			// execute the request
-			err := d.execute(req)
-			d.trackFailure(err)
-
-			// update state + potentially track stats
-			mu.Lock()
-			if err == nil {
-				downloadedB += int64(req.length) + downloadOverheadB
-				if downloadedB >= maxConcurrentSectorsPerHost*rhpv2.SectorSize || concurrent == maxConcurrentSectorsPerHost {
-					trackStatsFn()
-				}
-			}
-			concurrent--
-			if concurrent < 0 {
-				panic("concurrent can never be less than zero") // developer error
-			}
-			mu.Unlock()
-		}
-
-		// last worker that's done closes the channel and flushes the stats
-		if atomic.AddUint64(&inflight, ^uint64(0)) == 0 {
-			close(doneChan)
-			trackStatsFn()
-		}
-	}
-
-	// launch workers
-	for i := 0; i < len(batch); i++ {
-		go workerFn()
-	}
-	for _, req := range batch {
-		reqsChan <- req
-	}
-
-	// launch a goroutine to keep the request coming
-	go func() {
-		defer close(reqsChan)
-		for {
-			if req := d.pop(); req == nil {
-				break
-			} else if req.done() {
-				continue
-			} else {
-				reqsChan <- req
-			}
-		}
-	}()
-
-	return doneChan
-}
-
-func (d *downloader) processQueue(hp HostManager) {
-outer:
-	for {
-		// wait for work
-		select {
-		case <-d.signalWorkChan:
-		case <-d.shutdownCtx.Done():
-			return
-		}
-
-		for {
-			// try fill a batch of requests
-			batch := d.fillBatch()
-			if len(batch) == 0 {
-				continue outer
-			}
-
-			// process the batch
-			doneChan := d.processBatch(batch)
-			for {
-				select {
-				case <-d.shutdownCtx.Done():
-					return
-				case <-doneChan:
-					continue outer
-				}
-			}
-		}
-	}
-}
-
-func (d *downloader) estimate() float64 {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	// fetch estimated duration per sector
-	estimateP90 := d.statsSectorDownloadEstimateInMS.P90()
-	if estimateP90 == 0 {
-		if avg := d.statsSectorDownloadEstimateInMS.Average(); avg > 0 {
-			estimateP90 = avg
-		} else {
-			estimateP90 = 1
-		}
-	}
-
-	numSectors := float64(len(d.queue) + 1)
-	return numSectors * estimateP90
-}
-
-func (d *downloader) enqueue(download *sectorDownloadReq) {
-	// enqueue the job
-	d.mu.Lock()
-	d.queue = append(d.queue, download)
-	d.mu.Unlock()
-
-	// signal there's work
-	select {
-	case d.signalWorkChan <- struct{}{}:
-	default:
-	}
-}
-
-func (d *downloader) pop() *sectorDownloadReq {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if len(d.queue) > 0 {
-		j := d.queue[0]
-		d.queue[0] = nil
-		d.queue = d.queue[1:]
-		return j
-	}
-	return nil
-}
-
-func (d *downloader) trackFailure(err error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if err == nil {
-		d.consecutiveFailures = 0
-		return
-	}
-
-	if isBalanceInsufficient(err) ||
-		isPriceTableExpired(err) ||
-		isPriceTableNotFound(err) ||
-		isSectorNotFound(err) {
-		return // host is not to blame for these errors
-	}
-
-	d.consecutiveFailures++
-	d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-}
-
-func (d *downloader) execute(req *sectorDownloadReq) (err error) {
-	// download the sector
-	buf := bytes.NewBuffer(make([]byte, 0, req.length))
-	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
-	if err != nil {
-		req.fail(err)
-		return err
-	}
-
-	d.mu.Lock()
-	d.numDownloads++
-	d.mu.Unlock()
-
-	req.succeed(buf.Bytes())
-	return nil
 }
 
 func (req *sectorDownloadReq) succeed(sector []byte) {
@@ -1207,16 +927,6 @@ func (mgr *downloadManager) launch(req *sectorDownloadReq) error {
 
 	downloader.enqueue(req)
 	return nil
-}
-
-func newID() id {
-	var id id
-	frand.Read(id[:])
-	return id
-}
-
-func (id id) String() string {
-	return fmt.Sprintf("%x", id[:])
 }
 
 type slabSlice struct {

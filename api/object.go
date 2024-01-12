@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 )
 
 const (
+	ObjectMetadataPrefix = "X-Sia-Meta-"
+
 	ObjectsRenameModeSingle = "single"
 	ObjectsRenameModeMulti  = "multi"
 
@@ -40,11 +43,16 @@ var (
 	// ErrInvalidObjectSortParameters is returned when invalid sort parameters
 	// were provided
 	ErrInvalidObjectSortParameters = errors.New("invalid sort parameters")
+
+	// ErrSlabNotFound is returned when a slab can't be retrieved from the
+	// database.
+	ErrSlabNotFound = errors.New("slab not found")
 )
 
 type (
 	// Object wraps an object.Object with its metadata.
 	Object struct {
+		Metadata ObjectUserMetadata `json:"metadata,omitempty"`
 		ObjectMetadata
 		object.Object
 	}
@@ -53,20 +61,20 @@ type (
 	ObjectMetadata struct {
 		ETag     string      `json:"eTag,omitempty"`
 		Health   float64     `json:"health"`
-		MimeType string      `json:"mimeType,omitempty"`
 		ModTime  TimeRFC3339 `json:"modTime"`
 		Name     string      `json:"name"`
 		Size     int64       `json:"size"`
+		MimeType string      `json:"mimeType,omitempty"`
 	}
 
-	// ObjectAddRequest is the request type for the /bus/object/*key endpoint.
-	ObjectAddRequest struct {
-		Bucket      string        `json:"bucket"`
-		ContractSet string        `json:"contractSet"`
-		Object      object.Object `json:"object"`
-		MimeType    string        `json:"mimeType"`
-		ETag        string        `json:"eTag"`
-	}
+	// ObjectUserMetadata contains user-defined metadata about an object and can
+	// be provided through `X-Sia-Meta-` meta headers.
+	//
+	// NOTE: `X-Amz-Meta-` headers are supported and will be converted to sia
+	// metadata headers internally, this means that S3 clients can safely keep
+	// using Amazon headers and find the metadata will be persisted in Sia as
+	// well
+	ObjectUserMetadata map[string]string
 
 	// ObjectsResponse is the response type for the /bus/objects endpoint.
 	ObjectsResponse struct {
@@ -75,15 +83,14 @@ type (
 		Object  *Object          `json:"object,omitempty"`
 	}
 
-	// ObjectsCopyRequest is the request type for the /bus/objects/copy endpoint.
-	ObjectsCopyRequest struct {
-		SourceBucket string `json:"sourceBucket"`
-		SourcePath   string `json:"sourcePath"`
-
-		DestinationBucket string `json:"destinationBucket"`
-		DestinationPath   string `json:"destinationPath"`
-
-		MimeType string `json:"mimeType"`
+	// GetObjectResponse is the response type for the /worker/object endpoint.
+	GetObjectResponse struct {
+		Content      io.ReadCloser      `json:"content"`
+		ContentType  string             `json:"contentType"`
+		LastModified string             `json:"lastModified"`
+		Range        *DownloadRange     `json:"range,omitempty"`
+		Size         int64              `json:"size"`
+		Metadata     ObjectUserMetadata `json:"metadata"`
 	}
 
 	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
@@ -124,6 +131,16 @@ type (
 	}
 )
 
+func ExtractObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadata {
+	oum := make(map[string]string)
+	for k, v := range metadata {
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(ObjectMetadataPrefix)) {
+			oum[k[len(ObjectMetadataPrefix):]] = v
+		}
+	}
+	return oum
+}
+
 // LastModified returns the object's ModTime formatted for use in the
 // 'Last-Modified' header
 func (o ObjectMetadata) LastModified() string {
@@ -146,13 +163,39 @@ func (o ObjectMetadata) ContentType() string {
 }
 
 type (
+	// AddObjectOptions is the options type for the bus client.
 	AddObjectOptions struct {
-		MimeType string
 		ETag     string
+		MimeType string
+		Metadata ObjectUserMetadata
 	}
 
+	// AddObjectRequest is the request type for the /bus/object/*key endpoint.
+	AddObjectRequest struct {
+		Bucket      string             `json:"bucket"`
+		ContractSet string             `json:"contractSet"`
+		Object      object.Object      `json:"object"`
+		ETag        string             `json:"eTag"`
+		MimeType    string             `json:"mimeType"`
+		Metadata    ObjectUserMetadata `json:"metadata"`
+	}
+
+	// CopyObjectOptions is the options type for the bus client.
 	CopyObjectOptions struct {
 		MimeType string
+		Metadata ObjectUserMetadata
+	}
+
+	// CopyObjectsRequest is the request type for the /bus/objects/copy endpoint.
+	CopyObjectsRequest struct {
+		SourceBucket string `json:"sourceBucket"`
+		SourcePath   string `json:"sourcePath"`
+
+		DestinationBucket string `json:"destinationBucket"`
+		DestinationPath   string `json:"destinationPath"`
+
+		MimeType string             `json:"mimeType"`
+		Metadata ObjectUserMetadata `json:"metadata"`
 	}
 
 	DeleteObjectOptions struct {
@@ -186,14 +229,16 @@ type (
 		Limit  int
 	}
 
+	// UploadObjectOptions is the options type for the worker client.
 	UploadObjectOptions struct {
 		Offset                       int
 		MinShards                    int
 		TotalShards                  int
 		ContractSet                  string
-		MimeType                     string
 		DisablePreshardingEncryption bool
 		ContentLength                int64
+		MimeType                     string
+		Metadata                     ObjectUserMetadata
 	}
 
 	UploadMultipartUploadPartOptions struct {
@@ -203,7 +248,7 @@ type (
 	}
 )
 
-func (opts UploadObjectOptions) Apply(values url.Values) {
+func (opts UploadObjectOptions) ApplyValues(values url.Values) {
 	if opts.Offset != 0 {
 		values.Set("offset", fmt.Sprint(opts.Offset))
 	}
@@ -221,6 +266,12 @@ func (opts UploadObjectOptions) Apply(values url.Values) {
 	}
 	if opts.DisablePreshardingEncryption {
 		values.Set("disablepreshardingencryption", "true")
+	}
+}
+
+func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
+	for k, v := range opts.Metadata {
+		h.Set(ObjectMetadataPrefix+k, v)
 	}
 }
 

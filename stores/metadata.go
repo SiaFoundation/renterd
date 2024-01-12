@@ -106,11 +106,6 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
-	dbContractSetContract struct {
-		DBContractSetID uint `gorm:"primaryKey;"`
-		DBContractID    uint `gorm:"primaryKey;index"`
-	}
-
 	dbObject struct {
 		Model
 
@@ -118,13 +113,23 @@ type (
 		DBBucket   dbBucket
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
-		Key    secretKey
-		Slabs  []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
-		Health float64   `gorm:"index;default:1.0; NOT NULL"`
-		Size   int64
+		Key      secretKey
+		Slabs    []dbSlice              `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+		Metadata []dbObjectUserMetadata `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete metadata too
+		Health   float64                `gorm:"index;default:1.0; NOT NULL"`
+		Size     int64
 
 		MimeType string `json:"index"`
 		Etag     string `gorm:"index"`
+	}
+
+	dbObjectUserMetadata struct {
+		Model
+
+		DBObjectID          *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
+		DBMultipartUploadID *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
+		Key                 string `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
+		Value               string
 	}
 
 	dbBucket struct {
@@ -285,9 +290,6 @@ func (dbBucket) TableName() string { return "buckets" }
 func (dbContract) TableName() string { return "contracts" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbContractSetContract) TableName() string { return "contract_set_contracts" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }
 
 // TableName implements the gorm.Tabler interface.
@@ -295,6 +297,9 @@ func (dbContractSet) TableName() string { return "contract_sets" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbObjectUserMetadata) TableName() string { return "object_user_metadata" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }
@@ -411,81 +416,6 @@ func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 		Name:     raw.Name,
 		Size:     raw.Size,
 	}
-}
-
-func (raw rawObject) convert() (api.Object, error) {
-	if len(raw) == 0 {
-		return api.Object{}, errors.New("no slabs found")
-	}
-
-	// parse object key
-	var key object.EncryptionKey
-	if err := key.UnmarshalBinary(raw[0].ObjectKey); err != nil {
-		return api.Object{}, err
-	}
-
-	// filter out slabs without slab ID and buffered slabs - this is expected
-	// for an empty object or objects that end with a partial slab.
-	var filtered rawObject
-	minHealth := math.MaxFloat64
-	for _, sector := range raw {
-		if sector.SlabID != 0 {
-			filtered = append(filtered, sector)
-			if sector.SlabHealth < minHealth {
-				minHealth = sector.SlabHealth
-			}
-		}
-	}
-
-	// hydrate all slabs
-	slabs := make([]object.SlabSlice, 0, len(filtered))
-	if len(filtered) > 0 {
-		var start int
-		// create a helper function to add a slab and update the state
-		addSlab := func(end int) error {
-			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
-				return err
-			} else {
-				slabs = append(slabs, slab)
-				start = end
-			}
-			return nil
-		}
-
-		curr := filtered[0]
-		for j, sector := range filtered {
-			if sector.ObjectIndex == 0 {
-				return api.Object{}, api.ErrObjectCorrupted
-			} else if sector.SectorIndex == 0 && !sector.SlabBuffered {
-				return api.Object{}, api.ErrObjectCorrupted
-			}
-			if sector.ObjectIndex != curr.ObjectIndex {
-				if err := addSlab(j); err != nil {
-					return api.Object{}, err
-				}
-				curr = sector
-			}
-		}
-		if err := addSlab(len(filtered)); err != nil {
-			return api.Object{}, err
-		}
-	}
-
-	// return object
-	return api.Object{
-		ObjectMetadata: api.ObjectMetadata{
-			ETag:     raw[0].ObjectETag,
-			Health:   raw[0].ObjectHealth,
-			MimeType: raw[0].ObjectMimeType,
-			ModTime:  api.TimeRFC3339(raw[0].ObjectModTime.UTC()),
-			Name:     raw[0].ObjectName,
-			Size:     raw[0].ObjectSize,
-		},
-		Object: object.Object{
-			Key:   key,
-			Slabs: slabs,
-		},
-	}, nil
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -1180,7 +1110,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 
 	var objects []api.ObjectMetadata
 	err := s.db.
-		Select("o.object_id as name, o.size as size, o.health as health").
+		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as MimeType, o.etag as ETag, o.created_at as ModTime").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
@@ -1260,7 +1190,8 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 	objectsQuery := fmt.Sprintf(`
 SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
 FROM (
-	SELECT ANY_VALUE(etag) AS ETag,
+	SELECT
+	ANY_VALUE(etag) AS ETag,
 	MAX(objects.created_at) AS ModTime,
 	%s AS oname,
 	SUM(size) AS Size,
@@ -1387,17 +1318,12 @@ FROM (
 	return
 }
 
-func (s *SQLStore) Object(ctx context.Context, bucket, path string) (api.Object, error) {
-	var obj api.Object
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		o, err := s.object(ctx, tx, bucket, path)
-		if err != nil {
-			return err
-		}
-		obj, err = o.convert()
+func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		obj, err = s.object(ctx, tx, bucket, path)
 		return err
 	})
-	return obj, err
+	return
 }
 
 func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
@@ -1676,7 +1602,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
 }
 
-func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string) (om api.ObjectMetadata, err error) {
+func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		var srcObj dbObject
 		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
@@ -1687,21 +1613,19 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to fetch src object: %w", err)
 		}
 
-		srcObjHealth, err := s.objectHealth(ctx, tx, srcObj.ID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch src object health: %w", err)
-		}
-
 		if srcBucket == dstBucket && srcPath == dstPath {
 			// No copying is happening. We just update the metadata on the src
 			// object.
 			srcObj.MimeType = mimeType
 			om = api.ObjectMetadata{
-				Health:   srcObjHealth,
+				Health:   srcObj.Health,
 				MimeType: srcObj.MimeType,
 				ModTime:  api.TimeRFC3339(srcObj.CreatedAt.UTC()),
 				Name:     srcObj.ObjectID,
 				Size:     srcObj.Size,
+			}
+			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
+				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
 			return tx.Save(&srcObj).Error
 		}
@@ -1743,10 +1667,14 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create copy of object: %w", err)
 		}
 
+		if err := s.createUserMetadata(tx, dstObj.ID, metadata); err != nil {
+			return fmt.Errorf("failed to create object metadata: %w", err)
+		}
+
 		om = api.ObjectMetadata{
 			MimeType: dstObj.MimeType,
 			ETag:     dstObj.Etag,
-			Health:   srcObjHealth,
+			Health:   srcObj.Health,
 			ModTime:  api.TimeRFC3339(dstObj.CreatedAt.UTC()),
 			Name:     dstObj.ObjectID,
 			Size:     dstObj.Size,
@@ -1825,7 +1753,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	})
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, o object.Object) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	// Sanity check input.
 	for _, s := range o.Slabs {
 		for i, shard := range s.Shards {
@@ -1850,9 +1778,13 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// Try to delete. We want to get rid of the object and its slices if it
 		// exists.
 		//
-		// NOTE: please note that the object's created_at is currently used as
-		// its ModTime, if we ever stop recreating the object but update it
-		// instead we need to take this into account
+		// NOTE: the object's created_at is currently used as its ModTime, if we
+		// ever stop recreating the object but update it instead we need to take
+		// this into account
+		//
+		// NOTE: the metadata is not deleted because this delete will cascade,
+		// if we stop recreating the object we have to make sure to delete the
+		// object's metadata before trying to recreate it
 		_, err := s.deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
@@ -1894,6 +1826,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
+
+		// Create all user metadata.
+		if err := s.createUserMetadata(tx, obj.ID, metadata); err != nil {
+			return fmt.Errorf("failed to create user metadata: %w", err)
+		}
+
 		return nil
 	})
 }
@@ -2182,6 +2120,45 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
+func (s *SQLStore) createUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
+	for k, v := range metadata {
+		metadata := &dbObjectUserMetadata{
+			DBObjectID: &objID,
+			Key:        k,
+			Value:      v,
+		}
+		entities = append(entities, metadata)
+	}
+	return tx.CreateInBatches(&entities, 1000).Error
+}
+
+func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
+	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
+	for k, v := range metadata {
+		metadata := &dbObjectUserMetadata{
+			DBMultipartUploadID: &multipartUploadID,
+			Key:                 k,
+			Value:               v,
+		}
+		entities = append(entities, metadata)
+	}
+	return tx.CreateInBatches(&entities, 1000).Error
+}
+
+func (s *SQLStore) updateUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
+	// delete all existing metadata
+	err := tx.
+		Where("db_object_id = ?", objID).
+		Delete(&dbObjectUserMetadata{}).
+		Error
+	if err != nil {
+		return err
+	}
+
+	return s.createUserMetadata(tx, objID, metadata)
+}
+
 func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
 	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
 		return fmt.Errorf("either objID or multiPartID must be set")
@@ -2261,14 +2238,123 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	return nil
 }
 
-// object retrieves a raw object from the store.
-func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path string) (rawObject, error) {
+// object retrieves an object from the store.
+func (s *SQLStore) object(ctx context.Context, tx *gorm.DB, bucket, path string) (api.Object, error) {
+	// fetch raw object data
+	raw, err := s.objectRaw(ctx, tx, bucket, path)
+	if errors.Is(err, gorm.ErrRecordNotFound) || len(raw) == 0 {
+		return api.Object{}, api.ErrObjectNotFound
+	}
+
+	// hydrate raw object data
+	return s.objectHydrate(ctx, tx, bucket, path, raw)
+}
+
+// objectHydrate hydrates a raw object and returns an api.Object.
+func (s *SQLStore) objectHydrate(ctx context.Context, tx *gorm.DB, bucket, path string, obj rawObject) (api.Object, error) {
+	// parse object key
+	var key object.EncryptionKey
+	if err := key.UnmarshalBinary(obj[0].ObjectKey); err != nil {
+		return api.Object{}, err
+	}
+
+	// filter out slabs without slab ID and buffered slabs - this is expected
+	// for an empty object or objects that end with a partial slab.
+	var filtered rawObject
+	minHealth := math.MaxFloat64
+	for _, sector := range obj {
+		if sector.SlabID != 0 {
+			filtered = append(filtered, sector)
+			if sector.SlabHealth < minHealth {
+				minHealth = sector.SlabHealth
+			}
+		}
+	}
+
+	// hydrate all slabs
+	slabs := make([]object.SlabSlice, 0, len(filtered))
+	if len(filtered) > 0 {
+		var start int
+		// create a helper function to add a slab and update the state
+		addSlab := func(end int) error {
+			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
+				return err
+			} else {
+				slabs = append(slabs, slab)
+				start = end
+			}
+			return nil
+		}
+
+		curr := filtered[0]
+		for j, sector := range filtered {
+			if sector.ObjectIndex == 0 {
+				return api.Object{}, api.ErrObjectCorrupted
+			} else if sector.SectorIndex == 0 && !sector.SlabBuffered {
+				return api.Object{}, api.ErrObjectCorrupted
+			}
+			if sector.ObjectIndex != curr.ObjectIndex {
+				if err := addSlab(j); err != nil {
+					return api.Object{}, err
+				}
+				curr = sector
+			}
+		}
+		if err := addSlab(len(filtered)); err != nil {
+			return api.Object{}, err
+		}
+	}
+
+	// fetch object metadata
+	metadata, err := s.objectMetadata(ctx, tx, bucket, path)
+	if err != nil {
+		return api.Object{}, err
+	}
+
+	// return object
+	return api.Object{
+		Metadata: metadata,
+		ObjectMetadata: api.ObjectMetadata{
+			ETag:     obj[0].ObjectETag,
+			Health:   obj[0].ObjectHealth,
+			MimeType: obj[0].ObjectMimeType,
+			ModTime:  api.TimeRFC3339(obj[0].ObjectModTime.UTC()),
+			Name:     obj[0].ObjectName,
+			Size:     obj[0].ObjectSize,
+		},
+		Object: object.Object{
+			Key:   key,
+			Slabs: slabs,
+		},
+	}, nil
+}
+
+func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {
+	var rows []dbObjectUserMetadata
+	err := tx.
+		Model(&dbObjectUserMetadata{}).
+		Table("object_user_metadata oum").
+		Joins("INNER JOIN objects o ON oum.db_object_id = o.id").
+		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
+		Where("o.object_id = ? AND b.name = ?", path, bucket).
+		Find(&rows).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	metadata := make(api.ObjectUserMetadata)
+	for _, row := range rows {
+		metadata[row.Key] = row.Value
+	}
+	return metadata, nil
+}
+
+func (s *SQLStore) objectRaw(ctx context.Context, txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {
 	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
 	// included in the result set, when we convert the rawObject before
 	// returning it we'll check for SlabID and/or SectorID being 0 and act
 	// accordingly
-	var rows rawObject
-	tx := s.db.
+	err = s.db.
 		Select("o.id as ObjectID, o.health as ObjectHealth, sli.object_index as ObjectIndex, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
 		Model(&dbObject{}).
 		Table("objects o").
@@ -2283,12 +2369,9 @@ func (s *SQLStore) object(ctx context.Context, txn *gorm.DB, bucket string, path
 		Where("o.object_id = ? AND b.name = ?", path, bucket).
 		Order("sli.object_index ASC").
 		Order("sec.slab_index ASC").
-		Scan(&rows)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) || len(rows) == 0 {
-		return nil, api.ErrObjectNotFound
-	}
-
-	return rows, nil
+		Scan(&rows).
+		Error
+	return
 }
 
 func (s *SQLStore) objectHealth(ctx context.Context, tx *gorm.DB, objectID uint) (health float64, err error) {
@@ -2731,7 +2814,6 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	if err != nil {
 		return api.ObjectsListResponse{}, err
 	}
-
 	var rows []rawObjectMetadata
 	if err := s.db.
 		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as mimeType, o.created_at as ModTime").

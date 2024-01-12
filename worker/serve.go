@@ -67,6 +67,7 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 
 	// launch the download in a goroutine
 	pr, pw := io.Pipe()
+	defer pr.Close()
 	go func() {
 		if err := downloadFn(pw, offset, length); err != nil {
 			pw.CloseWithError(err)
@@ -91,6 +92,11 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	// serveContent does that for us
 	rw.Header().Set("ETag", api.FormatETag(obj.ETag))
 	rw.Header().Set("Content-Type", contentType)
+
+	// set the user metadata headers
+	for k, v := range obj.Metadata {
+		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectMetadataPrefix, k), v)
+	}
 
 	http.ServeContent(rw, req, obj.Name, obj.ModTime.Std(), rs)
 	return http.StatusOK, nil

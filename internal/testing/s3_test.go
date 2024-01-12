@@ -15,6 +15,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -166,6 +167,92 @@ func TestS3Basic(t *testing.T) {
 	if exists {
 		t.Fatal("expected bucket to not exist")
 	}
+}
+
+func TestS3ObjectMetadata(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create cluster
+	opts := testClusterOptions{
+		hosts:  testRedundancySettings.TotalShards,
+		logger: zap.NewNop(),
+	}
+	cluster := newTestCluster(t, opts)
+	defer cluster.Shutdown()
+
+	// convenience variables
+	s3 := cluster.S3
+	tt := cluster.tt
+
+	// create dummy metadata
+	metadata := map[string]string{
+		"Foo": "bar",
+		"Baz": "qux",
+	}
+
+	// add object to the bucket
+	_, err := s3.PutObject(context.Background(), api.DefaultBucketName, t.Name(), bytes.NewReader([]byte(t.Name())), int64(len([]byte(t.Name()))), minio.PutObjectOptions{UserMetadata: metadata})
+	tt.OK(err)
+
+	// create helper to assert metadata is present
+	assertMetadata := func(want map[string]string, got minio.StringMap) {
+		t.Helper()
+		for k, wantt := range want {
+			if gott, ok := got[k]; !ok || gott != wantt {
+				t.Fatalf("unexpected metadata, '%v' != '%v' (found: %v)", gott, wantt, ok)
+			}
+		}
+	}
+
+	// perform GET request
+	obj, err := s3.GetObject(context.Background(), api.DefaultBucketName, t.Name(), minio.GetObjectOptions{})
+	tt.OK(err)
+
+	// assert metadata is set
+	get, err := obj.Stat()
+	tt.OK(err)
+	assertMetadata(metadata, get.UserMetadata)
+
+	// perform HEAD request
+	head, err := s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(metadata, head.UserMetadata)
+
+	// perform metadata update (same src/dst copy)
+	metadata["Baz"] = "updated"
+	_, err = s3.CopyObject(
+		context.Background(),
+		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name(), UserMetadata: metadata, ReplaceMetadata: true},
+		minio.CopySrcOptions{Bucket: api.DefaultBucketName, Object: t.Name()},
+	)
+	tt.OK(err)
+
+	// perform HEAD request
+	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(metadata, head.UserMetadata)
+
+	// perform copy
+	metadata["Baz"] = "copied"
+	_, err = s3.CopyObject(
+		context.Background(),
+		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name() + "copied", UserMetadata: metadata, ReplaceMetadata: true},
+		minio.CopySrcOptions{Bucket: api.DefaultBucketName, Object: t.Name()},
+	)
+	tt.OK(err)
+
+	// perform HEAD request
+	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name()+"copied", minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(metadata, head.UserMetadata)
+
+	// assert the original object's metadata is unchanged
+	metadata["Baz"] = "updated"
+	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(metadata, head.UserMetadata)
 }
 
 func TestS3Authentication(t *testing.T) {
