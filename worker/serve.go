@@ -67,6 +67,7 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 
 	// launch the download in a goroutine
 	pr, pw := io.Pipe()
+	defer pr.Close()
 	go func() {
 		if err := downloadFn(pw, offset, length); err != nil {
 			pw.CloseWithError(err)
