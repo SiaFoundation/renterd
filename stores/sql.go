@@ -296,7 +296,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		ss.slabPruningLoop(cfg.SlabPruningInterval, cfg.SlabPruningCooldown)
 		ss.wg.Done()
 	}()
-	ss.scheduleSlabPruning()
 
 	return ss, ccid, nil
 }
