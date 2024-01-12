@@ -2094,15 +2094,16 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Health float64
 	}
 
-	if err := s.db.
-		Select("slabs.key, slabs.health").
-		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
-		Model(&dbSlab{}).
-		Where("health <= ? AND cs.name = ?", healthCutoff, set).
-		Order("health ASC").
-		Limit(limit).
-		Find(&rows).
-		Error; err != nil {
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
+		return tx.Select("slabs.key, slabs.health").
+			Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
+			Model(&dbSlab{}).
+			Where("health <= ? AND cs.name = ?", healthCutoff, set).
+			Order("health ASC").
+			Limit(limit).
+			Find(&rows).
+			Error
+	}); err != nil {
 		return nil, err
 	}
 
