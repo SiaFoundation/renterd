@@ -156,10 +156,13 @@ func (m *migrator) performMigrations(p *workerPool) {
 
 						if err != nil {
 							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
-							if res.SurchargeApplied {
-								m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
-							} else {
-								m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
+							skipAlert := isErr(err, api.ErrSlabNotFound)
+							if !skipAlert {
+								if res.SurchargeApplied {
+									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
+								} else {
+									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
+								}
 							}
 						} else {
 							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
