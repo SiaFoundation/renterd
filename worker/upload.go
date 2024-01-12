@@ -104,9 +104,10 @@ type (
 	}
 
 	slabUploadResponse struct {
-		slab  object.SlabSlice
-		index int
-		err   error
+		slabs                  []object.SlabSlice
+		bufferSizeLimitReached bool
+		index                  int
+		err                    error
 	}
 
 	sectorUpload struct {
@@ -492,17 +493,16 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the response channel
 	respChan := make(chan slabUploadResponse)
 
-	// channel to notify main thread of the number of slabs to wait for
-	numSlabsChan := make(chan int, 1)
+	// channel to notify main thread of the number of responses to wait for
+	numResponsesChan := make(chan int, 1)
 
 	// prepare slab size
 	size := int64(up.rs.MinShards) * rhpv2.SectorSize
 	redundantSize := uint64(up.rs.TotalShards) * rhpv2.SectorSize
-	var partialSlab []byte
 
 	// launch uploads in a separate goroutine
 	go func() {
-		var slabIndex int
+		var respIndex int
 		for {
 			select {
 			case <-mgr.shutdownCtx.Done():
@@ -511,6 +511,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 				return // interrupted
 			default:
 			}
+
 			// acquire memory
 			mem := mgr.mm.AcquireMemory(ctx, redundantSize)
 			if mem == nil {
@@ -523,15 +524,10 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 			if err == io.EOF {
 				mem.Release()
 
-				// no more data to upload, notify main thread of the number of
-				// slabs to wait for
-				numSlabs := slabIndex
-				if partialSlab != nil && slabIndex > 0 {
-					numSlabs-- // don't wait on partial slab
-				}
-				numSlabsChan <- numSlabs
+				// we know for sure how many responses the main thread should expect
+				numResponsesChan <- respIndex
 				return
-			} else if err != nil && err != io.ErrUnexpectedEOF {
+			} else if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 				mem.Release()
 
 				// unexpected error, notify main thread
@@ -540,39 +536,26 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 				case <-ctx.Done():
 				}
 				return
-			} else if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
-				mem.Release()
-
-				// uploadPacking is true, we return the partial slab without
-				// uploading.
-				partialSlab = data[:length]
+			} else if errors.Is(err, io.ErrUnexpectedEOF) && up.packing {
+				go mgr.addPartialSlab(ctx, mem, up.rs, data[:length], up.contractSet, respIndex, respChan)
+				respIndex++
 			} else {
-				// regular upload
-				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
-					uploadSpeed, overdrivePct := upload.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
-
-					// track stats
-					mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
-					mgr.statsOverdrivePct.Track(overdrivePct)
-
-					// release memory
-					mem.Release()
-				}(up.rs, data, length, slabIndex)
+				go mgr.addSlab(ctx, mem, up.rs, upload, data, length, respIndex, respChan)
+				respIndex++
 			}
-			slabIndex++
 		}
 	}()
 
 	// collect responses
 	var responses []slabUploadResponse
-	numSlabs := math.MaxInt32
-	for len(responses) < numSlabs {
+	numResponses := math.MaxInt32
+	for len(responses) < numResponses {
 		select {
 		case <-mgr.shutdownCtx.Done():
 			return false, "", errWorkerShutDown
 		case <-ctx.Done():
 			return false, "", errUploadInterrupted
-		case numSlabs = <-numSlabsChan:
+		case numResponses = <-numResponsesChan:
 		case res := <-respChan:
 			if res.err != nil {
 				return false, "", res.err
@@ -588,30 +571,20 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 
 	// decorate the object with the slabs
 	for _, resp := range responses {
-		o.Slabs = append(o.Slabs, resp.slab)
+		bufferSizeLimitReached = bufferSizeLimitReached || resp.bufferSizeLimitReached
+		o.Slabs = append(o.Slabs, resp.slabs...)
 	}
 
 	// calculate the eTag
 	eTag = hr.Hash()
 
-	// add partial slabs
-	if len(partialSlab) > 0 {
-		var pss []object.SlabSlice
-		pss, bufferSizeLimitReached, err = mgr.os.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
-		if err != nil {
-			return false, "", err
-		}
-		o.Slabs = append(o.Slabs, pss...)
-	}
-
+	// persist the upload
 	if up.multipart {
-		// persist the part
 		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}
 	} else {
-		// persist the object
 		err = mgr.os.AddObject(ctx, up.bucket, up.path, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add object: %w", err)
@@ -667,6 +640,60 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	}
 
 	return nil
+}
+
+func (mgr *uploadManager) addPartialSlab(ctx context.Context, mem Memory, rs api.RedundancySettings, data []byte, contractSet string, respIndex int, respChan chan slabUploadResponse) {
+	// make sure we release the memory
+	defer mem.Release()
+
+	// create the response
+	resp := slabUploadResponse{
+		index: respIndex,
+	}
+
+	// create the response
+	resp.slabs, resp.bufferSizeLimitReached, resp.err = mgr.os.AddPartialSlab(ctx, data, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet)
+
+	// send the response
+	select {
+	case <-ctx.Done():
+	case respChan <- resp:
+	}
+}
+
+func (mgr *uploadManager) addSlab(ctx context.Context, mem Memory, rs api.RedundancySettings, upload *upload, data []byte, length, respIndex int, respChan chan slabUploadResponse) {
+	// make sure we release the memory
+	defer mem.Release()
+
+	// create the response
+	resp := slabUploadResponse{
+		slabs: []object.SlabSlice{{
+			Slab:   object.NewSlab(uint8(rs.MinShards)),
+			Offset: 0,
+			Length: uint32(length),
+		}},
+		index: respIndex,
+	}
+
+	// create the shards
+	shards := make([][]byte, rs.TotalShards)
+	resp.slabs[0].Slab.Encode(data, shards)
+	resp.slabs[0].Slab.Encrypt(shards)
+
+	// upload the shards
+	var uploadSpeed int64
+	var overdrivePct float64
+	resp.slabs[0].Slab.Shards, uploadSpeed, overdrivePct, resp.err = upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+
+	// track stats
+	mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
+	mgr.statsOverdrivePct.Track(overdrivePct)
+
+	// send the response
+	select {
+	case <-ctx.Done():
+	case respChan <- resp:
+	}
 }
 
 func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader) {
@@ -803,34 +830,6 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 
 		errs: make(HostErrorSet),
 	}, responseChan
-}
-
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (uploadSpeed int64, overdrivePct float64) {
-	// create the response
-	resp := slabUploadResponse{
-		slab: object.SlabSlice{
-			Slab:   object.NewSlab(uint8(rs.MinShards)),
-			Offset: 0,
-			Length: uint32(length),
-		},
-		index: index,
-	}
-
-	// create the shards
-	shards := make([][]byte, rs.TotalShards)
-	resp.slab.Slab.Encode(data, shards)
-	resp.slab.Slab.Encrypt(shards)
-
-	// upload the shards
-	resp.slab.Slab.Shards, uploadSpeed, overdrivePct, resp.err = u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout)
-
-	// send the response
-	select {
-	case <-ctx.Done():
-	case respChan <- resp:
-	}
-
-	return
 }
 
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
