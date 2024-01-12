@@ -130,7 +130,7 @@ func TestUploadDownload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, _, err = ul.Upload(ctx, bytes.NewReader(data), metadatas, params, lockingPriorityUpload)
-	if err == nil || !errors.Is(err, context.Canceled) {
+	if err == nil || !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
 }
