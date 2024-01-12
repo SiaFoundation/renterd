@@ -1007,7 +1007,7 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 
 	var nullContracts []size
 	var dataContracts []size
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// first, we fetch all contracts without sectors and consider their
 		// entire size as prunable
 		if err := tx.
