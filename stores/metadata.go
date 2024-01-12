@@ -28,6 +28,7 @@ const (
 	refreshHealthBatchSize = 10000
 
 	sectorInsertionBatchSize = 500
+	sectorQueryBatchSize     = 100
 
 	refreshHealthMinHealthValidity = 12 * time.Hour
 	refreshHealthMaxHealthValidity = 72 * time.Hour
@@ -1938,7 +1939,8 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 
 		// ensure the sectors exists
-		if err := upsertSectors(tx, sectors); err != nil {
+		sectors, err = upsertSectors(tx, sectors)
+		if err != nil {
 			return fmt.Errorf("failed to create sector: %w", err)
 		}
 
@@ -2229,7 +2231,8 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	// create sector that don't exist yet
-	if err := upsertSectors(tx, sectors); err != nil {
+	sectors, err = upsertSectors(tx, sectors)
+	if err != nil {
 		return fmt.Errorf("failed to create sectors: %w", err)
 	}
 
@@ -3079,9 +3082,9 @@ func validateSort(sortBy, sortDir string) error {
 
 // upsertSectors creates a sector or updates it if it exists already. The
 // resulting ID is set on the input sector.
-func upsertSectors(tx *gorm.DB, sectors []dbSector) error {
+func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
 	if len(sectors) == 0 {
-		return nil // nothing to do
+		return nil, nil // nothing to do
 	}
 	err := tx.
 		Clauses(clause.OnConflict{
@@ -3091,15 +3094,21 @@ func upsertSectors(tx *gorm.DB, sectors []dbSector) error {
 		CreateInBatches(&sectors, sectorInsertionBatchSize).
 		Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// fetch the upserted sectors
+	roots := make([][]byte, len(sectors))
 	for i, sector := range sectors {
-		if err := tx.Raw("SELECT * FROM sectors WHERE root = ?", sector.Root[:]).
-			Scan(&sectors[i]).
-			Error; err != nil {
-			return err
-		}
+		roots[i] = sector.Root[:]
 	}
-	return nil
+	sectors = sectors[:0]
+
+	var batch []dbSector
+	if err := tx.Where("root IN (?)", roots).FindInBatches(&batch, sectorQueryBatchSize, func(tx *gorm.DB, _ int) error {
+		sectors = append(sectors, batch...)
+		return nil
+	}).Error; err != nil {
+		return nil, err
+	}
+	return sectors, nil
 }
