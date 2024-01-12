@@ -125,6 +125,14 @@ func TestUploadDownload(t *testing.T) {
 	if !errors.Is(err, errBucketNotFound) {
 		t.Fatal("expected bucket not found error", err)
 	}
+
+	// upload data using a cancelled context - assert we don't hang
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err = ul.Upload(ctx, bytes.NewReader(data), metadatas, params, lockingPriorityUpload)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
 }
 
 func testParameters(bucket, path string) uploadParameters {

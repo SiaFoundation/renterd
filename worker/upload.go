@@ -569,6 +569,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		select {
 		case <-mgr.shutdownCtx.Done():
 			return false, "", errWorkerShutDown
+		case <-ctx.Done():
+			return false, "", ctx.Err()
 		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
