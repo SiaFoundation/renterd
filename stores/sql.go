@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +59,7 @@ type (
 		GormLogger                    glogger.Interface
 		SlabPruningInterval           time.Duration
 		SlabPruningCooldown           time.Duration
+		RetryTransactionIntervals     []time.Duration
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -70,6 +70,8 @@ type (
 		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
+
+		retryTransactionIntervals []time.Duration
 
 		// Persistence buffer - related fields.
 		lastSave               time.Time
@@ -217,15 +219,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		}
 	}
 
-	// Check if any indices are missing after migrations.
-	detectMissingIndices(db, func(dst interface{}, name string) {
-		t := reflect.TypeOf(dst)
-		if t.Kind() == reflect.Ptr {
-			t = t.Elem()
-		}
-		l.Warnw("missing index", "table", t.Name(), "field", name)
-	})
-
 	// Get latest consensus change ID or init db.
 	ci, ccid, err := initConsensusInfo(db)
 	if err != nil {
@@ -284,6 +277,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 			Height: ci.Height,
 			ID:     types.BlockID(ci.BlockID),
 		},
+
+		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
@@ -553,14 +548,13 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		return false
 	}
 	var err error
-	timeoutIntervals := []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second}
-	for i := 0; i < len(timeoutIntervals); i++ {
+	for i := 0; i < len(s.retryTransactionIntervals); i++ {
 		err = s.db.Transaction(fc, opts...)
 		if abortRetry(err) {
 			return err
 		}
-		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(timeoutIntervals), timeoutIntervals[i], err))
-		time.Sleep(timeoutIntervals[i])
+		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(s.retryTransactionIntervals), s.retryTransactionIntervals[i], err))
+		time.Sleep(s.retryTransactionIntervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
 }

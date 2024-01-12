@@ -48,6 +48,7 @@ type (
 	CreateMultipartOptions struct {
 		Key      object.EncryptionKey
 		MimeType string
+		Metadata ObjectUserMetadata
 	}
 )
 
@@ -84,6 +85,7 @@ type (
 		Path     string               `json:"path"`
 		Key      object.EncryptionKey `json:"key"`
 		MimeType string               `json:"mimeType"`
+		Metadata ObjectUserMetadata   `json:"metadata"`
 	}
 
 	MultipartCreateResponse struct {

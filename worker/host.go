@@ -31,7 +31,11 @@ type (
 	}
 
 	HostManager interface {
-		Host(types.PublicKey, types.FileContractID, string) Host
+		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
+	}
+
+	HostStore interface {
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	}
 )
 
@@ -273,4 +277,34 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 		})
 		return balance, err
 	})
+}
+
+// preparePriceTableAccountPayment prepare a payment function to pay for a price
+// table from the given host using the provided revision.
+//
+// NOTE: This is the preferred way of paying for a price table since it is
+// faster and doesn't require locking a contract.
+func (h *host) preparePriceTableAccountPayment(bh uint64) PriceTablePaymentFunc {
+	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
+		account := rhpv3.Account(h.accountKey.PublicKey())
+		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
+		return &payment, nil
+	}
+}
+
+// preparePriceTableContractPayment prepare a payment function to pay for a
+// price table from the given host using the provided revision.
+//
+// NOTE: This way of paying for a price table should only be used if payment by
+// EA is not possible or if we already need a contract revision anyway. e.g.
+// funding an EA.
+func (h *host) preparePriceTableContractPayment(rev *types.FileContractRevision) PriceTablePaymentFunc {
+	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
+		refundAccount := rhpv3.Account(h.accountKey.PublicKey())
+		payment, err := payByContract(rev, pt.UpdatePriceTableCost, refundAccount, h.renterKey)
+		if err != nil {
+			return nil, err
+		}
+		return &payment, nil
+	}
 }

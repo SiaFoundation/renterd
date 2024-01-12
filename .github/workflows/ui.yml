@@ -26,11 +26,11 @@ jobs:
         run: |
           # Fetch tags with pagination
           TAGS_JSON=$(gh api --paginate repos/SiaFoundation/web/tags)
-      
+
           # Extract tags that start with "renterd/", sort them in version order, and pick the highest version
           LATEST_RENTERD_GO_TAG=$(echo "$TAGS_JSON" | jq -r '.[] | select(.name | startswith("renterd/")).name' | sort -Vr | head -n 1)
           LATEST_RENTERD_VERSION=$(echo "$LATEST_RENTERD_GO_TAG" | sed 's/renterd\///')
-      
+
           echo "Latest renterd tag is $LATEST_RENTERD_GO_TAG"
           echo "GO_TAG=$LATEST_RENTERD_GO_TAG" >> $GITHUB_ENV
           echo "VERSION=$LATEST_RENTERD_VERSION" >> $GITHUB_ENV

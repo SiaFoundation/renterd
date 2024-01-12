@@ -44,6 +44,22 @@ const (
 	// minutes. That's why we assume 10 seconds to be more than frequent enough
 	// to refill an account when it's due for another refill.
 	defaultAccountRefillInterval = 10 * time.Second
+
+	// usageHeader is the header for the CLI usage text.
+	usageHeader = `
+Renterd is the official Sia renter daemon. It provides a REST API for forming
+contracts with hosts, uploading data to them and downloading data from them.
+
+There are 3 ways to configure renterd (sorted from lowest to highest precedence):
+  - A YAML config file
+  - CLI flags
+  - Environment variables
+
+See the documentation (https://docs.sia.tech/) for more information and examples
+on how to configure and use renterd.
+
+Usage:
+`
 )
 
 var (
@@ -284,15 +300,26 @@ func main() {
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
+	// custom usage
+	flag.Usage = func() {
+		log.Print(usageHeader)
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
 	if flag.Arg(0) == "version" {
+		fmt.Println("renterd", build.Version())
+		fmt.Println("Network", build.NetworkName())
 		log.Println("Commit:", build.Commit())
 		log.Println("Build Date:", build.BuildTime())
 		return
 	} else if flag.Arg(0) == "seed" {
 		log.Println("Seed phrase:")
 		fmt.Println(wallet.NewSeedPhrase())
+		return
+	} else if flag.Arg(0) != "" {
+		flag.Usage()
 		return
 	}
 
