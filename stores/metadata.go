@@ -1937,8 +1937,8 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			}
 		}
 
-		// ensure the sector exists
-		if err := createOrUpdateSector(tx, sectors); err != nil {
+		// ensure the sectors exists
+		if err := upsertSectors(tx, sectors); err != nil {
 			return fmt.Errorf("failed to create sector: %w", err)
 		}
 
@@ -2229,7 +2229,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	// create sector that don't exist yet
-	if err := createOrUpdateSector(tx, sectors); err != nil {
+	if err := upsertSectors(tx, sectors); err != nil {
 		return fmt.Errorf("failed to create sectors: %w", err)
 	}
 
@@ -3077,9 +3077,9 @@ func validateSort(sortBy, sortDir string) error {
 	return nil
 }
 
-// createOrUpdateSector creates a sector or updates it if it exists already. The
+// upsertSectors creates a sector or updates it if it exists already. The
 // resulting ID is set on the input sector.
-func createOrUpdateSector(tx *gorm.DB, sectors []dbSector) error {
+func upsertSectors(tx *gorm.DB, sectors []dbSector) error {
 	if len(sectors) == 0 {
 		return nil // nothing to do
 	}
