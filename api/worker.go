@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -216,14 +215,6 @@ type (
 
 	UploadMultipartUploadPartResponse struct {
 		ETag string `json:"etag"`
-	}
-
-	GetObjectResponse struct {
-		Content     io.ReadCloser  `json:"content"`
-		ContentType string         `json:"contentType"`
-		ModTime     TimeRFC3339    `json:"modTime"`
-		Range       *DownloadRange `json:"range,omitempty"`
-		Size        int64          `json:"size"`
 	}
 )
 

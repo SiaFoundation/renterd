@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
@@ -37,6 +38,9 @@ type (
 
 		mu sync.Mutex
 		c  *mockContract
+
+		hpt          hostdb.HostPriceTable
+		hptBlockChan chan struct{}
 	}
 
 	mockHostManager struct {
@@ -89,6 +93,14 @@ var (
 	errSlabNotFound      = errors.New("slab not found")
 	errSectorOutOfBounds = errors.New("sector out of bounds")
 )
+
+func (c contractsMap) values() []api.ContractMetadata {
+	var contracts []api.ContractMetadata
+	for _, contract := range c {
+		contracts = append(contracts, contract)
+	}
+	return contracts
+}
 
 func (m *mockMemory) Release()           {}
 func (m *mockMemory) ReleaseSome(uint64) {}
@@ -314,8 +326,9 @@ func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 	return
 }
 
-func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	return
+func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hostdb.HostPriceTable, error) {
+	<-h.hptBlockChan
+	return h.hpt, nil
 }
 
 func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
@@ -363,15 +376,17 @@ func (cl *mockContractLocker) KeepaliveContract(ctx context.Context, fcid types.
 func newMockHosts(n int) []*mockHost {
 	hosts := make([]*mockHost, n)
 	for i := range hosts {
-		hosts[i] = newMockHost(types.PublicKey{byte(i)}, nil)
+		hosts[i] = newMockHost(types.PublicKey{byte(i)}, newTestHostPriceTable(time.Now().Add(time.Minute)), nil)
 	}
 	return hosts
 }
 
-func newMockHost(hk types.PublicKey, c *mockContract) *mockHost {
+func newMockHost(hk types.PublicKey, hpt hostdb.HostPriceTable, c *mockContract) *mockHost {
 	return &mockHost{
 		hk: hk,
 		c:  c,
+
+		hpt: hpt,
 	}
 }
 
@@ -455,10 +470,12 @@ func newMockWorker(numHosts int) *mockWorker {
 	}
 }
 
-func (c contractsMap) values() []api.ContractMetadata {
-	var contracts []api.ContractMetadata
-	for _, contract := range c {
-		contracts = append(contracts, contract)
+func newTestHostPriceTable(expiry time.Time) hostdb.HostPriceTable {
+	var uid rhpv3.SettingsID
+	frand.Read(uid[:])
+
+	return hostdb.HostPriceTable{
+		HostPriceTable: rhpv3.HostPriceTable{UID: uid, Validity: time.Minute},
+		Expiry:         expiry,
 	}
-	return contracts
 }

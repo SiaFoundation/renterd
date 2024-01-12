@@ -318,15 +318,6 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	return
 }
 
-func (w *worker) fetchPriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	h := w.Host(hk, types.FileContractID{}, siamuxAddr) // TODO: passing a nil fcid is hacky
-	hpt, err = h.FetchPriceTable(ctx, rev)
-	if err != nil {
-		return hostdb.HostPriceTable{}, err
-	}
-	return hpt, nil
-}
-
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -1016,6 +1007,14 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
+	// parse headers and extract object meta
+	metadata := make(api.ObjectUserMetadata)
+	for k, v := range jc.Request.Header {
+		if strings.HasPrefix(strings.ToLower(k), strings.ToLower(api.ObjectMetadataPrefix)) && len(v) > 0 {
+			metadata[k[len(api.ObjectMetadataPrefix):]] = v[0]
+		}
+	}
+
 	// build options
 	opts := []UploadOption{
 		WithBlockHeight(up.CurrentHeight),
@@ -1023,6 +1022,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		WithMimeType(mimeType),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
+		WithObjectUserMetadata(metadata),
 	}
 
 	// attach gouging checker to the context
