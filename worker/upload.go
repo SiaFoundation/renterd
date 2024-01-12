@@ -31,6 +31,7 @@ var (
 	errNoCandidateUploader = errors.New("no candidate uploader found")
 	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
 	errWorkerShutDown      = errors.New("worker was shut down")
+	errUploadInterrupted   = errors.New("upload was interrupted")
 )
 
 type (
@@ -569,6 +570,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		select {
 		case <-mgr.shutdownCtx.Done():
 			return false, "", errWorkerShutDown
+		case <-ctx.Done():
+			return false, "", errUploadInterrupted
 		case numSlabs = <-numSlabsChan:
 		case res := <-respChan:
 			if res.err != nil {
