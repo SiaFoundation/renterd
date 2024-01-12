@@ -14,10 +14,13 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 type (
+	contractsMap map[types.PublicKey]api.ContractMetadata
+
 	mockContract struct {
 		rev types.FileContractRevision
 
@@ -55,6 +58,18 @@ type (
 		bufferID     uint
 		slabKey      object.EncryptionKey
 		data         []byte
+	}
+
+	mockWorker struct {
+		cl *mockContractLocker
+		hm *mockHostManager
+		mm *mockMemoryManager
+		os *mockObjectStore
+
+		dl *downloadManager
+		ul *uploadManager
+
+		contracts contractsMap
 	}
 )
 
@@ -192,36 +207,35 @@ func (os *mockObjectStore) FetchPartialSlab(ctx context.Context, key object.Encr
 	return packedSlab.data[offset : offset+length], nil
 }
 
-func (os *mockObjectStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
+func (os *mockObjectStore) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
-	for _, objects := range os.objects {
-		for _, object := range objects {
-			for _, slab := range object.Slabs {
-				if slab.Slab.Key.String() == key.String() {
-					return slab.Slab, nil
-				}
+	os.forEachObject(func(bucket, path string, o object.Object) {
+		for _, s := range o.Slabs {
+			if s.Slab.Key.String() == key.String() {
+				slab = s.Slab
+				return
 			}
 		}
-	}
-	return object.Slab{}, errSlabNotFound
+		err = errSlabNotFound
+	})
+	return
 }
 
 func (os *mockObjectStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
-	for bucket, objects := range os.objects {
-		for path, object := range objects {
-			for i, slab := range object.Slabs {
-				if slab.Key.String() == s.Key.String() {
-					os.objects[bucket][path].Slabs[i].Slab = s
-					return nil
-				}
+	os.forEachObject(func(bucket, path string, o object.Object) {
+		for i, slab := range o.Slabs {
+			if slab.Key.String() == s.Key.String() {
+				os.objects[bucket][path].Slabs[i].Slab = s
+				return
 			}
 		}
-	}
+	})
+
 	return nil
 }
 
@@ -252,13 +266,11 @@ func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	}
 
 	slabKeyToSlab := make(map[string]*object.Slab)
-	for bucket, objects := range os.objects {
-		for path, object := range objects {
-			for i, slab := range object.Slabs {
-				slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][path].Slabs[i].Slab
-			}
+	os.forEachObject(func(bucket, path string, o object.Object) {
+		for i, slab := range o.Slabs {
+			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][path].Slabs[i].Slab
 		}
-	}
+	})
 
 	for _, slab := range slabs {
 		key := bufferIDToKey[slab.BufferID]
@@ -267,6 +279,14 @@ func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	}
 
 	return nil
+}
+
+func (os *mockObjectStore) forEachObject(fn func(bucket, path string, o object.Object)) {
+	for bucket, objects := range os.objects {
+		for path, object := range objects {
+			fn(bucket, path, object)
+		}
+	}
 }
 
 func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
@@ -397,4 +417,48 @@ func newMockSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
 	var sector [rhpv2.SectorSize]byte
 	frand.Read(sector[:])
 	return &sector, rhpv2.SectorRoot(&sector)
+}
+
+func newMockWorker(numHosts int) *mockWorker {
+	// create hosts and contracts
+	hosts := newMockHosts(numHosts)
+	contracts := newMockContracts(hosts)
+
+	// create dependencies
+	cl := newMockContractLocker(contracts)
+	hm := newMockHostManager(hosts)
+	os := newMockObjectStore()
+	mm := &mockMemoryManager{}
+
+	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
+	ul := newUploadManager(context.Background(), hm, mm, os, cl, 0, 0, time.Minute, zap.NewNop().Sugar())
+
+	// create contract metadata
+	metadatas := make(contractsMap)
+	for _, h := range hosts {
+		metadatas[h.hk] = api.ContractMetadata{
+			ID:      h.c.rev.ParentID,
+			HostKey: h.hk,
+		}
+	}
+
+	return &mockWorker{
+		cl: cl,
+		hm: hm,
+		mm: mm,
+		os: os,
+
+		dl: dl,
+		ul: ul,
+
+		contracts: metadatas,
+	}
+}
+
+func (c contractsMap) values() []api.ContractMetadata {
+	var contracts []api.ContractMetadata
+	for _, contract := range c {
+		contracts = append(contracts, contract)
+	}
+	return contracts
 }

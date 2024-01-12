@@ -134,25 +134,14 @@ func TestUpload(t *testing.T) {
 }
 
 func TestUploadPackedSlab(t *testing.T) {
-	// create upload params
-	params := testParameters(t.Name())
+	// mock worker
+	w := newMockWorker(testRedundancySettings.TotalShards * 2)
 
-	// create test hosts and contracts
-	hosts := newMockHosts(params.rs.TotalShards * 2)
-	contracts := newMockContracts(hosts)
-
-	// mock dependencies
-	cl := newMockContractLocker(contracts)
-	hm := newMockHostManager(hosts)
-	os := newMockObjectStore()
-	mm := &mockMemoryManager{}
-
-	// enable upload packing
-	params.packing = true
-
-	// create managers
-	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
-	ul := newUploadManager(context.Background(), hm, mm, os, cl, 0, 0, time.Minute, zap.NewNop().Sugar())
+	// convenience variables
+	os := w.os
+	mm := w.mm
+	dl := w.dl
+	ul := w.ul
 
 	// create test data
 	data := make([]byte, 128)
@@ -160,17 +149,12 @@ func TestUploadPackedSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// create upload contracts
-	metadatas := make([]api.ContractMetadata, len(contracts))
-	for i, h := range hosts {
-		metadatas[i] = api.ContractMetadata{
-			ID:      h.c.rev.ParentID,
-			HostKey: h.hk,
-		}
-	}
+	// create upload params
+	params := testParameters(t.Name())
+	params.packing = true
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), metadatas, params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.contracts.values(), params, lockingPriorityUpload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +172,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), metadatas)
+	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts.values())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -206,7 +190,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	mem := mm.AcquireMemory(context.Background(), uint64(params.rs.TotalShards*rhpv2.SectorSize))
 
 	// upload the packed slab
-	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, metadatas, 0, lockingPriorityUpload)
+	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.contracts.values(), 0, lockingPriorityUpload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +208,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), metadatas)
+	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts.values())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -233,22 +217,14 @@ func TestUploadPackedSlab(t *testing.T) {
 }
 
 func TestMigrateShards(t *testing.T) {
-	// create upload params
-	params := testParameters(t.Name())
+	// mock worker
+	w := newMockWorker(testRedundancySettings.TotalShards * 2)
 
-	// create test hosts and contracts
-	hosts := newMockHosts(params.rs.TotalShards * 2)
-	contracts := newMockContracts(hosts)
-
-	// mock dependencies
-	cl := newMockContractLocker(contracts)
-	hm := newMockHostManager(hosts)
-	os := newMockObjectStore()
-	mm := &mockMemoryManager{}
-
-	// create managers
-	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
-	ul := newUploadManager(context.Background(), hm, mm, os, cl, 0, 0, time.Minute, zap.NewNop().Sugar())
+	// convenience variables
+	os := w.os
+	mm := w.mm
+	dl := w.dl
+	ul := w.ul
 
 	// create test data
 	data := make([]byte, 128)
@@ -256,17 +232,11 @@ func TestMigrateShards(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// create upload contracts
-	metadatas := make([]api.ContractMetadata, len(contracts))
-	for i, h := range hosts {
-		metadatas[i] = api.ContractMetadata{
-			ID:      h.c.rev.ParentID,
-			HostKey: h.hk,
-		}
-	}
+	// create upload params
+	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), metadatas, params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.contracts.values(), params, lockingPriorityUpload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +267,7 @@ func TestMigrateShards(t *testing.T) {
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, metadatas)
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.contracts.values())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,21 +282,18 @@ func TestMigrateShards(t *testing.T) {
 	shards = shards[:len(badIndices)]
 
 	// recreate upload contracts
-	metadatas = metadatas[:0]
-	for _, h := range hosts {
-		_, used := usedHosts[h.hk]
-		_, bad := badHosts[h.hk]
+	contracts := make([]api.ContractMetadata, 0)
+	for hk := range w.hm.hosts {
+		_, used := usedHosts[hk]
+		_, bad := badHosts[hk]
 		if !used && !bad {
-			metadatas = append(metadatas, api.ContractMetadata{
-				ID:      h.c.rev.ParentID,
-				HostKey: h.hk,
-			})
+			contracts = append(contracts, w.contracts[hk])
 		}
 	}
 
 	// migrate those shards away from bad hosts
 	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
-	err = ul.MigrateShards(context.Background(), &o.Object.Object.Slabs[0].Slab, badIndices, shards, testContractSet, metadatas, 0, lockingPriorityUpload, mem)
+	err = ul.MigrateShards(context.Background(), &o.Object.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,24 +310,21 @@ func TestMigrateShards(t *testing.T) {
 	// assert none of the shards are on bad hosts
 	for _, shard := range slab.Shards {
 		if _, bad := badHosts[shard.LatestHost]; bad {
-			t.Fatal("shard is on bad host")
+			t.Fatal("shard is on bad host", shard.LatestHost)
 		}
 	}
 
 	// create download contracts
-	metadatas = make([]api.ContractMetadata, len(contracts))
-	for i, h := range hosts {
-		if _, bad := badHosts[h.hk]; !bad {
-			metadatas[i] = api.ContractMetadata{
-				ID:      h.c.rev.ParentID,
-				HostKey: h.hk,
-			}
+	contracts = contracts[:0]
+	for hk := range w.hm.hosts {
+		if _, bad := badHosts[hk]; !bad {
+			contracts = append(contracts, w.contracts[hk])
 		}
 	}
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), metadatas)
+	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), contracts)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {

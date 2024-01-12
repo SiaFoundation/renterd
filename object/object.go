@@ -154,40 +154,6 @@ func (o Object) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error)
 	return o.Key.Encrypt(r, offset)
 }
 
-// SplitSlabs splits a set of slabs into slices comprising objects with the
-// specified lengths.
-func SplitSlabs(slabs []Slab, lengths []int) [][]SlabSlice {
-	s := slabs[0]
-	slabs = slabs[1:]
-	objects := make([][]SlabSlice, len(lengths))
-	offset := 0
-	for i, l := range lengths {
-		for l > s.Length() {
-			objects[i] = append(objects[i], SlabSlice{
-				Slab:   s,
-				Offset: uint32(offset),
-				Length: uint32(s.Length() - offset),
-			})
-			l -= s.Length() - offset
-			s, slabs = slabs[0], slabs[1:]
-			offset = 0
-		}
-		objects[i] = append(objects[i], SlabSlice{
-			Slab:   s,
-			Offset: uint32(offset),
-			Length: uint32(l),
-		})
-		offset += l
-	}
-	return objects
-}
-
-// SingleSlabs converts a set of slabs into slices comprising a single object
-// with the specified length.
-func SingleSlabs(slabs []Slab, length int) []SlabSlice {
-	return SplitSlabs(slabs, []int{length})[0]
-}
-
 type rekeyStream struct {
 	key []byte
 	c   *chacha20.Cipher
