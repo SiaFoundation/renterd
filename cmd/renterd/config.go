@@ -336,7 +336,12 @@ func cmdBuildConfig() {
 	setAdvancedConfig()
 
 	// write the config file
-	f, err := os.Create("renterd.yml")
+	configPath := "renterd.yml"
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
+		configPath = str
+	}
+
+	f, err := os.Create(configPath)
 	if err != nil {
 		stdoutFatalError("Failed to create config file: " + err.Error())
 		return
