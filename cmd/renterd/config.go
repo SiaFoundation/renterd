@@ -338,14 +338,14 @@ func cmdBuildConfig() {
 	// write the config file
 	f, err := os.Create("renterd.yml")
 	if err != nil {
-		stdoutFatalError("failed to create config file: " + err.Error())
+		stdoutFatalError("Failed to create config file: " + err.Error())
 		return
 	}
 	defer f.Close()
 
 	enc := yaml.NewEncoder(f)
 	if err := enc.Encode(cfg); err != nil {
-		stdoutFatalError("failed to encode config file: " + err.Error())
+		stdoutFatalError("Failed to encode config file: " + err.Error())
 		return
 	}
 }
