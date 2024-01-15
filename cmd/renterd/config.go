@@ -304,34 +304,32 @@ func cmdBuildConfig() {
 		}
 	}
 
+	fmt.Println("")
 	if cfg.Seed != "" {
-		fmt.Println("")
 		fmt.Println(wrapANSI("\033[33m", "A wallet seed phrase is already set.", "\033[0m"))
 		fmt.Println("If you change your wallet seed phrase, your renter will not be able to access Siacoin associated with this wallet.")
 		fmt.Println("Ensure that you have backed up your wallet seed phrase before continuing.")
 		if promptYesNo("Would you like to change your wallet seed phrase?") {
 			setSeedPhrase()
-			fmt.Println("")
 		}
 	} else {
 		setSeedPhrase()
-		fmt.Println("")
 	}
 
+	fmt.Println("")
 	if cfg.HTTP.Password != "" {
-		fmt.Println("")
 		fmt.Println(wrapANSI("\033[33m", "An admin password is already set.", "\033[0m"))
 		fmt.Println("If you change your admin password, you will need to update any scripts or applications that use the admin API.")
 		if promptYesNo("Would you like to change your admin password?") {
 			setAPIPassword()
-			fmt.Println("")
 		}
 	} else {
 		setAPIPassword()
-		fmt.Println("")
 	}
 
+	fmt.Println("")
 	setS3Config()
+
 	fmt.Println("")
 	setAdvancedConfig()
 
