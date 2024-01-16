@@ -3857,3 +3857,135 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSlabCleanupTrigger(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create contract set
+	cs := dbContractSet{}
+	if err := ss.db.Create(&cs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create buffered slab
+	bs := dbBufferedSlab{
+		Filename: "foo",
+	}
+	if err := ss.db.Create(&bs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create objects
+	obj1 := dbObject{
+		ObjectID:   "1",
+		DBBucketID: 1,
+		Health:     1,
+	}
+	if err := ss.db.Create(&obj1).Error; err != nil {
+		t.Fatal(err)
+	}
+	obj2 := dbObject{
+		ObjectID:   "2",
+		DBBucketID: 1,
+		Health:     1,
+	}
+	if err := ss.db.Create(&obj2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create a slab
+	ek, _ := object.GenerateEncryptionKey().MarshalBinary()
+	slab := dbSlab{
+		DBContractSet:    cs,
+		Health:           1,
+		Key:              secretKey(ek),
+		HealthValidUntil: 100,
+	}
+	if err := ss.db.Create(&slab).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// reference the slab
+	slice1 := dbSlice{
+		DBObjectID: &obj1.ID,
+		DBSlabID:   slab.ID,
+	}
+	if err := ss.db.Create(&slice1).Error; err != nil {
+		t.Fatal(err)
+	}
+	slice2 := dbSlice{
+		DBObjectID: &obj2.ID,
+		DBSlabID:   slab.ID,
+	}
+	if err := ss.db.Create(&slice2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// delete the object
+	if err := ss.db.Delete(&obj1).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// check slice count
+	var slabCntr int64
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
+
+	// delete second object
+	if err := ss.db.Delete(&obj2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 0 {
+		t.Fatalf("expected 0 slabs, got %v", slabCntr)
+	}
+
+	// create another object that references a slab with buffer
+	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
+	bufferedSlab := dbSlab{
+		DBBufferedSlabID: bs.ID,
+		DBContractSet:    cs,
+		Health:           1,
+		Key:              ek,
+		HealthValidUntil: 100,
+	}
+	if err := ss.db.Create(&bufferedSlab).Error; err != nil {
+		t.Fatal(err)
+	}
+	obj3 := dbObject{
+		ObjectID:   "3",
+		DBBucketID: 1,
+		Health:     1,
+	}
+	if err := ss.db.Create(&obj3).Error; err != nil {
+		t.Fatal(err)
+	}
+	slice := dbSlice{
+		DBObjectID: &obj3.ID,
+		DBSlabID:   bufferedSlab.ID,
+	}
+	if err := ss.db.Create(&slice).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
+
+	// delete third object
+	if err := ss.db.Delete(&obj3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
+}
