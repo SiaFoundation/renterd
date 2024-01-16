@@ -43,24 +43,24 @@ jobs:
             autopilot
             bus bus/client
             worker worker/client
-      # - name: Test
-      #   uses: n8maninger/action-golang-test@v1
-      #   with:
-      #     args: "-race;-short"
+      - name: Test
+        uses: n8maninger/action-golang-test@v1
+        with:
+          args: "-race;-short"
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/testing/..."
-          args: "-race;-tags=testing;-timeout=180m;-count=100;-run=^TestSectorPruning$"
-      # - name: Test Integration - MySQL
-      #   if: matrix.os == 'ubuntu-latest'
-      #   uses: n8maninger/action-golang-test@v1
-      #   env:
-      #     RENTERD_DB_URI: 127.0.0.1:3800
-      #     RENTERD_DB_USER: root
-      #     RENTERD_DB_PASSWORD: test
-      #   with:
-      #     package: "./internal/testing/..."
-      #     args: "-race;-tags=testing;-timeout=30m"
+          args: "-race;-tags=testing;-timeout=30m"
+      - name: Test Integration - MySQL
+        if: matrix.os == 'ubuntu-latest'
+        uses: n8maninger/action-golang-test@v1
+        env:
+          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_USER: root
+          RENTERD_DB_PASSWORD: test
+        with:
+          package: "./internal/testing/..."
+          args: "-race;-tags=testing;-timeout=30m"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
