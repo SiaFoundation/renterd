@@ -150,6 +150,9 @@ func TestSectorPruning(t *testing.T) {
 	// wait until we have accounts
 	cluster.WaitForAccounts()
 
+	// wait until we have a contract set
+	cluster.WaitForContractSetContracts(cfg.Contracts.Set, int(cfg.Contracts.Amount))
+
 	// add several objects
 	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
