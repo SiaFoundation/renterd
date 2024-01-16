@@ -245,7 +245,9 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 			ListSpendingHi:        unsigned64(metric.ListSpending.Hi),
 		}
 	}
-	return s.dbMetrics.Create(&dbMetrics).Error
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
 }
 
 func (s *SQLStore) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
@@ -263,7 +265,9 @@ func (s *SQLStore) RecordContractPruneMetric(ctx context.Context, metrics ...api
 			Duration:  metric.Duration,
 		}
 	}
-	return s.dbMetrics.Create(&dbMetrics).Error
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
 }
 
 func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
@@ -277,7 +281,9 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...
 			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
-	return s.dbMetrics.Create(&dbMetrics).Error
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
 }
 
 func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
@@ -289,7 +295,9 @@ func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.C
 			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
-	return s.dbMetrics.Create(&dbMetrics).Error
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
 }
 
 func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
@@ -305,7 +313,9 @@ func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.Wallet
 			UnconfirmedHi: unsigned64(metric.Unconfirmed.Hi),
 		}
 	}
-	return s.dbMetrics.Create(&dbMetrics).Error
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
 }
 
 func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
@@ -319,7 +329,9 @@ func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.P
 			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
-	return s.dbMetrics.Create(dbMetrics).Error
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
 }
 
 func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
