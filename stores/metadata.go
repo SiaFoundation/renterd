@@ -1841,7 +1841,7 @@ func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.S
 		Preload("Shards.Contracts.Host").
 		Take(&slab)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return object.Slab{}, api.ErrObjectNotFound
+		return object.Slab{}, api.ErrSlabNotFound
 	}
 	return slab.convert()
 }
