@@ -25,6 +25,16 @@ const (
 	// redistributeBatchSize is the number of outputs to redistribute per txn to
 	// avoid creating a txn that is too large.
 	redistributeBatchSize = 10
+
+	// transactionDefragThreshold is the number of utxos at which the wallet
+	// will attempt to defrag itself by including small utxos in transactions.
+	transactionDefragThreshold = 30
+	// maxInputsForDefrag is the maximum number of inputs a transaction can
+	// have before the wallet will stop adding inputs
+	maxInputsForDefrag = 30
+	// maxDefragUTXOs is the maximum number of utxos that will be added to a
+	// transaction when defragging
+	maxDefragUTXOs = 10
 )
 
 // ErrInsufficientBalance is returned when there aren't enough unused outputs to
@@ -215,11 +225,11 @@ func (w *SingleAddressWallet) Transactions(before, since time.Time, offset, limi
 // inputs will not be available to future calls to FundTransaction unless
 // ReleaseInputs is called or enough time has passed.
 func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	if amount.IsZero() {
 		return nil, nil
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	// fetch all unspent siacoin elements
 	utxos, err := w.store.UnspentSiacoinElements(false)
@@ -245,34 +255,67 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 		utxos = append(utxos, tpoolUtxos...)
 	}
 
-	var outputSum types.Currency
-	var fundingElements []SiacoinElement
+	// remove locked and spent outputs
+	usableUTXOs := utxos[:0]
 	for _, sce := range utxos {
-		if w.isOutputUsed(sce.ID) || w.tpoolSpent[types.SiacoinOutputID(sce.ID)] || cs.Index.Height < sce.MaturityHeight {
+		if w.isOutputUsed(sce.ID) {
 			continue
 		}
-		fundingElements = append(fundingElements, sce)
-		outputSum = outputSum.Add(sce.Value)
-		if outputSum.Cmp(amount) >= 0 {
+		usableUTXOs = append(usableUTXOs, sce)
+	}
+
+	// fund the transaction using the largest utxos first
+	var selected []SiacoinElement
+	var inputSum types.Currency
+	for i, sce := range usableUTXOs {
+		if inputSum.Cmp(amount) >= 0 {
+			usableUTXOs = usableUTXOs[i:]
 			break
 		}
+		selected = append(selected, sce)
+		inputSum = inputSum.Add(sce.Value)
 	}
-	if outputSum.Cmp(amount) < 0 {
-		return nil, fmt.Errorf("%w: outputSum: %v, amount: %v", ErrInsufficientBalance, outputSum.String(), amount.String())
-	} else if outputSum.Cmp(amount) > 0 {
+
+	// if the transaction can't be funded, return an error
+	if inputSum.Cmp(amount) < 0 {
+		return nil, fmt.Errorf("%w: inputSum: %v, amount: %v", ErrInsufficientBalance, inputSum.String(), amount.String())
+	}
+
+	// check if remaining utxos should be defragged
+	txnInputs := len(txn.SiacoinInputs) + len(selected)
+	if len(usableUTXOs) > transactionDefragThreshold && txnInputs < maxInputsForDefrag {
+		// add the smallest utxos to the transaction
+		defraggable := usableUTXOs
+		if len(defraggable) > maxDefragUTXOs {
+			defraggable = defraggable[len(defraggable)-maxDefragUTXOs:]
+		}
+		for i := len(defraggable) - 1; i >= 0; i-- {
+			if txnInputs >= maxInputsForDefrag {
+				break
+			}
+
+			sce := defraggable[i]
+			selected = append(selected, sce)
+			inputSum = inputSum.Add(sce.Value)
+			txnInputs++
+		}
+	}
+
+	// add a change output if necessary
+	if inputSum.Cmp(amount) > 0 {
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			Value:   outputSum.Sub(amount),
+			Value:   inputSum.Sub(amount),
 			Address: w.addr,
 		})
 	}
 
-	toSign := make([]types.Hash256, len(fundingElements))
-	for i, sce := range fundingElements {
+	toSign := make([]types.Hash256, len(selected))
+	for i, sce := range selected {
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(sce.ID),
-			UnlockConditions: StandardUnlockConditions(w.priv.PublicKey()),
+			UnlockConditions: types.StandardUnlockConditions(w.priv.PublicKey()),
 		})
-		toSign[i] = sce.ID
+		toSign[i] = types.Hash256(sce.ID)
 		w.lastUsed[sce.ID] = time.Now()
 	}
 

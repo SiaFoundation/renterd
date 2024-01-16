@@ -318,6 +318,9 @@ func main() {
 		log.Println("Seed phrase:")
 		fmt.Println(wallet.NewSeedPhrase())
 		return
+	} else if flag.Arg(0) == "config" {
+		cmdBuildConfig()
+		return
 	} else if flag.Arg(0) != "" {
 		flag.Usage()
 		return

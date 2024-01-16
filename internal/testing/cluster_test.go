@@ -58,16 +58,6 @@ func TestNewTestCluster(t *testing.T) {
 	contracts := cluster.WaitForContracts()
 	contract = contracts[0]
 
-	// Make sure the contract set exists.
-	sets, err := cluster.Bus.ContractSets(context.Background())
-	tt.OK(err)
-	if len(sets) != 1 {
-		t.Fatal("invalid number of setse", len(sets))
-	}
-	if sets[0] != testAutopilotConfig.Contracts.Set {
-		t.Fatal("set name should be 'autopilot' but was", sets[0])
-	}
-
 	// Verify startHeight and endHeight of the contract.
 	cfg, currentPeriod := cluster.AutopilotConfig(context.Background())
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
@@ -77,18 +67,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("TotalCost and ContractPrice shouldn't be zero")
 	}
 
-	// Make sure the contracts are part of the set.
-	busContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range busContracts {
-		if len(c.ContractSets) != 1 {
-			t.Fatal("contract should be part of one set", len(c.ContractSets))
-		} else if c.ContractSets[0] != sets[0] {
-			t.Fatalf("contract should be part of set %v but was %v", sets[0], c.ContractSets[0])
-		}
-	}
+	// Wait for contract set to form
+	cluster.WaitForContractSetContracts(cfg.Contracts.Set, int(cfg.Contracts.Amount))
 
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
