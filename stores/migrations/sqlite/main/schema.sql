@@ -146,3 +146,32 @@ CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`)
 -- dbObjectUserMetadata
 CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer DEFAULT NULL,`db_multipart_upload_id` integer DEFAULT NULL,`key` text NOT NULL,`value` text, CONSTRAINT `fk_object_user_metadata` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE, CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL);
 CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db_object_id`,`db_multipart_upload_id`,`key`);
+
+-- dbSlab cleanup triggers
+CREATE TRIGGER prune_slabs_object_delete
+BEFORE DELETE ON objects
+BEGIN
+    DELETE FROM slabs
+		WHERE id IN (
+		SELECT slabs.id
+		FROM slabs
+		INNER JOIN slices ON slices.db_slab_id = slabs.id
+		WHERE slices.db_object_id = OLD.id
+		AND slices.db_multipart_part_id IS NULL
+		AND slabs.db_buffered_slab_id IS NULL
+	);
+END;
+
+CREATE TRIGGER prune_slabs_multipart_delete
+BEFORE DELETE ON multipart_parts
+BEGIN
+    DELETE FROM slabs
+		WHERE id IN (
+		SELECT slabs.id
+		FROM slabs
+		INNER JOIN slices ON slices.db_slab_id = slabs.id
+		WHERE slices.db_object_id IS NULL
+		AND slices.db_multipart_part_id IS OLD.id
+		AND slabs.db_buffered_slab_id IS NULL
+	);
+END;

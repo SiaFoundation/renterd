@@ -40,7 +40,6 @@ var (
 	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
 	errShardRootChanged      = errors.New("shard root changed")
 
-	slabDeleteBatchSizes   = []int64{1000, 10000, 50000, 100000}
 	objectDeleteBatchSizes = []int64{10000, 50000, 100000}
 )
 
@@ -552,7 +551,6 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 		if res.Error != nil {
 			return res.Error
 		}
-		s.scheduleSlabPruning()
 		return nil
 	})
 }
@@ -1425,88 +1423,6 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 	return found
 }
 
-func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	limitIdx := 0
-	for {
-		// wait for trigger
-		select {
-		case <-s.shutdownCtx.Done():
-			return
-		case <-ticker.C:
-		case <-s.slabPruneSigChan:
-		}
-
-		var duration time.Duration
-		var rowsAffected int64
-		err := s.retryTransaction(func(tx *gorm.DB) error {
-			start := time.Now()
-			var res *gorm.DB
-			if !isSQLite(s.db) {
-				res = tx.Exec(`
-			DELETE slabs
-			FROM slabs
-			INNER JOIN (
-			    SELECT slabs.id
-			    FROM slabs
-			    LEFT JOIN slices ON slices.db_slab_id = slabs.id
-			    WHERE slices.db_object_id IS NULL
-			    AND slices.db_multipart_part_id IS NULL
-			    AND slabs.db_buffered_slab_id IS NULL
-			    LIMIT ?
-			) i ON slabs.id = i.id;
-		`, slabDeleteBatchSizes[limitIdx])
-			} else {
-				res = tx.Exec(`
-			DELETE FROM slabs
-			WHERE id IN (
-				SELECT slabs.id
-				FROM slabs
-				LEFT JOIN slices ON slices.db_slab_id = slabs.id
-				WHERE slices.db_object_id IS NULL
-				AND slices.db_multipart_part_id IS NULL
-				AND slabs.db_buffered_slab_id IS NULL
-				LIMIT ?
-			);
-		`, slabDeleteBatchSizes[limitIdx])
-			}
-			duration = time.Since(start)
-			rowsAffected = res.RowsAffected
-			return res.Error
-		})
-		if err != nil {
-			s.logger.Errorw("failed to prune slabs", zap.Error(err))
-		}
-
-		// if we deleted the maximum amount of rows, we schedule another pruning
-		// after the cooldown
-		if rowsAffected == slabDeleteBatchSizes[limitIdx] {
-			s.scheduleSlabPruning()
-		}
-
-		// increase the batch size if possible
-		if duration < batchDurationThreshold && limitIdx < len(slabDeleteBatchSizes)-1 {
-			limitIdx++
-		}
-
-		// cooldown
-		select {
-		case <-s.shutdownCtx.Done():
-			return
-		case <-time.After(cooldown):
-		}
-	}
-}
-
-func (s *SQLStore) scheduleSlabPruning() {
-	select {
-	case s.slabPruneSigChan <- struct{}{}:
-	default:
-	}
-}
-
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
 	fcids := make([]fileContractID, 0, len(usedContracts))
 	for _, hostFCIDs := range usedContracts {
@@ -1570,9 +1486,6 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				Delete(&dbObject{})
 			if err := resp.Error; err != nil {
 				return err
-			}
-			if resp.RowsAffected > 0 {
-				s.scheduleSlabPruning()
 			}
 		}
 		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
@@ -2693,7 +2606,6 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDel
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	}
-	s.scheduleSlabPruning()
 	return
 }
 
@@ -2734,9 +2646,6 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 		if duration < batchDurationThreshold && batchSizeIdx < len(objectDeleteBatchSizes)-1 {
 			batchSizeIdx++
 		}
-	}
-	if numDeleted > 0 {
-		s.scheduleSlabPruning()
 	}
 	return numDeleted, nil
 }

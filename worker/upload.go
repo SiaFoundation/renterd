@@ -506,14 +506,17 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		for {
 			select {
 			case <-mgr.shutdownCtx.Done():
+				mgr.logger.Debug("CASE1")
 				return // interrupted
 			case <-ctx.Done():
+				mgr.logger.Debug("CASE2")
 				return // interrupted
 			default:
 			}
 			// acquire memory
 			mem := mgr.mm.AcquireMemory(ctx, redundantSize)
 			if mem == nil {
+				mgr.logger.Debug("CASE3")
 				return // interrupted
 			}
 
@@ -530,6 +533,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 					numSlabs-- // don't wait on partial slab
 				}
 				numSlabsChan <- numSlabs
+				mgr.logger.Debugw("CASE4", "numSlabs", numSlabs, "slabIndex", slabIndex, "partialSlab", partialSlab != nil)
 				return
 			} else if err != nil && err != io.ErrUnexpectedEOF {
 				mem.Release()
@@ -539,6 +543,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 				case respChan <- slabUploadResponse{err: err}:
 				case <-ctx.Done():
 				}
+				mgr.logger.Debug("CASE5")
 				return
 			} else if up.packing && errors.Is(err, io.ErrUnexpectedEOF) {
 				mem.Release()

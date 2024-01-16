@@ -419,3 +419,34 @@ CREATE TABLE `object_user_metadata` (
   CONSTRAINT `fk_object_user_metadata` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- dbSlab cleanup triggers
+CREATE TRIGGER prune_slabs_object_delete
+BEFORE DELETE ON objects
+BEGIN
+    DELETE slabs
+		FROM slabs
+		INNER JOIN (
+		    SELECT slabs.id
+		    FROM slabs
+		    INNER JOIN slices ON slices.db_slab_id = slabs.id
+		    WHERE slices.db_object_id IS OLD.id
+		    AND slices.db_multipart_part_id IS NULL
+		    AND slabs.db_buffered_slab_id IS NULL
+		) i ON slabs.id = i.id;
+END;
+
+CREATE TRIGGER prune_slabs_multipart_delete
+BEFORE DELETE ON multipart_parts
+BEGIN
+    DELETE slabs
+		FROM slabs
+		INNER JOIN (
+		    SELECT slabs.id
+		    FROM slabs
+		    INNER JOIN slices ON slices.db_slab_id = slabs.id
+		    WHERE slices.db_object_id IS NULL
+		    AND slices.db_multipart_part_id IS OLD.id
+		    AND slabs.db_buffered_slab_id IS NULL
+		) i ON slabs.id = i.id;
+END;

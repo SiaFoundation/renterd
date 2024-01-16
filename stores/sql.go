@@ -57,8 +57,6 @@ type (
 		SlabBufferCompletionThreshold int64
 		Logger                        *zap.SugaredLogger
 		GormLogger                    glogger.Interface
-		SlabPruningInterval           time.Duration
-		SlabPruningCooldown           time.Duration
 		RetryTransactionIntervals     []time.Duration
 	}
 
@@ -286,17 +284,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
-
-	// Start slab pruning loop.
-	if cfg.SlabPruningInterval == 0 || cfg.SlabPruningCooldown == 0 {
-		return nil, modules.ConsensusChangeID{}, errors.New("slab pruning interval and cooldown must be non-zero")
-	}
-	ss.wg.Add(1)
-	go func() {
-		ss.slabPruningLoop(cfg.SlabPruningInterval, cfg.SlabPruningCooldown)
-		ss.wg.Done()
-	}()
-
 	return ss, ccid, nil
 }
 
