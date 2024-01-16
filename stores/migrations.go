@@ -50,6 +50,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, "00001_object_metadata", logger)
 			},
 		},
+		{
+			ID: "00002_prune_slabs_trigger",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, "00002_prune_slabs_trigger", logger)
+			},
+		},
 	}
 
 	// Create migrator.

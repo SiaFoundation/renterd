@@ -422,10 +422,10 @@ CREATE TABLE `object_user_metadata` (
 
 -- dbSlab cleanup triggers
 CREATE TRIGGER delete_from_slabs_after_slice_delete
-AFTER DELETE ON slices
+AFTER DELETE
+ON slices FOR EACH ROW
 BEGIN
-    DELETE slabs
-    FROM slabs
+    DELETE FROM slabs
     WHERE slabs.id = OLD.db_slab_id
     AND slabs.db_buffered_slab_id IS NULL
     AND NOT EXISTS (
