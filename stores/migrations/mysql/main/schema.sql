@@ -424,13 +424,11 @@ CREATE TABLE `object_user_metadata` (
 CREATE TRIGGER delete_from_slabs_after_slice_delete
 AFTER DELETE
 ON slices FOR EACH ROW
-BEGIN
-    DELETE FROM slabs
-    WHERE slabs.id = OLD.db_slab_id
-    AND slabs.db_buffered_slab_id IS NULL
-    AND NOT EXISTS (
-        SELECT 1
-        FROM slices
-        WHERE slices.db_slab_id = OLD.db_slab_id
-    );
-END;
+DELETE FROM slabs
+WHERE slabs.id = OLD.db_slab_id
+AND slabs.db_buffered_slab_id IS NULL
+AND NOT EXISTS (
+    SELECT 1
+    FROM slices
+    WHERE slices.db_slab_id = OLD.db_slab_id
+);
