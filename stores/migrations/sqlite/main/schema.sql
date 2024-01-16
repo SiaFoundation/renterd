@@ -148,30 +148,15 @@ CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`cre
 CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db_object_id`,`db_multipart_upload_id`,`key`);
 
 -- dbSlab cleanup triggers
-CREATE TRIGGER prune_slabs_object_delete
-BEFORE DELETE ON objects
+CREATE TRIGGER delete_from_slabs_after_slice_delete
+AFTER DELETE ON slices
 BEGIN
     DELETE FROM slabs
-		WHERE id IN (
-		SELECT slabs.id
-		FROM slabs
-		INNER JOIN slices ON slices.db_slab_id = slabs.id
-		WHERE slices.db_object_id = OLD.id
-		AND slices.db_multipart_part_id IS NULL
-		AND slabs.db_buffered_slab_id IS NULL
-	);
-END;
-
-CREATE TRIGGER prune_slabs_multipart_delete
-BEFORE DELETE ON multipart_parts
-BEGIN
-    DELETE FROM slabs
-		WHERE id IN (
-		SELECT slabs.id
-		FROM slabs
-		INNER JOIN slices ON slices.db_slab_id = slabs.id
-		WHERE slices.db_object_id IS NULL
-		AND slices.db_multipart_part_id IS OLD.id
-		AND slabs.db_buffered_slab_id IS NULL
-	);
+    WHERE slabs.id = OLD.db_slab_id
+    AND slabs.db_buffered_slab_id IS NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM slices
+        WHERE slices.db_slab_id = OLD.db_slab_id
+    );
 END;
