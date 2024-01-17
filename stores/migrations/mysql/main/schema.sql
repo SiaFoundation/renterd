@@ -422,7 +422,7 @@ CREATE TABLE `object_user_metadata` (
 
 -- dbSlice cleanup trigger
 CREATE TRIGGER delete_from_slices_after_objects_delete
-AFTER DELETE
+BEFORE DELETE
 ON objects FOR EACH ROW
 DELETE FROM slices
 WHERE slices.db_object_id = OLD.id;

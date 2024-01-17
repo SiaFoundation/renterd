@@ -149,7 +149,7 @@ CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db
 
 -- dbSlice cleanup trigger
 CREATE TRIGGER delete_from_slices_after_objects_delete
-AFTER DELETE ON objects
+BEFORE DELETE ON objects
 BEGIN
     DELETE FROM slices
     WHERE slices.db_object_id = OLD.id;
