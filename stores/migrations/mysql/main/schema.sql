@@ -373,7 +373,7 @@ CREATE TABLE `slices` (
   KEY `idx_slices_object_index` (`object_index`),
   KEY `idx_slices_db_multipart_part_id` (`db_multipart_part_id`),
   KEY `idx_slices_db_slab_id` (`db_slab_id`),
-  CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`),
   CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`),
   CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -420,14 +420,28 @@ CREATE TABLE `object_user_metadata` (
   CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbSlice cleanup trigger
+-- dbObject trigger to delete from slices
 CREATE TRIGGER delete_from_slices_after_objects_delete
 BEFORE DELETE
 ON objects FOR EACH ROW
 DELETE FROM slices
 WHERE slices.db_object_id = OLD.id;
 
--- dbSlab cleanup triggers
+-- dbMultipartUpload trigger to delete from dbMultipartPart
+CREATE TRIGGER delete_from_multipart_parts_after_multipart_upload_delete
+BEFORE DELETE
+ON multipart_uploads FOR EACH ROW
+DELETE FROM multipart_parts
+WHERE multipart_parts.db_multipart_upload_id = OLD.id;
+
+-- dbMultipartPart trigger to delete from slices
+CREATE TRIGGER delete_from_slices_after_multipart_parts_delete
+BEFORE DELETE
+ON multipart_parts FOR EACH ROW
+DELETE FROM slices
+WHERE slices.db_multipart_part_id = OLD.id;
+
+-- dbSlices trigger to prune slabs
 CREATE TRIGGER delete_from_slabs_after_slice_delete
 AFTER DELETE
 ON slices FOR EACH ROW

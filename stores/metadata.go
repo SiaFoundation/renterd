@@ -116,7 +116,7 @@ type (
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
 		Key      secretKey
-		Slabs    []dbSlice              `gorm:"constraint"`                  // trigger delete instead of cascade
+		Slabs    []dbSlice              // no CASCADE, slices are deleted via trigger
 		Metadata []dbObjectUserMetadata `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete metadata too
 		Health   float64                `gorm:"index;default:1.0; NOT NULL"`
 		Size     int64

@@ -84,13 +84,13 @@ CREATE INDEX `idx_contract_sectors_db_contract_id` ON `contract_sectors`(`db_con
 CREATE INDEX `idx_contract_sectors_db_sector_id` ON `contract_sectors`(`db_sector_id`);
 
 -- dbMultipartPart
-CREATE TABLE `multipart_parts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`etag` text,`part_number` integer,`size` integer,`db_multipart_upload_id` integer NOT NULL,CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads`(`id`) ON DELETE CASCADE);
+CREATE TABLE `multipart_parts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`etag` text,`part_number` integer,`size` integer,`db_multipart_upload_id` integer NOT NULL,CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads`(`id`));
 CREATE INDEX `idx_multipart_parts_db_multipart_upload_id` ON `multipart_parts`(`db_multipart_upload_id`);
 CREATE INDEX `idx_multipart_parts_part_number` ON `multipart_parts`(`part_number`);
 CREATE INDEX `idx_multipart_parts_etag` ON `multipart_parts`(`etag`);
 
 -- dbSlice
-CREATE TABLE `slices` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer,`object_index` integer,`db_multipart_part_id` integer,`db_slab_id` integer,`offset` integer,`length` integer,CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects`(`id`),CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`));
+CREATE TABLE `slices` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer,`object_index` integer,`db_multipart_part_id` integer,`db_slab_id` integer,`offset` integer,`length` integer,CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects`(`id`),CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts`(`id`),CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`));
 CREATE INDEX `idx_slices_object_index` ON `slices`(`object_index`);
 CREATE INDEX `idx_slices_db_object_id` ON `slices`(`db_object_id`);
 CREATE INDEX `idx_slices_db_slab_id` ON `slices`(`db_slab_id`);
@@ -147,7 +147,7 @@ CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`)
 CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer DEFAULT NULL,`db_multipart_upload_id` integer DEFAULT NULL,`key` text NOT NULL,`value` text, CONSTRAINT `fk_object_user_metadata` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE, CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL);
 CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db_object_id`,`db_multipart_upload_id`,`key`);
 
--- dbSlice cleanup trigger
+-- dbObject trigger to delete from slices
 CREATE TRIGGER delete_from_slices_after_objects_delete
 BEFORE DELETE ON objects
 BEGIN
@@ -155,7 +155,23 @@ BEGIN
     WHERE slices.db_object_id = OLD.id;
 END;
 
--- dbSlab cleanup triggers
+-- dbMultipartUpload trigger to delete from dbMultipartPart
+CREATE TRIGGER delete_from_multipart_parts_after_multipart_upload_delete
+BEFORE DELETE ON multipart_uploads
+BEGIN
+    DELETE FROM multipart_parts
+    WHERE multipart_parts.db_multipart_upload_id = OLD.id;
+END;
+
+-- dbMultipartPart trigger to delete from slices
+CREATE TRIGGER delete_from_slices_after_multipart_parts_delete
+BEFORE DELETE ON multipart_parts
+BEGIN
+    DELETE FROM slices
+    WHERE slices.db_multipart_part_id = OLD.id;
+END;
+
+-- dbSlices trigger to prune slabs
 CREATE TRIGGER delete_from_slabs_after_slice_delete
 AFTER DELETE ON slices
 BEGIN
