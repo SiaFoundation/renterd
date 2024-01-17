@@ -8,13 +8,14 @@ AND slabs.db_buffered_slab_id IS NULL;
 
 -- remove ON DELETE CASCADE from slices
 ALTER TABLE slices DROP FOREIGN KEY fk_objects_slabs;
-ALTER TABLE slices DROP FOREIGN KEY fk_multipart_parts_slabs;
 ALTER TABLE slices ADD CONSTRAINT fk_objects_slabs FOREIGN KEY (db_object_id) REFERENCES objects(id);
-ALTER TABLE slices ADD CONSTRAINT fk_multipart_parts_slabs FOREIGN KEY (db_multipart_part_id) REFERENCES multipart_parts(id),
 
--- remove ON DELETE CASCADE from multipart_uploads
-ALTER TABLE multipart_uploads DROP FOREIGN KEY fk_multipart_uploads_parts;
-ALTER TABLE multipart_uploads ADD CONSTRAINT fk_multipart_uploads_parts FOREIGN KEY (db_multipart_upload_id) REFERENCES multipart_uploads(id)
+ALTER TABLE slices DROP FOREIGN KEY fk_multipart_parts_slabs;
+ALTER TABLE slices ADD CONSTRAINT fk_multipart_parts_slabs FOREIGN KEY (db_multipart_part_id) REFERENCES multipart_parts(id);
+
+-- remove ON DELETE CASCADE from multipart_parts
+ALTER TABLE multipart_parts DROP FOREIGN KEY fk_multipart_uploads_parts;
+ALTER TABLE multipart_parts ADD CONSTRAINT fk_multipart_uploads_parts FOREIGN KEY (db_multipart_upload_id) REFERENCES multipart_uploads(id);
 
 -- dbObject trigger to delete from slices
 CREATE TRIGGER delete_from_slices_after_objects_delete
