@@ -420,18 +420,22 @@ CREATE TABLE `object_user_metadata` (
   CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbSlab cleanup triggers
-CREATE PROCEDURE delete_slab_if_no_slice(IN slab_id INT)
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM slices WHERE slices.db_slab_id = slab_id
-    ) THEN
-        DELETE FROM slabs WHERE id = slab_id AND db_buffered_slab_id IS NULL;
-    END IF;
-END;
+-- dbSlice cleanup trigger
+CREATE TRIGGER delete_from_slices_after_objects_delete
+AFTER DELETE
+ON objects FOR EACH ROW
+DELETE FROM slices
+WHERE slices.db_object_id = OLD.id;
 
+-- dbSlab cleanup triggers
 CREATE TRIGGER delete_from_slabs_after_slice_delete
-AFTER DELETE ON slices FOR EACH ROW
-BEGIN
-    CALL delete_slab_if_no_slice(OLD.db_slab_id);
-END;
+AFTER DELETE
+ON slices FOR EACH ROW
+DELETE FROM slabs
+WHERE slabs.id = OLD.db_slab_id
+AND slabs.db_buffered_slab_id IS NULL
+AND NOT EXISTS (
+    SELECT 1
+    FROM slices
+    WHERE slices.db_slab_id = OLD.db_slab_id
+);
