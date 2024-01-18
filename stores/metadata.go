@@ -2691,6 +2691,7 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 				SELECT id FROM (
 					SELECT id FROM objects
 					WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ? LIMIT ?
+					ORDER BY object_id ASC
 					) tmp
 				)`,
 				path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket),
