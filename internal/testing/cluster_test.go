@@ -871,7 +871,10 @@ func TestUploadDownloadSpending(t *testing.T) {
 	cluster.MineToRenewWindow()
 
 	// wait for the contract to be renewed
-	tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(10, time.Second, func() error {
+		// mine a block
+		cluster.MineBlocks(1)
+
 		// fetch contracts
 		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)

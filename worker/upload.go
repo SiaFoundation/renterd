@@ -39,7 +39,7 @@ type (
 		hm     HostManager
 		mm     MemoryManager
 		os     ObjectStore
-		cl     ContractLocker
+		cs     ContractStore
 		logger *zap.SugaredLogger
 
 		contractLockDuration time.Duration
@@ -110,13 +110,15 @@ type (
 	}
 
 	sectorUpload struct {
-		index    int
-		data     *[rhpv2.SectorSize]byte
-		root     types.Hash256
-		uploaded object.Sector
+		index int
+		root  types.Hash256
 
 		ctx    context.Context
 		cancel context.CancelFunc
+
+		mu       sync.Mutex
+		uploaded object.Sector
+		data     *[rhpv2.SectorSize]byte
 	}
 
 	sectorUploadReq struct {
@@ -313,12 +315,12 @@ func (w *worker) uploadPackedSlab(ctx context.Context, rs api.RedundancySettings
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cl ContractLocker, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		hm:     hm,
 		mm:     mm,
 		os:     os,
-		cl:     cl,
+		cs:     cs,
 		logger: logger,
 
 		contractLockDuration: contractLockDuration,
@@ -335,10 +337,11 @@ func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os 
 	}
 }
 
-func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, h Host, c api.ContractMetadata, bh uint64) *uploader {
+func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostManager, c api.ContractMetadata, bh uint64) *uploader {
 	return &uploader{
 		os:     os,
-		cl:     cl,
+		cs:     cs,
+		hm:     hm,
 		logger: mgr.logger,
 
 		// static
@@ -352,7 +355,7 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, h Host,
 		statsSectorUploadSpeedBytesPerMS: stats.NoDecay(),
 
 		// covered by mutex
-		host:      h,
+		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
 		bh:        bh,
 		fcid:      c.ID,
 		endHeight: c.WindowEnd,
@@ -559,6 +562,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 					mem.Release()
 				}(up.rs, data, length, slabIndex)
 			}
+
 			slabIndex++
 		}
 	}()
@@ -727,10 +731,9 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	var refreshed []*uploader
 	existing := make(map[types.FileContractID]struct{})
 	for _, uploader := range mgr.uploaders {
-		// renew uploaders that got renewed
+		// refresh uploaders that got renewed
 		if renewal, renewed := renewals[uploader.ContractID()]; renewed {
-			host := mgr.hm.Host(renewal.HostKey, renewal.ID, renewal.SiamuxAddr)
-			uploader.Renew(host, renewal, bh)
+			uploader.Refresh(renewal, bh)
 		}
 
 		// stop uploaders that expired
@@ -751,8 +754,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists {
-			host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
-			uploader := mgr.newUploader(mgr.os, mgr.cl, host, c, bh)
+			uploader := mgr.newUploader(mgr.os, mgr.cs, mgr.hm, c, bh)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}
@@ -1000,7 +1002,6 @@ func (s *slabUpload) launch(req *sectorUploadReq) error {
 		s.lastOverdrive = time.Now()
 		s.numOverdriving++
 	}
-
 	// update the state
 	s.numInflight++
 	s.numLaunched++
@@ -1071,17 +1072,14 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 
 	// store the sector
-	sector.uploaded = object.Sector{
+	sector.finish(object.Sector{
 		Contracts:  map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
 		LatestHost: req.hk,
 		Root:       resp.root,
-	}
+	})
 
 	// update uploaded sectors
 	s.numUploaded++
-
-	// cancel the sector's context
-	sector.cancel()
 
 	// release all other candidates for this sector
 	for _, candidate := range s.candidates {
@@ -1091,14 +1089,28 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 
 	// release memory
-	sector.data = nil
 	s.mem.ReleaseSome(rhpv2.SectorSize)
 
 	return true, s.numUploaded == s.numSectors
 }
 
+func (s *sectorUpload) finish(sector object.Sector) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cancel()
+	s.uploaded = sector
+	s.data = nil
+}
+
 func (s *sectorUpload) isUploaded() bool {
 	return s.uploaded.Root != (types.Hash256{})
+}
+
+func (s *sectorUpload) sectorData() *[rhpv2.SectorSize]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data
 }
 
 func (req *sectorUploadReq) done() bool {
