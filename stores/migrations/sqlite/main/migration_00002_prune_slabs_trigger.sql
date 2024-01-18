@@ -12,7 +12,7 @@ WHERE id IN (
 PRAGMA foreign_keys=off;
 -- remove ON DELETE CASCADE from slices
 CREATE TABLE `slices_temp` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer,`object_index` integer,`db_multipart_part_id` integer,`db_slab_id` integer,`offset` integer,`length` integer,CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects`(`id`),CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts`(`id`),CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`));
-INSERT INTO slices_temp SELECT * FROM slices;
+INSERT INTO slices_temp SELECT `id`, `created_at`, `db_object_id`, `object_index`, `db_multipart_part_id`, `db_slab_id`, `offset`, `length` FROM slices;
 DROP TABLE slices;
 ALTER TABLE slices_temp RENAME TO slices;
 
