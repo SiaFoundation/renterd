@@ -33,7 +33,7 @@ CREATE INDEX `idx_multipart_parts_etag` ON `multipart_parts`(`etag`);
 PRAGMA foreign_keys=on;
 
 -- dbObject trigger to delete from slices
-CREATE TRIGGER delete_from_slices_after_objects_delete
+CREATE TRIGGER before_delete_on_objects_delete_slices
 BEFORE DELETE ON objects
 BEGIN
     DELETE FROM slices
@@ -41,7 +41,7 @@ BEGIN
 END;
 
 -- dbMultipartUpload trigger to delete from dbMultipartPart
-CREATE TRIGGER delete_from_multipart_parts_after_multipart_upload_delete
+CREATE TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
 BEFORE DELETE ON multipart_uploads
 BEGIN
     DELETE FROM multipart_parts
@@ -49,7 +49,7 @@ BEGIN
 END;
 
 -- dbMultipartPart trigger to delete from slices
-CREATE TRIGGER delete_from_slices_after_multipart_parts_delete
+CREATE TRIGGER before_delete_on_multipart_parts_delete_slices
 BEFORE DELETE ON multipart_parts
 BEGIN
     DELETE FROM slices
@@ -57,7 +57,7 @@ BEGIN
 END;
 
 -- dbSlices trigger to prune slabs
-CREATE TRIGGER delete_from_slabs_after_slice_delete
+CREATE TRIGGER after_delete_on_slices_delete_slabs
 AFTER DELETE ON slices
 BEGIN
     DELETE FROM slabs
