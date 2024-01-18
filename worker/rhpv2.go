@@ -598,8 +598,10 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		rev.Signatures[1].Signature = rootsResp.Signature[:]
 
 		// verify the proof
-		if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
-			return nil, fmt.Errorf("could verify roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
+		if uint64(len(rootsResp.SectorRoots)) != n {
+			return nil, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v, err: number of roots does not match range %d != %d", rev.HostKey(), settings.Version, len(rootsResp.SectorRoots), n)
+		} else if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
+			return nil, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
 		}
 
 		// append roots
