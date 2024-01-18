@@ -531,22 +531,35 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 		Metric dbContractMetric `gorm:"embedded"`
 		Period int64
 	}
-	currentPeriod := int64(math.MinInt64)
 	err := s.dbMetrics.Raw(`
-		SELECT * FROM contracts
+		WITH RECURSIVE periods AS (
+			SELECT ? AS period_start
+			UNION ALL
+			SELECT period_start + ?
+			FROM periods
+			WHERE period_start < ?
+		)
+		SELECT contracts.*, i.Period FROM contracts
 		INNER JOIN (
-			SELECT fcid, MIN(timestamp) as timestamp, ? AS Period
-			FROM contracts
-			WHERE timestamp >= ? AND timestamp < ?
-			GROUP BY Period, fcid) i
-		ON contracts.fcid = i.fcid AND contracts.timestamp = i.timestamp
-	`, roundPeriodExpr(s.dbMetrics, start, interval),
-		unixTimeMS(start), unixTimeMS(end)).
+		SELECT
+			p.period_start as Period, 
+			MIN(c.id) AS contract_id
+		FROM
+			periods p
+		INNER JOIN
+			contracts c ON c.timestamp >= p.period_start AND c.timestamp < p.period_start + ?
+		GROUP BY
+			p.period_start, c.fcid
+		ORDER BY
+			p.period_start ASC
+		) i ON contracts.id = i.contract_id 
+	`, unixTimeMS(start), interval.Milliseconds(), unixTimeMS(end), interval.Milliseconds()).
 		Scan(&metricsWithPeriod).
 		Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch aggregate metrics: %w", err)
 	}
+	currentPeriod := int64(math.MinInt64)
 	var metrics []dbContractMetric
 	for _, m := range metricsWithPeriod {
 		m.Metric.FCID = fileContractID{}
