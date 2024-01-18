@@ -197,22 +197,22 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger, pro
 	}
 }
 
-func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.AllowPrivateIPs, l)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	return w.Handler(), w.Shutdown, nil
-}
-
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
-	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer, cfg.MigratorParallelSlabsPerWorker, cfg.RevisionBroadcastInterval)
-	if err != nil {
 		return nil, nil, nil, err
 	}
-	return ap.Handler(), ap.Run, ap.Shutdown, nil
+
+	return w.Handler(), w.PrometheusHandler(), w.Shutdown, nil
+}
+
+func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, http.Handler, RunFn, ShutdownFn, error) {
+	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer, cfg.MigratorParallelSlabsPerWorker, cfg.RevisionBroadcastInterval)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return ap.Handler(), ap.PrometheusHandler(), ap.Run, ap.Shutdown, nil
 }
 
 func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {

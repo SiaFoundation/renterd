@@ -412,7 +412,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busCfg.Miner = node.NewMiner(busClient)
 
 	// Create bus.
-	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, _, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger, false)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -425,7 +425,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bStopFn)
 
 	// Create worker.
-	w, wShutdownFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
+	w, _, wShutdownFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
 	tt.OK(err)
 
 	workerAuth := jape.BasicAuth(workerPassword)
@@ -449,7 +449,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, _, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)

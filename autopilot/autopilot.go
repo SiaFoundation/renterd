@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -170,6 +171,15 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
+	})
+}
+
+// Handler returns an HTTP handler that serves the autopilot api.
+func (ap *Autopilot) PrometheusHandler() http.Handler {
+	return jape.Mux(map[string]jape.Handler{
+		// "GET    /config": ap.configHandlerGET, 		// intentionally left out, same information available in /prometheus/bus/autopilots
+		// "GET    /host/:hostKey": ap.hostHandlerGET, 	//intentionally left out
+		"GET    /state": ap.stateHandlerPrometheusGET,
 	})
 }
 
@@ -654,6 +664,49 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 	jc.Encode(host)
+}
+
+func (ap *Autopilot) stateHandlerPrometheusGET(jc jape.Context) {
+	pruning, _ := ap.c.Status()
+	migrating, _ := ap.m.Status()
+	scanning, _ := ap.s.Status()
+	_, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
+	if err != nil && !strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	configuredFlag, migratingFlag, pruningFlag, scanningFlag := 0, 0, 0, 0
+	if err == nil {
+		configuredFlag = 1
+	}
+	if migrating {
+		migratingFlag = 1
+	}
+	if pruning {
+		pruningFlag = 1
+	}
+	if scanning {
+		scanningFlag = 1
+	}
+
+	var buf bytes.Buffer
+	labels := fmt.Sprintf(`network="%s", version="%s", commit="%s", os="%s", buildTime="%s"`,
+		build.NetworkName(), build.Version(), build.Commit(), runtime.GOOS, api.TimeRFC3339(build.BuildTime()))
+	text := `renterd_autopilot_state_uptime{%s} %d
+renterd_autopilot_state_configured{%s} %d
+renterd_autopilot_state_migrating{%s} %d
+renterd_autopilot_state_pruing{%s} %d
+renterd_autopilot_state_scanning{%s} %d`
+	fmt.Fprintf(&buf, text,
+		labels, api.DurationMS(ap.Uptime()),
+		labels, configuredFlag,
+		labels, migratingFlag,
+		labels, pruningFlag,
+		labels, scanningFlag,
+	)
+
+	jc.ResponseWriter.Write(buf.Bytes())
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {

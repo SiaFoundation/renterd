@@ -381,7 +381,7 @@ func (b *bus) PrometheusHandler() http.Handler {
 
 		"GET    /alerts": b.handleGETAlertsPrometheus,
 
-		"GET    /autopilots": b.autopilotsListPrometheusHandlerGET,
+		// "GET    /autopilots": b.autopilotsListPrometheusHandlerGET, 				// intentionally left out, same information plus more available in /prometheus/autopilot/state
 		// "GET    /autopilot/:id": b.autopilotsHandlerGET,							// intentionally left out
 
 		"GET    /buckets": b.bucketsPrometheusHandlerGET,
@@ -2669,31 +2669,31 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) autopilotsListPrometheusHandlerGET(jc jape.Context) {
-	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
-		resulttext := ""
-		for i, ap := range autopilots {
-			var pruneBitSetVar, redundantIPBitSetVar int8
-			if ap.Config.Contracts.Prune {
-				pruneBitSetVar = 1
-			}
-			if ap.Config.Hosts.AllowRedundantIPs {
-				redundantIPBitSetVar = 1
-			}
-			aptext := fmt.Sprintf(`renterd_autopilot{name="%s", max_hosts_for_contracts="%d", period="%d", renew_window="%d", download="%d", upload="%d", storage="%d", prune_enabled="%d", allow_redundant_ips="%d", max_downtime_hours="%d", min_recent_scan_failures="%d"} 1`,
-				ap.ID, ap.Config.Contracts.Amount, ap.Config.Contracts.Period, ap.Config.Contracts.RenewWindow, ap.Config.Contracts.Download, ap.Config.Contracts.Upload, ap.Config.Contracts.Storage, pruneBitSetVar, redundantIPBitSetVar, ap.Config.Hosts.MaxDowntimeHours, ap.Config.Hosts.MinRecentScanFailures,
-			)
-			if i != len(autopilots)-1 {
-				aptext = aptext + "\n"
-			}
-			resulttext = resulttext + aptext
-		}
+// func (b *bus) autopilotsListPrometheusHandlerGET(jc jape.Context) {
+// 	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
+// 		resulttext := ""
+// 		for i, ap := range autopilots {
+// 			var pruneBitSetVar, redundantIPBitSetVar int8
+// 			if ap.Config.Contracts.Prune {
+// 				pruneBitSetVar = 1
+// 			}
+// 			if ap.Config.Hosts.AllowRedundantIPs {
+// 				redundantIPBitSetVar = 1
+// 			}
+// 			aptext := fmt.Sprintf(`renterd_autopilot{name="%s", max_hosts_for_contracts="%d", period="%d", renew_window="%d", download="%d", upload="%d", storage="%d", prune_enabled="%d", allow_redundant_ips="%d", max_downtime_hours="%d", min_recent_scan_failures="%d"} 1`,
+// 				ap.ID, ap.Config.Contracts.Amount, ap.Config.Contracts.Period, ap.Config.Contracts.RenewWindow, ap.Config.Contracts.Download, ap.Config.Contracts.Upload, ap.Config.Contracts.Storage, pruneBitSetVar, redundantIPBitSetVar, ap.Config.Hosts.MaxDowntimeHours, ap.Config.Hosts.MinRecentScanFailures,
+// 			)
+// 			if i != len(autopilots)-1 {
+// 				aptext = aptext + "\n"
+// 			}
+// 			resulttext = resulttext + aptext
+// 		}
 
-		var resultbuffer bytes.Buffer
-		resultbuffer.WriteString(resulttext)
-		jc.ResponseWriter.Write(resultbuffer.Bytes())
-	}
-}
+// 		var resultbuffer bytes.Buffer
+// 		resultbuffer.WriteString(resulttext)
+// 		jc.ResponseWriter.Write(resultbuffer.Bytes())
+// 	}
+// }
 
 func (b *bus) autopilotsListHandlerGET(jc jape.Context) {
 	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {

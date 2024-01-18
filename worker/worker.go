@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -793,9 +794,8 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
+func (w *worker) getDownloadStats(jc jape.Context) (downloadManagerStats, uint64, []api.DownloaderStats) {
 	stats := w.downloadManager.Stats()
-
 	// prepare downloaders stats
 	var healthy uint64
 	var dss []api.DownloaderStats
@@ -812,6 +812,29 @@ func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
 	sort.SliceStable(dss, func(i, j int) bool {
 		return dss[i].AvgSectorDownloadSpeedMBPS > dss[j].AvgSectorDownloadSpeedMBPS
 	})
+	return stats, healthy, dss
+}
+
+func (w *worker) downloadsStatsHandlerPrometheusGET(jc jape.Context) {
+	stats, healthy, _ := w.getDownloadStats(jc)
+
+	var buf bytes.Buffer
+	text := `renterd_worker_stats_avgdownloadspeedmbps %.0f
+renterd_worker_stats_avgoverdrivepct_download %.0f
+renterd_worker_stats_healthydownloaders  %d
+renterd_worker_stats_numdownloaders %d`
+	fmt.Fprintf(&buf, text,
+		math.Ceil(stats.avgDownloadSpeedMBPS*100)/100,
+		math.Floor(stats.avgOverdrivePct*100*100)/100,
+		healthy,
+		uint64(len(stats.downloaders)),
+	)
+
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
+func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
+	stats, healthy, dss := w.getDownloadStats(jc)
 
 	// encode response
 	jc.Encode(api.DownloadStatsResponse{
@@ -823,7 +846,7 @@ func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
-func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
+func (w *worker) getUploadStats(jc jape.Context) (uploadManagerStats, []api.UploaderStats) {
 	stats := w.uploadManager.Stats()
 
 	// prepare upload stats
@@ -837,6 +860,27 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	sort.SliceStable(uss, func(i, j int) bool {
 		return uss[i].AvgSectorUploadSpeedMBPS > uss[j].AvgSectorUploadSpeedMBPS
 	})
+	return stats, uss
+}
+
+func (w *worker) uploadsStatsHandlerPrometheusGET(jc jape.Context) {
+	stats, _ := w.getUploadStats(jc)
+	var buf bytes.Buffer
+	text := `renterd_worker_stats_avgslabuploadspeedmbps %.0f
+renterd_worker_stats_avgoverdrivepct_upload %.0f
+renterd_worker_stats_healthyuploaders  %d
+renterd_worker_stats_numuploaders %d`
+	fmt.Fprintf(&buf, text,
+		math.Ceil(stats.avgSlabUploadSpeedMBPS*100)/100,
+		math.Floor(stats.avgOverdrivePct*100*100)/100,
+		stats.healthyUploaders,
+		stats.numUploaders,
+	)
+
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
+	stats, uss := w.getUploadStats(jc)
 
 	// encode response
 	jc.Encode(api.UploadStatsResponse{
@@ -1243,6 +1287,23 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
+func (w *worker) memoryPrometheusGET(jc jape.Context) {
+	var buf bytes.Buffer
+
+	text := `renterd_worker_memory_download_available %d
+renterd_worker_memory_download_total %d
+renterd_worker_memory_upload_available %d
+renterd_worker_memory_upload_total %d`
+	fmt.Fprintf(&buf, text,
+		w.downloadManager.mm.Status().Available,
+		w.downloadManager.mm.Status().Total,
+		w.uploadManager.mm.Status().Available,
+		w.uploadManager.mm.Status().Total,
+	)
+
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
 func (w *worker) memoryGET(jc jape.Context) {
 	jc.Encode(api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
@@ -1348,6 +1409,22 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
+	}))
+}
+
+func (w *worker) PrometheusHandler() http.Handler {
+	return jape.Mux(interactionMiddleware(w, map[string]jape.Handler{
+		// "GET    /account/:hostkey": w.accountHandlerGET, 						// intentionally left out, derives a unique ephemeral account ID to use on the host, no need for it to be displayed on dashboard
+		// "GET    /id": w.idHandlerGET,											// intentionally left out. unconfirmed renter/host returns "worker" as string
+
+		"GET    /memory": w.memoryPrometheusGET,
+
+		// "GET    /rhp/contracts":          w.rhpContractsHandlerGET,				//intentionally left out. same data available in /bus/contracts
+		// "GET    /rhp/contract/:id/roots": w.rhpContractRootsHandlerGET,
+		"GET    /stats/downloads": w.downloadsStatsHandlerPrometheusGET,
+		"GET    /stats/uploads":   w.uploadsStatsHandlerPrometheusGET,
+		// "GET    /objects/*path":          w.objectsHandlerGET, 					//intentionally left out. dashboard should not try to recreate file explorer. file information available in /bus
+		// "GET    /state":                  w.stateHandlerGET, 					//intentionally left out. data also available in /bus and /autopilot endpoints
 	}))
 }
 

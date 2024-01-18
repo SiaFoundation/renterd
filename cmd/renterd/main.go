@@ -479,9 +479,11 @@ func main() {
 	var s3Srv *http.Server
 	var s3Listener net.Listener
 	var workers []autopilot.Worker
+	var w2 http.Handler
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, fn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
+			w, w3, fn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
+			w2 = w3
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
@@ -526,12 +528,14 @@ func main() {
 
 	autopilotErr := make(chan error, 1)
 	autopilotDir := filepath.Join(cfg.Directory, api.DefaultAutopilotID)
+	var a2 http.Handler
 	if cfg.Autopilot.Enabled {
 		apCfg := node.AutopilotConfig{
 			ID:        api.DefaultAutopilotID,
 			Autopilot: cfg.Autopilot,
 		}
-		ap, runFn, fn, err := node.NewAutopilot(apCfg, bc, workers, logger)
+		ap, ap2, runFn, fn, err := node.NewAutopilot(apCfg, bc, workers, logger)
+		a2 = ap2
 		if err != nil {
 			logger.Fatal("failed to create autopilot: " + err.Error())
 		}
@@ -569,6 +573,8 @@ func main() {
 			fn:   srvPrometheus.Shutdown,
 		})
 		mux.sub["/prometheus/bus"] = treeMux{h: auth(b2)}
+		mux.sub["/prometheus/autopilot"] = treeMux{h: auth(a2)}
+		mux.sub["/prometheus/worker"] = treeMux{h: auth(w2)}
 		go srv.Serve(l2)
 
 		// prometheusHandler := b.NewPrometheusHandler()
