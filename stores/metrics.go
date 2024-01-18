@@ -517,14 +517,6 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 	return unixTimeMS(time.UnixMilli(normalizedMS))
 }
 
-func roundPeriodExpr(db *gorm.DB, start time.Time, interval time.Duration) clause.Expr {
-	if !isSQLite(db) {
-		return gorm.Expr("CAST(FLOOR((timestamp - ?) / ?) * ? AS SIGNED)", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
-	} else {
-		return gorm.Expr("(timestamp - ?) / ? * ?", unixTimeMS(start), interval.Milliseconds(), interval.Milliseconds())
-	}
-}
-
 func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
 	end := start.Add(time.Duration(n) * interval)
 	var metricsWithPeriod []struct {
