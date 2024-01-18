@@ -1,12 +1,19 @@
 package api
 
 import (
+	"fmt"
 	"time"
 
 	"go.sia.tech/core/types"
 )
 
+var (
+	ErrMaxIntervalsExceeded = fmt.Errorf("max number of intervals exceeds maximum of %v", MaxMetricIntervals)
+)
+
 const (
+	MaxMetricIntervals = 1000
+
 	ChurnDirAdded   = "added"
 	ChurnDirRemoved = "removed"
 

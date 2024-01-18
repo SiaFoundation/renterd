@@ -518,6 +518,9 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 }
 
 func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
+	if n > api.MaxMetricIntervals {
+		return nil, api.ErrMaxIntervalsExceeded
+	}
 	end := start.Add(time.Duration(n) * interval)
 	var metricsWithPeriod []struct {
 		Metric dbContractMetric `gorm:"embedded"`
@@ -578,6 +581,9 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 // is returned. The result is then joined with the original table to retrieve
 // only the metrics we want.
 func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n uint64, interval time.Duration, whereExpr clause.Expr) error {
+	if n > api.MaxMetricIntervals {
+		return api.ErrMaxIntervalsExceeded
+	}
 	end := start.Add(time.Duration(n) * interval)
 	return s.dbMetrics.Raw(fmt.Sprintf(`
 		WITH RECURSIVE periods AS (
