@@ -18,6 +18,7 @@ const (
 
 	ObjectSortByHealth = "health"
 	ObjectSortByName   = "name"
+	ObjectSortBySize   = "size"
 
 	ObjectSortDirAsc  = "asc"
 	ObjectSortDirDesc = "desc"
@@ -159,16 +160,8 @@ type (
 	}
 
 	DownloadObjectOptions struct {
-		Prefix string
-		Offset int
-		Limit  int
-		Range  DownloadRange
-	}
-
-	ObjectEntriesOptions struct {
-		Prefix string
-		Offset int
-		Limit  int
+		GetObjectOptions
+		Range DownloadRange
 	}
 
 	GetObjectOptions struct {
@@ -177,6 +170,8 @@ type (
 		Limit       int
 		IgnoreDelim bool
 		Marker      string
+		SortBy      string
+		SortDir     string
 	}
 
 	ListObjectOptions struct {
@@ -239,15 +234,7 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 }
 
 func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
-	if opts.Prefix != "" {
-		values.Set("prefix", opts.Prefix)
-	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
+	opts.GetObjectOptions.Apply(values)
 }
 
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
@@ -281,6 +268,12 @@ func (opts GetObjectOptions) Apply(values url.Values) {
 	}
 	if opts.Marker != "" {
 		values.Set("marker", opts.Marker)
+	}
+	if opts.SortBy != "" {
+		values.Set("sortBy", opts.SortBy)
+	}
+	if opts.SortDir != "" {
+		values.Set("sortDir", opts.SortDir)
 	}
 }
 

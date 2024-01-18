@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	sectorUploadTimeout = 60 * time.Second
+)
+
 type (
 	uploader struct {
 		os     ObjectStore
@@ -205,8 +209,12 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 		cancel()
 	}()
 
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(req.sector.ctx, sectorUploadTimeout)
+	defer cancel()
+
 	// fetch the revision
-	rev, err := host.FetchRevision(req.sector.ctx, defaultRevisionFetchTimeout, bh)
+	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout, bh)
 	if err != nil {
 		return types.Hash256{}, 0, err
 	} else if rev.RevisionNumber == math.MaxUint64 {
@@ -214,15 +222,15 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	}
 
 	// update the bus
-	if err := u.os.AddUploadingSector(req.sector.ctx, req.uploadID, fcid, req.sector.root); err != nil {
+	if err := u.os.AddUploadingSector(ctx, req.uploadID, fcid, req.sector.root); err != nil {
 		return types.Hash256{}, 0, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
 	}
 
 	// upload the sector
 	start := time.Now()
-	root, err := host.UploadSector(req.sector.ctx, req.sector.data, rev)
+	root, err := host.UploadSector(ctx, req.sector.data, rev)
 	if err != nil {
-		return types.Hash256{}, 0, err
+		return types.Hash256{}, 0, fmt.Errorf("failed to upload sector to contract %v, err: %v", fcid, err)
 	}
 
 	// calculate elapsed time
