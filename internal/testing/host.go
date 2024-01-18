@@ -88,9 +88,8 @@ var defaultHostSettings = settings.Settings{
 
 	PriceTableValidity: 10 * time.Second,
 
-	AccountExpiry:      30 * 24 * time.Hour, // 1 month
-	MaxAccountBalance:  types.Siacoins(10),
-	MaxRegistryEntries: 1e3,
+	AccountExpiry:     30 * 24 * time.Hour, // 1 month
+	MaxAccountBalance: types.Siacoins(10),
 }
 
 // Close shutsdown the host
