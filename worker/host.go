@@ -217,44 +217,56 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 }
 
 func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
-	if err != nil {
-		return err
-	}
-
-	// calculate the amount to deposit
+	// fetch current balance
 	curr, err := h.acc.Balance(ctx)
 	if err != nil {
 		return err
 	}
+
+	// return early if we have the desired balance
 	if curr.Cmp(balance) >= 0 {
 		return nil
 	}
-	amount := balance.Sub(curr)
-
-	// cap the amount by the amount of money left in the contract
-	renterFunds := rev.ValidRenterPayout()
-	possibleFundCost := pt.FundAccountCost.Add(pt.UpdatePriceTableCost)
-	if renterFunds.Cmp(possibleFundCost) <= 0 {
-		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, possibleFundCost)
-	} else if maxAmount := renterFunds.Sub(possibleFundCost); maxAmount.Cmp(amount) < 0 {
-		amount = maxAmount
-	}
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			cost := amount.Add(pt.FundAccountCost)
-			payment, err := payByContract(rev, cost, rhpv3.Account{}, h.renterKey) // no account needed for funding
+		deposit := balance.Sub(curr)
+		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
+			// fetch pricetable
+			pt, err := h.priceTable(ctx, rev)
 			if err != nil {
 				return err
 			}
-			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
-				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
+
+			// check whether we have money left in the contract
+			if pt.FundAccountCost.Cmp(rev.ValidRenterPayout()) >= 0 {
+				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), pt.FundAccountCost)
 			}
-			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: cost})
+			funds := rev.ValidRenterPayout().Sub(pt.FundAccountCost)
+
+			// cap the deposit amount by the money that's left in the contract
+			if deposit.Cmp(funds) > 0 {
+				deposit = funds
+			}
+
+			// create the payment
+			amount := deposit.Add(pt.FundAccountCost)
+			payment, err := payByContract(rev, amount, rhpv3.Account{}, h.renterKey) // no account needed for funding
+			if err != nil {
+				return err
+			}
+
+			// fund the account
+			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
+				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, pt.FundAccountCost, err)
+			}
+
+			// record the spend
+			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: amount})
 			return nil
-		})
+		}); err != nil {
+			return types.ZeroCurrency, err
+		}
+		return deposit, nil
 	})
 }
 
