@@ -43,7 +43,7 @@ var (
 	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
 	errShardRootChanged      = errors.New("shard root changed")
 
-	objectDeleteBatchSizes = []int64{1000, 5000, 10000, 50000, 100000}
+	objectDeleteBatchSizes = []int64{100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
 const (
