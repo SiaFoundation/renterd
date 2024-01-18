@@ -3,7 +3,6 @@ package worker
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -792,52 +791,6 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	return
 }
 
-// RPCReadRegistry calls the ExecuteProgram RPC with an MDM program that reads
-// the specified registry value.
-func RPCReadRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey) (rv rhpv3.RegistryValue, err error) {
-	defer wrapErr(&err, "ReadRegistry")
-	s, err := t.DialStream(ctx)
-	if err != nil {
-		return rhpv3.RegistryValue{}, err
-	}
-	defer s.Close()
-
-	req := &rhpv3.RPCExecuteProgramRequest{
-		FileContractID: types.FileContractID{},
-		Program:        []rhpv3.Instruction{&rhpv3.InstrReadRegistry{}},
-		ProgramData:    append(key.PublicKey[:], key.Tweak[:]...),
-	}
-	if err := s.WriteRequest(rhpv3.RPCExecuteProgramID, nil); err != nil {
-		return rhpv3.RegistryValue{}, err
-	} else if err := processPayment(s, payment); err != nil {
-		return rhpv3.RegistryValue{}, err
-	} else if err := s.WriteResponse(req); err != nil {
-		return rhpv3.RegistryValue{}, err
-	}
-
-	var cancellationToken types.Specifier
-	s.ReadResponse(&cancellationToken, 16) // unused
-
-	const maxExecuteProgramResponseSize = 16 * 1024
-	var resp rhpv3.RPCExecuteProgramResponse
-	if err := s.ReadResponse(&resp, maxExecuteProgramResponseSize); err != nil {
-		return rhpv3.RegistryValue{}, err
-	} else if len(resp.Output) < 64+8+1 {
-		return rhpv3.RegistryValue{}, errors.New("invalid output length")
-	}
-	var sig types.Signature
-	copy(sig[:], resp.Output[:64])
-	rev := binary.LittleEndian.Uint64(resp.Output[64:72])
-	data := resp.Output[72 : len(resp.Output)-1]
-	typ := resp.Output[len(resp.Output)-1]
-	return rhpv3.RegistryValue{
-		Data:      data,
-		Revision:  rev,
-		Type:      typ,
-		Signature: sig,
-	}, nil
-}
-
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
@@ -1145,50 +1098,6 @@ func initialRevision(formationTxn types.Transaction, hostPubKey, renterPubKey ty
 			RevisionNumber:     1,
 		},
 	}
-}
-
-// RPCUpdateRegistry calls the ExecuteProgram RPC with an MDM program that
-// updates the specified registry value.
-func RPCUpdateRegistry(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, key rhpv3.RegistryKey, value rhpv3.RegistryValue) (err error) {
-	defer wrapErr(&err, "UpdateRegistry")
-	s, err := t.DialStream(ctx)
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-
-	var data bytes.Buffer
-	e := types.NewEncoder(&data)
-	key.Tweak.EncodeTo(e)
-	e.WriteUint64(value.Revision)
-	value.Signature.EncodeTo(e)
-	key.PublicKey.EncodeTo(e)
-	e.Write(value.Data)
-	e.Flush()
-	req := &rhpv3.RPCExecuteProgramRequest{
-		FileContractID: types.FileContractID{},
-		Program:        []rhpv3.Instruction{&rhpv3.InstrUpdateRegistry{}},
-		ProgramData:    data.Bytes(),
-	}
-	if err := s.WriteRequest(rhpv3.RPCExecuteProgramID, nil); err != nil {
-		return err
-	} else if err := processPayment(s, payment); err != nil {
-		return err
-	} else if err := s.WriteResponse(req); err != nil {
-		return err
-	}
-
-	var cancellationToken types.Specifier
-	s.ReadResponse(&cancellationToken, 16) // unused
-
-	const maxExecuteProgramResponseSize = 16 * 1024
-	var resp rhpv3.RPCExecuteProgramResponse
-	if err := s.ReadResponse(&resp, maxExecuteProgramResponseSize); err != nil {
-		return err
-	} else if resp.OutputLength != 0 {
-		return errors.New("invalid output length")
-	}
-	return nil
 }
 
 func payByContract(rev *types.FileContractRevision, amount types.Currency, refundAcct rhpv3.Account, sk types.PrivateKey) (rhpv3.PayByContractRequest, error) {
