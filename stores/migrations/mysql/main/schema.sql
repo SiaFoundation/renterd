@@ -310,7 +310,7 @@ CREATE TABLE `multipart_parts` (
   KEY `idx_multipart_parts_etag` (`etag`),
   KEY `idx_multipart_parts_part_number` (`part_number`),
   KEY `idx_multipart_parts_db_multipart_upload_id` (`db_multipart_upload_id`),
-  CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbObject
