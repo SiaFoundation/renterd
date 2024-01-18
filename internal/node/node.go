@@ -52,24 +52,24 @@ type (
 	ShutdownFn = func(context.Context) error
 )
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger, prometheusIsEnabled bool) (http.Handler, http.Handler, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cs, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	default:
 		go func() {
@@ -80,11 +80,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 	tpoolDir := filepath.Join(dir, "transactionpool")
 	if err := os.MkdirAll(tpoolDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	tp, err := transactionpool.New(cs, g, tpoolDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// If no DB dialector was provided, use SQLite.
@@ -92,7 +92,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	if dbConn == nil {
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
@@ -100,7 +100,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	if dbMetricsConn == nil {
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
 	}
@@ -126,11 +126,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		SlabPruningCooldown:           cfg.SlabPruningCooldown,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	hooksMgr, err := webhooks.NewManager(l.Named("webhooks").Sugar(), sqlStore)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Hook up webhooks to alerts.
@@ -157,24 +157,24 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry, zap.NewNop().Sugar())
 	tp.TransactionPoolSubscribe(w)
 	if err := cs.ConsensusSetSubscribe(w, modules.ConsensusChangeRecent, nil); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if m := cfg.Miner; m != nil {
 		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		tp.TransactionPoolSubscribe(m)
 	}
 
 	cm, err := NewChainManager(cs, cfg.Network)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
@@ -190,7 +190,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			sqlStore.Close(),
 		)
 	}
-	return b.Handler(), shutdownFn, nil
+	if prometheusIsEnabled {
+		return b.Handler(), b.PrometheusHandler(), shutdownFn, nil
+	} else {
+		return b.Handler(), nil, shutdownFn, nil
+	}
 }
 
 func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {

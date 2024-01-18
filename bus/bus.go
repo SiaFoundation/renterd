@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
@@ -374,6 +375,76 @@ func (b *bus) Handler() http.Handler {
 	})
 }
 
+func (b *bus) PrometheusHandler() http.Handler {
+	return jape.Mux(map[string]jape.Handler{
+		// "GET    /accounts": b.accountsPrometheusHandlerGET, 						// intentionally left out
+
+		"GET    /alerts": b.handleGETAlertsPrometheus,
+
+		"GET    /autopilots": b.autopilotsListPrometheusHandlerGET,
+		// "GET    /autopilot/:id": b.autopilotsHandlerGET,							// intentionally left out
+
+		"GET    /buckets": b.bucketsPrometheusHandlerGET,
+		// "GET    /bucket/:name": b.bucketHandlerGET,								// intentionally left out
+
+		"GET    /consensus/network": b.consensusNetworkPrometheusHandler,
+		// "GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,			// intentionally left out, just a siafundfee calculator basically
+		"GET    /consensus/state": b.consensusStateHandlerPrometheus,
+
+		"GET    /contracts":          b.contractsPrometheusHandlerGET,
+		"GET    /contracts/prunable": b.contractsPrunablePrometheusDataHandlerGET,
+		// "GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,		// intentionally left out
+		// "GET    /contracts/sets":         b.contractsSetsHandlerGET,				// intentionally left out, same info can be retrieved from /autopilots
+		// "GET    /contract/:id":           b.contractIDHandlerGET,				// intentionally left out
+		// "GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,			// intentionally left out
+		// "GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,			// intentionally left out
+		// "GET    /contract/:id/size":      b.contractSizeHandlerGET,				// intentionally left out
+
+		"GET    /hosts":           b.hostsPrometheusHandlerGET,
+		"GET    /hosts/allowlist": b.hostsAllowlistPrometheusHandlerGET,
+		"GET    /hosts/blocklist": b.hostsBlocklistPrometheusHandlerGET,
+		"GET    /hosts/scanning":  b.hostsScanningPrometheusHandlerGET,
+		// "GET    /host/:hostkey":   b.hostsPubkeyHandlerGET,						// intentionally left out
+
+		// "GET    /metric/:key": b.metricsHandlerGET,								// intentionally left out, url requires url params like start time, interval, and n.
+
+		// "GET    /multipart/upload/:id": b.multipartHandlerUploadGET,				// intentionally left out
+
+		// "GET    /objects/*path": b.objectsHandlerGET,							// intentionally left out
+
+		"GET    /params/gouging": b.paramsHandlerGougingPrometheusGET,
+		"GET    /params/upload":  b.paramsHandlerUploadPrometheusGET,
+
+		"GET    /slabbuffers": b.slabbuffersPrometheusHandlerGET,
+
+		"GET    /search/objects": b.searchObjectsHandlerPrometheusGET,
+
+		"GET    /settings": b.settingsPrometheusHandlerGET,
+
+		// "GET    /setting/:key": b.settingKeyHandlerGET,							// intentionally left out, /settings endpoint is pulling all the data for each setting key
+
+		// "GET    /slabs/partial/:key": b.slabsPartialHandlerGET,					// intentionally left out
+		// "GET    /slab/:key":          b.slabHandlerGET,							// intentionally left out
+		// "GET    /slab/:key/objects":  b.slabObjectsHandlerGET,					// intentionally left out
+
+		"GET    /state":         b.statePrometheusHandlerGET,
+		"GET    /stats/objects": b.objectsStatshandlerPrometheusGET,
+
+		"GET    /syncer/address": b.syncerAddrHandlerPrometheus,
+		"GET    /syncer/peers":   b.syncerPeersHandlerPrometheus,
+
+		"GET    /txpool/recommendedfee": b.txpoolFeeHandlerPrometheus,
+		"GET    /txpool/transactions":   b.txpoolTransactionsPrometheusHandler,
+
+		"GET    /wallet":              b.walletHandlerPrometheus,
+		"GET    /wallet/outputs":      b.walletOutputsPrometheusHandler,
+		"GET    /wallet/pending":      b.walletPendingHandlerPrometheus,
+		"GET    /wallet/transactions": b.walletTransactionsHandlerPrometheus,
+
+		// "GET    /webhooks": b.webhookHandlerGet,									// intentionally left out, returned a json document with fields webhooks and queues set to null
+	})
+}
+
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	b.hooks.Close()
@@ -406,12 +477,39 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	}
 }
 
+func (b *bus) syncerAddrHandlerPrometheus(jc jape.Context) {
+	addr, err := b.s.SyncerAddress(jc.Request.Context())
+	if jc.Check("failed to fetch syncer's address", err) != nil {
+		return
+	}
+	var buf bytes.Buffer
+	text := `renterd_syncer_address{address="%s"} 1`
+	fmt.Fprintf(&buf, text, addr)
+	jc.ResponseWriter.Write(buf.Bytes())
+
+}
+
 func (b *bus) syncerAddrHandler(jc jape.Context) {
 	addr, err := b.s.SyncerAddress(jc.Request.Context())
 	if jc.Check("failed to fetch syncer's address", err) != nil {
 		return
 	}
 	jc.Encode(addr)
+}
+
+func (b *bus) syncerPeersHandlerPrometheus(jc jape.Context) {
+	p := b.s.Peers()
+	resulttext := ""
+	for i, peer := range p {
+		synced_peer := fmt.Sprintf(`renterd_syncer_peer{address="%s"} 1`, peer)
+		if i != len(p)-1 {
+			synced_peer = synced_peer + "\n"
+		}
+		resulttext = resulttext + synced_peer
+	}
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
 }
 
 func (b *bus) syncerPeersHandler(jc jape.Context) {
@@ -449,15 +547,36 @@ func (b *bus) consensusStateHandler(jc jape.Context) {
 	jc.Encode(b.consensusState())
 }
 
+func (b *bus) consensusNetworkPrometheusHandler(jc jape.Context) {
+	var buf bytes.Buffer
+	text := `renterd_state{network="%s"} 1`
+	fmt.Fprintf(&buf, text, b.cm.TipState().Network.Name)
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
 	jc.Encode(api.ConsensusNetwork{
 		Name: b.cm.TipState().Network.Name,
 	})
 }
 
+func (b *bus) txpoolFeeHandlerPrometheus(jc jape.Context) {
+	fee := b.tp.RecommendedFee()
+	var buf bytes.Buffer
+	text := `renterd_tpool_fee %s`
+	fmt.Fprintf(&buf, text, fee)
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
 	fee := b.tp.RecommendedFee()
 	jc.Encode(fee)
+}
+
+func (b *bus) txpoolTransactionsPrometheusHandler(jc jape.Context) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, `renterd_txpool_numtxns %d`, len(b.tp.Transactions()))
+	jc.ResponseWriter.Write(buf.Bytes())
 }
 
 func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
@@ -469,6 +588,30 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	if jc.Decode(&txnSet) == nil {
 		jc.Check("couldn't broadcast transaction set", b.tp.AcceptTransactionSet(txnSet))
 	}
+}
+
+func (b *bus) bucketsPrometheusHandlerGET(jc jape.Context) {
+	buckets, err := b.ms.ListBuckets(jc.Request.Context())
+	if jc.Check("couldn't list buckets", err) != nil {
+		return
+	}
+	resulttext := ""
+	for i, bucket := range buckets {
+		var bitSetVar int8
+		if bucket.Policy.PublicReadAccess {
+			bitSetVar = 1
+		}
+		buckettext := fmt.Sprintf(`renterd_bucket{name="%s", publicReadAccess="%d", createdAt="%s"} 1`,
+			bucket.Name, bitSetVar, bucket.CreatedAt.String(),
+		)
+		if i != len(buckets)-1 {
+			buckettext = buckettext + "\n"
+		}
+		resulttext = resulttext + buckettext
+	}
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
 }
 
 func (b *bus) bucketsHandlerGET(jc jape.Context) {
@@ -533,6 +676,26 @@ func (b *bus) bucketHandlerGET(jc jape.Context) {
 	jc.Encode(bucket)
 }
 
+func (b *bus) walletHandlerPrometheus(jc jape.Context) {
+	address := b.w.Address()
+	spendable, confirmed, unconfirmed, err := b.w.Balance()
+	if jc.Check("couldn't fetch wallet balance", err) != nil {
+		return
+	}
+	var buf bytes.Buffer
+	text := `renterd_wallet_scanheight{address="%s"} %d
+renterd_wallet_spendable{address="%s"} %s
+renterd_wallet_confirmed{address="%s"} %s
+renterd_wallet_unconfirmed{address="%s"} %s`
+	fmt.Fprintf(&buf, text,
+		address, b.w.Height(),
+		address, spendable,
+		address, confirmed,
+		address, unconfirmed,
+	)
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
 func (b *bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
 	spendable, confirmed, unconfirmed, err := b.w.Balance()
@@ -548,6 +711,47 @@ func (b *bus) walletHandler(jc jape.Context) {
 	})
 }
 
+func (b *bus) walletTransactionsHandlerPrometheus(jc jape.Context) {
+	var before, since time.Time
+	offset := 0
+	limit := -1
+	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
+		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil ||
+		jc.DecodeForm("offset", &offset) != nil ||
+		jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	txns, err := b.w.Transactions(before, since, offset, limit)
+	if jc.Check("couldn't load transactions", err) != nil {
+		return
+	}
+	resulttext := ""
+	for i, transaction := range txns {
+		txid := strings.Split(transaction.ID.String(), ":")[1]
+		total, underflow := transaction.Inflow.SubWithUnderflow(transaction.Outflow)
+		bitSetVar := 0
+		if underflow {
+			total, _ = transaction.Outflow.SubWithUnderflow(transaction.Inflow)
+			bitSetVar = 1
+		}
+		txtext := fmt.Sprintf(`renterd_wallet_transaction_inflow{txid="%s"} %s
+renterd_wallet_transaction_outflow{txid="%s"} %s
+renterd_wallet_transaction_total{txid="%s", underflow="%d"} %s`,
+			txid, transaction.Inflow.ExactString(),
+			txid, transaction.Outflow.ExactString(),
+			txid, bitSetVar, total.ExactString(),
+		)
+		if i != len(txns)-1 {
+			txtext = txtext + "\n"
+		}
+		resulttext = resulttext + txtext
+	}
+
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
+}
+
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	var before, since time.Time
 	offset := 0
@@ -561,6 +765,16 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	txns, err := b.w.Transactions(before, since, offset, limit)
 	if jc.Check("couldn't load transactions", err) == nil {
 		jc.Encode(txns)
+	}
+}
+
+func (b *bus) walletOutputsPrometheusHandler(jc jape.Context) {
+	utxos, err := b.w.UnspentOutputs()
+	if jc.Check("couldn't load outputs", err) == nil {
+		var buf bytes.Buffer
+		text := `renterd_wallet_numoutputs %d`
+		fmt.Fprintf(&buf, text, len(utxos))
+		jc.ResponseWriter.Write(buf.Bytes())
 	}
 }
 
@@ -744,6 +958,45 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	})
 }
 
+// use to track pending txns number of inputs, outputs, and miner fees
+func (b *bus) walletPendingHandlerPrometheus(jc jape.Context) {
+	isRelevant := func(txn types.Transaction) bool {
+		addr := b.w.Address()
+		for _, sci := range txn.SiacoinInputs {
+			if sci.UnlockConditions.UnlockHash() == addr {
+				return true
+			}
+		}
+		for _, sco := range txn.SiacoinOutputs {
+			if sco.Address == addr {
+				return true
+			}
+		}
+		return false
+	}
+
+	txns := b.tp.Transactions()
+	resulttext := ""
+	for _, txn := range txns {
+		if isRelevant(txn) {
+			txtext := fmt.Sprintf(`renterd_wallet_transacaction_pending_inflow{txid="%s"} %d
+renterd_wallet_transaction_pending_outflow{txid="%s"} %d
+renterd_wallet_transaction_pending_minerfee{txid="%s"} %s`,
+				txn.ID().String(), len(txn.SiacoinInputs),
+				txn.ID().String(), len(txn.SiacoinOutputs),
+				txn.ID().String(), txn.MinerFees[0].ExactString())
+			resulttext = resulttext + txtext
+		}
+	}
+	if resulttext != "" {
+		resulttext = resulttext[:len(resulttext)-1]
+	}
+
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
+}
+
 func (b *bus) walletPendingHandler(jc jape.Context) {
 	isRelevant := func(txn types.Transaction) bool {
 		addr := b.w.Address()
@@ -768,6 +1021,207 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 		}
 	}
 	jc.Encode(relevant)
+}
+
+func (b *bus) hostsPrometheusHandlerShouldIgnoreHost(host *hostdb.Host) bool {
+	if host.PriceTable.Validity.Milliseconds() == 0 &&
+		host.PriceTable.HostBlockHeight == 0 &&
+		host.PriceTable.UpdatePriceTableCost.ExactString() == "0" &&
+		host.PriceTable.AccountBalanceCost.ExactString() == "0" &&
+		host.PriceTable.FundAccountCost.ExactString() == "0" &&
+		host.PriceTable.LatestRevisionCost.ExactString() == "0" &&
+		host.PriceTable.SubscriptionMemoryCost.ExactString() == "0" &&
+		host.PriceTable.SubscriptionNotificationCost.ExactString() == "0" &&
+		host.PriceTable.InitBaseCost.ExactString() == "0" &&
+		host.PriceTable.MemoryTimeCost.ExactString() == "0" &&
+		host.PriceTable.DownloadBandwidthCost.ExactString() == "0" &&
+		host.PriceTable.UploadBandwidthCost.ExactString() == "0" &&
+		host.PriceTable.DropSectorsBaseCost.ExactString() == "0" &&
+		host.PriceTable.DropSectorsUnitCost.ExactString() == "0" &&
+		host.PriceTable.HasSectorBaseCost.ExactString() == "0" &&
+		host.PriceTable.ReadBaseCost.ExactString() == "0" &&
+		host.PriceTable.ReadLengthCost.ExactString() == "0" &&
+		host.PriceTable.RenewContractCost.ExactString() == "0" &&
+		host.PriceTable.RevisionBaseCost.ExactString() == "0" &&
+		host.PriceTable.SwapSectorBaseCost.ExactString() == "0" &&
+		host.PriceTable.WriteBaseCost.ExactString() == "0" &&
+		host.PriceTable.WriteLengthCost.ExactString() == "0" &&
+		host.PriceTable.WriteStoreCost.ExactString() == "0" &&
+		host.PriceTable.TxnFeeMinRecommended.ExactString() == "0" &&
+		host.PriceTable.TxnFeeMaxRecommended.ExactString() == "0" &&
+		host.PriceTable.ContractPrice.ExactString() == "0" &&
+		host.PriceTable.CollateralCost.ExactString() == "0" &&
+		host.PriceTable.MaxCollateral.ExactString() == "0" &&
+		host.PriceTable.MaxDuration == 0 &&
+		host.PriceTable.WindowSize == 0 &&
+		host.PriceTable.RegistryEntriesLeft == 0 &&
+		host.PriceTable.RegistryEntriesTotal == 0 {
+		return true //host should be filterd out / ignored
+	} else {
+		return false //dont filter out host
+	}
+}
+
+func (b *bus) hostsPrometheusHandlerGET(jc jape.Context) {
+	offset := 0
+	limit := -1
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit)
+	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
+		return
+	}
+	resulttext := ""
+	for i, host := range hosts {
+		if b.hostsPrometheusHandlerShouldIgnoreHost(&host) {
+			continue
+		}
+		var acceptingContractsBitSetVar, lastScanSuccessBitSetVar, secondToLastScanSuccessBitSetVar, hostScannedBitSetVar int8
+		if host.Settings.AcceptingContracts {
+			acceptingContractsBitSetVar = 1
+		}
+		if host.Interactions.LastScanSuccess {
+			lastScanSuccessBitSetVar = 1
+		}
+		if host.Interactions.SecondToLastScanSuccess {
+			secondToLastScanSuccessBitSetVar = 1
+		}
+		if host.Scanned {
+			hostScannedBitSetVar = 1
+		}
+		ptmetadata := fmt.Sprintf(`netAddress="%s", uid="%s", expiry="%s"`, host.NetAddress, host.PriceTable.UID.String(), host.PriceTable.Expiry.Local().Format("2006-01-02T15:04:05Z07:00"))
+		smetadata := fmt.Sprintf(`netAddress="%s", version="%s", siamuxPort="%s"`, host.NetAddress, host.Settings.Version, host.Settings.SiaMuxPort)
+		ht := fmt.Sprintf(`renterd_host_pricetable_validity{%s} %d
+renterd_host_pricetable_hostblockheight{%s} %d
+renterd_host_pricetable_updatepricetablecost{%s} %s
+renterd_host_pricetable_accountbalancecost{%s} %s
+renterd_host_pricetable_fundaccountcost{%s} %s
+renterd_host_pricetable_latestrevisioncost{%s} %s
+renterd_host_pricetable_subscriptionmemorycost{%s} %s
+renterd_host_pricetable_subscriptionnotificationcost{%s} %s
+renterd_host_pricetable_initbasecost{%s} %s
+renterd_host_pricetable_memorytimecost{%s} %s
+renterd_host_pricetable_downloadbandwidthcost{%s} %s
+renterd_host_pricetable_uploadbandwidthcost{%s} %s
+renterd_host_pricetable_dropsectorsbasecost{%s} %s
+renterd_host_pricetable_dropsectorsunitcost{%s} %s
+renterd_host_pricetable_hassectorbasecost{%s} %s
+renterd_host_pricetable_readbasecost{%s} %s
+renterd_host_pricetable_readlengthcost{%s} %s
+renterd_host_pricetable_renewcontractcost{%s} %s
+renterd_host_pricetable_revisionbasecost{%s} %s
+renterd_host_pricetable_swapsectorcost{%s} %s
+renterd_host_pricetable_writebasecost{%s} %s
+renterd_host_pricetable_writelengthcost{%s} %s
+renterd_host_pricetable_writestorecost{%s} %s
+renterd_host_pricetable_txnfeeminrecommended{%s} %s
+renterd_host_pricetable_txnfeemaxrecommended{%s} %s
+renterd_host_pricetable_contractprice{%s} %s
+renterd_host_pricetable_collateralcost{%s} %s
+renterd_host_pricetable_maxcollateral{%s} %s
+renterd_host_pricetable_maxduration{%s} %d
+renterd_host_pricetable_windowsize{%s} %d
+renterd_host_pricetable_registryentriesleft{%s} %d
+renterd_host_pricetable_registryentriestotal{%s} %d
+renterd_host_settings_acceptingcontracts{%s} %d
+renterd_host_settings_baserpcprice{%s} %s
+renterd_host_settings_collateral{%s} %s
+renterd_host_settings_contractprice{%s} %s
+renterd_host_settings_downloadbandwidthprice{%s} %s
+renterd_host_settings_ephemeralaccountexpiry{%s} %d
+renterd_host_settings_maxcollateral{%s} %s
+renterd_host_settings_maxdownloadbatchsize{%s} %d
+renterd_host_settings_maxduration{%s} %d
+renterd_host_settings_maxephemeralaccountbalance{%s} %s
+renterd_host_settings_maxrevisebatchsize{%s} %d
+renterd_host_settings_remainingstorage{%s} %d
+renterd_host_settings_revisionnumber{%s} %d
+renterd_host_settings_sectoraccessprice{%s} %s
+renterd_host_settings_sectorsize{%s} %d
+renterd_host_settings_storageprice{%s} %s
+renterd_host_settings_totalstorage{%s} %d
+renterd_host_settings_uploadbandwidthprice{%s} %s
+renterd_host_settings_windowsize{%s} %d
+renterd_host_interactions_totalscans{netAddress="%s"} %d
+renterd_host_interactions_lastscansuccess{netAddress="%s"} %d
+renterd_host_interactions_lostsectors{netAddress="%s"} %d
+renterd_host_interactions_secondtolastscansuccess{netAddress="%s"} %d
+renterd_host_interactions_uptime{netAddress="%s"} %d
+renterd_host_interactions_downtime{netAddress="%s"} %d
+renterd_host_interactions_successfulinteractions{netAddress="%s"} %.0f
+renterd_host_interactions_failedinteractions{netAddress="%s"} %.0f
+renterd_host_scanned{netAddress="%s"} %d`,
+			ptmetadata, host.PriceTable.Validity.Milliseconds(),
+			ptmetadata, host.PriceTable.HostBlockHeight,
+			ptmetadata, host.PriceTable.UpdatePriceTableCost.ExactString(),
+			ptmetadata, host.PriceTable.AccountBalanceCost.ExactString(),
+			ptmetadata, host.PriceTable.FundAccountCost.ExactString(),
+			ptmetadata, host.PriceTable.LatestRevisionCost.ExactString(),
+			ptmetadata, host.PriceTable.SubscriptionMemoryCost.ExactString(),
+			ptmetadata, host.PriceTable.SubscriptionNotificationCost.ExactString(),
+			ptmetadata, host.PriceTable.InitBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.MemoryTimeCost.ExactString(),
+			ptmetadata, host.PriceTable.DownloadBandwidthCost.ExactString(),
+			ptmetadata, host.PriceTable.UploadBandwidthCost.ExactString(),
+			ptmetadata, host.PriceTable.DropSectorsBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.DropSectorsUnitCost.ExactString(),
+			ptmetadata, host.PriceTable.HasSectorBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.ReadBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.ReadLengthCost.ExactString(),
+			ptmetadata, host.PriceTable.RenewContractCost.ExactString(),
+			ptmetadata, host.PriceTable.RevisionBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.SwapSectorBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.WriteBaseCost.ExactString(),
+			ptmetadata, host.PriceTable.WriteLengthCost.ExactString(),
+			ptmetadata, host.PriceTable.WriteStoreCost.ExactString(),
+			ptmetadata, host.PriceTable.TxnFeeMinRecommended.ExactString(),
+			ptmetadata, host.PriceTable.TxnFeeMaxRecommended.ExactString(),
+			ptmetadata, host.PriceTable.ContractPrice.ExactString(),
+			ptmetadata, host.PriceTable.CollateralCost.ExactString(),
+			ptmetadata, host.PriceTable.MaxCollateral.ExactString(),
+			ptmetadata, host.PriceTable.MaxDuration,
+			ptmetadata, host.PriceTable.WindowSize,
+			ptmetadata, host.PriceTable.RegistryEntriesLeft,
+			ptmetadata, host.PriceTable.RegistryEntriesTotal,
+			smetadata, acceptingContractsBitSetVar,
+			smetadata, host.Settings.BaseRPCPrice.ExactString(),
+			smetadata, host.Settings.Collateral.ExactString(),
+			smetadata, host.Settings.ContractPrice.ExactString(),
+			smetadata, host.Settings.DownloadBandwidthPrice.ExactString(),
+			smetadata, host.Settings.EphemeralAccountExpiry.Milliseconds(),
+			smetadata, host.Settings.MaxCollateral.ExactString(),
+			smetadata, host.Settings.MaxDownloadBatchSize,
+			smetadata, host.Settings.MaxDuration,
+			smetadata, host.Settings.MaxEphemeralAccountBalance.ExactString(),
+			smetadata, host.Settings.MaxReviseBatchSize,
+			smetadata, host.Settings.RemainingStorage,
+			smetadata, host.Settings.RevisionNumber,
+			smetadata, host.Settings.SectorAccessPrice.ExactString(),
+			smetadata, host.Settings.SectorSize,
+			smetadata, host.Settings.StoragePrice.ExactString(),
+			smetadata, host.Settings.TotalStorage,
+			smetadata, host.Settings.UploadBandwidthPrice.ExactString(),
+			smetadata, host.Settings.WindowSize,
+			host.NetAddress, host.Interactions.TotalScans,
+			host.NetAddress, lastScanSuccessBitSetVar,
+			host.NetAddress, host.Interactions.LostSectors,
+			host.NetAddress, secondToLastScanSuccessBitSetVar,
+			host.NetAddress, host.Interactions.Uptime.Milliseconds(),
+			host.NetAddress, host.Interactions.Downtime.Milliseconds(),
+			host.NetAddress, host.Interactions.SuccessfulInteractions,
+			host.NetAddress, host.Interactions.FailedInteractions,
+			host.NetAddress, hostScannedBitSetVar,
+		)
+		if i != len(hosts)-1 {
+			ht = ht + "\n"
+		}
+		resulttext = resulttext + ht
+	}
+
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
 }
 
 func (b *bus) hostsHandlerGET(jc jape.Context) {
@@ -813,6 +1267,33 @@ func (b *bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(removed)
+}
+
+func (b *bus) hostsScanningPrometheusHandlerGET(jc jape.Context) {
+	offset := 0
+	limit := -1
+	maxLastScan := time.Now()
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
+		return
+	}
+	hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
+	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
+		return
+	}
+	resulttext := ""
+	for i, host := range hosts {
+		ht := fmt.Sprintf(`renterd_hosts_scanning{netAddress="%s", publicKey="%s"} 1`,
+			host.NetAddress, host.PublicKey.String(),
+		)
+		if i != len(hosts)-1 {
+			ht = ht + "\n"
+		}
+		resulttext = resulttext + ht
+	}
+
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
 }
 
 func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
@@ -881,6 +1362,25 @@ func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) hostsAllowlistPrometheusHandlerGET(jc jape.Context) {
+	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
+	if jc.Check("couldn't load allowlist", err) == nil {
+		resulttext := ""
+		for i, key := range allowlist {
+			ah := fmt.Sprintf(`renterd_allowed_host{publicKey="%s"} 1`,
+				key,
+			)
+			if i != len(allowlist)-1 {
+				ah = ah + "\n"
+			}
+			resulttext = resulttext + ah
+		}
+		var resultbuffer bytes.Buffer
+		resultbuffer.WriteString(resulttext)
+		jc.ResponseWriter.Write(resultbuffer.Bytes())
+	}
+}
+
 func (b *bus) hostsAllowlistHandlerGET(jc jape.Context) {
 	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
@@ -901,6 +1401,25 @@ func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) hostsBlocklistPrometheusHandlerGET(jc jape.Context) {
+	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
+	if jc.Check("couldn't load blocklist", err) == nil {
+		resulttext := ""
+		for i, host := range blocklist {
+			bl := fmt.Sprintf(`renterd_blocked_host{netAddress="%s"} 1`,
+				host,
+			)
+			if i != len(blocklist)-1 {
+				bl = bl + "\n"
+			}
+			resulttext = resulttext + bl
+		}
+		var resultbuffer bytes.Buffer
+		resultbuffer.WriteString(resulttext)
+		jc.ResponseWriter.Write(resultbuffer.Bytes())
+	}
+}
+
 func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
 	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
@@ -918,6 +1437,36 @@ func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 		} else if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
+	}
+}
+
+func (b *bus) contractsPrometheusHandlerGET(jc jape.Context) {
+	var cs string
+	if jc.DecodeForm("contractset", &cs) != nil {
+		return
+	}
+	contracts, err := b.ms.Contracts(jc.Request.Context(), api.ContractsOpts{
+		ContractSet: cs,
+	})
+	if jc.Check("couldn't load contracts", err) == nil {
+		resulttext := ""
+		for i, contract := range contracts {
+			contracttext := fmt.Sprintf(`renterd_contract{hostIP="%s", state="%s", hostKey="%s", siamuxAddr="%s", contractPrice="%s"} %s`,
+				contract.HostIP,
+				contract.State,
+				contract.HostKey.String(),
+				contract.SiamuxAddr,
+				contract.ContractPrice.ExactString(),
+				contract.TotalCost.ExactString(),
+			)
+			if i != len(contracts)-1 {
+				contracttext = contracttext + "\n"
+			}
+			resulttext = resulttext + contracttext
+		}
+		var resultbuffer bytes.Buffer
+		resultbuffer.WriteString(resulttext)
+		jc.ResponseWriter.Write(resultbuffer.Bytes())
 	}
 }
 
@@ -1012,17 +1561,44 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) contractsPrunablePrometheusDataHandlerGET(jc jape.Context) {
+	_, totalPrunable, totalSize := b.contractsPrunableTotalsGET(jc)
+	resulttext := fmt.Sprintf(`renterd_prunable_contracts_total %d
+renterd_prunable_contracts_size %d`,
+		totalPrunable, totalSize,
+	)
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	jc.ResponseWriter.Write(resultbuffer.Bytes())
+}
+
 func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
+	contracts, totalPrunable, totalSize := b.contractsPrunableTotalsGET(jc)
+
+	// sort contracts by the amount of prunable data
+	sort.Slice(contracts, func(i, j int) bool {
+		if contracts[i].Prunable == contracts[j].Prunable {
+			return contracts[i].Size > contracts[j].Size
+		}
+		return contracts[i].Prunable > contracts[j].Prunable
+	})
+
+	jc.Encode(api.ContractsPrunableDataResponse{
+		Contracts:     contracts,
+		TotalPrunable: totalPrunable,
+		TotalSize:     totalSize,
+	})
+}
+
+func (b *bus) contractsPrunableTotalsGET(jc jape.Context) ([]api.ContractPrunableData, uint64, uint64) {
 	sizes, err := b.ms.ContractSizes(jc.Request.Context())
 	if jc.Check("failed to fetch contract sizes", err) != nil {
-		return
+		return nil, 0, 0
 	}
 
-	// prepare the response
+	// build the response
 	var contracts []api.ContractPrunableData
 	var totalPrunable, totalSize uint64
-
-	// build the response
 	for fcid, size := range sizes {
 		// adjust the amount of prunable data with the pending uploads, due to
 		// how we record contract spending a contract's size might already
@@ -1042,19 +1618,7 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		totalSize += size.Size
 	}
 
-	// sort contracts by the amount of prunable data
-	sort.Slice(contracts, func(i, j int) bool {
-		if contracts[i].Prunable == contracts[j].Prunable {
-			return contracts[i].Size > contracts[j].Size
-		}
-		return contracts[i].Prunable > contracts[j].Prunable
-	})
-
-	jc.Encode(api.ContractsPrunableDataResponse{
-		Contracts:     contracts,
-		TotalPrunable: totalPrunable,
-		TotalSize:     totalSize,
-	})
+	return contracts, totalPrunable, totalSize
 }
 
 func (b *bus) contractSizeHandlerGET(jc jape.Context) {
@@ -1180,21 +1744,44 @@ func (b *bus) contractsAllHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
-func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
+func (b *bus) getSearchObjectKeys(jc jape.Context) []api.ObjectMetadata {
 	offset := 0
 	limit := -1
 	var key string
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
-		return
+		return nil
 	}
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
+		return nil
 	}
 	keys, err := b.ms.SearchObjects(jc.Request.Context(), bucket, key, offset, limit)
 	if jc.Check("couldn't list objects", err) != nil {
-		return
+		return nil
 	}
+	return keys
+}
+
+func (b *bus) searchObjectsHandlerPrometheusGET(jc jape.Context) {
+	keys := b.getSearchObjectKeys(jc)
+	unavailableObjs := 0
+	avgHealth := float64(0.0)
+	for _, obj := range keys {
+		if obj.Health == 0 {
+			unavailableObjs += 1
+		}
+		avgHealth += obj.Health
+	}
+	avgHealth = avgHealth / float64(len(keys))
+	var buf bytes.Buffer
+	text := `renterd_objects_avghealth %.0f
+renterd_objects_unavailable %d`
+	fmt.Fprintf(&buf, text, avgHealth, unavailableObjs)
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
+func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
+	keys := b.getSearchObjectKeys(jc)
 	jc.Encode(keys)
 }
 
@@ -1361,12 +1948,53 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", err)
 }
 
+func (b *bus) slabbuffersPrometheusHandlerGET(jc jape.Context) {
+	buffers, err := b.ms.SlabBuffers(jc.Request.Context())
+	if jc.Check("couldn't get slab buffers info", err) != nil {
+		return
+	}
+	totalSize := int64(0)
+	for _, buffer := range buffers {
+		totalSize += buffer.Size
+	}
+	var buf bytes.Buffer
+
+	text := `renterd_slabbuffers_totalsize %d
+renterd_slabbuffers_totalslabs %d`
+	fmt.Fprintf(&buf, text, totalSize, len(buffers))
+
+	jc.ResponseWriter.Write(buf.Bytes())
+}
+
 func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
 	buffers, err := b.ms.SlabBuffers(jc.Request.Context())
 	if jc.Check("couldn't get slab buffers info", err) != nil {
 		return
 	}
 	jc.Encode(buffers)
+}
+
+func (b *bus) objectsStatshandlerPrometheusGET(jc jape.Context) {
+	info, err := b.ms.ObjectsStats(jc.Request.Context())
+	if jc.Check("couldn't get objects stats", err) != nil {
+		return
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, `renterd_stats_numobjects %d
+renterd_stats_numunfinishedobjects %d
+renterd_stats_minhealth %.0f
+renterd_stats_totalobjectsize %d
+renterd_stats_totalunfinishedobjectssize %d
+renterd_stats_totalsectorssize %d
+renterd_stats_totaluploadedsize %d`,
+		info.NumObjects,
+		info.NumUnfinishedObjects,
+		info.MinHealth,
+		info.TotalObjectsSize,
+		info.TotalUnfinishedObjectsSize,
+		info.TotalSectorsSize,
+		info.TotalUploadedSize)
+	jc.ResponseWriter.Write(buf.Bytes())
 }
 
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {
@@ -1551,6 +2179,52 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
+type settingV0ConfigDisplayOptions struct {
+	includeRedundancyMaxStoragePrice bool
+	includeRedundancyMaxUploadPrice  bool
+}
+
+func (b *bus) settingsPrometheusHandlerGET(jc jape.Context) {
+	setting1, err := b.ss.Setting(jc.Request.Context(), "s3authentication")
+	if errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	var resp1 interface{}
+	err = json.Unmarshal([]byte(setting1), &resp1)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	setting2, err := b.ss.Setting(jc.Request.Context(), "v0-config-display-options")
+	if errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	var resp2 interface{}
+	err = json.Unmarshal([]byte(setting2), &resp2)
+	if err != nil {
+		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, `renterd_settings{includeRedundancyMaxStoragePrice="%v", includeRedundancyMaxUploadPrice="%v"} 1
+renterd_settings_s3{address="%s", enabled="%v", disabledauth="%v", hostbucketenabled="%v"} 1`,
+		resp2.(settingV0ConfigDisplayOptions).includeRedundancyMaxStoragePrice,
+		resp2.(settingV0ConfigDisplayOptions).includeRedundancyMaxUploadPrice,
+		resp1.(config.S3).Address, resp1.(config.S3).Enabled, resp1.(config.S3).DisableAuth, resp1.(config.S3).HostBucketEnabled)
+	jc.ResponseWriter.Write(buf.Bytes())
+
+}
+
 func (b *bus) settingsHandlerGET(jc jape.Context) {
 	if settings, err := b.ss.Settings(jc.Request.Context()); jc.Check("couldn't load settings", err) == nil {
 		jc.Encode(settings)
@@ -1700,6 +2374,94 @@ func (b *bus) consensusState() api.ConsensusState {
 	}
 }
 
+func (b *bus) paramsHandlerPrometheusGETHelper(jc jape.Context, id string) (bytes.Buffer, error) {
+	gp, err := b.gougingParams(jc.Request.Context())
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return bytes.Buffer{}, err
+	}
+	var bitSetVar int8
+	if gp.ConsensusState.Synced {
+		bitSetVar = 1
+	}
+	var buf bytes.Buffer
+	text := `renterd_%s_consensusstate_synced %d
+renterd_%s_consensusstate_chainIndex_height %d
+renterd_%s_consensusstate_chainIndex_height{lastBlockTime="%s"} %d
+renterd_%s_settings_minmaxcollateral %s
+renterd_%s_settings_maxrpcprice %s
+renterd_%s_settings_maxcontractprice %s
+renterd_%s_settings_maxdownloadprice %s
+renterd_%s_settings_maxuploadprice %s
+renterd_%s_settings_maxstorageprice %s
+renterd_%s_settings_hostblockheightleeway %d
+renterd_%s_settings_minpricetablevalidity %d
+renterd_%s_settings_minaccountexpiry %d
+renterd_%s_settings_minmaxephemeralaccountbalance %s
+renterd_%s_settings_migrationsurchagemultiplier %d
+renterd_%s_redundancy_settings_minshards %d
+renterd_%s_redundancy_settings_totalshards %d
+renterd_%s_transactionfee %s`
+	fmt.Fprintf(&buf, text,
+		id, bitSetVar,
+		id, gp.ConsensusState.BlockHeight,
+		id, gp.ConsensusState.LastBlockTime.String(), gp.ConsensusState.BlockHeight,
+		id, gp.GougingSettings.MinMaxCollateral.ExactString(),
+		id, gp.GougingSettings.MaxRPCPrice.ExactString(),
+		id, gp.GougingSettings.MaxContractPrice.ExactString(),
+		id, gp.GougingSettings.MaxDownloadPrice.ExactString(),
+		id, gp.GougingSettings.MaxUploadPrice.ExactString(),
+		id, gp.GougingSettings.MaxStoragePrice.ExactString(),
+		id, gp.GougingSettings.HostBlockHeightLeeway,
+		id, gp.GougingSettings.MinPriceTableValidity.Milliseconds(),
+		id, gp.GougingSettings.MinAccountExpiry.Milliseconds(),
+		id, gp.GougingSettings.MinMaxEphemeralAccountBalance.ExactString(),
+		id, gp.GougingSettings.MigrationSurchargeMultiplier,
+		id, gp.RedundancySettings.MinShards,
+		id, gp.RedundancySettings.TotalShards,
+		id, gp.TransactionFee.ExactString(),
+	)
+	return buf, nil
+}
+
+func (b *bus) paramsHandlerUploadPrometheusGET(jc jape.Context) {
+	buf, err := b.paramsHandlerPrometheusGETHelper(jc, "upload")
+	if err != nil {
+		return
+	}
+
+	var contractSet string
+	var css api.ContractSetSetting
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingContractSet, &css); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
+		return
+	} else if err == nil {
+		contractSet = css.Default
+	}
+
+	var uploadPacking bool
+	var pus api.UploadPackingSettings
+	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
+		return
+	} else if err == nil {
+		uploadPacking = pus.Enabled
+	}
+
+	var buf2 bytes.Buffer
+	fmt.Fprintf(&buf2, `%s
+renterd_upload_currentheight{contractset="%s", uploadpacking="%v", slabbuffermaxsizesoft="%d"} %d`,
+		buf.String(),
+		contractSet, uploadPacking, pus.SlabBufferMaxSizeSoft, b.cm.TipState().Index.Height)
+	jc.ResponseWriter.Write(buf2.Bytes())
+}
+
+func (b *bus) paramsHandlerGougingPrometheusGET(jc jape.Context) {
+	buf, err := b.paramsHandlerPrometheusGETHelper(jc, "gouging")
+	if err != nil {
+		jc.ResponseWriter.Write(buf.Bytes())
+	}
+}
+
 func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -1731,6 +2493,25 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		RedundancySettings: rs,
 		TransactionFee:     b.tp.RecommendedFee(),
 	}, nil
+}
+
+func (b *bus) handleGETAlertsPrometheus(c jape.Context) {
+	alerts := b.alertMgr.Active()
+
+	resulttext := ""
+	for i, alert := range alerts {
+		alerttext := fmt.Sprintf(`renterd_alert{severity="%s", message="%s", timestamp="%s"} 1`,
+			alert.Severity.String(), alert.Message, alert.Timestamp.String(),
+		)
+		if i != len(alerts)-1 {
+			alerttext = alerttext + "\n"
+		}
+		resulttext = resulttext + alerttext
+	}
+
+	var resultbuffer bytes.Buffer
+	resultbuffer.WriteString(resulttext)
+	c.ResponseWriter.Write(resultbuffer.Bytes())
 }
 
 func (b *bus) handleGETAlerts(c jape.Context) {
@@ -1888,6 +2669,32 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *bus) autopilotsListPrometheusHandlerGET(jc jape.Context) {
+	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
+		resulttext := ""
+		for i, ap := range autopilots {
+			var pruneBitSetVar, redundantIPBitSetVar int8
+			if ap.Config.Contracts.Prune {
+				pruneBitSetVar = 1
+			}
+			if ap.Config.Hosts.AllowRedundantIPs {
+				redundantIPBitSetVar = 1
+			}
+			aptext := fmt.Sprintf(`renterd_autopilot{name="%s", max_hosts_for_contracts="%d", period="%d", renew_window="%d", download="%d", upload="%d", storage="%d", prune_enabled="%d", allow_redundant_ips="%d", max_downtime_hours="%d", min_recent_scan_failures="%d"} 1`,
+				ap.ID, ap.Config.Contracts.Amount, ap.Config.Contracts.Period, ap.Config.Contracts.RenewWindow, ap.Config.Contracts.Download, ap.Config.Contracts.Upload, ap.Config.Contracts.Storage, pruneBitSetVar, redundantIPBitSetVar, ap.Config.Hosts.MaxDowntimeHours, ap.Config.Hosts.MinRecentScanFailures,
+			)
+			if i != len(autopilots)-1 {
+				aptext = aptext + "\n"
+			}
+			resulttext = resulttext + aptext
+		}
+
+		var resultbuffer bytes.Buffer
+		resultbuffer.WriteString(resulttext)
+		jc.ResponseWriter.Write(resultbuffer.Bytes())
+	}
+}
+
 func (b *bus) autopilotsListHandlerGET(jc jape.Context) {
 	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
 		jc.Encode(autopilots)
@@ -1937,6 +2744,13 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	}
 	cs := b.cm.TipState()
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
+}
+
+func (b *bus) statePrometheusHandlerGET(jc jape.Context) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, `renterd_state{network="%s", version="%s", commit="%s", starttime="%s", os="%s", buildtime="%s"} 1`,
+		build.NetworkName(), build.Version(), build.Commit(), api.TimeRFC3339(b.startTime).String(), runtime.GOOS, api.TimeRFC3339(build.BuildTime()).String())
+	jc.ResponseWriter.Write(buf.Bytes())
 }
 
 func (b *bus) stateHandlerGET(jc jape.Context) {

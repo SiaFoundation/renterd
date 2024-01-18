@@ -54,6 +54,10 @@ var (
 			Address:  build.DefaultAPIAddress,
 			Password: os.Getenv("RENTERD_API_PASSWORD"),
 		},
+		Prometheus: config.HTTP{
+			Address:  build.DefaultPrometheusAddress,
+			Password: os.Getenv("RENTERD_API_PASSWORD"),
+		},
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
 			Log: config.DatabaseLog{
@@ -284,6 +288,9 @@ func main() {
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
+	// prometheus
+	flag.StringVar(&cfg.Prometheus.Address, "prometheus", "notset", "Address to serve prometheus API on")
+
 	flag.Parse()
 
 	if flag.Arg(0) == "version" {
@@ -295,6 +302,7 @@ func main() {
 		fmt.Println(wallet.NewSeedPhrase())
 		return
 	}
+	promIsSet := cfg.Prometheus.Address != "notset"
 
 	// Overwrite flags from environment if set.
 	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
@@ -445,8 +453,10 @@ func main() {
 	}
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
+	var b2 http.Handler
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, b3, fn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger, promIsSet)
+		b2 = b3
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
@@ -538,6 +548,50 @@ func main() {
 
 	// Start server.
 	go srv.Serve(l)
+
+	// var pc prometheus.prometheus
+	if promIsSet {
+		l2, err := listenTCP(logger, cfg.Prometheus.Address)
+		if err != nil {
+			logger.Fatal("failed to create listener: " + err.Error())
+		}
+		// override the address with the actual one
+		cfg.Prometheus.Address = "http://" + l2.Addr().String()
+
+		prometheusMux := &treeMux{
+			sub: make(map[string]treeMux),
+		}
+
+		// Create the webserver.
+		srvPrometheus := &http.Server{Handler: prometheusMux}
+		shutdownFns = append(shutdownFns, shutdownFn{
+			name: "Prometheus Server",
+			fn:   srvPrometheus.Shutdown,
+		})
+		mux.sub["/prometheus/bus"] = treeMux{h: auth(b2)}
+		go srv.Serve(l2)
+
+		// prometheusHandler := b.NewPrometheusHandler()
+		// mux.sub["/prometheus"] = treeMux{h: auth(prometheusHandler)}
+		// // prometheusAddr := cfg.Prometheus.Address + "/prometheus"
+		// // prometheusPassword := cfg.HTTP.Password
+		// // pc := prometheus.NewClient(prometheusAddr, prometheusPassword)
+		// prometheusSrv := &http.Server{
+		// 	Addr:    cfg.Prometheus.Address,
+		// 	Handler: prometheusHandler,
+		// }
+		// prometheusListener, err := listenTCP(logger, cfg.Prometheus.Address)
+		// if err != nil {
+		// 	logger.Fatal("failed to create listener: " + err.Error())
+		// }
+		// shutdownFns = append(shutdownFns, shutdownFn{
+		// 	name: "Prometheus",
+		// 	fn:   prometheusSrv.Shutdown,
+		// })
+		// go prometheusSrv.Serve(prometheusListener)
+
+		logger.Info("prometheus api: Listening on " + l2.Addr().String())
+	}
 
 	// Set initial S3 keys.
 	if cfg.S3.Enabled && !cfg.S3.DisableAuth {

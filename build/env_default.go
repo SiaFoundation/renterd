@@ -12,9 +12,10 @@ import (
 const (
 	network = "mainnet"
 
-	DefaultAPIAddress     = "localhost:9980"
-	DefaultGatewayAddress = ":9981"
-	DefaultS3Address      = "localhost:8080"
+	DefaultAPIAddress        = "localhost:9980"
+	DefaultPrometheusAddress = ":9982"
+	DefaultGatewayAddress    = ":9981"
+	DefaultS3Address         = "localhost:8080"
 )
 
 var (

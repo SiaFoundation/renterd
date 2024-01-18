@@ -14,11 +14,12 @@ type (
 
 		Log Log `yaml:"log"`
 
-		HTTP      HTTP      `yaml:"http"`
-		Bus       Bus       `yaml:"bus"`
-		Worker    Worker    `yaml:"worker"`
-		S3        S3        `yaml:"s3"`
-		Autopilot Autopilot `yaml:"autopilot"`
+		HTTP       HTTP      `yaml:"http"`
+		Prometheus HTTP      `yaml:"prometheus"`
+		Bus        Bus       `yaml:"bus"`
+		Worker     Worker    `yaml:"worker"`
+		S3         S3        `yaml:"s3"`
+		Autopilot  Autopilot `yaml:"autopilot"`
 
 		Database Database `yaml:"database"`
 	}

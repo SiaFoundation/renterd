@@ -12,9 +12,10 @@ import (
 const (
 	network = "zen"
 
-	DefaultAPIAddress     = "localhost:9880"
-	DefaultGatewayAddress = ":9881"
-	DefaultS3Address      = "localhost:7070"
+	DefaultAPIAddress        = "localhost:9880"
+	DefaultPrometheusAddress = ":9882"
+	DefaultGatewayAddress    = ":9881"
+	DefaultS3Address         = "localhost:7070"
 )
 
 var (

@@ -1324,7 +1324,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"GET /memory": w.memoryGET,
+		"GET    /memory": w.memoryGET,
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
