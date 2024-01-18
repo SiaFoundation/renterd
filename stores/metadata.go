@@ -43,7 +43,7 @@ var (
 	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
 	errShardRootChanged      = errors.New("shard root changed")
 
-	objectDeleteBatchSizes = []int64{100, 200, 500, 1000, 5000, 10000, 50000, 100000}
+	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
 const (
@@ -2678,6 +2678,10 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDel
 	return
 }
 
+// deleteObjects deletes a batch of objects from the database. The order of
+// deletion goes from largest to smallest. That's because the batch size is
+// dynamically increased and the smaller objects get the faster we can delete
+// them meaning it makes sense to increase the batch size over time.
 func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, _ error) {
 	batchSizeIdx := 0
 	for {
@@ -2690,8 +2694,9 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 			WHERE id IN (
 				SELECT id FROM (
 					SELECT id FROM objects
-					WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ? LIMIT ?
-					ORDER BY object_id ASC
+					WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?
+					ORDER BY size DESC
+					LIMIT ?
 					) tmp
 				)`,
 				path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket),
