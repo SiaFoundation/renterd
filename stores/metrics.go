@@ -529,7 +529,7 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 			UNION ALL
 			SELECT period_start + ?
 			FROM periods
-			WHERE period_start < ?
+			WHERE period_start < ? - ?
 		)
 		SELECT contracts.*, i.Period FROM contracts
 		INNER JOIN (
@@ -544,8 +544,13 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 			p.period_start, c.fcid
 		ORDER BY
 			p.period_start ASC
-		) i ON contracts.id = i.contract_id 
-	`, unixTimeMS(start), interval.Milliseconds(), unixTimeMS(end), interval.Milliseconds()).
+		) i ON contracts.id = i.id
+	`, unixTimeMS(start),
+		interval.Milliseconds(),
+		unixTimeMS(end),
+		interval.Milliseconds(),
+		interval.Milliseconds(),
+	).
 		Scan(&metricsWithPeriod).
 		Error
 	if err != nil {
@@ -574,14 +579,13 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 // only the metrics we want.
 func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n uint64, interval time.Duration, whereExpr clause.Expr) error {
 	end := start.Add(time.Duration(n) * interval)
-
 	return s.dbMetrics.Raw(fmt.Sprintf(`
 		WITH RECURSIVE periods AS (
 			SELECT ? AS period_start
 			UNION ALL
 			SELECT period_start + ?
 			FROM periods
-			WHERE period_start < ?
+			WHERE period_start < ? - ?
 		)
 		SELECT %s.* FROM %s
 		INNER JOIN (
@@ -602,6 +606,7 @@ func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n
 		unixTimeMS(start),
 		interval.Milliseconds(),
 		unixTimeMS(end),
+		interval.Milliseconds(),
 		interval.Milliseconds(),
 		whereExpr,
 	).Scan(dst).
