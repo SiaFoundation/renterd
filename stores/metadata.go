@@ -22,6 +22,11 @@ import (
 )
 
 const (
+	// batchDurationThreshold is the upper bound for the duration of a batch
+	// operation on the database. As long as we are below the threshold, we
+	// increase the batch size.
+	batchDurationThreshold = time.Second
+
 	// refreshHealthBatchSize is the number of slabs for which we update the
 	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
@@ -37,6 +42,8 @@ const (
 var (
 	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
 	errShardRootChanged      = errors.New("shard root changed")
+
+	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
 const (
@@ -109,7 +116,7 @@ type (
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
 		Key      secretKey
-		Slabs    []dbSlice              `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+		Slabs    []dbSlice              // no CASCADE, slices are deleted via trigger
 		Metadata []dbObjectUserMetadata `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete metadata too
 		Health   float64                `gorm:"index;default:1.0; NOT NULL"`
 		Size     int64
@@ -547,7 +554,6 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 		if res.Error != nil {
 			return res.Error
 		}
-		s.scheduleSlabPruning()
 		return nil
 	})
 }
@@ -932,7 +938,7 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]
 
 	var nullContracts []size
 	var dataContracts []size
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
 		// first, we fetch all contracts without sectors and consider their
 		// entire size as prunable
 		if err := tx.
@@ -1194,7 +1200,7 @@ FROM (
 	ANY_VALUE(mime_type) as MimeType
 	FROM objects
 	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	WHERE SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
+	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
 	GROUP BY oname
 ) baseQuery
 `,
@@ -1211,6 +1217,8 @@ FROM (
 		utf8.RuneCountInString(path) + 1,       // onameExpr
 		path, utf8.RuneCountInString(path) + 1, // onameExpr
 		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+
+		path + "%",
 
 		utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
 		path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
@@ -1418,62 +1426,6 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 	return found
 }
 
-func (s *SQLStore) slabPruningLoop(interval, cooldown time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		// wait for trigger
-		select {
-		case <-s.shutdownCtx.Done():
-			return
-		case <-ticker.C:
-		case <-s.slabPruneSigChan:
-		}
-
-		err := s.retryTransaction(func(tx *gorm.DB) error {
-			if !isSQLite(s.db) {
-				return s.db.Exec(`
-			DELETE slabs
-			FROM slabs
-			LEFT JOIN slices ON slices.db_slab_id = slabs.id
-			WHERE slices.db_object_id IS NULL
-			AND slices.db_multipart_part_id IS NULL
-			AND slabs.db_buffered_slab_id IS NULL;
-		`).Error
-			} else {
-				return s.db.Exec(`
-			DELETE FROM slabs
-				WHERE id IN (
-				SELECT slabs.id
-				FROM slabs
-				LEFT JOIN slices ON slices.db_slab_id = slabs.id
-				WHERE slices.db_object_id IS NULL
-				AND slices.db_multipart_part_id IS NULL
-				AND slabs.db_buffered_slab_id IS NULL
-			);
-		`).Error
-			}
-		})
-		if err != nil {
-			s.logger.Errorw("failed to prune slabs", zap.Error(err))
-		}
-
-		// cooldown
-		select {
-		case <-s.shutdownCtx.Done():
-			return
-		case <-time.After(cooldown):
-		}
-	}
-}
-
-func (s *SQLStore) scheduleSlabPruning() {
-	select {
-	case s.slabPruneSigChan <- struct{}{}:
-	default:
-	}
-}
-
 func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
 	fcids := make([]fileContractID, 0, len(usedContracts))
 	for _, hostFCIDs := range usedContracts {
@@ -1528,21 +1480,19 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		if force {
 			// delete potentially existing objects at destination
-			inner := tx.Raw("SELECT ? FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")),
-				prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+			inner := tx.Raw("SELECT ? FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")), prefixNew,
+				utf8.RuneCountInString(prefixOld)+1, prefixOld+"%",
+				utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
 			resp := tx.Model(&dbObject{}).
 				Where("object_id IN (?)", inner).
 				Delete(&dbObject{})
 			if err := resp.Error; err != nil {
 				return err
 			}
-			if resp.RowsAffected > 0 {
-				s.scheduleSlabPruning()
-			}
 		}
-		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-			prefixNew, utf8.RuneCountInString(prefixOld)+1, utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
 		if tx.Error != nil &&
 			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
 			return api.ErrObjectExists
@@ -1821,10 +1771,7 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) error {
 	var rowsAffected int64
 	var err error
-	err = s.retryTransaction(func(tx *gorm.DB) error {
-		rowsAffected, err = s.deleteObjects(tx, bucket, prefix)
-		return err
-	})
+	rowsAffected, err = s.deleteObjects(bucket, prefix)
 	if err != nil {
 		return err
 	}
@@ -2082,15 +2029,16 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		Health float64
 	}
 
-	if err := s.db.
-		Select("slabs.key, slabs.health").
-		Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
-		Model(&dbSlab{}).
-		Where("health <= ? AND cs.name = ?", healthCutoff, set).
-		Order("health ASC").
-		Limit(limit).
-		Find(&rows).
-		Error; err != nil {
+	if err := s.retryTransaction(func(tx *gorm.DB) error {
+		return tx.Select("slabs.key, slabs.health").
+			Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
+			Model(&dbSlab{}).
+			Where("health <= ? AND cs.name = ?", healthCutoff, set).
+			Order("health ASC").
+			Limit(limit).
+			Find(&rows).
+			Error
+	}); err != nil {
 		return nil, err
 	}
 
@@ -2464,7 +2412,8 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey 
 		return nil, err
 	}
 
-	err = s.db.Raw(`
+	err = s.retryTransaction(func(tx *gorm.DB) error {
+		return tx.Raw(`
 SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
@@ -2472,8 +2421,9 @@ INNER JOIN objects obj ON sli.db_object_id = obj.id
 INNER JOIN buckets b ON obj.db_bucket_id = b.id AND b.name = ?
 WHERE sla.key = ?
 	`, bucket, key).
-		Scan(&rows).
-		Error
+			Scan(&rows).
+			Error
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -2725,19 +2675,52 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDel
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	}
-	s.scheduleSlabPruning()
 	return
 }
 
-func (s *SQLStore) deleteObjects(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
-	tx = tx.Exec("DELETE FROM objects WHERE SUBSTR(object_id, 1, ?) = ? AND ?",
-		utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket))
-	if tx.Error != nil {
-		return 0, tx.Error
-	}
-	numDeleted = tx.RowsAffected
-	if numDeleted > 0 {
-		s.scheduleSlabPruning()
+// deleteObjects deletes a batch of objects from the database. The order of
+// deletion goes from largest to smallest. That's because the batch size is
+// dynamically increased and the smaller objects get the faster we can delete
+// them meaning it makes sense to increase the batch size over time.
+func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, _ error) {
+	batchSizeIdx := 0
+	for {
+		var duration time.Duration
+		var rowsAffected int64
+		if err := s.retryTransaction(func(tx *gorm.DB) error {
+			start := time.Now()
+			res := tx.Exec(`
+			DELETE FROM objects
+			WHERE id IN (
+				SELECT id FROM (
+					SELECT id FROM objects
+					WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?
+					ORDER BY size DESC
+					LIMIT ?
+					) tmp
+				)`,
+				path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket),
+				objectDeleteBatchSizes[batchSizeIdx])
+			if err := res.Error; err != nil {
+				return res.Error
+			}
+			duration = time.Since(start)
+			rowsAffected = res.RowsAffected
+			return nil
+		}); err != nil {
+			return 0, fmt.Errorf("failed to delete objects: %w", err)
+		}
+
+		// if nothing got deleted we are done
+		if rowsAffected == 0 {
+			break
+		}
+		numDeleted += rowsAffected
+
+		// increase the batch size if deletion was faster than the threshold
+		if duration < batchDurationThreshold && batchSizeIdx < len(objectDeleteBatchSizes)-1 {
+			batchSizeIdx++
+		}
 	}
 	return numDeleted, nil
 }
@@ -3043,7 +3026,7 @@ func buildOrderClause(sortBy, sortDir string) (clause.OrderByColumn, error) {
 
 func buildPrefixExpr(prefix string) clause.Expr {
 	if prefix != "" {
-		return gorm.Expr("SUBSTR(o.object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
+		return gorm.Expr("o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?", prefix+"%", utf8.RuneCountInString(prefix), prefix)
 	} else {
 		return exprTRUE
 	}

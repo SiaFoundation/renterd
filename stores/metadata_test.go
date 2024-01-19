@@ -1057,9 +1057,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 1
+	expectedObj.Slabs[0].DBSlabID = 3
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 2
+	expectedObj.Slabs[1].DBSlabID = 4
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1081,7 +1081,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   1,
+				DBSlabID:   3,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1121,7 +1121,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   2,
+				DBSlabID:   4,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -1217,7 +1217,6 @@ func TestSQLMetadataStore(t *testing.T) {
 		}
 		return nil
 	}
-	ss.scheduleSlabPruning()
 	ss.Retry(100, 100*time.Millisecond, func() error {
 		return countCheck(1, 1, 1, 1)
 	})
@@ -1227,7 +1226,6 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err := ss.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
-	ss.scheduleSlabPruning()
 	ss.Retry(100, 100*time.Millisecond, func() error {
 		return countCheck(0, 0, 0, 0)
 	})
@@ -2928,9 +2926,6 @@ func TestContractSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// prune slabs
-	ss.scheduleSlabPruning()
-
 	// assert there's one sector that can be pruned and assert it's from fcid 1
 	ss.Retry(100, 100*time.Millisecond, func() error {
 		if n := prunableData(nil); n != rhpv2.SectorSize {
@@ -2946,9 +2941,6 @@ func TestContractSizes(t *testing.T) {
 	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
-
-	// prune slabs
-	ss.scheduleSlabPruning()
 
 	// assert there's now two sectors that can be pruned
 	ss.Retry(100, 100*time.Millisecond, func() error {
@@ -3863,5 +3855,137 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		if !(min.Before(validUntil) && max.After(validUntil)) {
 			t.Fatal("valid until not in boundaries", min, max, validUntil, now)
 		}
+	}
+}
+
+func TestSlabCleanupTrigger(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create contract set
+	cs := dbContractSet{}
+	if err := ss.db.Create(&cs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create buffered slab
+	bs := dbBufferedSlab{
+		Filename: "foo",
+	}
+	if err := ss.db.Create(&bs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create objects
+	obj1 := dbObject{
+		ObjectID:   "1",
+		DBBucketID: 1,
+		Health:     1,
+	}
+	if err := ss.db.Create(&obj1).Error; err != nil {
+		t.Fatal(err)
+	}
+	obj2 := dbObject{
+		ObjectID:   "2",
+		DBBucketID: 1,
+		Health:     1,
+	}
+	if err := ss.db.Create(&obj2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// create a slab
+	ek, _ := object.GenerateEncryptionKey().MarshalBinary()
+	slab := dbSlab{
+		DBContractSet:    cs,
+		Health:           1,
+		Key:              secretKey(ek),
+		HealthValidUntil: 100,
+	}
+	if err := ss.db.Create(&slab).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// reference the slab
+	slice1 := dbSlice{
+		DBObjectID: &obj1.ID,
+		DBSlabID:   slab.ID,
+	}
+	if err := ss.db.Create(&slice1).Error; err != nil {
+		t.Fatal(err)
+	}
+	slice2 := dbSlice{
+		DBObjectID: &obj2.ID,
+		DBSlabID:   slab.ID,
+	}
+	if err := ss.db.Create(&slice2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// delete the object
+	if err := ss.db.Delete(&obj1).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// check slice count
+	var slabCntr int64
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
+
+	// delete second object
+	if err := ss.db.Delete(&obj2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 0 {
+		t.Fatalf("expected 0 slabs, got %v", slabCntr)
+	}
+
+	// create another object that references a slab with buffer
+	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
+	bufferedSlab := dbSlab{
+		DBBufferedSlabID: bs.ID,
+		DBContractSet:    cs,
+		Health:           1,
+		Key:              ek,
+		HealthValidUntil: 100,
+	}
+	if err := ss.db.Create(&bufferedSlab).Error; err != nil {
+		t.Fatal(err)
+	}
+	obj3 := dbObject{
+		ObjectID:   "3",
+		DBBucketID: 1,
+		Health:     1,
+	}
+	if err := ss.db.Create(&obj3).Error; err != nil {
+		t.Fatal(err)
+	}
+	slice := dbSlice{
+		DBObjectID: &obj3.ID,
+		DBSlabID:   bufferedSlab.ID,
+	}
+	if err := ss.db.Create(&slice).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
+
+	// delete third object
+	if err := ss.db.Delete(&obj3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
 	}
 }
