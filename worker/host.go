@@ -227,9 +227,9 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 	if curr.Cmp(balance) >= 0 {
 		return nil
 	}
+	deposit := balance.Sub(curr)
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
-		deposit := balance.Sub(curr)
 		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			// fetch pricetable
 			pt, err := h.priceTable(ctx, rev)
@@ -241,11 +241,11 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			if pt.FundAccountCost.Cmp(rev.ValidRenterPayout()) >= 0 {
 				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), pt.FundAccountCost)
 			}
-			funds := rev.ValidRenterPayout().Sub(pt.FundAccountCost)
+			availableFunds := rev.ValidRenterPayout().Sub(pt.FundAccountCost)
 
 			// cap the deposit amount by the money that's left in the contract
-			if deposit.Cmp(funds) > 0 {
-				deposit = funds
+			if deposit.Cmp(availableFunds) > 0 {
+				deposit = availableFunds
 			}
 
 			// create the payment
