@@ -8,11 +8,11 @@ import (
 )
 
 var (
-	ErrMaxIntervalsExceeded = fmt.Errorf("max number of intervals exceeds maximum of %v", MaxMetricIntervals)
+	ErrMaxIntervalsExceeded = fmt.Errorf("max number of intervals exceeds maximum of %v", MetricMaxIntervals)
 )
 
 const (
-	MaxMetricIntervals = 1000
+	MetricMaxIntervals = 1000
 
 	ChurnDirAdded   = "added"
 	ChurnDirRemoved = "removed"

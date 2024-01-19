@@ -2083,19 +2083,18 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	}
 
 	// parse optional query parameters
-	switch key := jc.PathParam("key"); key {
+	var metrics interface{}
+	var err error
+	key := jc.PathParam("key")
+	switch key {
 	case api.MetricContract:
 		var opts api.ContractMetricsQueryOpts
 		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
 			return
 		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
 			return
-		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract metrics", err) != nil {
-			return
-		} else {
-			jc.Encode(metrics)
-			return
 		}
+		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricContractPrune:
 		var opts api.ContractPruneMetricsQueryOpts
 		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
@@ -2104,22 +2103,14 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("hostVersion", &opts.HostVersion) != nil {
 			return
-		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract prune metrics", err) != nil {
-			return
-		} else {
-			jc.Encode(metrics)
-			return
 		}
+		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricContractSet:
 		var opts api.ContractSetMetricsQueryOpts
 		if jc.DecodeForm("name", &opts.Name) != nil {
 			return
-		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract set metrics", err) != nil {
-			return
-		} else {
-			jc.Encode(metrics)
-			return
 		}
+		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricContractSetChurn:
 		var opts api.ContractSetChurnMetricsQueryOpts
 		if jc.DecodeForm("name", &opts.Name) != nil {
@@ -2128,24 +2119,22 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 			return
 		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
 			return
-		} else if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get contract churn metrics", err) != nil {
-			return
-		} else {
-			jc.Encode(metrics)
-			return
 		}
+		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricWallet:
 		var opts api.WalletMetricsQueryOpts
-		if metrics, err := b.metrics(jc.Request.Context(), key, start, n, interval, opts); jc.Check("failed to get wallet metrics", err) != nil {
-			return
-		} else {
-			jc.Encode(metrics)
-			return
-		}
+		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	default:
 		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
+	if errors.Is(err, api.ErrMaxIntervalsExceeded) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check(fmt.Sprintf("failed to fetch '%s' metrics", key), err) != nil {
+		return
+	}
+	jc.Encode(metrics)
 }
 
 func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64, interval time.Duration, opts interface{}) (interface{}, error) {
