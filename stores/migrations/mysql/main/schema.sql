@@ -310,7 +310,7 @@ CREATE TABLE `multipart_parts` (
   KEY `idx_multipart_parts_etag` (`etag`),
   KEY `idx_multipart_parts_part_number` (`part_number`),
   KEY `idx_multipart_parts_db_multipart_upload_id` (`db_multipart_upload_id`),
-  CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbObject
@@ -373,8 +373,8 @@ CREATE TABLE `slices` (
   KEY `idx_slices_object_index` (`object_index`),
   KEY `idx_slices_db_multipart_part_id` (`db_multipart_part_id`),
   KEY `idx_slices_db_slab_id` (`db_slab_id`),
-  CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`),
+  CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`),
   CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -419,3 +419,37 @@ CREATE TABLE `object_user_metadata` (
   CONSTRAINT `fk_object_user_metadata` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- dbObject trigger to delete from slices
+CREATE TRIGGER before_delete_on_objects_delete_slices
+BEFORE DELETE
+ON objects FOR EACH ROW
+DELETE FROM slices
+WHERE slices.db_object_id = OLD.id;
+
+-- dbMultipartUpload trigger to delete from dbMultipartPart
+CREATE TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
+BEFORE DELETE
+ON multipart_uploads FOR EACH ROW
+DELETE FROM multipart_parts
+WHERE multipart_parts.db_multipart_upload_id = OLD.id;
+
+-- dbMultipartPart trigger to delete from slices
+CREATE TRIGGER before_delete_on_multipart_parts_delete_slices
+BEFORE DELETE
+ON multipart_parts FOR EACH ROW
+DELETE FROM slices
+WHERE slices.db_multipart_part_id = OLD.id;
+
+-- dbSlices trigger to prune slabs
+CREATE TRIGGER after_delete_on_slices_delete_slabs
+AFTER DELETE
+ON slices FOR EACH ROW
+DELETE FROM slabs
+WHERE slabs.id = OLD.db_slab_id
+AND slabs.db_buffered_slab_id IS NULL
+AND NOT EXISTS (
+    SELECT 1
+    FROM slices
+    WHERE slices.db_slab_id = OLD.db_slab_id
+);

@@ -26,7 +26,7 @@ type (
 		ObjectID   string                 `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
 		DBBucket   dbBucket               `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
 		DBBucketID uint                   `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
-		Parts      []dbMultipartPart      `gorm:"constraint:OnDelete:CASCADE"`  // CASCADE to delete parts too
+		Parts      []dbMultipartPart      // no CASCADE, parts are deleted via trigger
 		Metadata   []dbObjectUserMetadata `gorm:"constraint:OnDelete:SET NULL"` // CASCADE to delete parts too
 		MimeType   string                 `gorm:"index:idx_multipart_uploads_mime_type"`
 	}
@@ -37,7 +37,7 @@ type (
 		PartNumber          int    `gorm:"index"`
 		Size                uint64
 		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
-		Slabs               []dbSlice `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete slices too
+		Slabs               []dbSlice // no CASCADE, slices are deleted via trigger
 	}
 )
 
@@ -295,7 +295,6 @@ func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string
 		if err != nil {
 			return fmt.Errorf("failed to delete multipart upload: %w", err)
 		}
-		s.scheduleSlabPruning()
 		return nil
 	})
 }
