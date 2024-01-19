@@ -27,14 +27,14 @@ func TestUploadDownload(t *testing.T) {
 	contracts := newMockContracts(hosts)
 
 	// mock dependencies
-	cl := newMockContractLocker(contracts)
+	cs := newMockContractStore(contracts)
 	hm := newMockHostManager(hosts)
 	os := newMockObjectStore()
 	mm := &mockMemoryManager{}
 
 	// create managers
 	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
-	ul := newUploadManager(context.Background(), hm, mm, os, cl, 0, 0, time.Minute, zap.NewNop().Sugar())
+	ul := newUploadManager(context.Background(), hm, mm, os, cs, 0, 0, time.Minute, zap.NewNop().Sugar())
 
 	// create test data
 	data := make([]byte, 128)
