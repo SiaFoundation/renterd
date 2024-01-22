@@ -49,7 +49,7 @@ type (
 
 		acc                      *account
 		bus                      Bus
-		contractSpendingRecorder *contractSpendingRecorder
+		contractSpendingRecorder ContractSpendingRecorder
 		logger                   *zap.SugaredLogger
 		transportPool            *transportPoolV3
 		priceTables              *priceTables
@@ -192,7 +192,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+			HostInteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
 				HostKey:    h.hk,
 				Success:    isSuccessfulInteraction(err),
 				Timestamp:  time.Now(),

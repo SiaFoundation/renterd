@@ -25,7 +25,6 @@ const (
 )
 
 var (
-	errDownloadManagerStopped = errors.New("download manager stopped")
 	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
 )
 
@@ -291,7 +290,7 @@ outer:
 		var resp *slabDownloadResponse
 		select {
 		case <-mgr.shutdownCtx.Done():
-			return errDownloadManagerStopped
+			return ErrShuttingDown
 		case <-ctx.Done():
 			return errors.New("download timed out")
 		case resp = <-responseChan:
