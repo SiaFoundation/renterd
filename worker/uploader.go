@@ -22,7 +22,8 @@ const (
 type (
 	uploader struct {
 		os     ObjectStore
-		cl     ContractLocker
+		cs     ContractStore
+		hm     HostManager
 		logger *zap.SugaredLogger
 
 		hk              types.PublicKey
@@ -70,12 +71,12 @@ func (u *uploader) Healthy() bool {
 	return u.consecutiveFailures == 0
 }
 
-func (u *uploader) Renew(h Host, c api.ContractMetadata, bh uint64) {
+func (u *uploader) Refresh(c api.ContractMetadata, bh uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	u.bh = bh
-	u.host = h
+	u.host = u.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 	u.fcid = c.ID
 	u.siamuxAddr = c.SiamuxAddr
 	u.endHeight = c.WindowEnd
@@ -120,8 +121,10 @@ outer:
 
 			// the uploader's contract got renewed, requeue the request
 			if errors.Is(err, errMaxRevisionReached) {
-				u.enqueue(req)
-				continue outer
+				if u.tryRefresh(req.sector.ctx) {
+					u.enqueue(req)
+					continue outer
+				}
 			}
 
 			// send the response
@@ -196,13 +199,13 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	u.mu.Unlock()
 
 	// acquire contract lock
-	lockID, err := u.cl.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
+	lockID, err := u.cs.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
 	if err != nil {
 		return types.Hash256{}, 0, err
 	}
 
 	// defer the release
-	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
+	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cs, u.logger)
 	defer func() {
 		ctx, cancel := context.WithTimeout(u.shutdownCtx, 10*time.Second)
 		lock.Release(ctx)
@@ -228,7 +231,7 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 
 	// upload the sector
 	start := time.Now()
-	root, err := host.UploadSector(ctx, req.sector.data, rev)
+	root, err := host.UploadSector(ctx, req.sector.sectorData(), rev)
 	if err != nil {
 		return types.Hash256{}, 0, fmt.Errorf("failed to upload sector to contract %v, err: %v", fcid, err)
 	}
@@ -286,4 +289,19 @@ func (u *uploader) tryRecomputeStats() {
 	u.lastRecompute = time.Now()
 	u.statsSectorUploadEstimateInMS.Recompute()
 	u.statsSectorUploadSpeedBytesPerMS.Recompute()
+}
+
+func (u *uploader) tryRefresh(ctx context.Context) bool {
+	// fetch the renewed contract
+	renewed, err := u.cs.RenewedContract(ctx, u.ContractID())
+	if isError(err, api.ErrContractNotFound) || isError(err, context.Canceled) {
+		return false
+	} else if err != nil {
+		u.logger.Errorf("failed to fetch renewed contract %v, err: %v", u.ContractID(), err)
+		return false
+	}
+
+	// renew the uploader with the renewed contract
+	u.Refresh(renewed, u.BlockHeight())
+	return true
 }

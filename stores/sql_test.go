@@ -97,8 +97,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop().Sugar(),
 		GormLogger:                    newTestLogger(),
-		SlabPruningInterval:           time.Hour,
-		SlabPruningCooldown:           10 * time.Millisecond,
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
 	})
 	if err != nil {

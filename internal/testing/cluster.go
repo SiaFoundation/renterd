@@ -580,13 +580,12 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 	return nil
 }
 
-// announceHosts adds storage and a registry to each host and announces them to
+// announceHosts configures hosts with default settings and announces them to
 // the group
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
 		settings.NetAddress = host.RHPv2Addr()
-		settings.MaxRegistryEntries = 1 << 18
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}

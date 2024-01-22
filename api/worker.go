@@ -166,15 +166,6 @@ type (
 		AccountKey types.PrivateKey `json:"accountKey"`
 	}
 
-	// RHPRegistryUpdateRequest is the request type for the /rhp/registry/update
-	// endpoint.
-	RHPRegistryUpdateRequest struct {
-		HostKey       types.PublicKey     `json:"hostKey"`
-		SiamuxAddr    string              `json:"siamuxAddr"`
-		RegistryKey   rhpv3.RegistryKey   `json:"registryKey"`
-		RegistryValue rhpv3.RegistryValue `json:"registryValue"`
-	}
-
 	// DownloadStatsResponse is the response type for the /stats/downloads endpoint.
 	DownloadStatsResponse struct {
 		AvgDownloadSpeedMBPS float64           `json:"avgDownloadSpeedMbps"`
