@@ -20,10 +20,9 @@ import (
 )
 
 type (
-	contractsMap map[types.PublicKey]api.ContractMetadata
-
 	mockContract struct {
-		rev types.FileContractRevision
+		rev      types.FileContractRevision
+		metadata api.ContractMetadata
 
 		mu      sync.Mutex
 		sectors map[types.Hash256]*[rhpv2.SectorSize]byte
@@ -43,8 +42,11 @@ type (
 		hptBlockChan chan struct{}
 	}
 
+	mockHosts     []*mockHost
+	mockContracts []*mockContract
+
 	mockHostManager struct {
-		hosts map[types.PublicKey]Host
+		hosts map[types.PublicKey]*mockHost
 	}
 
 	mockMemory        struct{}
@@ -72,8 +74,6 @@ type (
 
 		dl *downloadManager
 		ul *uploadManager
-
-		contracts contractsMap
 	}
 )
 
@@ -94,12 +94,36 @@ var (
 	errSectorOutOfBounds = errors.New("sector out of bounds")
 )
 
-func (c contractsMap) values() []api.ContractMetadata {
-	var contracts []api.ContractMetadata
-	for _, contract := range c {
-		contracts = append(contracts, contract)
+var mockContractCntr = 0
+
+func newFileContractID() (fcid types.FileContractID) {
+	fcid = types.FileContractID{byte(mockContractCntr)}
+	mockContractCntr++
+	return
+}
+
+var mockHostCntr = 0
+
+func newHostKey() (hk types.PublicKey) {
+	hk = types.PublicKey{byte(mockHostCntr)}
+	mockHostCntr++
+	return
+}
+
+func (hosts mockHosts) contracts() mockContracts {
+	contracts := make([]*mockContract, len(hosts))
+	for i, host := range hosts {
+		contracts[i] = host.c
 	}
 	return contracts
+}
+
+func (contracts mockContracts) metadata() []api.ContractMetadata {
+	metadata := make([]api.ContractMetadata, len(contracts))
+	for i, contract := range contracts {
+		metadata[i] = contract.metadata
+	}
+	return metadata
 }
 
 func (m *mockMemory) Release()           {}
@@ -340,6 +364,15 @@ func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev 
 }
 
 func (h *mockHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	curr := h.c.metadata
+	update := newMockContract(h.hk)
+	update.metadata.RenewedFrom = curr.ID
+	update.metadata.WindowStart = curr.WindowEnd
+	update.metadata.WindowEnd = update.metadata.WindowStart + (curr.WindowEnd - curr.WindowStart)
+	h.c = update
 	return
 }
 
@@ -377,34 +410,33 @@ func (cs *mockContractStore) KeepaliveContract(ctx context.Context, fcid types.F
 	return nil
 }
 
-func newMockHosts(n int) []*mockHost {
-	hosts := make([]*mockHost, n)
-	for i := range hosts {
-		hosts[i] = newMockHost(types.PublicKey{byte(i)}, newTestHostPriceTable(time.Now().Add(time.Minute)), nil)
+func newMockHost(contract bool) *mockHost {
+	host := &mockHost{
+		hk:  newHostKey(),
+		hpt: newTestHostPriceTable(time.Now().Add(time.Minute)),
 	}
-	return hosts
+	if contract {
+		host.c = newMockContract(host.hk)
+	}
+	return host
 }
 
-func newMockHost(hk types.PublicKey, hpt hostdb.HostPriceTable, c *mockContract) *mockHost {
-	return &mockHost{
-		hk: hk,
-		c:  c,
-
-		hpt: hpt,
+func newMockHosts(n int, contract bool) (hosts mockHosts) {
+	for i := 0; i < n; i++ {
+		hosts = append(hosts, newMockHost(contract))
 	}
+	return
 }
 
-func newMockContracts(hosts []*mockHost) []*mockContract {
-	contracts := make([]*mockContract, len(hosts))
-	for i := range contracts {
-		contracts[i] = newMockContract(types.FileContractID{byte(i)})
-		hosts[i].c = contracts[i]
-	}
-	return contracts
-}
-
-func newMockContract(fcid types.FileContractID) *mockContract {
+func newMockContract(hk types.PublicKey) *mockContract {
+	fcid := newFileContractID()
 	return &mockContract{
+		metadata: api.ContractMetadata{
+			ID:          fcid,
+			HostKey:     hk,
+			WindowStart: 0,
+			WindowEnd:   10,
+		},
 		rev:     types.FileContractRevision{ParentID: fcid},
 		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
 	}
@@ -419,7 +451,7 @@ func newMockContractStore(contracts []*mockContract) *mockContractStore {
 }
 
 func newMockHostManager(hosts []*mockHost) *mockHostManager {
-	hm := &mockHostManager{hosts: make(map[types.PublicKey]Host)}
+	hm := &mockHostManager{hosts: make(map[types.PublicKey]*mockHost)}
 	for _, h := range hosts {
 		hm.hosts[h.hk] = h
 	}
@@ -439,12 +471,11 @@ func newMockSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
 }
 
 func newMockWorker(numHosts int) *mockWorker {
-	// create hosts and contracts
-	hosts := newMockHosts(numHosts)
-	contracts := newMockContracts(hosts)
+	// create hosts
+	hosts := newMockHosts(numHosts, true)
 
 	// create dependencies
-	cs := newMockContractStore(contracts)
+	cs := newMockContractStore(hosts.contracts())
 	hm := newMockHostManager(hosts)
 	os := newMockObjectStore()
 	mm := &mockMemoryManager{}
@@ -452,25 +483,22 @@ func newMockWorker(numHosts int) *mockWorker {
 	dl := newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar())
 	ul := newUploadManager(context.Background(), hm, mm, os, cs, 0, 0, time.Minute, zap.NewNop().Sugar())
 
-	// create contract metadata
-	metadatas := make(contractsMap)
-	for _, h := range hosts {
-		metadatas[h.hk] = api.ContractMetadata{
-			ID:      h.c.rev.ParentID,
-			HostKey: h.hk,
-		}
-	}
-
 	return &mockWorker{
+		cs: cs,
 		hm: hm,
 		mm: mm,
 		os: os,
 
 		dl: dl,
 		ul: ul,
-
-		contracts: metadatas,
 	}
+}
+
+func (w *mockWorker) contracts() (metadatas []api.ContractMetadata) {
+	for _, h := range w.hm.hosts {
+		metadatas = append(metadatas, h.c.metadata)
+	}
+	return
 }
 
 func newTestHostPriceTable(expiry time.Time) hostdb.HostPriceTable {

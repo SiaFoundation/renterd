@@ -28,6 +28,7 @@ const (
 )
 
 var (
+	errContractExpired     = errors.New("contract expired")
 	errNoCandidateUploader = errors.New("no candidate uploader found")
 	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
 	errWorkerShutDown      = errors.New("worker was shut down")
@@ -363,67 +364,6 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostM
 	}
 }
 
-func (mgr *uploadManager) MigrateShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
-	// cancel all in-flight requests when the upload is done
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
-	if err != nil {
-		return err
-	}
-
-	// track the upload in the bus
-	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
-		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
-	}
-
-	// defer a function that finishes the upload
-	defer func() {
-		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
-			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
-		}
-		cancel()
-	}()
-
-	// upload the shards
-	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
-	if err != nil {
-		return err
-	}
-
-	// track stats
-	mgr.statsOverdrivePct.Track(overdrivePct)
-	mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
-
-	// overwrite the shards with the newly uploaded ones
-	for i, si := range shardIndices {
-		s.Shards[si].LatestHost = uploaded[i].LatestHost
-
-		knownContracts := make(map[types.FileContractID]struct{})
-		for _, fcids := range s.Shards[si].Contracts {
-			for _, fcid := range fcids {
-				knownContracts[fcid] = struct{}{}
-			}
-		}
-		for hk, fcids := range uploaded[i].Contracts {
-			for _, fcid := range fcids {
-				if _, exists := knownContracts[fcid]; !exists {
-					if s.Shards[si].Contracts == nil {
-						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
-					}
-					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
-				}
-			}
-		}
-	}
-
-	// update the slab
-	return mgr.os.UpdateSlab(ctx, *s, contractSet)
-}
-
 func (mgr *uploadManager) Stats() uploadManagerStats {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -451,7 +391,7 @@ func (mgr *uploadManager) Stop() {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, u := range mgr.uploaders {
-		u.Stop()
+		u.Stop(errWorkerShutDown)
 	}
 }
 
@@ -673,6 +613,67 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
+func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+	// cancel all in-flight requests when the upload is done
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// create the upload
+	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	if err != nil {
+		return err
+	}
+
+	// track the upload in the bus
+	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
+		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
+	}
+
+	// defer a function that finishes the upload
+	defer func() {
+		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
+		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
+			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
+		}
+		cancel()
+	}()
+
+	// upload the shards
+	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+	if err != nil {
+		return err
+	}
+
+	// track stats
+	mgr.statsOverdrivePct.Track(overdrivePct)
+	mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
+
+	// overwrite the shards with the newly uploaded ones
+	for i, si := range shardIndices {
+		s.Shards[si].LatestHost = uploaded[i].LatestHost
+
+		knownContracts := make(map[types.FileContractID]struct{})
+		for _, fcids := range s.Shards[si].Contracts {
+			for _, fcid := range fcids {
+				knownContracts[fcid] = struct{}{}
+			}
+		}
+		for hk, fcids := range uploaded[i].Contracts {
+			for _, fcid := range fcids {
+				if _, exists := knownContracts[fcid]; !exists {
+					if s.Shards[si].Contracts == nil {
+						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
+					}
+					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
+				}
+			}
+		}
+	}
+
+	// update the slab
+	return mgr.os.UpdateSlab(ctx, *s, contractSet)
+}
+
 func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -722,7 +723,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// build map of renewals
 	renewals := make(map[types.FileContractID]api.ContractMetadata)
 	for _, c := range contracts {
-		if c.RenewedFrom == (types.FileContractID{}) {
+		if c.RenewedFrom != (types.FileContractID{}) {
 			renewals[c.RenewedFrom] = c
 		}
 	}
@@ -738,7 +739,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 		// stop uploaders that expired
 		if uploader.Expired(bh) {
-			uploader.Stop()
+			uploader.Stop(errContractExpired)
 			continue
 		}
 
@@ -753,7 +754,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 
 	// add missing uploaders
 	for _, c := range contracts {
-		if _, exists := existing[c.ID]; !exists {
+		if _, exists := existing[c.ID]; !exists && bh < c.WindowEnd {
 			uploader := mgr.newUploader(mgr.os, mgr.cs, mgr.hm, c, bh)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()

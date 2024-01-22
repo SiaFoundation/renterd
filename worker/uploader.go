@@ -143,14 +143,14 @@ outer:
 	}
 }
 
-func (u *uploader) Stop() {
+func (u *uploader) Stop(err error) {
 	for {
 		upload := u.pop()
 		if upload == nil {
 			break
 		}
 		if !upload.done() {
-			upload.fail(errors.New("uploader stopped"))
+			upload.fail(err)
 		}
 	}
 }

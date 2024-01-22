@@ -44,15 +44,16 @@ func newMockHostStore(hosts []*hostdb.HostInfo) *mockHostStore {
 }
 
 func TestPriceTables(t *testing.T) {
-	// create two price tables
+	// create two price tables, a valid one and one that expired
 	expiredPT := newTestHostPriceTable(time.Now())
 	validPT := newTestHostPriceTable(time.Now().Add(time.Minute))
 
-	// create a mock host with that returns a valid price table
-	hk1 := types.PublicKey{1}
-	h1 := newMockHost(hk1, validPT, nil)
+	// create a mock host that has a valid price table
+	h1 := newMockHost(false)
+	h1.hpt = validPT
+	hk1 := h1.hk
 
-	// create a hostdb host with an expired pt
+	// create a hostdb entry for that host that returns the expired price table
 	hdb1 := &hostdb.HostInfo{
 		Host: hostdb.Host{
 			PublicKey:  hk1,
