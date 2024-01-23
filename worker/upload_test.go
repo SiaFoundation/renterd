@@ -435,6 +435,64 @@ func TestRefreshUploaders(t *testing.T) {
 	}
 }
 
+func TestUploadRegression(t *testing.T) {
+	// mock worker
+	w := newMockWorker()
+
+	// add hosts to worker
+	w.addHosts(testRedundancySettings.TotalShards)
+
+	// convenience variables
+	mm := w.mm
+	os := w.os
+	ul := w.ul
+	dl := w.dl
+
+	// create test data
+	data := make([]byte, 128)
+	if _, err := frand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// create upload params
+	params := testParameters(t.Name())
+
+	// make sure the memory manager blocks
+	mm.memBlockChan = make(chan struct{})
+
+	// upload data
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _, err := ul.Upload(ctx, bytes.NewReader(data), w.contracts(), params, lockingPriorityUpload)
+	if !errors.Is(err, errUploadInterrupted) {
+		t.Fatal(err)
+	}
+
+	// unblock the memory manager
+	close(mm.memBlockChan)
+
+	// upload data
+	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.contracts(), params, lockingPriorityUpload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// grab the object
+	o, err := os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// download data for good measure
+	var buf bytes.Buffer
+	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, buf.Bytes()) {
+		t.Fatal("data mismatch", data, buf.Bytes())
+	}
+}
+
 func testParameters(path string) uploadParameters {
 	return uploadParameters{
 		bucket: testBucket,

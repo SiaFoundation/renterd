@@ -49,7 +49,9 @@ type (
 	}
 
 	mockMemory        struct{}
-	mockMemoryManager struct{}
+	mockMemoryManager struct {
+		memBlockChan chan struct{}
+	}
 
 	mockObjectStore struct {
 		mu           sync.Mutex
@@ -126,6 +128,9 @@ func (mm *mockMemoryManager) Limit(amt uint64) (MemoryManager, error) {
 }
 func (mm *mockMemoryManager) Status() api.MemoryStatus { return api.MemoryStatus{} }
 func (mm *mockMemoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
+	if mm.memBlockChan != nil {
+		<-mm.memBlockChan
+	}
 	return &mockMemory{}
 }
 

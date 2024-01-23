@@ -537,7 +537,7 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 		SELECT contracts.*, i.Period FROM contracts
 		INNER JOIN (
 		SELECT
-			p.period_start as Period, 
+			p.period_start as Period,
 			MIN(c.id) AS id
 		FROM
 			periods p
