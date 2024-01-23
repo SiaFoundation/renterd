@@ -25,7 +25,10 @@ var (
 
 func TestUpload(t *testing.T) {
 	// mock worker
-	w := newMockWorker(testRedundancySettings.TotalShards * 2)
+	w := newMockWorker()
+
+	// add hosts to worker
+	w.addHosts(testRedundancySettings.TotalShards * 2)
 
 	// convenience variables
 	os := w.os
@@ -127,7 +130,10 @@ func TestUpload(t *testing.T) {
 
 func TestUploadPackedSlab(t *testing.T) {
 	// mock worker
-	w := newMockWorker(testRedundancySettings.TotalShards * 2)
+	w := newMockWorker()
+
+	// add hosts to worker
+	w.addHosts(testRedundancySettings.TotalShards * 2)
 
 	// convenience variables
 	os := w.os
@@ -210,7 +216,10 @@ func TestUploadPackedSlab(t *testing.T) {
 
 func TestUploadShards(t *testing.T) {
 	// mock worker
-	w := newMockWorker(testRedundancySettings.TotalShards * 2)
+	w := newMockWorker()
+
+	// add hosts to worker
+	w.addHosts(testRedundancySettings.TotalShards * 2)
 
 	// convenience variables
 	os := w.os
@@ -326,7 +335,10 @@ func TestUploadShards(t *testing.T) {
 
 func TestRefreshUploaders(t *testing.T) {
 	// mock worker
-	w := newMockWorker(testRedundancySettings.TotalShards * 2)
+	w := newMockWorker()
+
+	// add hosts to worker
+	w.addHosts(testRedundancySettings.TotalShards)
 
 	// convenience variables
 	ul := w.ul
@@ -356,18 +368,15 @@ func TestRefreshUploaders(t *testing.T) {
 
 	// renew the first contract
 	c1 := contracts[0]
-	hm.hosts[c1.HostKey].RenewContract(context.Background(), api.RHPRenewRequest{})
-	c1Renewed := hm.hosts[c1.HostKey].c
+	c1Renewed := w.renewContractWithHost(c1.HostKey)
 
 	// remove the host from the second contract
 	c2 := contracts[1]
 	delete(hm.hosts, c2.HostKey)
-	delete(cs.contracts, c2.ID)
+	delete(cs.locks, c2.ID)
 
 	// add a new host/contract
-	hNew := newMockHost(true)
-	hm.hosts[hNew.hk] = hNew
-	cs.contracts[hNew.c.metadata.ID] = hNew.c
+	hNew := w.addHost()
 
 	// upload data
 	contracts = w.contracts()

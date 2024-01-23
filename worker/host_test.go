@@ -11,7 +11,8 @@ import (
 )
 
 func TestHost(t *testing.T) {
-	h := newMockHost(true)
+	h := newMockHost(types.PublicKey{1})
+	h.c = newMockContract(h.hk, types.FileContractID{1})
 	sector, root := newMockSector()
 
 	// upload the sector
