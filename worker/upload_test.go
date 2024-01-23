@@ -368,7 +368,7 @@ func TestRefreshUploaders(t *testing.T) {
 
 	// renew the first contract
 	c1 := contracts[0]
-	c1Renewed := w.renewContractWithHost(c1.HostKey)
+	c1Renewed := w.renewContract(c1.HostKey)
 
 	// remove the host from the second contract
 	c2 := contracts[1]

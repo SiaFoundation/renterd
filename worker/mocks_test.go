@@ -472,15 +472,16 @@ func (hm *mockHostManager) Host(hk types.PublicKey, fcid types.FileContractID, s
 	return hm.hosts[hk]
 }
 
-func (hm *mockHostManager) addHost(h *mockHost) {
+func (hm *mockHostManager) newHost(hk types.PublicKey) *mockHost {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
-	if _, ok := hm.hosts[h.hk]; ok {
+	if _, ok := hm.hosts[hk]; ok {
 		panic("host already exists")
 	}
 
-	hm.hosts[h.hk] = h
+	hm.hosts[hk] = newMockHost(hk)
+	return hm.hosts[hk]
 }
 
 func (hm *mockHostManager) host(hk types.PublicKey) *mockHost {
@@ -519,26 +520,21 @@ func (w *mockWorker) addHosts(n int) {
 }
 
 func (w *mockWorker) addHost() *mockHost {
-	host := newMockHost(w.newHostKey())
-	w.hm.addHost(host)
-	w.formContractWithHost(host.hk)
+	host := w.hm.newHost(w.newHostKey())
+	w.formContract(host)
 	return host
 }
 
-func (w *mockWorker) formContractWithHost(hk types.PublicKey) *mockContract {
-	host := w.hm.host(hk)
-	if host == nil {
-		panic("host not found")
-	} else if host.c != nil {
+func (w *mockWorker) formContract(host *mockHost) *mockContract {
+	if host.c != nil {
 		panic("host already has contract, use renew")
 	}
-
 	host.c = newMockContract(host.hk, w.newFileContractID())
 	w.cs.addContract(host.c)
 	return host.c
 }
 
-func (w *mockWorker) renewContractWithHost(hk types.PublicKey) *mockContract {
+func (w *mockWorker) renewContract(hk types.PublicKey) *mockContract {
 	host := w.hm.host(hk)
 	if host == nil {
 		panic("host not found")

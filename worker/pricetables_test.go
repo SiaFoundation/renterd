@@ -48,14 +48,13 @@ func TestPriceTables(t *testing.T) {
 	expiredPT := newTestHostPriceTable(time.Now())
 	validPT := newTestHostPriceTable(time.Now().Add(time.Minute))
 
-	// create a mock host that has a valid price table
-	hk1 := types.PublicKey{1}
-	h1 := newMockHost(hk1)
-	h1.hpt = validPT
-
 	// create host manager
 	hm := newMockHostManager()
-	hm.addHost(h1)
+
+	// create a mock host that has a valid price table
+	hk1 := types.PublicKey{1}
+	h1 := hm.newHost(hk1)
+	h1.hpt = validPT
 
 	// create a hostdb entry for that host that returns the expired price table
 	hdb1 := &hostdb.HostInfo{
