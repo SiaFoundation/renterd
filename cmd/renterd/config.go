@@ -104,12 +104,16 @@ func stdoutError(msg string) {
 	}
 }
 
-func setListenAddress(context string, value *string) {
+func setListenAddress(context string, value *string, allowEmpty bool) {
 	// will continue to prompt until a valid value is entered
 	for {
 		input := readInput(fmt.Sprintf("%s (currently %q)", context, *value))
 		if input == "" {
-			return
+			if allowEmpty {
+				return
+			}
+			stdoutError(fmt.Sprintf("Invalid %s %q: must not be empty", context, input))
+			continue
 		}
 
 		host, port, err := net.SplitHostPort(input)
@@ -221,13 +225,49 @@ func setAdvancedConfig() {
 	fmt.Println("The HTTP address is used to serve the renter's admin API.")
 	fmt.Println("The admin API is used to configure the renter.")
 	fmt.Println("It should not be exposed to the public internet without setting up a reverse proxy.")
-	setListenAddress("HTTP Address", &cfg.HTTP.Address)
+	setListenAddress("HTTP Address", &cfg.HTTP.Address, true)
 
 	// gateway address
 	fmt.Println("")
 	fmt.Println("The gateway address is used to exchange blocks with other nodes in the Sia network")
 	fmt.Println("It should be exposed publicly to improve the renter's connectivity.")
-	setListenAddress("Gateway Address", &cfg.Bus.GatewayAddr)
+	setListenAddress("Gateway Address", &cfg.Bus.GatewayAddr, true)
+
+	// database
+	fmt.Println("")
+	fmt.Println("The database is used to store the renter's metadata.")
+	fmt.Println("The embedded SQLite database is recommended for small (< 50TB), single-user setups. Choose this for the easiest setup.")
+	fmt.Println("MySQL database is recommended for larger (> 50TB) or multi-user setups. MySQL requires a separate MySQL server to connect to.")
+	setStoreConfig()
+}
+
+func setStoreConfig() {
+	store := promptQuestion("Which data store would you like to use?", []string{"mysql", "sqlite"})
+	switch store {
+	case "mysql":
+		fmt.Println("")
+		fmt.Println("The MySQL database is used to store the renter metadata.")
+		fmt.Println("You will need to set up a MySQL server to connect to.")
+		fmt.Println("")
+		fmt.Println("You will also need to create two database")
+		fmt.Println(" - The first database will be used to store the object metadata.")
+		fmt.Println(" - The second database will be used to store metrics.")
+		fmt.Println("")
+		setListenAddress("MySQL address", &cfg.Database.MySQL.URI, false)
+
+		cfg.Database.MySQL.User = readInput("MySQL username")
+		cfg.Database.MySQL.Password = readPasswordInput("MySQL password")
+		objectDB := readInput("Object database name (default: renterd)")
+		if objectDB != "" {
+			cfg.Database.MySQL.Database = objectDB
+		}
+		metricsDB := readInput("Metrics database name (default: renterd_metrics)")
+		if metricsDB != "" {
+			cfg.Database.MySQL.MetricsDatabase = metricsDB
+		}
+	default:
+		return
+	}
 }
 
 func setS3Config() {
@@ -244,7 +284,7 @@ func setS3Config() {
 	fmt.Println("The S3 address is used to serve the renter's S3 API.")
 	fmt.Println("The S3 API provides an S3-compatible gateway for uploading data to Sia.")
 	fmt.Println("It should not be exposed to the public internet without setting up a reverse proxy.")
-	setListenAddress("S3 Address", &cfg.S3.Address)
+	setListenAddress("S3 Address", &cfg.S3.Address, true)
 
 	// s3 access key
 	if len(cfg.S3.KeypairsV4) != 0 {
