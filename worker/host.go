@@ -22,7 +22,7 @@ type (
 		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 
 		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
-		FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error

@@ -393,7 +393,7 @@ func (h *mockHost) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]b
 	return h.contract().addSector(sector), nil
 }
 
-func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (rev types.FileContractRevision, _ error) {
+func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (rev types.FileContractRevision, _ error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	rev = h.c.rev

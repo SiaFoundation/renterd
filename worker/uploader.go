@@ -32,7 +32,6 @@ type (
 		shutdownCtx     context.Context
 
 		mu        sync.Mutex
-		bh        uint64
 		endHeight uint64
 		fcid      types.FileContractID
 		host      Host
@@ -46,12 +45,6 @@ type (
 		statsSectorUploadSpeedBytesPerMS *stats.DataPoints
 	}
 )
-
-func (u *uploader) BlockHeight() uint64 {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.bh
-}
 
 func (u *uploader) ContractID() types.FileContractID {
 	u.mu.Lock()
@@ -71,11 +64,10 @@ func (u *uploader) Healthy() bool {
 	return u.consecutiveFailures == 0
 }
 
-func (u *uploader) Refresh(c api.ContractMetadata, bh uint64) {
+func (u *uploader) Refresh(c api.ContractMetadata) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	u.bh = bh
 	u.host = u.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 	u.fcid = c.ID
 	u.siamuxAddr = c.SiamuxAddr
@@ -155,12 +147,6 @@ func (u *uploader) Stop(err error) {
 	}
 }
 
-func (u *uploader) UpdateBlockHeight(bh uint64) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.bh = bh
-}
-
 func (u *uploader) enqueue(req *sectorUploadReq) {
 	// decorate the request
 	req.fcid = u.ContractID()
@@ -193,7 +179,6 @@ func (u *uploader) estimate() float64 {
 func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, error) {
 	// grab fields
 	u.mu.Lock()
-	bh := u.bh
 	host := u.host
 	fcid := u.fcid
 	u.mu.Unlock()
@@ -217,7 +202,7 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	defer cancel()
 
 	// fetch the revision
-	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout, bh)
+	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout)
 	if err != nil {
 		return types.Hash256{}, 0, err
 	} else if rev.RevisionNumber == math.MaxUint64 {
@@ -302,6 +287,6 @@ func (u *uploader) tryRefresh(ctx context.Context) bool {
 	}
 
 	// renew the uploader with the renewed contract
-	u.Refresh(renewed, u.BlockHeight())
+	u.Refresh(renewed)
 	return true
 }

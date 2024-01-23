@@ -338,7 +338,7 @@ func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os 
 	}
 }
 
-func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostManager, c api.ContractMetadata, bh uint64) *uploader {
+func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
 	return &uploader{
 		os:     os,
 		cs:     cs,
@@ -357,7 +357,6 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostM
 
 		// covered by mutex
 		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
-		bh:        bh,
 		fcid:      c.ID,
 		endHeight: c.WindowEnd,
 		queue:     make([]*sectorUploadReq, 0),
@@ -734,7 +733,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	for _, uploader := range mgr.uploaders {
 		// refresh uploaders that got renewed
 		if renewal, renewed := renewals[uploader.ContractID()]; renewed {
-			uploader.Refresh(renewal, bh)
+			uploader.Refresh(renewal)
 		}
 
 		// stop uploaders that expired
@@ -743,8 +742,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 			continue
 		}
 
-		// update uploader
-		uploader.UpdateBlockHeight(bh)
+		// recompute the stats
 		uploader.tryRecomputeStats()
 
 		// add to the list
@@ -755,7 +753,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists && bh < c.WindowEnd {
-			uploader := mgr.newUploader(mgr.os, mgr.cs, mgr.hm, c, bh)
+			uploader := mgr.newUploader(mgr.os, mgr.cs, mgr.hm, c)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}
