@@ -696,7 +696,7 @@ func (ap *Autopilot) stateHandlerPrometheusGET(jc jape.Context) {
 	text := `renterd_autopilot_state_uptime{%s} %d
 renterd_autopilot_state_configured{%s} %d
 renterd_autopilot_state_migrating{%s} %d
-renterd_autopilot_state_pruing{%s} %d
+renterd_autopilot_state_pruning{%s} %d
 renterd_autopilot_state_scanning{%s} %d`
 	fmt.Fprintf(&buf, text,
 		labels, api.DurationMS(ap.Uptime()),

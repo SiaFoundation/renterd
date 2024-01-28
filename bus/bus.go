@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
@@ -387,7 +386,7 @@ func (b *bus) PrometheusHandler() http.Handler {
 		"GET    /buckets": b.bucketsPrometheusHandlerGET,
 		// "GET    /bucket/:name": b.bucketHandlerGET,								// intentionally left out
 
-		"GET    /consensus/network": b.consensusNetworkPrometheusHandler,
+		// "GET    /consensus/network": b.consensusNetworkPrometheusHandler, 		// intentionally left out. was returning 'renterd_state{network="zen"} 1'. /state returns "Zen Testnet" which is more uniform with hostd and walletd
 		// "GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,			// intentionally left out, just a siafundfee calculator basically
 		"GET    /consensus/state": b.consensusStateHandlerPrometheus,
 
@@ -421,7 +420,7 @@ func (b *bus) PrometheusHandler() http.Handler {
 
 		"GET    /settings": b.settingsPrometheusHandlerGET,
 
-		// "GET    /setting/:key": b.settingKeyHandlerGET,							// intentionally left out, /settings endpoint is pulling all the data for each setting key
+		// "GET    /setting/:key": b.settingKeyHandlerGET,							// intentionally left out, see /settings
 
 		// "GET    /slabs/partial/:key": b.slabsPartialHandlerGET,					// intentionally left out
 		// "GET    /slab/:key":          b.slabHandlerGET,							// intentionally left out
@@ -547,13 +546,6 @@ func (b *bus) consensusStateHandler(jc jape.Context) {
 	jc.Encode(b.consensusState())
 }
 
-func (b *bus) consensusNetworkPrometheusHandler(jc jape.Context) {
-	var buf bytes.Buffer
-	text := `renterd_state{network="%s"} 1`
-	fmt.Fprintf(&buf, text, b.cm.TipState().Network.Name)
-	jc.ResponseWriter.Write(buf.Bytes())
-}
-
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
 	jc.Encode(api.ConsensusNetwork{
 		Name: b.cm.TipState().Network.Name,
@@ -564,7 +556,7 @@ func (b *bus) txpoolFeeHandlerPrometheus(jc jape.Context) {
 	fee := b.tp.RecommendedFee()
 	var buf bytes.Buffer
 	text := `renterd_tpool_fee %s`
-	fmt.Fprintf(&buf, text, fee)
+	fmt.Fprintf(&buf, text, fee.ExactString())
 	jc.ResponseWriter.Write(buf.Bytes())
 }
 
@@ -689,9 +681,9 @@ renterd_wallet_confirmed{address="%s"} %s
 renterd_wallet_unconfirmed{address="%s"} %s`
 	fmt.Fprintf(&buf, text,
 		address, b.w.Height(),
-		address, spendable,
-		address, confirmed,
-		address, unconfirmed,
+		address, spendable.ExactString(),
+		address, confirmed.ExactString(),
+		address, unconfirmed.ExactString(),
 	)
 	jc.ResponseWriter.Write(buf.Bytes())
 }
@@ -734,12 +726,13 @@ func (b *bus) walletTransactionsHandlerPrometheus(jc jape.Context) {
 			total, _ = transaction.Outflow.SubWithUnderflow(transaction.Inflow)
 			bitSetVar = 1
 		}
-		txtext := fmt.Sprintf(`renterd_wallet_transaction_inflow{txid="%s"} %s
-renterd_wallet_transaction_outflow{txid="%s"} %s
-renterd_wallet_transaction_total{txid="%s", underflow="%d"} %s`,
-			txid, transaction.Inflow.ExactString(),
-			txid, transaction.Outflow.ExactString(),
-			txid, bitSetVar, total.ExactString(),
+		labels := fmt.Sprintf(`height="%d", timestamp="%s", txid="%s"`, transaction.Index.Height, transaction.Timestamp.Format(time.RFC3339), txid)
+		txtext := fmt.Sprintf(`renterd_wallet_transaction_inflow{%s} %s
+renterd_wallet_transaction_outflow{%s} %s
+renterd_wallet_transaction_total{%s, underflow="%d"} %s`,
+			labels, transaction.Inflow.ExactString(),
+			labels, transaction.Outflow.ExactString(),
+			labels, bitSetVar, total.ExactString(),
 		)
 		if i != len(txns)-1 {
 			txtext = txtext + "\n"
@@ -1023,45 +1016,6 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *bus) hostsPrometheusHandlerShouldIgnoreHost(host *hostdb.Host) bool {
-	if host.PriceTable.Validity.Milliseconds() == 0 &&
-		host.PriceTable.HostBlockHeight == 0 &&
-		host.PriceTable.UpdatePriceTableCost.ExactString() == "0" &&
-		host.PriceTable.AccountBalanceCost.ExactString() == "0" &&
-		host.PriceTable.FundAccountCost.ExactString() == "0" &&
-		host.PriceTable.LatestRevisionCost.ExactString() == "0" &&
-		host.PriceTable.SubscriptionMemoryCost.ExactString() == "0" &&
-		host.PriceTable.SubscriptionNotificationCost.ExactString() == "0" &&
-		host.PriceTable.InitBaseCost.ExactString() == "0" &&
-		host.PriceTable.MemoryTimeCost.ExactString() == "0" &&
-		host.PriceTable.DownloadBandwidthCost.ExactString() == "0" &&
-		host.PriceTable.UploadBandwidthCost.ExactString() == "0" &&
-		host.PriceTable.DropSectorsBaseCost.ExactString() == "0" &&
-		host.PriceTable.DropSectorsUnitCost.ExactString() == "0" &&
-		host.PriceTable.HasSectorBaseCost.ExactString() == "0" &&
-		host.PriceTable.ReadBaseCost.ExactString() == "0" &&
-		host.PriceTable.ReadLengthCost.ExactString() == "0" &&
-		host.PriceTable.RenewContractCost.ExactString() == "0" &&
-		host.PriceTable.RevisionBaseCost.ExactString() == "0" &&
-		host.PriceTable.SwapSectorBaseCost.ExactString() == "0" &&
-		host.PriceTable.WriteBaseCost.ExactString() == "0" &&
-		host.PriceTable.WriteLengthCost.ExactString() == "0" &&
-		host.PriceTable.WriteStoreCost.ExactString() == "0" &&
-		host.PriceTable.TxnFeeMinRecommended.ExactString() == "0" &&
-		host.PriceTable.TxnFeeMaxRecommended.ExactString() == "0" &&
-		host.PriceTable.ContractPrice.ExactString() == "0" &&
-		host.PriceTable.CollateralCost.ExactString() == "0" &&
-		host.PriceTable.MaxCollateral.ExactString() == "0" &&
-		host.PriceTable.MaxDuration == 0 &&
-		host.PriceTable.WindowSize == 0 &&
-		host.PriceTable.RegistryEntriesLeft == 0 &&
-		host.PriceTable.RegistryEntriesTotal == 0 {
-		return true //host should be filterd out / ignored
-	} else {
-		return false //dont filter out host
-	}
-}
-
 func (b *bus) hostsPrometheusHandlerGET(jc jape.Context) {
 	offset := 0
 	limit := -1
@@ -1074,25 +1028,23 @@ func (b *bus) hostsPrometheusHandlerGET(jc jape.Context) {
 	}
 	resulttext := ""
 	for i, host := range hosts {
-		if b.hostsPrometheusHandlerShouldIgnoreHost(&host) {
-			continue
-		}
-		var acceptingContractsBitSetVar, lastScanSuccessBitSetVar, secondToLastScanSuccessBitSetVar, hostScannedBitSetVar int8
-		if host.Settings.AcceptingContracts {
-			acceptingContractsBitSetVar = 1
-		}
-		if host.Interactions.LastScanSuccess {
-			lastScanSuccessBitSetVar = 1
-		}
-		if host.Interactions.SecondToLastScanSuccess {
-			secondToLastScanSuccessBitSetVar = 1
-		}
-		if host.Scanned {
-			hostScannedBitSetVar = 1
-		}
-		ptmetadata := fmt.Sprintf(`netAddress="%s", uid="%s", expiry="%s"`, host.NetAddress, host.PriceTable.UID.String(), host.PriceTable.Expiry.Local().Format("2006-01-02T15:04:05Z07:00"))
-		smetadata := fmt.Sprintf(`netAddress="%s", version="%s", siamuxPort="%s"`, host.NetAddress, host.Settings.Version, host.Settings.SiaMuxPort)
-		ht := fmt.Sprintf(`renterd_host_pricetable_validity{%s} %d
+		ht := ""
+		if !host.Scanned {
+			ht = fmt.Sprintf(`renterd_host_scanned{netAddress="%s"} 0`, host.NetAddress)
+		} else {
+			var acceptingContractsBitSetVar, lastScanSuccessBitSetVar, secondToLastScanSuccessBitSetVar int8
+			if host.Settings.AcceptingContracts {
+				acceptingContractsBitSetVar = 1
+			}
+			if host.Interactions.LastScanSuccess {
+				lastScanSuccessBitSetVar = 1
+			}
+			if host.Interactions.SecondToLastScanSuccess {
+				secondToLastScanSuccessBitSetVar = 1
+			}
+			ptmetadata := fmt.Sprintf(`netAddress="%s", uid="%s", expiry="%s"`, host.NetAddress, host.PriceTable.UID.String(), host.PriceTable.Expiry.Local().Format("2006-01-02T15:04:05Z07:00"))
+			smetadata := fmt.Sprintf(`netAddress="%s", version="%s", siamuxPort="%s"`, host.NetAddress, host.Settings.Version, host.Settings.SiaMuxPort)
+			ht = fmt.Sprintf(`renterd_host_pricetable_validity{%s} %d
 renterd_host_pricetable_hostblockheight{%s} %d
 renterd_host_pricetable_updatepricetablecost{%s} %s
 renterd_host_pricetable_accountbalancecost{%s} %s
@@ -1151,68 +1103,69 @@ renterd_host_interactions_uptime{netAddress="%s"} %d
 renterd_host_interactions_downtime{netAddress="%s"} %d
 renterd_host_interactions_successfulinteractions{netAddress="%s"} %.0f
 renterd_host_interactions_failedinteractions{netAddress="%s"} %.0f
-renterd_host_scanned{netAddress="%s"} %d`,
-			ptmetadata, host.PriceTable.Validity.Milliseconds(),
-			ptmetadata, host.PriceTable.HostBlockHeight,
-			ptmetadata, host.PriceTable.UpdatePriceTableCost.ExactString(),
-			ptmetadata, host.PriceTable.AccountBalanceCost.ExactString(),
-			ptmetadata, host.PriceTable.FundAccountCost.ExactString(),
-			ptmetadata, host.PriceTable.LatestRevisionCost.ExactString(),
-			ptmetadata, host.PriceTable.SubscriptionMemoryCost.ExactString(),
-			ptmetadata, host.PriceTable.SubscriptionNotificationCost.ExactString(),
-			ptmetadata, host.PriceTable.InitBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.MemoryTimeCost.ExactString(),
-			ptmetadata, host.PriceTable.DownloadBandwidthCost.ExactString(),
-			ptmetadata, host.PriceTable.UploadBandwidthCost.ExactString(),
-			ptmetadata, host.PriceTable.DropSectorsBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.DropSectorsUnitCost.ExactString(),
-			ptmetadata, host.PriceTable.HasSectorBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.ReadBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.ReadLengthCost.ExactString(),
-			ptmetadata, host.PriceTable.RenewContractCost.ExactString(),
-			ptmetadata, host.PriceTable.RevisionBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.SwapSectorBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.WriteBaseCost.ExactString(),
-			ptmetadata, host.PriceTable.WriteLengthCost.ExactString(),
-			ptmetadata, host.PriceTable.WriteStoreCost.ExactString(),
-			ptmetadata, host.PriceTable.TxnFeeMinRecommended.ExactString(),
-			ptmetadata, host.PriceTable.TxnFeeMaxRecommended.ExactString(),
-			ptmetadata, host.PriceTable.ContractPrice.ExactString(),
-			ptmetadata, host.PriceTable.CollateralCost.ExactString(),
-			ptmetadata, host.PriceTable.MaxCollateral.ExactString(),
-			ptmetadata, host.PriceTable.MaxDuration,
-			ptmetadata, host.PriceTable.WindowSize,
-			ptmetadata, host.PriceTable.RegistryEntriesLeft,
-			ptmetadata, host.PriceTable.RegistryEntriesTotal,
-			smetadata, acceptingContractsBitSetVar,
-			smetadata, host.Settings.BaseRPCPrice.ExactString(),
-			smetadata, host.Settings.Collateral.ExactString(),
-			smetadata, host.Settings.ContractPrice.ExactString(),
-			smetadata, host.Settings.DownloadBandwidthPrice.ExactString(),
-			smetadata, host.Settings.EphemeralAccountExpiry.Milliseconds(),
-			smetadata, host.Settings.MaxCollateral.ExactString(),
-			smetadata, host.Settings.MaxDownloadBatchSize,
-			smetadata, host.Settings.MaxDuration,
-			smetadata, host.Settings.MaxEphemeralAccountBalance.ExactString(),
-			smetadata, host.Settings.MaxReviseBatchSize,
-			smetadata, host.Settings.RemainingStorage,
-			smetadata, host.Settings.RevisionNumber,
-			smetadata, host.Settings.SectorAccessPrice.ExactString(),
-			smetadata, host.Settings.SectorSize,
-			smetadata, host.Settings.StoragePrice.ExactString(),
-			smetadata, host.Settings.TotalStorage,
-			smetadata, host.Settings.UploadBandwidthPrice.ExactString(),
-			smetadata, host.Settings.WindowSize,
-			host.NetAddress, host.Interactions.TotalScans,
-			host.NetAddress, lastScanSuccessBitSetVar,
-			host.NetAddress, host.Interactions.LostSectors,
-			host.NetAddress, secondToLastScanSuccessBitSetVar,
-			host.NetAddress, host.Interactions.Uptime.Milliseconds(),
-			host.NetAddress, host.Interactions.Downtime.Milliseconds(),
-			host.NetAddress, host.Interactions.SuccessfulInteractions,
-			host.NetAddress, host.Interactions.FailedInteractions,
-			host.NetAddress, hostScannedBitSetVar,
-		)
+renterd_host_scanned{netAddress="%s"} 1`,
+				ptmetadata, host.PriceTable.Validity.Milliseconds(),
+				ptmetadata, host.PriceTable.HostBlockHeight,
+				ptmetadata, host.PriceTable.UpdatePriceTableCost.ExactString(),
+				ptmetadata, host.PriceTable.AccountBalanceCost.ExactString(),
+				ptmetadata, host.PriceTable.FundAccountCost.ExactString(),
+				ptmetadata, host.PriceTable.LatestRevisionCost.ExactString(),
+				ptmetadata, host.PriceTable.SubscriptionMemoryCost.ExactString(),
+				ptmetadata, host.PriceTable.SubscriptionNotificationCost.ExactString(),
+				ptmetadata, host.PriceTable.InitBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.MemoryTimeCost.ExactString(),
+				ptmetadata, host.PriceTable.DownloadBandwidthCost.ExactString(),
+				ptmetadata, host.PriceTable.UploadBandwidthCost.ExactString(),
+				ptmetadata, host.PriceTable.DropSectorsBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.DropSectorsUnitCost.ExactString(),
+				ptmetadata, host.PriceTable.HasSectorBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.ReadBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.ReadLengthCost.ExactString(),
+				ptmetadata, host.PriceTable.RenewContractCost.ExactString(),
+				ptmetadata, host.PriceTable.RevisionBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.SwapSectorBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.WriteBaseCost.ExactString(),
+				ptmetadata, host.PriceTable.WriteLengthCost.ExactString(),
+				ptmetadata, host.PriceTable.WriteStoreCost.ExactString(),
+				ptmetadata, host.PriceTable.TxnFeeMinRecommended.ExactString(),
+				ptmetadata, host.PriceTable.TxnFeeMaxRecommended.ExactString(),
+				ptmetadata, host.PriceTable.ContractPrice.ExactString(),
+				ptmetadata, host.PriceTable.CollateralCost.ExactString(),
+				ptmetadata, host.PriceTable.MaxCollateral.ExactString(),
+				ptmetadata, host.PriceTable.MaxDuration,
+				ptmetadata, host.PriceTable.WindowSize,
+				ptmetadata, host.PriceTable.RegistryEntriesLeft,
+				ptmetadata, host.PriceTable.RegistryEntriesTotal,
+				smetadata, acceptingContractsBitSetVar,
+				smetadata, host.Settings.BaseRPCPrice.ExactString(),
+				smetadata, host.Settings.Collateral.ExactString(),
+				smetadata, host.Settings.ContractPrice.ExactString(),
+				smetadata, host.Settings.DownloadBandwidthPrice.ExactString(),
+				smetadata, host.Settings.EphemeralAccountExpiry.Milliseconds(),
+				smetadata, host.Settings.MaxCollateral.ExactString(),
+				smetadata, host.Settings.MaxDownloadBatchSize,
+				smetadata, host.Settings.MaxDuration,
+				smetadata, host.Settings.MaxEphemeralAccountBalance.ExactString(),
+				smetadata, host.Settings.MaxReviseBatchSize,
+				smetadata, host.Settings.RemainingStorage,
+				smetadata, host.Settings.RevisionNumber,
+				smetadata, host.Settings.SectorAccessPrice.ExactString(),
+				smetadata, host.Settings.SectorSize,
+				smetadata, host.Settings.StoragePrice.ExactString(),
+				smetadata, host.Settings.TotalStorage,
+				smetadata, host.Settings.UploadBandwidthPrice.ExactString(),
+				smetadata, host.Settings.WindowSize,
+				host.NetAddress, host.Interactions.TotalScans,
+				host.NetAddress, lastScanSuccessBitSetVar,
+				host.NetAddress, host.Interactions.LostSectors,
+				host.NetAddress, secondToLastScanSuccessBitSetVar,
+				host.NetAddress, host.Interactions.Uptime.Milliseconds(),
+				host.NetAddress, host.Interactions.Downtime.Milliseconds(),
+				host.NetAddress, host.Interactions.SuccessfulInteractions,
+				host.NetAddress, host.Interactions.FailedInteractions,
+				host.NetAddress,
+			)
+		}
 		if i != len(hosts)-1 {
 			ht = ht + "\n"
 		}
@@ -2179,48 +2132,40 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
-type settingV0ConfigDisplayOptions struct {
-	includeRedundancyMaxStoragePrice bool
-	includeRedundancyMaxUploadPrice  bool
-}
-
+// /setting/contractset - already available in /params/upload
+// /setting/gouging - already available in /params/gouging
+// /setting/redundancy - already available in /params/gouging
+// /settings/uploadpacking - already available in /prometheus/params/upload
+// this endpoint provides s3authentication and v0-config-display-options settings
 func (b *bus) settingsPrometheusHandlerGET(jc jape.Context) {
-	setting1, err := b.ss.Setting(jc.Request.Context(), "s3authentication")
-	if errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
+	//get s3authentication setting
+	// s3auth, err := b.getSetting(jc, "s3authentication")
+	// if err != nil {
+	// 	return
+	// }
+
+	//get v0-config-display-options
+	v0config, err := b.getSetting(jc, "v0-config-display-options")
 	if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	var resp1 interface{}
-	err = json.Unmarshal([]byte(setting1), &resp1)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
-		return
+
+	var maxstorage int8
+	if v0config.(map[string]interface{})["includeRedundancyMaxStoragePrice"].(bool) {
+		maxstorage = 1
 	}
-	setting2, err := b.ss.Setting(jc.Request.Context(), "v0-config-display-options")
-	if errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
+	var uploadprice int8
+	if v0config.(map[string]interface{})["includeRedundancyMaxUploadPrice"].(bool) {
+		uploadprice = 1
 	}
-	if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-	var resp2 interface{}
-	err = json.Unmarshal([]byte(setting2), &resp2)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
-		return
-	}
+
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, `renterd_settings{includeRedundancyMaxStoragePrice="%v", includeRedundancyMaxUploadPrice="%v"} 1
-renterd_settings_s3{address="%s", enabled="%v", disabledauth="%v", hostbucketenabled="%v"} 1`,
-		resp2.(settingV0ConfigDisplayOptions).includeRedundancyMaxStoragePrice,
-		resp2.(settingV0ConfigDisplayOptions).includeRedundancyMaxUploadPrice,
-		resp1.(config.S3).Address, resp1.(config.S3).Enabled, resp1.(config.S3).DisableAuth, resp1.(config.S3).HostBucketEnabled)
+	fmt.Fprintf(&buf, `renterd_settings_include_redundancy_maxstorageprice %d
+renterd_settings_include_redundancy_maxuploadprice %d`,
+		// renterd_settings_s3{address="%s", enabled="%v", disabledauth="%v"} 1`,
+		maxstorage,
+		uploadprice)
+	// resp1.(map[string]interface{})["keypairsV4"], resp1.(map[string]interface{})["enabled"], resp1.(map[string]interface{})["disableAuth"], resp1.(map[string]interface{})["HostBucketEnabled"])
 	jc.ResponseWriter.Write(buf.Bytes())
 
 }
@@ -2231,30 +2176,32 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *bus) getSetting(jc jape.Context, setting string) (interface{}, error) {
+	setting, err := b.ss.Setting(jc.Request.Context(), setting)
+	if errors.Is(err, api.ErrSettingNotFound) {
+		return nil, jc.Error(err, http.StatusNotFound)
+	}
+	if err != nil {
+		return nil, jc.Error(err, http.StatusInternalServerError)
+	}
+	var resp interface{}
+	err = json.Unmarshal([]byte(setting), &resp)
+	if err != nil {
+		return nil, jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
+	}
+	return resp, nil
+}
+
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
-
-	setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key"))
-	if errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
+	resp, err := b.getSetting(jc, key)
 	if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-
-	var resp interface{}
-	err = json.Unmarshal([]byte(setting), &resp)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	jc.Encode(resp)
 }
 
@@ -2397,7 +2344,7 @@ renterd_%s_settings_hostblockheightleeway %d
 renterd_%s_settings_minpricetablevalidity %d
 renterd_%s_settings_minaccountexpiry %d
 renterd_%s_settings_minmaxephemeralaccountbalance %s
-renterd_%s_settings_migrationsurchagemultiplier %d
+renterd_%s_settings_migrationsurchargemultiplier %d
 renterd_%s_redundancy_settings_minshards %d
 renterd_%s_redundancy_settings_totalshards %d
 renterd_%s_transactionfee %s`
