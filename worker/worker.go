@@ -70,7 +70,7 @@ type (
 		webhooks.Broadcaster
 
 		AccountStore
-		ContractLocker
+		ContractStore
 		ObjectStore
 
 		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
@@ -80,7 +80,6 @@ type (
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
@@ -115,6 +114,12 @@ type (
 		ResetDrift(ctx context.Context, id rhpv3.Account) error
 		SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
 		ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
+	}
+
+	ContractStore interface {
+		ContractLocker
+
+		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	}
 
 	ObjectStore interface {
