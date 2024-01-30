@@ -45,6 +45,22 @@ type (
 	}
 )
 
+func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address) *chainSubscriber {
+	return &chainSubscriber{
+		db:              db,
+		logger:          logger,
+		retryIntervals:  intvls,
+		walletAddress:   addr,
+		lastSave:        time.Now(),
+		persistInterval: persistInterval,
+
+		contractState: make(map[types.Hash256]contractState),
+		hosts:         make(map[types.PublicKey]struct{}),
+		proofs:        make(map[types.Hash256]uint64),
+		revisions:     make(map[types.Hash256]revisionUpdate),
+	}
+}
+
 func (cs *chainSubscriber) Close() error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()

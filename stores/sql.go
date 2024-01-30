@@ -543,7 +543,7 @@ func retryTransaction(db *gorm.DB, logger *zap.SugaredLogger, fc func(tx *gorm.D
 		if abortRetry(err) {
 			return err
 		}
-		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(s.retryTransactionIntervals), s.retryTransactionIntervals[i], err))
+		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(intervals), intervals[i], err))
 		time.Sleep(intervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
