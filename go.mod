@@ -75,6 +75,8 @@ require (
 	gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e // indirect
 	gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259 // indirect
 	gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 // indirect
+	go.etcd.io/bbolt v1.3.8 // indirect
+	go.sia.tech/coreutils v0.0.0-20240125145741-0f35c5ee74a8 // indirect
 	go.sia.tech/web v0.0.0-20231213145933-3f175a86abff // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.20.0 // indirect

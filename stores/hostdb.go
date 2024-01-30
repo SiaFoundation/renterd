@@ -989,6 +989,17 @@ func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.Cha
 	}).Error
 }
 
+func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {
+	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+		Model: Model{
+			ID: consensusInfoID,
+		},
+	}).Updates(map[string]interface{}{
+		"height":   newTip.Height,
+		"block_id": hash256(newTip.ID),
+	}).Error
+}
+
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var hosts []dbHost
 	var announcements []dbAnnouncement

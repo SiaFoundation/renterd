@@ -514,7 +514,7 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 	return nil
 }
 
-func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+func retryTransaction(db *gorm.DB, logger *zap.SugaredLogger, fc func(tx *gorm.DB) error, intervals []time.Duration, opts ...*sql.TxOptions) error {
 	abortRetry := func(err error) bool {
 		if err == nil ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
@@ -538,15 +538,19 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		return false
 	}
 	var err error
-	for i := 0; i < len(s.retryTransactionIntervals); i++ {
-		err = s.db.Transaction(fc, opts...)
+	for i := 0; i < len(intervals); i++ {
+		err = db.Transaction(fc, opts...)
 		if abortRetry(err) {
 			return err
 		}
-		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(s.retryTransactionIntervals), s.retryTransactionIntervals[i], err))
-		time.Sleep(s.retryTransactionIntervals[i])
+		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(s.retryTransactionIntervals), s.retryTransactionIntervals[i], err))
+		time.Sleep(intervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
+}
+
+func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+	return retryTransaction(s.db, s.logger, fc, s.retryTransactionIntervals, opts...)
 }
 
 func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID, error) {
