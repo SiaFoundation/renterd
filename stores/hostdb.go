@@ -915,7 +915,10 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 
 		// Process announcements, but only if they are not too old.
 		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			hostdb.ForEachAnnouncement(types.Block(b), height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+			hostdb.ForEachAnnouncement(types.Block(b), types.ChainIndex{
+				ID:     b.ID(),
+				Height: height,
+			}, func(hostKey types.PublicKey, ha hostdb.Announcement) {
 				newAnnouncements = append(newAnnouncements, announcement{
 					hostKey:      publicKey(hostKey),
 					announcement: ha,

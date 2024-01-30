@@ -10,21 +10,21 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/renterd/hostdb"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
-
-// TODO: add support for v2 transactions and elements
 
 var _ chain.Subscriber = (*chainSubscriber)(nil)
 
 type (
 	chainSubscriber struct {
-		db             *gorm.DB
-		tip            types.ChainIndex
-		logger         *zap.SugaredLogger
-		retryIntervals []time.Duration
-		walletAddress  types.Address
+		announcementMaxAge time.Duration
+		db                 *gorm.DB
+		tip                types.ChainIndex
+		logger             *zap.SugaredLogger
+		retryIntervals     []time.Duration
+		walletAddress      types.Address
 
 		// buffered state
 		mu              sync.Mutex
@@ -45,14 +45,15 @@ type (
 	}
 )
 
-func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address) *chainSubscriber {
+func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address, ancmtMaxAge time.Duration) *chainSubscriber {
 	return &chainSubscriber{
-		db:              db,
-		logger:          logger,
-		retryIntervals:  intvls,
-		walletAddress:   addr,
-		lastSave:        time.Now(),
-		persistInterval: persistInterval,
+		announcementMaxAge: ancmtMaxAge,
+		db:                 db,
+		logger:             logger,
+		retryIntervals:     intvls,
+		walletAddress:      addr,
+		lastSave:           time.Now(),
+		persistInterval:    persistInterval,
 
 		contractState: make(map[types.Hash256]contractState),
 		hosts:         make(map[types.PublicKey]struct{}),
@@ -87,7 +88,7 @@ func (cs *chainSubscriber) ProcessChainApplyUpdate(cau *chain.ApplyUpdate, mayCo
 
 	cs.processChainApplyUpdateHostDB(cau)
 	cs.processChainApplyUpdateContracts(cau)
-	cs.processChainApplyUpdateWallet(cau)
+	// TODO: handle wallet here
 
 	cs.tip = cau.State.Index
 	cs.mayCommit = mayCommit
@@ -107,7 +108,7 @@ func (cs *chainSubscriber) ProcessChainRevertUpdate(cru *chain.RevertUpdate) err
 
 	cs.processChainRevertUpdateHostDB(cru)
 	cs.processChainRevertUpdateContracts(cru)
-	cs.processChainRevertUpdateWallet(cru)
+	// TODO: handle wallet here
 
 	cs.tip = cru.State.Index
 	cs.mayCommit = true
@@ -244,11 +245,21 @@ func (cs *chainSubscriber) tryCommit() error {
 }
 
 func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate) {
-	panic("implement me")
+	b := cau.Block
+	if b.Timestamp.Before(time.Now().Add(-cs.announcementMaxAge)) {
+		return // ignore old announcements
+	}
+	hostdb.ForEachAnnouncement(types.Block(b), cau.State.Index, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+		cs.announcements = append(cs.announcements, announcement{
+			hostKey:      publicKey(hostKey),
+			announcement: ha,
+		})
+		cs.hosts[hostKey] = struct{}{}
+	})
 }
 
 func (cs *chainSubscriber) processChainRevertUpdateHostDB(cru *chain.RevertUpdate) {
-	panic("implement me")
+	// nothing to do, we are not unannouncing hosts
 }
 
 func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpdate) {
@@ -436,54 +447,6 @@ func (cs *chainSubscriber) processChainRevertUpdateContracts(cru *chain.RevertUp
 		}
 		processContract(fce.ID, prevRev, r, resolved, valid)
 	})
-}
-
-func (cs *chainSubscriber) processChainApplyUpdateWallet(cau *chain.ApplyUpdate) {
-	cau.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) {
-		// TODO: consider spent?
-
-		// ignore irrelevant outputs
-		if sce.SiacoinOutput.Address != cs.walletAddress {
-			return
-		}
-
-		cs.outputs = append(cs.outputs, outputChange{
-			addition: true,
-			oid:      hash256(sce.ID),
-			sco: dbSiacoinElement{
-				Address:        hash256(sce.SiacoinOutput.Address),
-				Value:          currency(sce.SiacoinOutput.Value),
-				OutputID:       hash256(sce.ID),
-				MaturityHeight: sce.MaturityHeight,
-			},
-		})
-
-		// TODO: create fake transaction for matured siacoin output
-
-		// TODO: create transactions
-	})
-	panic("implement me")
-}
-
-func (cs *chainSubscriber) processChainRevertUpdateWallet(cru *chain.RevertUpdate) {
-	cru.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) {
-		// TODO: consider spent?
-
-		// ignore irrelevant outputs
-		if sce.SiacoinOutput.Address != cs.walletAddress {
-			return
-		}
-
-		cs.outputs = append(cs.outputs, outputChange{
-			addition: false,
-			oid:      hash256(sce.ID),
-		})
-
-		// TODO: remove fake transaction for no longer matured siacoin output
-
-		// TODO: remove transactions
-	})
-	panic("implement me")
 }
 
 func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {

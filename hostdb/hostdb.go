@@ -24,7 +24,7 @@ type hostAnnouncement struct {
 }
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
-func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, Announcement)) {
+func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.PublicKey, Announcement)) {
 	for _, txn := range b.Transactions {
 		for _, arb := range txn.ArbitraryData {
 			// decode announcement
@@ -49,12 +49,23 @@ func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, 
 			}
 
 			fn(hostKey, Announcement{
-				Index: types.ChainIndex{
-					Height: height,
-					ID:     b.ID(),
-				},
+				Index:      ci,
 				Timestamp:  b.Timestamp,
 				NetAddress: string(ha.NetAddress),
+			})
+		}
+	}
+	for _, txn := range b.V2Transactions() {
+		for _, att := range txn.Attestations {
+			if att.Key != "HostAnnouncement" {
+				continue
+			} else if len(att.Value) == 0 {
+				continue
+			}
+			fn(att.PublicKey, Announcement{
+				Index:      ci,
+				Timestamp:  b.Timestamp,
+				NetAddress: string(att.Value),
 			})
 		}
 	}
