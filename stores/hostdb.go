@@ -919,6 +919,9 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 				ID:     b.ID(),
 				Height: height,
 			}, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+				if ha.NetAddress == "" {
+					return
+				}
 				newAnnouncements = append(newAnnouncements, announcement{
 					hostKey:      publicKey(hostKey),
 					announcement: ha,

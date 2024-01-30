@@ -246,10 +246,13 @@ func (cs *chainSubscriber) tryCommit() error {
 
 func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate) {
 	b := cau.Block
-	if b.Timestamp.Before(time.Now().Add(-cs.announcementMaxAge)) {
+	if time.Since(b.Timestamp) > cs.announcementMaxAge {
 		return // ignore old announcements
 	}
-	hostdb.ForEachAnnouncement(types.Block(b), cau.State.Index, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+	hostdb.ForEachAnnouncement(b, cau.State.Index, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+		if ha.NetAddress == "" {
+			return // ignore
+		}
 		cs.announcements = append(cs.announcements, announcement{
 			hostKey:      publicKey(hostKey),
 			announcement: ha,
@@ -290,7 +293,7 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 				number: rev.revisionNumber,
 				size:   rev.fileSize,
 			}
-			if rev.revisionNumber == math.MaxUint64 && rev.fileSize == 0 {
+			if rev.revisionNumber == types.MaxRevisionNumber && rev.fileSize == 0 {
 				cs.contractState[fcid] = contractStateComplete // renewed: 'active' -> 'complete'
 				cs.logger.Infow("contract state changed: active -> complete",
 					"fcid", fcid,

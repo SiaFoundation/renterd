@@ -34,7 +34,6 @@ func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.Publi
 			} else if ha.Specifier != modules.PrefixHostAnnouncement {
 				continue
 			}
-
 			// verify signature
 			var hostKey types.PublicKey
 			copy(hostKey[:], ha.PublicKey.Key)
@@ -42,12 +41,6 @@ func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.Publi
 			if !hostKey.VerifyHash(annHash, ha.Signature) {
 				continue
 			}
-
-			// verify net address
-			if ha.NetAddress == "" {
-				continue
-			}
-
 			fn(hostKey, Announcement{
 				Index:      ci,
 				Timestamp:  b.Timestamp,
@@ -58,8 +51,6 @@ func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.Publi
 	for _, txn := range b.V2Transactions() {
 		for _, att := range txn.Attestations {
 			if att.Key != "HostAnnouncement" {
-				continue
-			} else if len(att.Value) == 0 {
 				continue
 			}
 			fn(att.PublicKey, Announcement{
