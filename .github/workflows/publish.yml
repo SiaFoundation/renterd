@@ -270,4 +270,9 @@ jobs:
           token: ${{ secrets.PAT_REPOSITORY_DISPATCH }}
           repository: ${{ matrix.repo }}
           event-type: release-tagged
-          client-payload: '{"tag": "${{ steps.get_tag.outputs.tag_name }}", "project": "renterd"}'
+          client-payload: >
+            {
+              "tag": "${{ steps.get_tag.outputs.tag_name }}",
+              "project": "renterd",
+              "workflow_run_id": "${{ github.run_id }}"
+            }
