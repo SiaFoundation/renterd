@@ -252,83 +252,189 @@ func (cs *chainSubscriber) processChainRevertUpdateHostDB(cru *chain.RevertUpdat
 }
 
 func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpdate) {
-	// handle v1 contracts
-	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
-		// TODO: consider valid?
+	type revision struct {
+		revisionNumber uint64
+		fileSize       uint64
+	}
 
+	// generic helper for processing v1 and v2 contracts
+	processContract := func(fcid types.Hash256, rev *revision, resolved, valid bool) {
 		// ignore irrelevant contracts
-		if !cs.isKnownContract(types.FileContractID(fce.ID)) {
+		if !cs.isKnownContract(types.FileContractID(fcid)) {
 			return
 		}
 
 		// 'pending' -> 'active'
-		if cs.contractState[fce.ID] < contractStateActive {
-			cs.contractState[fce.ID] = contractStateActive // 'pending' -> 'active'
+		if cs.contractState[fcid] < contractStateActive {
+			cs.contractState[fcid] = contractStateActive // 'pending' -> 'active'
 			cs.logger.Infow("contract state changed: pending -> active",
-				"fcid", fce.ID,
+				"fcid", fcid,
 				"reason", "contract confirmed")
 		}
 
 		// renewed: 'active' -> 'complete'
 		if rev != nil {
-			cs.revisions[fce.ID] = revisionUpdate{
+			cs.revisions[fcid] = revisionUpdate{
 				height: cau.State.Index.Height,
-				number: rev.FileContract.RevisionNumber,
-				size:   rev.FileContract.Filesize,
+				number: rev.revisionNumber,
+				size:   rev.fileSize,
 			}
-			if rev.FileContract.RevisionNumber == math.MaxUint64 && rev.FileContract.Filesize == 0 {
-				cs.contractState[rev.ID] = contractStateComplete // renewed: 'active' -> 'complete'
+			if rev.revisionNumber == math.MaxUint64 && rev.fileSize == 0 {
+				cs.contractState[fcid] = contractStateComplete // renewed: 'active' -> 'complete'
 				cs.logger.Infow("contract state changed: active -> complete",
-					"fcid", rev.ID,
+					"fcid", fcid,
 					"reason", "final revision confirmed")
 			}
 		}
 
-		// storage proof: 'active' -> 'complete'
+		// storage proof: 'active' -> 'complete/failed'
 		if resolved {
-			cs.proofs[rev.ID] = cau.State.Index.Height
-			cs.contractState[rev.ID] = contractStateComplete // storage proof: 'active' -> 'complete'
-			cs.logger.Infow("contract state changed: active -> complete",
-				"fcid", rev.ID,
-				"reason", "storage proof confirmed")
+			cs.proofs[fcid] = cau.State.Index.Height
+			if valid {
+				cs.contractState[fcid] = contractStateComplete
+				cs.logger.Infow("contract state changed: active -> complete",
+					"fcid", fcid,
+					"reason", "storage proof valid")
+			} else {
+				cs.contractState[fcid] = contractStateFailed
+				cs.logger.Infow("contract state changed: active -> failed",
+					"fcid", fcid,
+					"reason", "storage proof missed")
+			}
 		}
+	}
+
+	// v1 contracts
+	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+		var r *revision
+		if rev != nil {
+			r = &revision{
+				revisionNumber: rev.FileContract.RevisionNumber,
+				fileSize:       rev.FileContract.Filesize,
+			}
+		}
+		processContract(fce.ID, r, resolved, valid)
 	})
 
-	// TODO: handle v2 contracts
+	// v2 contracts
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		var r *revision
+		if rev != nil {
+			r = &revision{
+				revisionNumber: rev.V2FileContract.RevisionNumber,
+				fileSize:       rev.V2FileContract.Filesize,
+			}
+		}
+		resolved := res != nil
+		valid := false
+		if res != nil {
+			switch res.(type) {
+			case *types.V2FileContractFinalization:
+				valid = true
+			case *types.V2FileContractRenewal:
+				valid = true
+			case *types.V2StorageProof:
+				valid = true
+			case *types.V2FileContractExpiration:
+				valid = fce.V2FileContract.Filesize == 0
+			}
+		}
+		processContract(fce.ID, r, resolved, valid)
+	})
 }
 
 func (cs *chainSubscriber) processChainRevertUpdateContracts(cru *chain.RevertUpdate) {
-	cru.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
-		// TODO: consider valid?
+	type revision struct {
+		revisionNumber uint64
+		fileSize       uint64
+	}
 
+	// generic helper for processing v1 and v2 contracts
+	processContract := func(fcid types.Hash256, prevRev revision, rev *revision, resolved, valid bool) {
 		// ignore irrelevant contracts
-		if !cs.isKnownContract(types.FileContractID(fce.ID)) {
+		if !cs.isKnownContract(types.FileContractID(fcid)) {
 			return
 		}
 
 		// 'active' -> 'pending'
 		if rev == nil {
-			cs.contractState[fce.ID] = contractStatePending
+			cs.contractState[fcid] = contractStatePending
 		}
 
 		// reverted renewal: 'complete' -> 'active'
 		if rev != nil {
-			// TODO: figure out if we can actually revert the revision here
-			if rev.FileContract.RevisionNumber == math.MaxUint64 && rev.FileContract.Filesize == 0 {
-				cs.contractState[rev.ID] = contractStateActive
+			cs.revisions[fcid] = revisionUpdate{
+				height: cru.State.Index.Height,
+				number: prevRev.revisionNumber,
+				size:   prevRev.fileSize,
+			}
+			if rev.revisionNumber == math.MaxUint64 && rev.fileSize == 0 {
+				cs.contractState[fcid] = contractStateActive
 				cs.logger.Infow("contract state changed: complete -> active",
-					"fcid", rev.ID,
+					"fcid", fcid,
 					"reason", "final revision reverted")
 			}
 		}
 
-		// reverted storage proof: 'complete' -> 'active'
+		// reverted storage proof: 'complete/failed' -> 'active'
 		if resolved {
-			cs.contractState[rev.ID] = contractStateActive // revert from 'complete' to 'active'
-			cs.logger.Infow("contract state changed: complete -> active",
-				"fcid", rev.ID,
-				"reason", "storage proof reverted")
+			cs.contractState[fcid] = contractStateActive // revert from 'complete' to 'active'
+			if valid {
+				cs.logger.Infow("contract state changed: complete -> active",
+					"fcid", fcid,
+					"reason", "storage proof reverted")
+			} else {
+				cs.logger.Infow("contract state changed: failed -> active",
+					"fcid", fcid,
+					"reason", "storage proof reverted")
+			}
 		}
+	}
+
+	// v1 contracts
+	cru.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+		var r *revision
+		if rev != nil {
+			r = &revision{
+				revisionNumber: rev.FileContract.RevisionNumber,
+				fileSize:       rev.FileContract.Filesize,
+			}
+		}
+		prevRev := revision{
+			revisionNumber: fce.FileContract.RevisionNumber,
+			fileSize:       fce.FileContract.Filesize,
+		}
+		processContract(fce.ID, prevRev, r, resolved, valid)
+	})
+
+	// v2 contracts
+	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		var r *revision
+		if rev != nil {
+			r = &revision{
+				revisionNumber: rev.V2FileContract.RevisionNumber,
+				fileSize:       rev.V2FileContract.Filesize,
+			}
+		}
+		resolved := res != nil
+		valid := false
+		if res != nil {
+			switch res.(type) {
+			case *types.V2FileContractFinalization:
+				valid = true
+			case *types.V2FileContractRenewal:
+				valid = true
+			case *types.V2StorageProof:
+				valid = true
+			case *types.V2FileContractExpiration:
+				valid = fce.V2FileContract.Filesize == 0
+			}
+		}
+		prevRev := revision{
+			revisionNumber: fce.V2FileContract.RevisionNumber,
+			fileSize:       fce.V2FileContract.Filesize,
+		}
+		processContract(fce.ID, prevRev, r, resolved, valid)
 	})
 }
 
