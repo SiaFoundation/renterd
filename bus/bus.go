@@ -81,11 +81,11 @@ type (
 		Address() types.Address
 		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
 		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error)
-		Height() uint64
 		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error)
 		ReleaseInputs(txn ...types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-		Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error)
+		Tip() (types.ChainIndex, error)
+		Transactions(offset, limit int) ([]wallet.Transaction, error)
 		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
 
@@ -518,8 +518,14 @@ func (b *bus) walletHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
+
+	tip, err := b.w.Tip()
+	if jc.Check("couldn't fetch wallet scan height", err) != nil {
+		return
+	}
+
 	jc.Encode(api.WalletResponse{
-		ScanHeight:  b.w.Height(),
+		ScanHeight:  tip.Height,
 		Address:     address,
 		Confirmed:   confirmed,
 		Spendable:   spendable,
@@ -528,19 +534,48 @@ func (b *bus) walletHandler(jc jape.Context) {
 }
 
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
-	var before, since time.Time
 	offset := 0
 	limit := -1
-	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
-		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil ||
-		jc.DecodeForm("offset", &offset) != nil ||
+	if jc.DecodeForm("offset", &offset) != nil ||
 		jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	txns, err := b.w.Transactions(before, since, offset, limit)
-	if jc.Check("couldn't load transactions", err) == nil {
-		jc.Encode(txns)
+
+	// TODO: deprecate these parameters when moving to v2.0.0
+	var before, since time.Time
+	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
+		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil {
+		return
 	}
+
+	if before.IsZero() && since.IsZero() {
+		txns, err := b.w.Transactions(offset, limit)
+		if jc.Check("couldn't load transactions", err) == nil {
+			jc.Encode(txns)
+		}
+		return
+	}
+
+	// TODO: remove this when 'before' and 'since' are deprecated, until then we
+	// fetch all transactions and paginate manually if either is specified
+	txns, err := b.w.Transactions(0, -1)
+	if jc.Check("couldn't load transactions", err) != nil {
+		return
+	}
+	filtered := txns[:0]
+	for _, txn := range txns {
+		if (before.IsZero() || txn.Timestamp.Before(before)) &&
+			(since.IsZero() || txn.Timestamp.After(since)) {
+			filtered = append(filtered, txn)
+		}
+	}
+	txns = filtered
+	if limit == 0 || limit == -1 {
+		jc.Encode(txns[offset:])
+	} else {
+		jc.Encode(txns[offset : offset+limit])
+	}
+	return
 }
 
 func (b *bus) walletOutputsHandler(jc jape.Context) {
