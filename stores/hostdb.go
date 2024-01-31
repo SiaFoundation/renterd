@@ -915,7 +915,13 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 
 		// Process announcements, but only if they are not too old.
 		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			hostdb.ForEachAnnouncement(types.Block(b), height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+			hostdb.ForEachAnnouncement(types.Block(b), types.ChainIndex{
+				ID:     b.ID(),
+				Height: height,
+			}, func(hostKey types.PublicKey, ha hostdb.Announcement) {
+				if ha.NetAddress == "" {
+					return
+				}
 				newAnnouncements = append(newAnnouncements, announcement{
 					hostKey:      publicKey(hostKey),
 					announcement: ha,
@@ -984,6 +990,17 @@ func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.Cha
 		},
 	}).Updates(map[string]interface{}{
 		"CCID":     newCCID[:],
+		"height":   newTip.Height,
+		"block_id": hash256(newTip.ID),
+	}).Error
+}
+
+func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {
+	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
+		Model: Model{
+			ID: consensusInfoID,
+		},
+	}).Updates(map[string]interface{}{
 		"height":   newTip.Height,
 		"block_id": hash256(newTip.ID),
 	}).Error

@@ -24,7 +24,7 @@ type hostAnnouncement struct {
 }
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
-func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, Announcement)) {
+func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.PublicKey, Announcement)) {
 	for _, txn := range b.Transactions {
 		for _, arb := range txn.ArbitraryData {
 			// decode announcement
@@ -34,7 +34,6 @@ func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, 
 			} else if ha.Specifier != modules.PrefixHostAnnouncement {
 				continue
 			}
-
 			// verify signature
 			var hostKey types.PublicKey
 			copy(hostKey[:], ha.PublicKey.Key)
@@ -42,19 +41,22 @@ func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, 
 			if !hostKey.VerifyHash(annHash, ha.Signature) {
 				continue
 			}
-
-			// verify net address
-			if ha.NetAddress == "" {
-				continue
-			}
-
 			fn(hostKey, Announcement{
-				Index: types.ChainIndex{
-					Height: height,
-					ID:     b.ID(),
-				},
+				Index:      ci,
 				Timestamp:  b.Timestamp,
 				NetAddress: string(ha.NetAddress),
+			})
+		}
+	}
+	for _, txn := range b.V2Transactions() {
+		for _, att := range txn.Attestations {
+			if att.Key != "HostAnnouncement" {
+				continue
+			}
+			fn(att.PublicKey, Announcement{
+				Index:      ci,
+				Timestamp:  b.Timestamp,
+				NetAddress: string(att.Value),
 			})
 		}
 	}
