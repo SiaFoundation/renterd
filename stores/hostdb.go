@@ -127,8 +127,10 @@ type (
 
 	// announcement describes an announcement for a single host.
 	announcement struct {
-		hostKey      publicKey
-		announcement hostdb.Announcement
+		hostdb.Announcement
+		blockHeight uint64
+		blockID     types.BlockID
+		timestamp   time.Time
 	}
 )
 
@@ -915,18 +917,17 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 
 		// Process announcements, but only if they are not too old.
 		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			hostdb.ForEachAnnouncement(types.Block(b), types.ChainIndex{
-				ID:     b.ID(),
-				Height: height,
-			}, func(hostKey types.PublicKey, ha hostdb.Announcement) {
-				if ha.NetAddress == "" {
+			hostdb.ForEachAnnouncement(types.Block(b), func(a hostdb.Announcement) {
+				if a.NetAddress == "" {
 					return
 				}
 				newAnnouncements = append(newAnnouncements, announcement{
-					hostKey:      publicKey(hostKey),
-					announcement: ha,
+					Announcement: a,
+					blockHeight:  height,
+					blockID:      b.ID(),
+					timestamp:    b.Timestamp,
 				})
-				ss.unappliedHostKeys[hostKey] = struct{}{}
+				ss.unappliedHostKeys[a.HostKey()] = struct{}{}
 			})
 		}
 		height++
@@ -1011,15 +1012,15 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var announcements []dbAnnouncement
 	for _, a := range as {
 		hosts = append(hosts, dbHost{
-			PublicKey:        a.hostKey,
-			LastAnnouncement: a.announcement.Timestamp.UTC(),
-			NetAddress:       a.announcement.NetAddress,
+			PublicKey:        publicKey(a.HostKey()),
+			LastAnnouncement: a.timestamp.UTC(),
+			NetAddress:       a.NetAddress,
 		})
 		announcements = append(announcements, dbAnnouncement{
-			HostKey:     a.hostKey,
-			BlockHeight: a.announcement.Index.Height,
-			BlockID:     a.announcement.Index.ID.String(),
-			NetAddress:  a.announcement.NetAddress,
+			HostKey:     publicKey(a.HostKey()),
+			BlockHeight: a.blockHeight,
+			BlockID:     a.blockID.String(),
+			NetAddress:  a.NetAddress,
 		})
 	}
 	if err := tx.Create(&announcements).Error; err != nil {

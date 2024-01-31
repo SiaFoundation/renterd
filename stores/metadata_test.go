@@ -218,7 +218,12 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: hostdb.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk.UnlockKey(),
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,11 +514,21 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	err = ss.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: hostdb.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk.UnlockKey(),
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.insertTestAnnouncement(hk2, hostdb.Announcement{NetAddress: "address2"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: hostdb.Announcement{
+			NetAddress: "address2",
+			PublicKey:  hk2.UnlockKey(),
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2263,7 +2278,12 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: hostdb.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk.UnlockKey(),
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

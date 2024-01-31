@@ -10,24 +10,17 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"gitlab.com/NebulousLabs/encoding"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
-func (s *SQLStore) insertTestAnnouncement(hk types.PublicKey, a hostdb.Announcement) error {
-	return insertAnnouncements(s.db, []announcement{
-		{
-			hostKey:      publicKey(hk),
-			announcement: a,
-		},
-	})
+func (s *SQLStore) insertTestAnnouncement(a announcement) error {
+	return insertAnnouncements(s.db, []announcement{a})
 }
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
@@ -63,15 +56,16 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert an announcement for the host and another one for an unknown
 	// host.
-	a := hostdb.Announcement{
-		Index: types.ChainIndex{
-			Height: 42,
-			ID:     types.BlockID{1, 2, 3},
+	a := announcement{
+		blockHeight: 42,
+		blockID:     types.BlockID{1, 2, 3},
+		timestamp:   time.Now().UTC().Round(time.Second),
+		Announcement: hostdb.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk.UnlockKey(),
 		},
-		Timestamp:  time.Now().UTC().Round(time.Second),
-		NetAddress: "address",
 	}
-	err = ss.insertTestAnnouncement(hk, a)
+	err = ss.insertTestAnnouncement(a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +73,7 @@ func TestSQLHostDB(t *testing.T) {
 	// Read the host and verify that the announcement related fields were
 	// set.
 	var h dbHost
-	tx := ss.db.Where("last_announcement = ? AND net_address = ?", a.Timestamp, a.NetAddress).Find(&h)
+	tx := ss.db.Where("last_announcement = ? AND net_address = ?", a.timestamp, a.NetAddress).Find(&h)
 	if tx.Error != nil {
 		t.Fatal(tx.Error)
 	}
@@ -115,12 +109,13 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Insert another announcement for an unknown host.
-	unknownKey := types.PublicKey{1, 4, 7}
-	err = ss.insertTestAnnouncement(unknownKey, a)
+	unknownKeyAnn := a
+	unknownKeyAnn.PublicKey = types.PublicKey{1, 4, 7}.UnlockKey()
+	err = ss.insertTestAnnouncement(unknownKeyAnn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h3, err := ss.Host(ctx, unknownKey)
+	h3, err := ss.Host(ctx, unknownKeyAnn.HostKey())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,20 +507,23 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		hostKey: publicKey(types.GeneratePrivateKey().PublicKey()),
-		announcement: hostdb.Announcement{
-			Index:      types.ChainIndex{Height: 1, ID: types.BlockID{1}},
-			Timestamp:  time.Now(),
+		timestamp:   time.Now(),
+		blockHeight: 1,
+		blockID:     types.BlockID{1},
+		Announcement: hostdb.Announcement{
 			NetAddress: "foo.bar:1000",
+			PublicKey:  types.GeneratePrivateKey().PublicKey().UnlockKey(),
 		},
 	}
 	ann2 := announcement{
-		hostKey:      publicKey(types.GeneratePrivateKey().PublicKey()),
-		announcement: hostdb.Announcement{},
+		Announcement: hostdb.Announcement{
+			PublicKey: types.GeneratePrivateKey().PublicKey().UnlockKey(),
+		},
 	}
 	ann3 := announcement{
-		hostKey:      publicKey(types.GeneratePrivateKey().PublicKey()),
-		announcement: hostdb.Announcement{},
+		Announcement: hostdb.Announcement{
+			PublicKey: types.GeneratePrivateKey().PublicKey().UnlockKey(),
+		},
 	}
 
 	// Insert the first one and check that all fields are set.
@@ -538,7 +536,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 	ann.Model = Model{} // ignore
 	expectedAnn := dbAnnouncement{
-		HostKey:     ann1.hostKey,
+		HostKey:     publicKey(ann1.HostKey()),
 		BlockHeight: 1,
 		BlockID:     types.BlockID{1}.String(),
 		NetAddress:  "foo.bar:1000",
@@ -1070,7 +1068,7 @@ func TestAnnouncementMaxAge(t *testing.T) {
 
 	if len(db.unappliedAnnouncements) != 1 {
 		t.Fatal("expected 1 announcement")
-	} else if db.unappliedAnnouncements[0].announcement.NetAddress != "foo.com:1001" {
+	} else if db.unappliedAnnouncements[0].NetAddress != "foo.com:1001" {
 		t.Fatal("unexpected announcement")
 	}
 }
@@ -1100,8 +1098,10 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	s.unappliedHostKeys[hk] = struct{}{}
 	s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
-		hostKey:      publicKey(hk),
-		announcement: hostdb.Announcement{NetAddress: na},
+		Announcement: hostdb.Announcement{
+			NetAddress: na,
+			PublicKey:  hk.UnlockKey(),
+		},
 	}}...)
 	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)
@@ -1135,27 +1135,33 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 	}
 }
 
-func newTestPK() (stypes.SiaPublicKey, types.PrivateKey) {
+func newTestUK() (types.UnlockKey, types.PrivateKey) {
 	sk := types.GeneratePrivateKey()
 	pk := sk.PublicKey()
-	return stypes.SiaPublicKey{
-		Algorithm: stypes.SignatureEd25519,
-		Key:       pk[:],
-	}, sk
+	return pk.UnlockKey(), sk
 }
 
-func newTestHostAnnouncement(na modules.NetAddress) (modules.HostAnnouncement, types.PrivateKey) {
-	spk, sk := newTestPK()
-	return modules.HostAnnouncement{
-		Specifier:  modules.PrefixHostAnnouncement,
+func newTestHostAnnouncement(na string) (hostdb.Announcement, types.PrivateKey) {
+	uk, sk := newTestUK()
+	a := hostdb.Announcement{
+		Specifier:  types.NewSpecifier(hostdb.AnnouncementSpecifier),
 		NetAddress: na,
-		PublicKey:  spk,
-	}, sk
+		PublicKey:  uk,
+	}
+	buf := new(bytes.Buffer)
+	e := types.NewEncoder(buf)
+	a.Specifier.EncodeTo(e)
+	e.WriteString(a.NetAddress)
+	a.PublicKey.EncodeTo(e)
+	e.Flush()
+	a.Signature = sk.SignHash(types.HashBytes(buf.Bytes()))
+	return a, sk
 }
 
-func newTestTransaction(ha modules.HostAnnouncement, sk types.PrivateKey) stypes.Transaction {
-	var buf bytes.Buffer
-	buf.Write(encoding.Marshal(ha))
-	buf.Write(encoding.Marshal(sk.SignHash(types.Hash256(crypto.HashObject(ha)))))
+func newTestTransaction(ha hostdb.Announcement, sk types.PrivateKey) stypes.Transaction {
+	buf := new(bytes.Buffer)
+	enc := types.NewEncoder(buf)
+	ha.EncodeTo(enc)
+	enc.Flush()
 	return stypes.Transaction{ArbitraryData: [][]byte{buf.Bytes()}}
 }
