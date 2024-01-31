@@ -1,14 +1,16 @@
 package hostdb
 
 import (
+	"bytes"
 	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/modules"
+)
+
+const (
+	hostAnnouncementSpecifier = "HostAnnouncement"
 )
 
 // Announcement represents a host announcement in a given block.
@@ -19,8 +21,41 @@ type Announcement struct {
 }
 
 type hostAnnouncement struct {
-	modules.HostAnnouncement
-	Signature types.Signature
+	Specifier  types.Specifier
+	NetAddress string
+	PublicKey  types.UnlockKey
+	Signature  types.Signature
+}
+
+func (ha *hostAnnouncement) DecodeFrom(d *types.Decoder) {
+	ha.Specifier.DecodeFrom(d)
+	ha.NetAddress = d.ReadString()
+	ha.PublicKey.DecodeFrom(d)
+	ha.Signature.DecodeFrom(d)
+}
+
+func (ha hostAnnouncement) EncodeTo(e *types.Encoder) {
+	ha.Specifier.EncodeTo(e)
+	e.WriteString(ha.NetAddress)
+	ha.PublicKey.EncodeTo(e)
+	ha.Signature.EncodeTo(e)
+}
+
+func (ha hostAnnouncement) HostKey() types.PublicKey {
+	var hk types.PublicKey
+	copy(hk[:], ha.PublicKey.Key)
+	return hk
+}
+
+func (ha hostAnnouncement) VerifySignature() bool {
+	buf := new(bytes.Buffer)
+	e := types.NewEncoder(buf)
+	ha.Specifier.EncodeTo(e)
+	e.WriteString(ha.NetAddress)
+	ha.PublicKey.EncodeTo(e)
+	e.Flush()
+	annHash := types.HashBytes(buf.Bytes())
+	return ha.HostKey().VerifyHash(annHash, ha.Signature)
 }
 
 // ForEachAnnouncement calls fn on each host announcement in a block.
@@ -29,19 +64,18 @@ func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.Publi
 		for _, arb := range txn.ArbitraryData {
 			// decode announcement
 			var ha hostAnnouncement
-			if err := encoding.Unmarshal(arb, &ha); err != nil {
+			dec := types.NewBufDecoder(arb)
+			ha.DecodeFrom(dec)
+			if err := dec.Err(); err != nil {
 				continue
-			} else if ha.Specifier != modules.PrefixHostAnnouncement {
+			} else if ha.Specifier != types.NewSpecifier(hostAnnouncementSpecifier) {
 				continue
 			}
 			// verify signature
-			var hostKey types.PublicKey
-			copy(hostKey[:], ha.PublicKey.Key)
-			annHash := types.Hash256(crypto.HashObject(ha.HostAnnouncement)) // TODO
-			if !hostKey.VerifyHash(annHash, ha.Signature) {
+			if !ha.VerifySignature() {
 				continue
 			}
-			fn(hostKey, Announcement{
+			fn(ha.HostKey(), Announcement{
 				Index:      ci,
 				Timestamp:  b.Timestamp,
 				NetAddress: string(ha.NetAddress),
@@ -50,7 +84,7 @@ func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.Publi
 	}
 	for _, txn := range b.V2Transactions() {
 		for _, att := range txn.Attestations {
-			if att.Key != "HostAnnouncement" {
+			if att.Key != hostAnnouncementSpecifier {
 				continue
 			}
 			fn(att.PublicKey, Announcement{
