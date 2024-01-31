@@ -150,6 +150,9 @@ type Transaction struct {
 type SingleAddressStore interface {
 	wallet.SingleAddressStore
 
+	// TODO PJ: this needs to move out of the store interface, perhaps we can
+	// wrap the SingleAddressWallet from coreutils and subscribe it to record
+	// the wallet metrics in the store on every change in consensus.
 	RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
 }
 
@@ -584,7 +587,7 @@ func (w *SingleAddressWallet) ReceiveUpdatedUnconfirmedTransactions(diff *module
 	// fetch current heith
 	tip, err := w.store.Tip()
 	if err != nil {
-		return // TODO PJ: kind of horrible but we do it when we can't fetch unspent outputs as well
+		return
 	}
 	currentHeight := tip.Height
 

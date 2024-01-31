@@ -69,9 +69,9 @@ type (
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		alerts    alerts.Alerter
+		cs        *chainSubscriber
 		db        *gorm.DB
 		dbMetrics *gorm.DB
-		cs        *chainSubscriber
 		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
@@ -263,8 +263,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:                 cfg.Alerts,
-		db:                     db,
 		cs:                     cs,
+		db:                     db,
 		dbMetrics:              dbMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,
