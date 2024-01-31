@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/modules"
@@ -1135,33 +1136,31 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 	}
 }
 
-func newTestUK() (types.UnlockKey, types.PrivateKey) {
+func newTestPK() (types.PublicKey, types.PrivateKey) {
 	sk := types.GeneratePrivateKey()
 	pk := sk.PublicKey()
-	return pk.UnlockKey(), sk
+	return pk, sk
 }
 
-func newTestHostAnnouncement(na string) (hostdb.Announcement, types.PrivateKey) {
-	uk, sk := newTestUK()
-	a := hostdb.Announcement{
-		Specifier:  types.NewSpecifier(hostdb.AnnouncementSpecifier),
+func newTestHostAnnouncement(na string) (chain.Announcement, types.PrivateKey) {
+	uk, sk := newTestPK()
+	a := chain.Announcement{
 		NetAddress: na,
 		PublicKey:  uk,
 	}
-	buf := new(bytes.Buffer)
-	e := types.NewEncoder(buf)
-	a.Specifier.EncodeTo(e)
-	e.WriteString(a.NetAddress)
-	a.PublicKey.EncodeTo(e)
-	e.Flush()
-	a.Signature = sk.SignHash(types.HashBytes(buf.Bytes()))
 	return a, sk
 }
 
-func newTestTransaction(ha hostdb.Announcement, sk types.PrivateKey) stypes.Transaction {
+func newTestTransaction(ha chain.Announcement, sk types.PrivateKey) stypes.Transaction {
 	buf := new(bytes.Buffer)
 	enc := types.NewEncoder(buf)
-	ha.EncodeTo(enc)
+	v1Ann := chain.V1Announcement{
+		Specifier:  types.NewSpecifier(chain.AnnouncementSpecifier),
+		NetAddress: ha.NetAddress,
+		PublicKey:  sk.PublicKey().UnlockKey(),
+	}
+	v1Ann.Sign(sk)
+	v1Ann.EncodeTo(enc)
 	enc.Flush()
 	return stypes.Transaction{ArbitraryData: [][]byte{buf.Bytes()}}
 }

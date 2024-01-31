@@ -10,7 +10,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/renterd/hostdb"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -249,7 +248,7 @@ func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate)
 	if time.Since(b.Timestamp) > cs.announcementMaxAge {
 		return // ignore old announcements
 	}
-	hostdb.ForEachAnnouncement(b, func(ha hostdb.Announcement) {
+	chain.ForEachAnnouncement(b, func(ha chain.Announcement) {
 		if ha.NetAddress == "" {
 			return // ignore
 		}
@@ -259,7 +258,7 @@ func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate)
 			blockID:      b.ID(),
 			timestamp:    b.Timestamp,
 		})
-		cs.hosts[types.PublicKey(ha.HostKey())] = struct{}{}
+		cs.hosts[types.PublicKey(ha.PublicKey)] = struct{}{}
 	})
 }
 

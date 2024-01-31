@@ -1,89 +1,12 @@
 package hostdb
 
 import (
-	"bytes"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
-
-const AnnouncementSpecifier = "HostAnnouncement"
-
-// Announcement represents a host announcement in a given block.
-type Announcement struct {
-	Specifier  types.Specifier
-	NetAddress string
-	PublicKey  types.UnlockKey
-	Signature  types.Signature
-}
-
-func (a *Announcement) DecodeFrom(d *types.Decoder) {
-	a.Specifier.DecodeFrom(d)
-	a.NetAddress = d.ReadString()
-	a.PublicKey.DecodeFrom(d)
-	a.Signature.DecodeFrom(d)
-}
-
-func (a Announcement) EncodeTo(e *types.Encoder) {
-	a.Specifier.EncodeTo(e)
-	e.WriteString(a.NetAddress)
-	a.PublicKey.EncodeTo(e)
-	a.Signature.EncodeTo(e)
-}
-
-func (a Announcement) HostKey() types.PublicKey {
-	var hk types.PublicKey
-	copy(hk[:], a.PublicKey.Key)
-	return hk
-}
-
-func (a Announcement) VerifySignature() bool {
-	buf := new(bytes.Buffer)
-	e := types.NewEncoder(buf)
-	a.Specifier.EncodeTo(e)
-	e.WriteString(a.NetAddress)
-	a.PublicKey.EncodeTo(e)
-	e.Flush()
-	annHash := types.HashBytes(buf.Bytes())
-	return a.HostKey().VerifyHash(annHash, a.Signature)
-}
-
-// ForEachAnnouncement calls fn on each host announcement in a block.
-func ForEachAnnouncement(b types.Block, fn func(Announcement)) {
-	for _, txn := range b.Transactions {
-		for _, arb := range txn.ArbitraryData {
-			// decode announcement
-			var ha Announcement
-			dec := types.NewBufDecoder(arb)
-			ha.DecodeFrom(dec)
-			if err := dec.Err(); err != nil {
-				continue
-			} else if ha.Specifier != types.NewSpecifier(AnnouncementSpecifier) {
-				continue
-			}
-			// verify signature
-			if !ha.VerifySignature() {
-				continue
-			}
-			fn(ha)
-		}
-	}
-	for _, txn := range b.V2Transactions() {
-		for _, att := range txn.Attestations {
-			if att.Key != AnnouncementSpecifier {
-				continue
-			}
-			fn(Announcement{
-				Specifier:  types.NewSpecifier(AnnouncementSpecifier),
-				NetAddress: string(att.Value),
-				PublicKey:  att.PublicKey.UnlockKey(),
-				Signature:  att.Signature,
-			})
-		}
-	}
-}
 
 // Interactions contains metadata about a host's interactions.
 type Interactions struct {
