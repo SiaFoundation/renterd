@@ -3,64 +3,10 @@ package hostdb
 import (
 	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/siad/crypto"
-	"go.sia.tech/siad/modules"
 )
-
-// Announcement represents a host announcement in a given block.
-type Announcement struct {
-	Index      types.ChainIndex
-	Timestamp  time.Time
-	NetAddress string
-}
-
-type hostAnnouncement struct {
-	modules.HostAnnouncement
-	Signature types.Signature
-}
-
-// ForEachAnnouncement calls fn on each host announcement in a block.
-func ForEachAnnouncement(b types.Block, ci types.ChainIndex, fn func(types.PublicKey, Announcement)) {
-	for _, txn := range b.Transactions {
-		for _, arb := range txn.ArbitraryData {
-			// decode announcement
-			var ha hostAnnouncement
-			if err := encoding.Unmarshal(arb, &ha); err != nil {
-				continue
-			} else if ha.Specifier != modules.PrefixHostAnnouncement {
-				continue
-			}
-			// verify signature
-			var hostKey types.PublicKey
-			copy(hostKey[:], ha.PublicKey.Key)
-			annHash := types.Hash256(crypto.HashObject(ha.HostAnnouncement)) // TODO
-			if !hostKey.VerifyHash(annHash, ha.Signature) {
-				continue
-			}
-			fn(hostKey, Announcement{
-				Index:      ci,
-				Timestamp:  b.Timestamp,
-				NetAddress: string(ha.NetAddress),
-			})
-		}
-	}
-	for _, txn := range b.V2Transactions() {
-		for _, att := range txn.Attestations {
-			if att.Key != "HostAnnouncement" {
-				continue
-			}
-			fn(att.PublicKey, Announcement{
-				Index:      ci,
-				Timestamp:  b.Timestamp,
-				NetAddress: string(att.Value),
-			})
-		}
-	}
-}
 
 // Interactions contains metadata about a host's interactions.
 type Interactions struct {

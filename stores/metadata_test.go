@@ -15,8 +15,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -218,7 +218,12 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: chain.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,11 +514,21 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	err = ss.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: chain.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.insertTestAnnouncement(hk2, hostdb.Announcement{NetAddress: "address2"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: chain.Announcement{
+			NetAddress: "address2",
+			PublicKey:  hk2,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2263,7 +2278,12 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(hk, hostdb.Announcement{NetAddress: "address"})
+	err = ss.insertTestAnnouncement(announcement{
+		Announcement: chain.Announcement{
+			NetAddress: "address",
+			PublicKey:  hk,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

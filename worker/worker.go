@@ -27,7 +27,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 )
@@ -432,7 +431,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil && !isErrDuplicateTransactionSet(err) {
+	if err != nil {
 		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
 	}
 
@@ -639,7 +638,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil && !isErrDuplicateTransactionSet(err) {
+	if err != nil {
 		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
 	}
 
@@ -1444,8 +1443,4 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 		l.Errorf("%w: failed to discard txn: %v", *err, dErr)
 	}
 	cancel()
-}
-
-func isErrDuplicateTransactionSet(err error) bool {
-	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
 }
