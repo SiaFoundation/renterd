@@ -51,6 +51,10 @@ const (
 	lockingPriorityBackgroundUpload = 5
 )
 
+var (
+	ErrShuttingDown = errors.New("worker is shutting down")
+)
+
 // re-export the client
 type Client struct {
 	*client.Client
@@ -189,26 +193,21 @@ type worker struct {
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
 
-	accounts    *accounts
-	priceTables *priceTables
-
-	busFlushInterval time.Duration
+	accounts        *accounts
+	priceTables     *priceTables
+	transportPoolV3 *transportPoolV3
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]bool
 
-	interactionsMu                sync.Mutex
-	interactionsScans             []hostdb.HostScan
-	interactionsPriceTableUpdates []hostdb.PriceTableUpdate
-	interactionsFlushTimer        *time.Timer
-
-	contractSpendingRecorder *contractSpendingRecorder
+	hostInteractionRecorder  HostInteractionRecorder
+	contractSpendingRecorder ContractSpendingRecorder
 	contractLockingDuration  time.Duration
 
-	transportPoolV3   *transportPoolV3
-	logger            *zap.SugaredLogger
 	shutdownCtx       context.Context
 	shutdownCtxCancel context.CancelFunc
+
+	logger *zap.SugaredLogger
 }
 
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
@@ -225,7 +224,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, f
 func (w *worker) registerAlert(a alerts.Alert) {
 	ctx, cancel := context.WithTimeout(w.shutdownCtx, time.Minute)
 	if err := w.alerts.RegisterAlert(ctx, a); err != nil {
-		w.logger.Error("failed to register alert", err)
+		w.logger.Errorf("failed to register alert, err: %v", err)
 	}
 	cancel()
 }
@@ -343,7 +342,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	var err error
 	var hpt hostdb.HostPriceTable
 	defer func() {
-		InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+		HostInteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
 			HostKey:    rptr.HostKey,
 			Success:    isSuccessfulInteraction(err),
 			Timestamp:  time.Now(),
@@ -921,11 +920,11 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
 		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
-		if err != nil && !(errors.Is(err, errDownloadManagerStopped) ||
-			errors.Is(err, errNotEnoughContracts) ||
-			errors.Is(err, context.Canceled)) {
+		if err != nil {
 			w.logger.Error(err)
-			w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
+			if !errors.Is(err, ErrShuttingDown) {
+				w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
+			}
 		}
 		return
 	}
@@ -1037,11 +1036,11 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	params := defaultParameters(bucket, path)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if err := jc.Check("couldn't upload object", err); err != nil {
-		if err != nil && !(errors.Is(err, errWorkerShutDown) ||
-			errors.Is(err, errNotEnoughContracts) ||
-			errors.Is(err, context.Canceled)) {
+		if err != nil {
 			w.logger.Error(err)
-			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
+			if !errors.Is(err, ErrShuttingDown) {
+				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
+			}
 		}
 		return
 	}
@@ -1176,11 +1175,11 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	params := multipartParameters(bucket, path, uploadID, partNumber)
 	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
-		if err != nil && !(errors.Is(err, errWorkerShutDown) ||
-			errors.Is(err, errNotEnoughContracts) ||
-			errors.Is(err, context.Canceled)) {
+		if err != nil {
 			w.logger.Error(err)
-			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
+			if !errors.Is(err, ErrShuttingDown) {
+				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
+			}
 		}
 		return
 	}
@@ -1301,7 +1300,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
-		busFlushInterval:        busFlushInterval,
 		logger:                  l.Sugar().Named("worker").Named(id),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]bool),
@@ -1309,17 +1307,20 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		shutdownCtxCancel:       shutdownCtxCancel,
 	}
 	w.initAccounts(b)
-	w.initContractSpendingRecorder()
-	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
 	w.initPriceTables()
 	w.initTransportPool()
+
+	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
 	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
+
+	w.initContractSpendingRecorder(busFlushInterval)
+	w.initHostInteractionRecorder(busFlushInterval)
 	return w, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
-	return jape.Mux(interactionMiddleware(w, map[string]jape.Handler{
+	return jape.Mux(interactionMiddleware(w.hostInteractionRecorder, map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
@@ -1351,32 +1352,24 @@ func (w *worker) Handler() http.Handler {
 }
 
 // Shutdown shuts down the worker.
-func (w *worker) Shutdown(_ context.Context) error {
-	w.interactionsMu.Lock()
-	if w.interactionsFlushTimer != nil {
-		w.interactionsFlushTimer.Stop()
-		w.flushInteractions()
-	}
-	w.interactionsMu.Unlock()
-
-	// Cancel shutdown context.
+func (w *worker) Shutdown(ctx context.Context) error {
+	// cancel shutdown context
 	w.shutdownCtxCancel()
 
-	// Stop contract spending recorder.
-	w.contractSpendingRecorder.Stop()
-
-	// Stop the downloader.
+	// stop uploads and downloads
 	w.downloadManager.Stop()
-
-	// Stop the uploader.
 	w.uploadManager.Stop()
+
+	// stop recorders
+	w.hostInteractionRecorder.Stop(ctx)
+	w.contractSpendingRecorder.Stop(ctx)
 	return nil
 }
 
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, elapsed time.Duration, err error) {
 	// record host scan
 	defer func() {
-		InteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
+		HostInteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
 			HostKey:    hostKey,
 			Success:    isSuccessfulInteraction(err),
 			Timestamp:  time.Now(),
