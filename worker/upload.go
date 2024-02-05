@@ -389,7 +389,7 @@ func (mgr *uploadManager) Stop() {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, u := range mgr.uploaders {
-		u.Stop(errWorkerShutDown)
+		u.Stop(ErrShuttingDown)
 	}
 }
 
