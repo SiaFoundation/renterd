@@ -272,7 +272,8 @@ jobs:
           event-type: release-tagged
           client-payload: >
             {
+              "description": "Renterd: The Next-Gen Sia Renter",
               "tag": "${{ steps.get_tag.outputs.tag_name }}",
               "project": "renterd",
-              "workflow_run_id": "${{ github.run_id }}"
+              "workflow_id": "${{ github.run_id }}"
             }
