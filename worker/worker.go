@@ -211,10 +211,10 @@ type worker struct {
 	shutdownCtxCancel context.CancelFunc
 }
 
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, blockHeight uint64, fn func(rev types.FileContractRevision) error) error {
+func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
 		h := w.Host(hk, fcid, siamuxAddr)
-		rev, err := h.FetchRevision(ctx, fetchTimeout, blockHeight)
+		rev, err := h.FetchRevision(ctx, fetchTimeout)
 		if err != nil {
 			return err
 		}
@@ -271,7 +271,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration, blockHeight uint64) (contracts []api.Contract, errs HostErrorSet) {
+func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
 	errs = make(HostErrorSet)
 
 	// create requests channel
@@ -282,7 +282,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	worker := func() {
 		for md := range reqs {
 			var revision types.FileContractRevision
-			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, blockHeight, func(rev types.FileContractRevision) error {
+			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev types.FileContractRevision) error {
 				revision = rev
 				return nil
 			})
@@ -619,17 +619,13 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	cs, err := w.bus.ConsensusState(ctx)
-	if jc.Check("could not get consensus state", err) != nil {
-		return
-	}
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// renew the contract
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var contractPrice types.Currency
-	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, cs.BlockHeight, func(_ types.FileContractRevision) (err error) {
+	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, func(_ types.FileContractRevision) (err error) {
 		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
 		renewed, txnSet, contractPrice, err = h.RenewContract(ctx, rrr)
 		return err
@@ -669,7 +665,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, gp.ConsensusState.BlockHeight, func(rev types.FileContractRevision) (err error) {
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) (err error) {
 		h := w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr)
 		err = h.FundAccount(ctx, rfr.Balance, &rev)
 		if isBalanceMaxExceeded(err) {
@@ -699,18 +695,16 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 		return
 	}
 
-	// fetch gouging params
+	// attach gouging checker
 	up, err := w.bus.UploadParams(ctx)
 	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
 		return
 	}
-
-	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// sync the account
 	h := w.Host(rsr.HostKey, rsr.ContractID, rsr.SiamuxAddr)
-	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, up.CurrentHeight, func(rev types.FileContractRevision) error {
+	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	}))
 }
@@ -1236,7 +1230,7 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	}
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
-	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout, gp.ConsensusState.BlockHeight)
+	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()

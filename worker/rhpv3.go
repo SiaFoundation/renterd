@@ -239,20 +239,19 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	return err
 }
 
-// FetchRevision tries to fetch a contract revision from the host. We pass in
-// the blockHeight instead of using the blockHeight from the pricetable since we
-// might not have a price table.
-func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error) {
+// FetchRevision tries to fetch a contract revision from the host.
+func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
 	timeoutCtx := func() (context.Context, context.CancelFunc) {
 		if fetchTimeout > 0 {
 			return context.WithTimeout(ctx, fetchTimeout)
 		}
 		return ctx, func() {}
 	}
+
 	// Try to fetch the revision with an account first.
 	ctx, cancel := timeoutCtx()
 	defer cancel()
-	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, blockHeight, h.fcid)
+	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, h.fcid)
 	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
@@ -279,18 +278,17 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	return rev, nil
 }
 
-func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fcid types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
 		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-				// Fetch pt.
+			rev, err = RPCLatestRevision(ctx, t, fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
 				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's better to stay pessimistic
-				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
+				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
 			if err != nil {

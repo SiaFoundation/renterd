@@ -22,7 +22,7 @@ type (
 		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 
 		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
-		FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
@@ -209,11 +209,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	}
 
 	// pay by account
-	cs, err := h.bus.ConsensusState(ctx)
-	if err != nil {
-		return hostdb.HostPriceTable{}, err
-	}
-	return fetchPT(h.preparePriceTableAccountPayment(cs.BlockHeight))
+	return fetchPT(h.preparePriceTableAccountPayment())
 }
 
 func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
@@ -296,10 +292,10 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 //
 // NOTE: This is the preferred way of paying for a price table since it is
 // faster and doesn't require locking a contract.
-func (h *host) preparePriceTableAccountPayment(bh uint64) PriceTablePaymentFunc {
+func (h *host) preparePriceTableAccountPayment() PriceTablePaymentFunc {
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		account := rhpv3.Account(h.accountKey.PublicKey())
-		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
+		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 		return &payment, nil
 	}
 }
