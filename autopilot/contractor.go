@@ -1197,11 +1197,17 @@ func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredH
 		return math.SmallestNonzeroFloat64, nil
 	}
 
+	// determine the number of random hosts we fetch per iteration when
+	// calculating the min score - it contains a constant factor in case the
+	// number of contracts is very low and a linear factor to make sure the
+	// number is relative to the number of contracts we want to form
+	randSetSize := 2*int(numContracts) + 50
+
 	// do multiple rounds to select the lowest score
 	var lowestScores []float64
 	for r := 0; r < 5; r++ {
 		lowestScore := math.MaxFloat64
-		for _, host := range scoredHosts(candidates).randSelectByScore(int(numContracts) + 50) { // buffer
+		for _, host := range scoredHosts(candidates).randSelectByScore(randSetSize) {
 			if host.score < lowestScore {
 				lowestScore = host.score
 			}
@@ -1216,8 +1222,17 @@ func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredH
 	}
 	minScore := lowestScore / minAllowedScoreLeeway
 
+	// make sure the min score allows for 'numContracts' contracts to be formed
+	if len(candidates) < int(numContracts) {
+		return math.SmallestNonzeroFloat64, nil
+	} else if cutoff := candidates[numContracts-1].score; minScore < cutoff {
+		minScore = cutoff
+	}
+
 	c.logger.Infow("finished computing minScore",
+		"candidates", len(candidates),
 		"minScore", minScore,
+		"numContracts", numContracts,
 		"lowestScore", lowestScore)
 	return minScore, nil
 }
