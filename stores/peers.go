@@ -138,7 +138,6 @@ func (s *SQLStore) Ban(addr string, duration time.Duration, reason string) error
 			})
 		return res.Error
 	})
-
 }
 
 // Banned returns true, nil if the peer is banned.
