@@ -571,7 +571,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	}
 	for _, txn := range pending {
 		for _, mTxnID := range c.maintenanceTxnIDs {
-			if mTxnID == txn.ID {
+			if mTxnID == txn.ID() {
 				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
 			}

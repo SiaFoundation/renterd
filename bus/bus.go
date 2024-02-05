@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	rwallet "go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
@@ -87,8 +88,8 @@ type (
 		ReleaseInputs(txn ...types.Transaction)
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 		Tip() (types.ChainIndex, error)
-		Transactions(offset, limit int) ([]wallet.Transaction, error)
-		UnspentOutputs() ([]types.SiacoinElement, error)
+		Transactions(offset, limit int) ([]rwallet.Transaction, error)
+		UnspentOutputs() ([]rwallet.SiacoinElement, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -556,7 +557,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	if before.IsZero() && since.IsZero() {
 		txns, err := b.w.Transactions(offset, limit)
 		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(txns)
+			jc.Encode(rwallet.ConvertToTransactions(txns))
 		}
 		return
 	}
@@ -576,9 +577,9 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	}
 	txns = filtered
 	if limit == 0 || limit == -1 {
-		jc.Encode(txns[offset:])
+		jc.Encode(rwallet.ConvertToTransactions(txns[offset:]))
 	} else {
-		jc.Encode(txns[offset : offset+limit])
+		jc.Encode(rwallet.ConvertToTransactions(txns[offset : offset+limit]))
 	}
 	return
 }

@@ -13,13 +13,13 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -82,8 +82,8 @@ type Bus interface {
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []types.SiacoinElement, err error)
-	WalletPending(ctx context.Context) (resp []wallet.Transaction, err error)
+	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
+	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
 
