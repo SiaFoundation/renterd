@@ -246,10 +246,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
-		if err != nil {
-			return false, fmt.Errorf("failed to determine min score for contract check: %w", err)
-		}
+		minScore = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
@@ -1190,11 +1187,11 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) (float64, error) {
+func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) float64 {
 	// return early if there's no hosts
 	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return math.SmallestNonzeroFloat64, nil
+		return math.SmallestNonzeroFloat64
 	}
 
 	// determine the number of random hosts we fetch per iteration when
@@ -1216,16 +1213,20 @@ func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredH
 	}
 
 	// compute the min score
+	var lowestScore float64
 	lowestScore, err := stats.Float64Data(lowestScores).Median()
 	if err != nil {
-		return 0, err
+		panic("never fails since len(candidates) > 0 so len(lowestScores) > 0 as well")
 	}
 	minScore := lowestScore / minAllowedScoreLeeway
 
 	// make sure the min score allows for 'numContracts' contracts to be formed
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
 	if len(candidates) < int(numContracts) {
-		return math.SmallestNonzeroFloat64, nil
-	} else if cutoff := candidates[numContracts-1].score; minScore < cutoff {
+		return math.SmallestNonzeroFloat64
+	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
 		minScore = cutoff
 	}
 
@@ -1234,7 +1235,7 @@ func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredH
 		"minScore", minScore,
 		"numContracts", numContracts,
 		"lowestScore", lowestScore)
-	return minScore, nil
+	return minScore
 }
 
 func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
