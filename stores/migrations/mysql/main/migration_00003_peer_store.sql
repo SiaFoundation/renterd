@@ -8,7 +8,7 @@ CREATE TABLE `syncer_peers` (
   `synced_blocks` bigint,
   `sync_duration` bigint,
   PRIMARY KEY (`id`),
-  UNIQUE KEY (`address`)
+  UNIQUE KEY `idx_syncer_peers_address` (`address`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbSyncerBan
@@ -19,5 +19,6 @@ CREATE TABLE `syncer_bans` (
   `reason` longtext,
   `expiration` bigint NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY (`net_cidr`)
+  UNIQUE KEY `idx_syncer_bans_net_cidr` (`net_cidr`),
+  KEY `idx_syncer_bans_expiration` (`expiration`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
