@@ -17,6 +17,9 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -25,7 +28,6 @@ import (
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
@@ -86,7 +88,7 @@ type (
 		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 		Tip() (types.ChainIndex, error)
 		Transactions(offset, limit int) ([]wallet.Transaction, error)
-		UnspentOutputs() ([]wallet.SiacoinElement, error)
+		UnspentOutputs() ([]types.SiacoinElement, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -211,9 +213,9 @@ type (
 type bus struct {
 	startTime time.Time
 
-	cm ChainManager
-	s  Syncer
-	tp TransactionPool
+	cm *chain.Manager
+	s  *syncer.Syncer
+	w  *wallet.SingleAddressWallet
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
@@ -221,7 +223,6 @@ type bus struct {
 	ms    MetadataStore
 	ss    SettingStore
 	mtrcs MetricsStore
-	w     Wallet
 
 	accounts         *accounts
 	contractLocks    *contractLocks
@@ -400,17 +401,18 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	if jc.Decode(&block) != nil {
 		return
 	}
-	if jc.Check("failed to accept block", b.cm.AcceptBlock(block)) != nil {
+
+	// TODO: should we extend the API with a way to accept multiple blocks at once?
+	// TODO: should we deprecate this route in favor of /addblocks
+
+	if jc.Check("failed to accept block", b.cm.AddBlocks([]types.Block{block})) != nil {
 		return
 	}
 }
 
 func (b *bus) syncerAddrHandler(jc jape.Context) {
-	addr, err := b.s.SyncerAddress(jc.Request.Context())
-	if jc.Check("failed to fetch syncer's address", err) != nil {
-		return
-	}
-	jc.Encode(addr)
+	// TODO: have syncer accept contexts
+	jc.Encode(b.s.Addr())
 }
 
 func (b *bus) syncerPeersHandler(jc jape.Context) {
@@ -420,7 +422,8 @@ func (b *bus) syncerPeersHandler(jc jape.Context) {
 func (b *bus) syncerConnectHandler(jc jape.Context) {
 	var addr string
 	if jc.Decode(&addr) == nil {
-		jc.Check("couldn't connect to peer", b.s.Connect(addr))
+		_, err := b.s.Connect(addr)
+		jc.Check("couldn't connect to peer", err)
 	}
 }
 
@@ -435,18 +438,20 @@ func (b *bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
-	fee := b.tp.RecommendedFee()
-	jc.Encode(fee)
+	// TODO: have chain manager accept contexts
+	jc.Encode(b.cm.RecommendedFee())
 }
 
 func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
-	jc.Encode(b.tp.Transactions())
+	jc.Encode(b.cm.PoolTransactions())
 }
 
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Decode(&txnSet) == nil {
-		jc.Check("couldn't broadcast transaction set", b.tp.AcceptTransactionSet(txnSet))
+		// TODO: should we handle 'known' return value
+		_, err := b.cm.AddPoolTransactions(txnSet)
+		jc.Check("couldn't broadcast transaction set", err)
 	}
 }
 
@@ -579,7 +584,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 }
 
 func (b *bus) walletOutputsHandler(jc jape.Context) {
-	utxos, err := b.w.UnspentOutputs()
+	utxos, err := b.w.SpendableOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
 		jc.Encode(utxos)
 	}
@@ -593,22 +598,21 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	txn := wfr.Transaction
 	if len(txn.MinerFees) == 0 {
 		// if no fees are specified, we add some
-		fee := b.tp.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
+		fee := b.cm.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
 		txn.MinerFees = []types.Currency{fee}
 	}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
+
+	toSign, err := b.w.FundTransaction(&txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
-	parents, err := b.tp.UnconfirmedParents(txn)
-	if jc.Check("couldn't load transaction dependencies", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
+
+	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)
+
 	jc.Encode(api.WalletFundResponse{
 		Transaction: txn,
 		ToSign:      toSign,
-		DependsOn:   parents,
+		DependsOn:   b.cm.UnconfirmedParents(txn),
 	})
 }
 
@@ -617,10 +621,8 @@ func (b *bus) walletSignHandler(jc jape.Context) {
 	if jc.Decode(&wsr) != nil {
 		return
 	}
-	err := b.w.SignTransaction(b.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
-	if jc.Check("couldn't sign transaction", err) == nil {
-		jc.Encode(wsr.Transaction)
-	}
+	b.w.SignTransaction(&wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
+	jc.Encode(wsr.Transaction)
 }
 
 func (b *bus) walletRedistributeHandler(jc jape.Context) {
@@ -633,23 +635,20 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	cs := b.cm.TipState()
-	txns, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
+	txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
 	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 		return
 	}
 
 	var ids []types.TransactionID
 	for i := 0; i < len(txns); i++ {
-		err = b.w.SignTransaction(cs, &txns[i], toSign, types.CoveredFields{WholeTransaction: true})
-		if jc.Check("couldn't sign the transaction", err) != nil {
-			b.w.ReleaseInputs(txns...)
-			return
-		}
+		b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
 		ids = append(ids, txns[i].ID())
 	}
 
-	if jc.Check("couldn't broadcast the transaction", b.tp.AcceptTransactionSet(txns)) != nil {
+	// TODO: should we handle 'known' return parameter here
+	_, err = b.cm.AddPoolTransactions(txns)
+	if jc.Check("couldn't broadcast the transaction", err) != nil {
 		b.w.ReleaseInputs(txns...)
 		return
 	}
@@ -684,23 +683,15 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
-	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), true)
+	txn.MinerFees = []types.Currency{b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
+	toSign, err := b.w.FundTransaction(&txn, cost.Add(txn.MinerFees[0]), true)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
-	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(cs, &txn, toSign, cf)
-	if jc.Check("couldn't sign transaction", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
-	parents, err := b.tp.UnconfirmedParents(txn)
-	if jc.Check("couldn't load transaction dependencies", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
-	jc.Encode(append(parents, txn))
+	b.w.SignTransaction(&txn, toSign, ExplicitCoveredFields(txn))
+
+	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)
+	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
 
 func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
@@ -741,20 +732,16 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
 	// the renter key by the worker.
-	toSign, err := b.w.FundTransaction(cs, &txn, cost, true)
+	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 
-	// Add any required parents.
-	parents, err := b.tp.UnconfirmedParents(txn)
-	if jc.Check("couldn't load transaction dependencies", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
+	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)
+
 	jc.Encode(api.WalletPrepareRenewResponse{
 		ToSign:         toSign,
-		TransactionSet: append(parents, txn),
+		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
 	})
 }
 
@@ -774,7 +761,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 		return false
 	}
 
-	txns := b.tp.Transactions()
+	txns := b.cm.PoolTransactions()
 	relevant := txns[:0]
 	for _, txn := range txns {
 		if isRelevant(txn) {
@@ -1706,10 +1693,19 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 }
 
 func (b *bus) consensusState() api.ConsensusState {
+	// TODO: this should be a method on the syncer
+	var n int
+	for _, peer := range b.s.Peers() {
+		if peer.Synced() {
+			n++
+		}
+	}
+	synced := float64(n)/float64(len(b.s.Peers())) >= .3
+
 	return api.ConsensusState{
 		BlockHeight:   b.cm.TipState().Index.Height,
-		LastBlockTime: api.TimeRFC3339(b.cm.LastBlockTime()),
-		Synced:        b.cm.Synced(),
+		LastBlockTime: api.TimeRFC3339(b.cm.TipState().PrevTimestamps[0]),
+		Synced:        synced,
 	}
 }
 
@@ -1742,7 +1738,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		ConsensusState:     cs,
 		GougingSettings:    gs,
 		RedundancySettings: rs,
-		TransactionFee:     b.tp.RecommendedFee(),
+		TransactionFee:     b.cm.RecommendedFee(),
 	}, nil
 }
 
@@ -2287,15 +2283,50 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
+// ExplicitCoveredFields returns a CoveredFields that covers all elements
+// present in txn.
+//
+// TODO: where should this live
+func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
+	for i := range txn.SiacoinInputs {
+		cf.SiacoinInputs = append(cf.SiacoinInputs, uint64(i))
+	}
+	for i := range txn.SiacoinOutputs {
+		cf.SiacoinOutputs = append(cf.SiacoinOutputs, uint64(i))
+	}
+	for i := range txn.FileContracts {
+		cf.FileContracts = append(cf.FileContracts, uint64(i))
+	}
+	for i := range txn.FileContractRevisions {
+		cf.FileContractRevisions = append(cf.FileContractRevisions, uint64(i))
+	}
+	for i := range txn.StorageProofs {
+		cf.StorageProofs = append(cf.StorageProofs, uint64(i))
+	}
+	for i := range txn.SiafundInputs {
+		cf.SiafundInputs = append(cf.SiafundInputs, uint64(i))
+	}
+	for i := range txn.SiafundOutputs {
+		cf.SiafundOutputs = append(cf.SiafundOutputs, uint64(i))
+	}
+	for i := range txn.MinerFees {
+		cf.MinerFees = append(cf.MinerFees, uint64(i))
+	}
+	for i := range txn.ArbitraryData {
+		cf.ArbitraryData = append(cf.ArbitraryData, uint64(i))
+	}
+	for i := range txn.Signatures {
+		cf.Signatures = append(cf.Signatures, uint64(i))
+	}
+	return
+}
+
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm *webhooks.Manager, cm *chain.Manager, s *syncer.Syncer, w *wallet.SingleAddressWallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		hooks:            hm,
-		s:                s,
-		cm:               cm,
-		tp:               tp,
 		w:                w,
 		hdb:              hdb,
 		as:               as,

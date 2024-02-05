@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
@@ -160,7 +159,7 @@ func getSeed() types.PrivateKey {
 			fmt.Println()
 			phrase = string(pw)
 		}
-		key, err := wallet.KeyFromPhrase(phrase)
+		key, err := KeyFromPhrase(phrase)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -316,7 +315,7 @@ func main() {
 		return
 	} else if flag.Arg(0) == "seed" {
 		log.Println("Seed phrase:")
-		fmt.Println(wallet.NewSeedPhrase())
+		fmt.Println(NewSeedPhrase())
 		return
 	} else if flag.Arg(0) == "config" {
 		cmdBuildConfig()
@@ -379,10 +378,11 @@ func main() {
 		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
 	}
 
-	network, _ := build.Network()
+	network, genesis := build.Network()
 	busCfg := node.BusConfig{
 		Bus:                 cfg.Bus,
 		Network:             network,
+		Genesis:             genesis,
 		SlabPruningInterval: time.Hour,
 		SlabPruningCooldown: 30 * time.Second,
 	}

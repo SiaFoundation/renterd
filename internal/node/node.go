@@ -3,28 +3,25 @@ package node
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/stores"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
-	"go.sia.tech/siad/modules"
-	mconsensus "go.sia.tech/siad/modules/consensus"
-	"go.sia.tech/siad/modules/gateway"
-	"go.sia.tech/siad/modules/transactionpool"
-	"go.sia.tech/siad/sync"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
@@ -34,6 +31,7 @@ import (
 type BusConfig struct {
 	config.Bus
 	Network             *consensus.Network
+	Genesis             types.Block
 	Miner               *Miner
 	DBLoggerConfig      stores.LoggerConfig
 	DBDialector         gorm.Dialector
@@ -53,40 +51,6 @@ type (
 )
 
 func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
-	gatewayDir := filepath.Join(dir, "gateway")
-	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	consensusDir := filepath.Join(dir, "consensus")
-	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	cs, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, nil, err
-		}
-	default:
-		go func() {
-			if err := <-errCh; err != nil {
-				log.Println("WARNING: consensus initialization returned an error:", err)
-			}
-		}()
-	}
-	tpoolDir := filepath.Join(dir, "transactionpool")
-	if err := os.MkdirAll(tpoolDir, 0700); err != nil {
-		return nil, nil, err
-	}
-	tp, err := transactionpool.New(cs, g, tpoolDir)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	// If no DB dialector was provided, use SQLite.
 	dbConn := cfg.DBDialector
 	if dbConn == nil {
@@ -107,10 +71,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 	alertsMgr := alerts.NewManager()
 	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
-	walletAddr := wallet.StandardAddress(seed.PublicKey())
+	walletAddr := types.StandardUnlockHash(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	sqlStore, ccid, err := stores.NewSQLStore(stores.Config{
+	sqlStore, _, err := stores.NewSQLStore(stores.Config{
 		Conn:                          dbConn,
 		ConnMetrics:                   dbMetricsConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
@@ -135,56 +99,48 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	// Hook up webhooks to alerts.
 	alertsMgr.RegisterWebhookBroadcaster(hooksMgr)
 
-	cancelSubscribe := make(chan struct{})
-	go func() {
-		subscribeErr := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe)
-		if errors.Is(subscribeErr, modules.ErrInvalidConsensusChangeID) {
-			l.Warn("Invalid consensus change ID detected - resyncing consensus")
-			// Reset the consensus state within the database and rescan.
-			if err := sqlStore.ResetConsensusSubscription(); err != nil {
-				l.Fatal(fmt.Sprintf("Failed to reset consensus subscription of SQLStore: %v", err))
-				return
-			}
-			// Subscribe from the beginning.
-			subscribeErr = cs.ConsensusSetSubscribe(sqlStore, modules.ConsensusChangeBeginning, cancelSubscribe)
-		}
-		if subscribeErr != nil && !errors.Is(subscribeErr, sync.ErrStopped) {
-			l.Fatal(fmt.Sprintf("ConsensusSetSubscribe returned an error: %v", err))
-		}
-	}()
+	// TODO: should we have something similar to ResetConsensusSubscription?
+	// TODO: should we get rid of modules.ConsensusChangeID all together?
 
-	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry, zap.NewNop().Sugar())
-	tp.TransactionPoolSubscribe(w)
-	if err := cs.ConsensusSetSubscribe(w, modules.ConsensusChangeRecent, nil); err != nil {
+	// create chain manager
+	chainDB := chain.NewMemDB()
+	store, state, err := chain.NewDBStore(chainDB, cfg.Network, cfg.Genesis)
+	if err != nil {
 		return nil, nil, err
 	}
+	cm := chain.NewManager(store, state)
 
-	if m := cfg.Miner; m != nil {
-		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
-			return nil, nil, err
-		}
-		tp.TransactionPoolSubscribe(m)
-	}
+	// TODO: we stopped recording wallet metrics,
 
-	cm, err := NewChainManager(cs, cfg.Network)
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	// create syncer
+	gwl, err := net.Listen("tcp", cfg.GatewayAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// TODO: implement peer store
+	// TODO: not sure what to pass as header here
+	// TODO: reuse the gateway dir? create new peer dir?
+	s := syncer.New(gwl, cm, NewPeerStore(), gateway.Header{
+		UniqueID:   gateway.GenerateUniqueID(),
+		GenesisID:  cfg.Genesis.ID(),
+		NetAddress: cfg.GatewayAddr,
+	})
+
+	b, err := bus.New(alertsMgr, hooksMgr, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
-			func() error {
-				close(cancelSubscribe)
-				return nil
-			}(),
-			g.Close(),
-			cs.Close(),
-			tp.Close(),
+			gwl.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
 		)

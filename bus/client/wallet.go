@@ -9,8 +9,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/wallet"
 )
 
 // SendSiacoins is a helper method that sends siacoins to the given outputs.
@@ -67,14 +67,14 @@ func (c *Client) WalletFund(ctx context.Context, txn *types.Transaction, amount 
 }
 
 // WalletOutputs returns the set of unspent outputs controlled by the wallet.
-func (c *Client) WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error) {
+func (c *Client) WalletOutputs(ctx context.Context) (resp []types.SiacoinElement, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/outputs", &resp)
 	return
 }
 
 // WalletPending returns the txpool transactions that are relevant to the
 // wallet.
-func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, err error) {
+func (c *Client) WalletPending(ctx context.Context) (resp []wallet.Transaction, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/pending", &resp)
 	return
 }

@@ -21,11 +21,11 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -2120,7 +2120,7 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 			Value:   toSend,
 		},
 	}, false)
-	tt.AssertIs(err, wallet.ErrInsufficientBalance)
+	tt.AssertIs(err, wallet.ErrNotEnoughFunds)
 
 	// try again - this time using unconfirmed transactions
 	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
