@@ -476,5 +476,5 @@ CREATE TABLE `syncer_bans` (
   `expiration` bigint NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_syncer_bans_net_cidr` (`net_cidr`),
-  KEY `idx_syncer_bans_expiration` (`expiration`),
+  KEY `idx_syncer_bans_expiration` (`expiration`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
