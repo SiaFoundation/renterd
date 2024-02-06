@@ -578,31 +578,26 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		}
 	}
 
+	wantedNumOutputs := 10
+
 	// enough outputs - nothing to do
 	available, err := b.WalletOutputs(ctx)
 	if err != nil {
 		return err
 	}
-	if uint64(len(available)) >= cfg.Contracts.Amount {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), cfg.Contracts.Amount)
+	if uint64(len(available)) >= uint64(wantedNumOutputs) {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
 		return nil
 	}
+	wantedNumOutputs -= len(available)
 
-	// not enough balance to redistribute outputs - nothing to do
-	amount := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
-	outputs := balance.Div(amount).Big().Uint64()
-	if outputs < 2 {
-		l.Warnf("wallet maintenance skipped, wallet has insufficient balance %v", balance)
-		return err
-	}
-	if outputs > cfg.Contracts.Amount {
-		outputs = cfg.Contracts.Amount
-	}
+	// figure out the amount per output
+	amount := cfg.Contracts.Allowance.Div64(uint64(wantedNumOutputs))
 
 	// redistribute outputs
-	ids, err := b.WalletRedistribute(ctx, int(outputs), amount)
+	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, amount)
 	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", outputs, amount, balance, err)
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", wantedNumOutputs, amount, balance, err)
 	}
 
 	l.Debugf("wallet maintenance succeeded, txns %v", ids)
@@ -1593,7 +1588,7 @@ func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, 
 
 func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
 	// return early if the host's pricetable is not expired yet
-	if !host.PriceTable.Expiry.IsZero() && time.Now().After(host.PriceTable.Expiry) {
+	if time.Now().Before(host.PriceTable.Expiry) {
 		return nil
 	}
 

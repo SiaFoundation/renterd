@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -18,6 +20,8 @@ import (
 )
 
 type (
+	contractsMap map[types.PublicKey]api.ContractMetadata
+
 	mockContract struct {
 		rev types.FileContractRevision
 
@@ -34,6 +38,9 @@ type (
 
 		mu sync.Mutex
 		c  *mockContract
+
+		hpt          hostdb.HostPriceTable
+		hptBlockChan chan struct{}
 	}
 
 	mockHostManager struct {
@@ -66,7 +73,7 @@ type (
 		dl *downloadManager
 		ul *uploadManager
 
-		contracts map[types.PublicKey]api.ContractMetadata
+		contracts contractsMap
 	}
 )
 
@@ -83,8 +90,17 @@ var (
 	errBucketNotFound    = errors.New("bucket not found")
 	errContractNotFound  = errors.New("contract not found")
 	errObjectNotFound    = errors.New("object not found")
+	errSlabNotFound      = errors.New("slab not found")
 	errSectorOutOfBounds = errors.New("sector out of bounds")
 )
+
+func (c contractsMap) values() []api.ContractMetadata {
+	var contracts []api.ContractMetadata
+	for _, contract := range c {
+		contracts = append(contracts, contract)
+	}
+	return contracts
+}
 
 func (m *mockMemory) Release()           {}
 func (m *mockMemory) ReleaseSome(uint64) {}
@@ -105,6 +121,22 @@ func (os *mockObjectStore) AddMultipartPart(ctx context.Context, bucket, path, c
 	return nil
 }
 
+func (os *mockObjectStore) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error {
+	return nil
+}
+
+func (os *mockObjectStore) TrackUpload(ctx context.Context, uID api.UploadID) error { return nil }
+
+func (os *mockObjectStore) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
+
+func (os *mockObjectStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+	return nil
+}
+
+func (os *mockObjectStore) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error {
+	return nil
+}
+
 func (os *mockObjectStore) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
@@ -119,11 +151,33 @@ func (os *mockObjectStore) AddObject(ctx context.Context, bucket, path, contract
 }
 
 func (os *mockObjectStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
-	return nil, false, nil
-}
+	os.mu.Lock()
+	defer os.mu.Unlock()
 
-func (os *mockObjectStore) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error {
-	return nil
+	// check if given data is too big
+	slabSize := int(minShards) * int(rhpv2.SectorSize)
+	if len(data) > slabSize {
+		return nil, false, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
+	}
+
+	// create slab
+	ec := object.GenerateEncryptionKey()
+	ss := object.SlabSlice{
+		Slab:   object.NewPartialSlab(ec, minShards),
+		Offset: 0,
+		Length: uint32(len(data)),
+	}
+
+	// update store
+	os.partials[ec.String()] = mockPackedSlab{
+		parameterKey: fmt.Sprintf("%d-%d-%v", minShards, totalShards, contractSet),
+		bufferID:     os.bufferIDCntr,
+		slabKey:      ec,
+		data:         data,
+	}
+	os.bufferIDCntr++
+
+	return []object.SlabSlice{ss}, false, nil
 }
 
 func (os *mockObjectStore) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error) {
@@ -140,33 +194,116 @@ func (os *mockObjectStore) Object(ctx context.Context, bucket, path string, opts
 		return api.ObjectsResponse{}, errObjectNotFound
 	}
 
-	object := os.objects[bucket][path]
+	// clone to ensure the store isn't unwillingly modified
+	var o object.Object
+	if b, err := json.Marshal(os.objects[bucket][path]); err != nil {
+		panic(err)
+	} else if err := json.Unmarshal(b, &o); err != nil {
+		panic(err)
+	}
+
 	return api.ObjectsResponse{Object: &api.Object{
-		ObjectMetadata: api.ObjectMetadata{Name: path, Size: object.TotalSize()},
-		Object:         object,
+		ObjectMetadata: api.ObjectMetadata{Name: path, Size: o.TotalSize()},
+		Object:         o,
 	}}, nil
 }
 
-func (os *mockObjectStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
-	return nil
-}
-func (os *mockObjectStore) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error {
-	return nil
-}
 func (os *mockObjectStore) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
-	return nil, nil
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	packedSlab, exists := os.partials[key.String()]
+	if !exists {
+		return nil, errSlabNotFound
+	}
+	if offset+length > uint32(len(packedSlab.data)) {
+		return nil, errors.New("offset out of bounds")
+	}
+
+	return packedSlab.data[offset : offset+length], nil
 }
-func (os *mockObjectStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
-	return object.Slab{}, nil
+
+func (os *mockObjectStore) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	os.forEachObject(func(bucket, path string, o object.Object) {
+		for _, s := range o.Slabs {
+			if s.Slab.Key.String() == key.String() {
+				slab = s.Slab
+				return
+			}
+		}
+		err = errSlabNotFound
+	})
+	return
 }
+
 func (os *mockObjectStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	os.forEachObject(func(bucket, path string, o object.Object) {
+		for i, slab := range o.Slabs {
+			if slab.Key.String() == s.Key.String() {
+				os.objects[bucket][path].Slabs[i].Slab = s
+				return
+			}
+		}
+	})
+
 	return nil
 }
+
+func (os *mockObjectStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (pss []api.PackedSlab, _ error) {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	parameterKey := fmt.Sprintf("%d-%d-%v", minShards, totalShards, set)
+	for _, ps := range os.partials {
+		if ps.parameterKey == parameterKey {
+			pss = append(pss, api.PackedSlab{
+				BufferID: ps.bufferID,
+				Data:     ps.data,
+				Key:      ps.slabKey,
+			})
+		}
+	}
+	return
+}
+
 func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	bufferIDToKey := make(map[uint]string)
+	for key, ps := range os.partials {
+		bufferIDToKey[ps.bufferID] = key
+	}
+
+	slabKeyToSlab := make(map[string]*object.Slab)
+	os.forEachObject(func(bucket, path string, o object.Object) {
+		for i, slab := range o.Slabs {
+			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][path].Slabs[i].Slab
+		}
+	})
+
+	for _, slab := range slabs {
+		key := bufferIDToKey[slab.BufferID]
+		slabKeyToSlab[key].Shards = slab.Shards
+		delete(os.partials, key)
+	}
+
 	return nil
 }
-func (os *mockObjectStore) TrackUpload(ctx context.Context, uID api.UploadID) error  { return nil }
-func (os *mockObjectStore) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
+
+func (os *mockObjectStore) forEachObject(fn func(bucket, path string, o object.Object)) {
+	for bucket, objects := range os.objects {
+		for path, object := range objects {
+			fn(bucket, path, object)
+		}
+	}
+}
 
 func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
 	sector, exist := h.c.sectors[root]
@@ -193,8 +330,9 @@ func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 	return
 }
 
-func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
-	return
+func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hostdb.HostPriceTable, error) {
+	<-h.hptBlockChan
+	return h.hpt, nil
 }
 
 func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
@@ -242,15 +380,17 @@ func (cs *mockContractStore) KeepaliveContract(ctx context.Context, fcid types.F
 func newMockHosts(n int) []*mockHost {
 	hosts := make([]*mockHost, n)
 	for i := range hosts {
-		hosts[i] = newMockHost(types.PublicKey{byte(i)}, nil)
+		hosts[i] = newMockHost(types.PublicKey{byte(i)}, newTestHostPriceTable(time.Now().Add(time.Minute)), nil)
 	}
 	return hosts
 }
 
-func newMockHost(hk types.PublicKey, c *mockContract) *mockHost {
+func newMockHost(hk types.PublicKey, hpt hostdb.HostPriceTable, c *mockContract) *mockHost {
 	return &mockHost{
 		hk: hk,
 		c:  c,
+
+		hpt: hpt,
 	}
 }
 
@@ -287,7 +427,7 @@ func newMockHostManager(hosts []*mockHost) *mockHostManager {
 }
 
 func newMockObjectStore() *mockObjectStore {
-	os := &mockObjectStore{objects: make(map[string]map[string]object.Object)}
+	os := &mockObjectStore{objects: make(map[string]map[string]object.Object), partials: make(map[string]mockPackedSlab)}
 	os.objects[testBucket] = make(map[string]object.Object)
 	return os
 }
@@ -313,7 +453,7 @@ func newMockWorker(numHosts int) *mockWorker {
 	ul := newUploadManager(context.Background(), hm, mm, os, cs, 0, 0, time.Minute, zap.NewNop().Sugar())
 
 	// create contract metadata
-	metadatas := make(map[types.PublicKey]api.ContractMetadata)
+	metadatas := make(contractsMap)
 	for _, h := range hosts {
 		metadatas[h.hk] = api.ContractMetadata{
 			ID:      h.c.rev.ParentID,

@@ -22,6 +22,7 @@ import (
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.sia.tech/hostd/wallet"
+	"go.sia.tech/hostd/webhooks"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/siad/modules"
@@ -87,9 +88,8 @@ var defaultHostSettings = settings.Settings{
 
 	PriceTableValidity: 10 * time.Second,
 
-	AccountExpiry:      30 * 24 * time.Hour, // 1 month
-	MaxAccountBalance:  types.Siacoins(10),
-	MaxRegistryEntries: 1e3,
+	AccountExpiry:     30 * 24 * time.Hour, // 1 month
+	MaxAccountBalance: types.Siacoins(10),
 }
 
 // Close shutsdown the host
@@ -194,11 +194,17 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
 
-	am := alerts.NewManager()
+	wr, err := webhooks.NewManager(db, log.Named("webhooks"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create webhook reporter: %w", err)
+	}
+
+	am := alerts.NewManager(wr, log.Named("alerts"))
 	storage, err := storage.NewVolumeManager(db, am, cm, log.Named("storage"), 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage manager: %w", err)
 	}
+
 	contracts, err := contracts.NewManager(db, am, storage, cm, tp, wallet, log.Named("contracts"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract manager: %w", err)

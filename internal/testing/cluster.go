@@ -580,13 +580,12 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 	return nil
 }
 
-// announceHosts adds storage and a registry to each host and announces them to
+// announceHosts configures hosts with default settings and announces them to
 // the group
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
 		settings.NetAddress = host.RHPv2Addr()
-		settings.MaxRegistryEntries = 1 << 18
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
@@ -709,6 +708,48 @@ func (c *TestCluster) WaitForContracts() []api.Contract {
 		c.tt.Fatal(resp.Error)
 	}
 	return resp.Contracts
+}
+
+func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
+	c.tt.Helper()
+
+	// limit n to number of hosts we have
+	if n > len(c.hosts) {
+		n = len(c.hosts)
+	}
+
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
+		sets, err := c.Bus.ContractSets(context.Background())
+		if err != nil {
+			return err
+		}
+
+		// check if set exists
+		if len(sets) == 0 {
+			return errors.New("no contract sets found")
+		} else {
+			var found bool
+			for _, s := range sets {
+				if s == set {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("set '%v' not found, sets: %v", set, sets)
+			}
+		}
+
+		// check if it contains the desired number of contracts
+		csc, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: set})
+		if err != nil {
+			return err
+		}
+		if len(csc) != n {
+			return fmt.Errorf("contract set does not contain the desired number of contracts, %v!=%v", len(csc), n)
+		}
+		return nil
+	})
 }
 
 func (c *TestCluster) RemoveHost(host *Host) {

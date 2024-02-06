@@ -3,6 +3,7 @@ package stores
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.sia.tech/renterd/api"
@@ -10,56 +11,14 @@ import (
 	"gorm.io/gorm"
 )
 
-var errRunV072 = errors.New("can't upgrade to >=v1.0.0 from your current version - please upgrade to v0.7.2 first (https://github.com/SiaFoundation/renterd/releases/tag/v0.7.2)")
-
 var (
-	tables = []interface{}{
-		// bus.MetadataStore tables
-		&dbArchivedContract{},
-		&dbContract{},
-		&dbContractSet{},
-		&dbObject{},
-		&dbMultipartUpload{},
-		&dbBucket{},
-		&dbBufferedSlab{},
-		&dbSlab{},
-		&dbSector{},
-		&dbSlice{},
-
-		// bus.HostDB tables
-		&dbAnnouncement{},
-		&dbConsensusInfo{},
-		&dbHost{},
-		&dbAllowlistEntry{},
-		&dbBlocklistEntry{},
-
-		// wallet tables
-		&dbSiacoinElement{},
-		&dbTransaction{},
-
-		// bus.SettingStore tables
-		&dbSetting{},
-
-		// bus.EphemeralAccountStore tables
-		&dbAccount{},
-
-		// bus.AutopilotStore tables
-		&dbAutopilot{},
-
-		// webhooks.WebhookStore tables
-		&dbWebhook{},
-	}
+	errRunV072               = errors.New("can't upgrade to >=v1.0.0 from your current version - please upgrade to v0.7.2 first (https://github.com/SiaFoundation/renterd/releases/tag/v0.7.2)")
+	errMySQLNoSuperPrivilege = errors.New("You do not have the SUPER privilege and binary logging is enabled")
 )
 
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
-func initSchema(tx *gorm.DB) error {
-	// Setup join tables.
-	err := setupJoinTables(tx)
-	if err != nil {
-		return fmt.Errorf("failed to setup join tables: %w", err)
-	}
-
+func initSchema(tx *gorm.DB) (err error) {
 	// Pick the right migrations.
 	var schema []byte
 	if isSQLite(tx) {
@@ -68,7 +27,7 @@ func initSchema(tx *gorm.DB) error {
 		schema, err = migrations.ReadFile("migrations/mysql/main/schema.sql")
 	}
 	if err != nil {
-		return err
+		return
 	}
 
 	// Run it.
@@ -89,7 +48,24 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID:      "00001_init",
 			Migrate: func(tx *gorm.DB) error { return errRunV072 },
 		},
+		{
+			ID: "00001_object_metadata",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, "00001_object_metadata", logger)
+			},
+		},
+		{
+			ID: "00002_prune_slabs_trigger",
+			Migrate: func(tx *gorm.DB) error {
+				err := performMigration(tx, "00002_prune_slabs_trigger", logger)
+				if err != nil && strings.Contains(err.Error(), errMySQLNoSuperPrivilege.Error()) {
+					logger.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
+				}
+				return err
+			},
+		},
 	}
+
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
 
@@ -100,5 +76,32 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate: %v", err)
 	}
+	return nil
+}
+
+func performMigration(db *gorm.DB, name string, logger *zap.SugaredLogger) error {
+	logger.Infof("performing migration %s", name)
+
+	// build path
+	var path string
+	if isSQLite(db) {
+		path = fmt.Sprintf("migrations/sqlite/main/migration_" + name + ".sql")
+	} else {
+		path = fmt.Sprintf("migrations/mysql/main/migration_" + name + ".sql")
+	}
+
+	// read migration file
+	migration, err := migrations.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("migration %s failed: %w", name, err)
+	}
+
+	// execute it
+	err = db.Exec(string(migration)).Error
+	if err != nil {
+		return fmt.Errorf("migration %s failed: %w", name, err)
+	}
+
+	logger.Infof("migration %s complete", name)
 	return nil
 }

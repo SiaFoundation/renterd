@@ -31,7 +31,11 @@ type (
 	}
 
 	HostManager interface {
-		Host(types.PublicKey, types.FileContractID, string) Host
+		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
+	}
+
+	HostStore interface {
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	}
 )
 
@@ -213,44 +217,56 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 }
 
 func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
-	if err != nil {
-		return err
-	}
-
-	// calculate the amount to deposit
+	// fetch current balance
 	curr, err := h.acc.Balance(ctx)
 	if err != nil {
 		return err
 	}
+
+	// return early if we have the desired balance
 	if curr.Cmp(balance) >= 0 {
 		return nil
 	}
-	amount := balance.Sub(curr)
-
-	// cap the amount by the amount of money left in the contract
-	renterFunds := rev.ValidRenterPayout()
-	possibleFundCost := pt.FundAccountCost.Add(pt.UpdatePriceTableCost)
-	if renterFunds.Cmp(possibleFundCost) <= 0 {
-		return fmt.Errorf("insufficient funds to fund account: %v <= %v", renterFunds, possibleFundCost)
-	} else if maxAmount := renterFunds.Sub(possibleFundCost); maxAmount.Cmp(amount) < 0 {
-		amount = maxAmount
-	}
+	deposit := balance.Sub(curr)
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
-		return amount, h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			cost := amount.Add(pt.FundAccountCost)
-			payment, err := payByContract(rev, cost, rhpv3.Account{}, h.renterKey) // no account needed for funding
+		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
+			// fetch pricetable
+			pt, err := h.priceTable(ctx, rev)
 			if err != nil {
 				return err
 			}
-			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
-				return fmt.Errorf("failed to fund account with %v;%w", amount, err)
+
+			// check whether we have money left in the contract
+			if pt.FundAccountCost.Cmp(rev.ValidRenterPayout()) >= 0 {
+				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), pt.FundAccountCost)
 			}
-			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: cost})
+			availableFunds := rev.ValidRenterPayout().Sub(pt.FundAccountCost)
+
+			// cap the deposit amount by the money that's left in the contract
+			if deposit.Cmp(availableFunds) > 0 {
+				deposit = availableFunds
+			}
+
+			// create the payment
+			amount := deposit.Add(pt.FundAccountCost)
+			payment, err := payByContract(rev, amount, rhpv3.Account{}, h.renterKey) // no account needed for funding
+			if err != nil {
+				return err
+			}
+
+			// fund the account
+			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
+				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, pt.FundAccountCost, err)
+			}
+
+			// record the spend
+			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: amount})
 			return nil
-		})
+		}); err != nil {
+			return types.ZeroCurrency, err
+		}
+		return deposit, nil
 	})
 }
 
@@ -273,4 +289,34 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 		})
 		return balance, err
 	})
+}
+
+// preparePriceTableAccountPayment prepare a payment function to pay for a price
+// table from the given host using the provided revision.
+//
+// NOTE: This is the preferred way of paying for a price table since it is
+// faster and doesn't require locking a contract.
+func (h *host) preparePriceTableAccountPayment(bh uint64) PriceTablePaymentFunc {
+	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
+		account := rhpv3.Account(h.accountKey.PublicKey())
+		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
+		return &payment, nil
+	}
+}
+
+// preparePriceTableContractPayment prepare a payment function to pay for a
+// price table from the given host using the provided revision.
+//
+// NOTE: This way of paying for a price table should only be used if payment by
+// EA is not possible or if we already need a contract revision anyway. e.g.
+// funding an EA.
+func (h *host) preparePriceTableContractPayment(rev *types.FileContractRevision) PriceTablePaymentFunc {
+	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
+		refundAccount := rhpv3.Account(h.accountKey.PublicKey())
+		payment, err := payByContract(rev, pt.UpdatePriceTableCost, refundAccount, h.renterKey)
+		if err != nil {
+			return nil, err
+		}
+		return &payment, nil
+	}
 }
