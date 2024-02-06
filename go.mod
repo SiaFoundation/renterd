@@ -7,7 +7,7 @@ require (
 	github.com/go-gormigrate/gormigrate/v2 v2.1.1
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.19.0
-	github.com/klauspost/reedsolomon v1.12.0
+	github.com/klauspost/reedsolomon v1.12.1
 	github.com/minio/minio-go/v7 v7.0.65
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
