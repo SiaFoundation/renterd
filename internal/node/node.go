@@ -164,6 +164,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	// start the syncer
 	go s.Run()
 
+	// subscribe the store to the chain manager
+	err = cm.AddSubscriber(sqlStore, types.ChainIndex{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
 			l.Close(),

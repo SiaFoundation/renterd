@@ -546,6 +546,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			if err != nil {
 				return err
 			}
+			fmt.Printf("wallet details %v %v\n", res.Address, res)
 
 			if res.Confirmed.IsZero() {
 				tt.Fatal("wallet not funded")
@@ -942,9 +943,10 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 
 func (c *TestCluster) mineBlocks(addr types.Address, n int) error {
 	for i := 0; i < n; i++ {
-		_, found := coreutils.MineBlock(c.cm, addr, time.Second)
-		if !found {
+		if block, found := coreutils.MineBlock(c.cm, addr, time.Second); !found {
 			return errors.New("failed to find block")
+		} else if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -956,7 +958,7 @@ func testNetwork() *consensus.Network {
 	n := &consensus.Network{
 		InitialCoinbase: types.Siacoins(300000),
 		MinimumCoinbase: types.Siacoins(299990),
-		InitialTarget:   types.BlockID{4: 32},
+		InitialTarget:   types.BlockID{255, 255},
 	}
 
 	n.HardforkDevAddr.Height = 3
