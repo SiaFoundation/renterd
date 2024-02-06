@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -28,11 +30,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// RHP4 TODOs:
+// - get rid of dbConsensusInfo
+// - get rid of returned chain manager in bus constructor
+// - all wallet metrics support
+// - add UPNP support
+
 type BusConfig struct {
 	config.Bus
 	Network             *consensus.Network
 	Genesis             types.Block
-	Miner               *Miner
 	DBLoggerConfig      stores.LoggerConfig
 	DBDialector         gorm.Dialector
 	DBMetricsDialector  gorm.Dialector
@@ -50,13 +57,13 @@ type (
 	ShutdownFn = func(context.Context) error
 )
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, error) {
 	// If no DB dialector was provided, use SQLite.
 	dbConn := cfg.DBDialector
 	if dbConn == nil {
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
 	}
@@ -64,13 +71,22 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	if dbMetricsConn == nil {
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
 	}
 
+	consensusDir := filepath.Join(dir, "consensus")
+	if err := os.MkdirAll(consensusDir, 0700); err != nil {
+		return nil, nil, nil, err
+	}
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(dir, "consensus.db"))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to open consensus database: %w", err)
+	}
+
 	alertsMgr := alerts.NewManager()
-	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
+	sqlLogger := stores.NewSQLLogger(logger.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := types.StandardUnlockHash(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
@@ -84,68 +100,79 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		PersistInterval:               cfg.PersistInterval,
 		WalletAddress:                 walletAddr,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
-		Logger:                        l.Sugar(),
+		Logger:                        logger.Sugar(),
 		GormLogger:                    sqlLogger,
 		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	hooksMgr, err := webhooks.NewManager(l.Named("webhooks").Sugar(), sqlStore)
+	wh, err := webhooks.NewManager(logger.Named("webhooks").Sugar(), sqlStore)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Hook up webhooks to alerts.
-	alertsMgr.RegisterWebhookBroadcaster(hooksMgr)
-
-	// TODO: should we have something similar to ResetConsensusSubscription?
-	// TODO: should we get rid of modules.ConsensusChangeID all together?
+	alertsMgr.RegisterWebhookBroadcaster(wh)
 
 	// create chain manager
-	chainDB := chain.NewMemDB()
-	store, state, err := chain.NewDBStore(chainDB, cfg.Network, cfg.Genesis)
+	store, state, err := chain.NewDBStore(bdb, cfg.Network, cfg.Genesis)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cm := chain.NewManager(store, state)
-
-	// TODO: we stopped recording wallet metrics,
 
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// create syncer
-	gwl, err := net.Listen("tcp", cfg.GatewayAddr)
+	l, err := net.Listen("tcp", cfg.GatewayAddr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	syncerAddr := l.Addr().String()
+
+	// peers will reject us if our hostname is empty or unspecified, so use loopback
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
 	}
 
-	// TODO: implement peer store
-	// TODO: not sure what to pass as header here
-	// TODO: reuse the gateway dir? create new peer dir?
-	s := syncer.New(gwl, cm, NewPeerStore(), gateway.Header{
-		UniqueID:   gateway.GenerateUniqueID(),
+	header := gateway.Header{
 		GenesisID:  cfg.Genesis.ID(),
-		NetAddress: cfg.GatewayAddr,
-	})
-
-	b, err := bus.New(alertsMgr, hooksMgr, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
-	if err != nil {
-		return nil, nil, err
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
 	}
+	s := syncer.New(l, cm, sqlStore, header)
+
+	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// bootstrap the syncer
+	if cfg.Bootstrap {
+		if cfg.Network == nil {
+			return nil, nil, nil, errors.New("cannot bootstrap without a network")
+		}
+		bootstrap(*cfg.Network, sqlStore)
+	}
+
+	// start the syncer
+	go s.Run()
 
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
-			gwl.Close(),
+			l.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
+			bdb.Close(),
 		)
 	}
-	return b.Handler(), shutdownFn, nil
+	return b.Handler(), shutdownFn, cm, nil
 }
 
 func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {

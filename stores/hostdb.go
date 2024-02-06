@@ -128,7 +128,8 @@ type (
 
 	// announcement describes an announcement for a single host.
 	announcement struct {
-		chain.Announcement
+		pk types.PublicKey
+		chain.HostAnnouncement
 		blockHeight uint64
 		blockID     types.BlockID
 		timestamp   time.Time
@@ -918,17 +919,17 @@ func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
 
 		// Process announcements, but only if they are not too old.
 		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			chain.ForEachAnnouncement(types.Block(b), func(a chain.Announcement) {
+			chain.ForEachHostAnnouncement(types.Block(b), func(pk types.PublicKey, a chain.HostAnnouncement) {
 				if a.NetAddress == "" {
 					return
 				}
 				newAnnouncements = append(newAnnouncements, announcement{
-					Announcement: a,
-					blockHeight:  height,
-					blockID:      b.ID(),
-					timestamp:    b.Timestamp,
+					HostAnnouncement: a,
+					blockHeight:      height,
+					blockID:          b.ID(),
+					timestamp:        b.Timestamp,
 				})
-				ss.unappliedHostKeys[a.PublicKey] = struct{}{}
+				ss.unappliedHostKeys[pk] = struct{}{}
 			})
 		}
 		height++
@@ -1013,12 +1014,12 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var announcements []dbAnnouncement
 	for _, a := range as {
 		hosts = append(hosts, dbHost{
-			PublicKey:        publicKey(a.PublicKey),
+			PublicKey:        publicKey(a.pk),
 			LastAnnouncement: a.timestamp.UTC(),
 			NetAddress:       a.NetAddress,
 		})
 		announcements = append(announcements, dbAnnouncement{
-			HostKey:     publicKey(a.PublicKey),
+			HostKey:     publicKey(a.pk),
 			BlockHeight: a.blockHeight,
 			BlockID:     a.blockID.String(),
 			NetAddress:  a.NetAddress,

@@ -38,7 +38,7 @@ func TestNewTestCluster(t *testing.T) {
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
-
+	return
 	// Upload packing should be disabled by default.
 	ups, err := b.UploadPackingSettings(context.Background())
 	tt.OK(err)

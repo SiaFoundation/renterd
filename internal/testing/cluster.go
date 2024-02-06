@@ -19,6 +19,8 @@ import (
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
@@ -156,7 +158,7 @@ type TestCluster struct {
 	s3ShutdownFns        []func(context.Context) error
 
 	network *consensus.Network
-	miner   *node.Miner
+	cm      *chain.Manager
 	apID    string
 	dbName  string
 	dir     string
@@ -408,11 +410,8 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	})
 	tt.OK(err)
 
-	// Create miner.
-	busCfg.Miner = node.NewMiner(busClient)
-
 	// Create bus.
-	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bStopFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -467,7 +466,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		dbName:  dbName,
 		logger:  logger,
 		network: busCfg.Network,
-		miner:   busCfg.Miner,
+		cm:      cm,
 		tt:      tt,
 		wk:      wk,
 
@@ -656,7 +655,7 @@ func (c *TestCluster) MineBlocks(n int) {
 
 	// If we don't have any hosts in the cluster mine all blocks right away.
 	if len(c.hosts) == 0 {
-		c.tt.OK(c.miner.Mine(wallet.Address, n))
+		c.tt.OK(c.mineBlocks(wallet.Address, n))
 		c.Sync()
 	}
 	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
@@ -666,7 +665,7 @@ func (c *TestCluster) MineBlocks(n int) {
 		if toMine > 10 {
 			toMine = 10
 		}
-		c.tt.OK(c.miner.Mine(wallet.Address, toMine))
+		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
 		c.Sync()
 		mined += toMine
 	}
@@ -939,6 +938,16 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 		}
 		return nil
 	})
+}
+
+func (c *TestCluster) mineBlocks(addr types.Address, n int) error {
+	for i := 0; i < n; i++ {
+		_, found := coreutils.MineBlock(c.cm, addr, time.Second)
+		if !found {
+			return errors.New("failed to find block")
+		}
+	}
+	return nil
 }
 
 // testNetwork returns a custom network for testing which matches the

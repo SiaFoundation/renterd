@@ -1694,14 +1694,10 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 }
 
 func (b *bus) consensusState() api.ConsensusState {
-	// TODO: this should be a method on the syncer
-	var n int
-	for _, peer := range b.s.Peers() {
-		if peer.Synced() {
-			n++
-		}
+	var synced bool
+	if block, ok := b.cm.Block(b.cm.Tip().ID); ok && time.Since(block.Timestamp) < 2*b.cm.TipState().BlockInterval() {
+		synced = true
 	}
-	synced := float64(n)/float64(len(b.s.Peers())) >= .3
 
 	return api.ConsensusState{
 		BlockHeight:   b.cm.TipState().Index.Height,
@@ -2328,6 +2324,8 @@ func New(am *alerts.Manager, hm *webhooks.Manager, cm *chain.Manager, s *syncer.
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		hooks:            hm,
+		cm:               cm,
+		s:                s,
 		w:                w,
 		hdb:              hdb,
 		as:               as,
