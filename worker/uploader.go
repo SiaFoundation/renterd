@@ -23,6 +23,7 @@ type (
 	uploader struct {
 		os     ObjectStore
 		cs     ContractStore
+		ms     MetricStore
 		hm     HostManager
 		logger *zap.SugaredLogger
 
@@ -124,12 +125,15 @@ outer:
 				req.fail(err)
 			} else {
 				req.succeed(root)
+				if err := u.recordMetrics(req.hk, elapsed); err != nil {
+					u.logger.Errorf("failed to record metrics, err %v", err)
+				}
 			}
 
 			// track the error, ignore gracefully closed streams and canceled overdrives
 			canceledOverdrive := req.done() && req.overdrive && err != nil
 			if !canceledOverdrive && !isClosedStream(err) {
-				u.trackSectorUpload(err, elapsed)
+				u.updateEstimate(err, elapsed)
 			}
 		}
 	}
@@ -246,22 +250,46 @@ func (u *uploader) signalWork() {
 	}
 }
 
-func (u *uploader) trackSectorUpload(err error, d time.Duration) {
+func (u *uploader) recordMetrics(hk types.PublicKey, d time.Duration) error {
+	// derive timeout ctx from the bg context to ensure we record metrics on shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	// update stats (should be deprecated)
+	ms := d.Milliseconds()
+	if ms == 0 {
+		ms = 1 // avoid division by zero
+	}
+	u.statsSectorUploadSpeedBytesPerMS.Track(float64(rhpv2.SectorSize / ms))
+
+	// record performance metric
+	return u.ms.RecordPerformanceMetric(ctx, api.PerformanceMetric{
+		Timestamp: api.TimeNow(),
+		Action:    "uploadsector",
+		HostKey:   hk,
+		Origin:    "worker",
+		Duration:  d,
+	})
+}
+
+func (u *uploader) updateEstimate(err error, elapsed time.Duration) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+
+	// handle error
 	if err != nil {
 		u.consecutiveFailures++
 		u.statsSectorUploadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-	} else {
-		ms := d.Milliseconds()
-		if ms == 0 {
-			ms = 1 // avoid division by zero
-		}
-
-		u.consecutiveFailures = 0
-		u.statsSectorUploadEstimateInMS.Track(float64(ms))                       // duration in ms
-		u.statsSectorUploadSpeedBytesPerMS.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
+		return
 	}
+
+	ms := elapsed.Milliseconds()
+	if ms == 0 {
+		ms = 1 // avoid division by zero
+	}
+
+	u.consecutiveFailures = 0
+	u.statsSectorUploadEstimateInMS.Track(float64(ms)) // duration in ms
 }
 
 func (u *uploader) tryRecomputeStats() {

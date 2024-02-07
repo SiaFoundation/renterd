@@ -32,6 +32,7 @@ func TestUpload(t *testing.T) {
 
 	// convenience variables
 	os := w.os
+	ms := w.ms
 	dl := w.dl
 	ul := w.ul
 
@@ -69,6 +70,22 @@ func TestUpload(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
 		t.Fatal("data mismatch")
+	}
+
+	// assert metrics were recorded
+	sms, pms := ms.Recorded()
+	if len(sms) != 2 {
+		t.Fatal("unexpected number of slab metrics, expected 1 upload and 1 download", len(sms))
+	} else if ulm := sms[0]; ulm.Action != api.SlabActionUpload || ulm.MinShards != 2 || ulm.TotalShards != 6 {
+		t.Fatal("unexpected upload metric", ulm)
+	} else if dlm := sms[1]; dlm.Action != api.SlabActionDownload || dlm.MinShards != 2 || dlm.TotalShards != 6 {
+		t.Fatal("unexpected download metric", dlm)
+	} else if len(pms) != 8 {
+		t.Fatal("unexpected number of performance metrics, expected 6 for upload and 2 for download", len(pms))
+	} else if ulm := pms[0]; ulm.Action != "uploadsector" {
+		t.Fatal("unexpected upload metric", ulm)
+	} else if dlm := pms[6]; dlm.Action != "downloadsector" {
+		t.Fatal("unexpected download metric", dlm)
 	}
 
 	// filter contracts to have (at most) min shards used contracts

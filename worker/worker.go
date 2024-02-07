@@ -74,6 +74,7 @@ type (
 
 		AccountStore
 		ContractStore
+		MetricStore
 		ObjectStore
 
 		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
@@ -140,6 +141,11 @@ type (
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+	}
+
+	MetricStore interface {
+		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
+		RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetric) error
 	}
 
 	consensusState interface {
@@ -1337,9 +1343,7 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/sync":                   w.rhpSyncHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
 
-		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
-		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
-		"POST   /slab/migrate":    w.slabMigrateHandler,
+		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
@@ -1348,6 +1352,12 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
+
+		// TODO: these routes are deprecated as they've been replaced (for the
+		// most part) by a combination of slab and performance metrics, remove
+		// at the next major release
+		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
+		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 	}))
 }
 

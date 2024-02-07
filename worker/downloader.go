@@ -8,8 +8,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/stats"
+	"go.uber.org/zap"
 )
 
 const (
@@ -19,7 +21,9 @@ const (
 
 type (
 	downloader struct {
-		host Host
+		host   Host
+		ms     MetricStore
+		logger *zap.SugaredLogger
 
 		statsDownloadSpeedBytesPerMS    *stats.DataPoints // keep track of this separately for stats (no decay is applied)
 		statsSectorDownloadEstimateInMS *stats.DataPoints
@@ -34,16 +38,21 @@ type (
 	}
 )
 
-func newDownloader(ctx context.Context, host Host) *downloader {
+func (mgr *downloadManager) newDownloader(c api.ContractMetadata) *downloader {
 	return &downloader{
-		host: host,
+		ms:     mgr.ms,
+		logger: mgr.logger,
 
+		// static
+		shutdownCtx:    mgr.shutdownCtx,
+		signalWorkChan: make(chan struct{}, 1),
+
+		// stats
 		statsSectorDownloadEstimateInMS: stats.Default(),
 		statsDownloadSpeedBytesPerMS:    stats.NoDecay(),
 
-		signalWorkChan: make(chan struct{}, 1),
-		shutdownCtx:    ctx,
-
+		// covered by mutex
+		host:  mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
 		queue: make([]*sectorDownloadReq, 0),
 	}
 }
@@ -104,21 +113,20 @@ func (d *downloader) estimate() float64 {
 	return numSectors * estimateP90
 }
 
-func (d *downloader) execute(req *sectorDownloadReq) (err error) {
-	// download the sector
+func (d *downloader) execute(req *sectorDownloadReq) ([]byte, time.Duration, error) {
+	// prepare buffer
 	buf := bytes.NewBuffer(make([]byte, 0, req.length))
-	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
+
+	// download the sector
+	start := time.Now()
+	err := d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
 	if err != nil {
-		req.fail(err)
-		return err
+		return nil, 0, err
 	}
 
-	d.mu.Lock()
-	d.numDownloads++
-	d.mu.Unlock()
-
-	req.succeed(buf.Bytes())
-	return nil
+	// calculate elapsed time
+	elapsed := time.Since(start)
+	return buf.Bytes(), elapsed, nil
 }
 
 func (d *downloader) pop() *sectorDownloadReq {
@@ -137,22 +145,6 @@ func (d *downloader) pop() *sectorDownloadReq {
 func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 	doneChan := make(chan struct{})
 
-	// define some state to keep track of stats
-	var mu sync.Mutex
-	var start time.Time
-	var concurrent int64
-	var downloadedB int64
-	trackStatsFn := func() {
-		if start.IsZero() || time.Since(start).Milliseconds() == 0 || downloadedB == 0 {
-			return
-		}
-		durationMS := time.Since(start).Milliseconds()
-		d.statsDownloadSpeedBytesPerMS.Track(float64(downloadedB / durationMS))
-		d.statsSectorDownloadEstimateInMS.Track(float64(durationMS))
-		start = time.Time{}
-		downloadedB = 0
-	}
-
 	// define a worker to process download requests
 	inflight := uint64(len(batch))
 	reqsChan := make(chan *sectorDownloadReq)
@@ -165,37 +157,23 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 			default:
 			}
 
-			// update state
-			mu.Lock()
-			if start.IsZero() {
-				start = time.Now()
-			}
-			concurrent++
-			mu.Unlock()
-
 			// execute the request
-			err := d.execute(req)
-			d.trackFailure(err)
-
-			// update state + potentially track stats
-			mu.Lock()
-			if err == nil {
-				downloadedB += int64(req.length) + downloadOverheadB
-				if downloadedB >= maxConcurrentSectorsPerHost*rhpv2.SectorSize || concurrent == maxConcurrentSectorsPerHost {
-					trackStatsFn()
+			sector, elapsed, err := d.execute(req)
+			if err != nil {
+				req.fail(err)
+			} else {
+				req.succeed(sector)
+				if err := d.recordMetrics(req.hk, req.length, elapsed); err != nil {
+					d.logger.Errorf("failed to record metrics, err %v", err)
 				}
 			}
-			concurrent--
-			if concurrent < 0 {
-				panic("concurrent can never be less than zero") // developer error
-			}
-			mu.Unlock()
+
+			d.updateEstimate(err, elapsed)
 		}
 
 		// last worker that's done closes the channel and flushes the stats
 		if atomic.AddUint64(&inflight, ^uint64(0)) == 0 {
 			close(doneChan)
-			trackStatsFn()
 		}
 	}
 
@@ -265,22 +243,55 @@ func (d *downloader) stats() downloaderStats {
 	}
 }
 
-func (d *downloader) trackFailure(err error) {
+func (d *downloader) recordMetrics(hk types.PublicKey, downloaded uint32, elapsed time.Duration) error {
+	// derive timeout ctx from the bg context to ensure we record metrics on shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	// update stats (should be deprecated)
+	ms := elapsed.Milliseconds()
+	if ms == 0 {
+		ms = 1 // avoid division by zero
+	}
+	d.statsDownloadSpeedBytesPerMS.Track(float64(downloaded) / float64(ms))
+
+	// record performance metric
+	return d.ms.RecordPerformanceMetric(ctx, api.PerformanceMetric{
+		Timestamp: api.TimeNow(),
+		Action:    "downloadsector",
+		HostKey:   hk,
+		Origin:    "worker",
+		Duration:  elapsed,
+	})
+}
+
+func (d *downloader) updateEstimate(err error, elapsed time.Duration) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if err == nil {
-		d.consecutiveFailures = 0
-		return
-	}
+	// track download
+	d.numDownloads++
 
+	// host is not to blame for these errors
 	if isBalanceInsufficient(err) ||
 		isPriceTableExpired(err) ||
 		isPriceTableNotFound(err) ||
 		isSectorNotFound(err) {
-		return // host is not to blame for these errors
+		return
 	}
 
-	d.consecutiveFailures++
-	d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+	// handle error
+	if err != nil {
+		d.consecutiveFailures++
+		d.statsSectorDownloadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
+		return
+	}
+
+	ms := elapsed.Milliseconds()
+	if ms == 0 {
+		ms = 1 // avoid division by zero
+	}
+
+	d.consecutiveFailures = 0
+	d.statsSectorDownloadEstimateInMS.Track(float64(ms))
 }

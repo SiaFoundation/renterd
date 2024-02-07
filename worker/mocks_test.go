@@ -53,6 +53,12 @@ type (
 		memBlockChan chan struct{}
 	}
 
+	mockMetricStore struct {
+		mu  sync.Mutex
+		sms []api.SlabMetric
+		pms []api.PerformanceMetric
+	}
+
 	mockObjectStore struct {
 		mu           sync.Mutex
 		objects      map[string]map[string]object.Object
@@ -68,9 +74,10 @@ type (
 	}
 
 	mockWorker struct {
-		cs *mockContractStore
 		hm *mockHostManager
 		mm *mockMemoryManager
+		ms *mockMetricStore
+		cs *mockContractStore
 		os *mockObjectStore
 
 		dl *downloadManager
@@ -132,6 +139,44 @@ func (mm *mockMemoryManager) AcquireMemory(ctx context.Context, amt uint64) Memo
 		<-mm.memBlockChan
 	}
 	return &mockMemory{}
+}
+
+func newMockMemoryManager(blocked bool) *mockMemoryManager {
+	mm := &mockMemoryManager{
+		memBlockChan: make(chan struct{}),
+	}
+	if !blocked {
+		close(mm.memBlockChan)
+	}
+	return mm
+}
+
+func newMockMetricStore() *mockMetricStore {
+	return &mockMetricStore{}
+}
+
+func (ms *mockMetricStore) RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetric) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	for _, metric := range metrics {
+		ms.sms = append(ms.sms, metric)
+	}
+	return nil
+}
+
+func (ms *mockMetricStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	for _, metric := range metrics {
+		ms.pms = append(ms.pms, metric)
+	}
+	return nil
+}
+
+func (ms *mockMetricStore) Recorded() ([]api.SlabMetric, []api.PerformanceMetric) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	return ms.sms, ms.pms
 }
 
 func newMockContractStore() *mockContractStore {
@@ -367,6 +412,10 @@ func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	return nil
 }
 
+func (os *mockObjectStore) RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetric) error {
+	return nil
+}
+
 func (os *mockObjectStore) forEachObject(fn func(bucket, path string, o object.Object)) {
 	for bucket, objects := range os.objects {
 		for path, object := range objects {
@@ -502,19 +551,21 @@ func newMockSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
 }
 
 func newMockWorker() *mockWorker {
-	cs := newMockContractStore()
 	hm := newMockHostManager()
+	mm := newMockMemoryManager(false)
+	ms := newMockMetricStore()
 	os := newMockObjectStore()
-	mm := &mockMemoryManager{}
+	cs := newMockContractStore()
 
 	return &mockWorker{
-		cs: cs,
 		hm: hm,
 		mm: mm,
+		ms: ms,
+		cs: cs,
 		os: os,
 
-		dl: newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar()),
-		ul: newUploadManager(context.Background(), hm, mm, os, cs, 0, 0, time.Minute, zap.NewNop().Sugar()),
+		dl: newDownloadManager(context.Background(), hm, mm, ms, os, 0, 0, zap.NewNop().Sugar()),
+		ul: newUploadManager(context.Background(), hm, mm, ms, os, cs, 0, 0, time.Minute, zap.NewNop().Sugar()),
 	}
 }
 
