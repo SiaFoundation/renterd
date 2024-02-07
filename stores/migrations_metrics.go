@@ -37,6 +37,12 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID:      "00001_init",
 			Migrate: func(tx *gorm.DB) error { return errRunV072 },
 		},
+		{
+			ID: "00001_slab_metrics",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, "00001_object_metadata", logger)
+			},
+		},
 	}
 
 	// Create migrator.

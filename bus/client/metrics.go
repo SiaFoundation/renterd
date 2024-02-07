@@ -115,6 +115,14 @@ func (c *Client) RecordContractPruneMetric(ctx context.Context, metrics ...api.C
 	return c.recordMetric(ctx, api.MetricContractPrune, api.ContractPruneMetricRequestPUT{Metrics: metrics})
 }
 
+func (c *Client) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
+	return c.recordMetric(ctx, api.MetricSlab, api.PerformanceMetricRequestPUT{Metrics: metrics})
+}
+
+func (c *Client) RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetric) error {
+	return c.recordMetric(ctx, api.MetricSlab, api.SlabMetricRequestPUT{Metrics: metrics})
+}
+
 func (c *Client) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
 	values := url.Values{}
 	values.Set("cutoff", api.TimeRFC3339(cutoff).String())

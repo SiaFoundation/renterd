@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -22,8 +23,44 @@ const (
 	MetricContractSetChurn = "churn"
 	MetricContract         = "contract"
 	MetricPerformance      = "performance"
+	MetricSlab             = "slab"
 	MetricWallet           = "wallet"
 )
+
+type SlabAction uint8
+
+const (
+	SlabActionUnknown SlabAction = iota
+	SlabActionUpload
+	SlabActionDownload
+	SlabActionMigrate
+)
+
+func (sa SlabAction) String() string {
+	switch sa {
+	case SlabActionUpload:
+		return "upload"
+	case SlabActionDownload:
+		return "download"
+	case SlabActionMigrate:
+		return "migrate"
+	default:
+		panic("unknown action") // developer error
+	}
+}
+
+func ParseSlabAction(s string) SlabAction {
+	switch strings.ToLower(s) {
+	case "upload":
+		return SlabActionUpload
+	case "download":
+		return SlabActionDownload
+	case "migrate":
+		return SlabActionMigrate
+	default:
+		return SlabActionUnknown
+	}
+}
 
 type (
 	ContractSetMetric struct {
@@ -113,6 +150,22 @@ type (
 	}
 
 	WalletMetricsQueryOpts struct{}
+
+	SlabMetric struct {
+		Timestamp TimeRFC3339 `json:"timestamp"`
+
+		Action          SlabAction `json:"action"`
+		SpeedBytesPerMS uint64     `json:"speedBytesPerMs"`
+
+		MinShards    uint8  `json:"minShards"`
+		TotalShards  uint8  `json:"totalShards"`
+		NumMigrated  uint8  `json:"numMigrated"`
+		NumOverdrive uint64 `json:"numOverdrive"`
+	}
+
+	SlabMetricsQueryOpts struct {
+		Action string
+	}
 )
 
 type (
@@ -126,5 +179,13 @@ type (
 
 	ContractMetricRequestPUT struct {
 		Metrics []ContractMetric `json:"metrics"`
+	}
+
+	PerformanceMetricRequestPUT struct {
+		Metrics []PerformanceMetric `json:"metrics"`
+	}
+
+	SlabMetricRequestPUT struct {
+		Metrics []SlabMetric `json:"metrics"`
 	}
 )

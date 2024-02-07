@@ -110,6 +110,20 @@ type (
 		UnconfirmedLo unsigned64 `gorm:"index:idx_unconfirmed;NOT NULL"`
 		UnconfirmedHi unsigned64 `gorm:"index:idx_unconfirmed;NOT NULL"`
 	}
+
+	// dbSlabMetric tracks information about various actions performed on slabs.
+	dbSlabMetric struct {
+		Model
+		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
+
+		Action          uint8      `gorm:"index:idx_slab_metric_action;NOT NULL"`
+		SpeedBytesPerMS unsigned64 `gorm:"index:idx_slab_metric_speed;default:0;NOT NULL"`
+
+		MinShards    uint8      `gorm:"index:idx_slab_metric_min_shards;default:0;NOT NULL"`
+		TotalShards  uint8      `gorm:"index:idx_slab_metric_total_shards;default:0;NOT NULL"`
+		NumMigrated  uint8      `gorm:"index:idx_slab_metric_num_migrated;default:0;NOT NULL"`
+		NumOverdrive unsigned64 `gorm:"index:idx_slab_metric_num_overdrive;default:0;NOT NULL"`
+	}
 )
 
 func (dbContractMetric) TableName() string         { return "contracts" }
@@ -118,6 +132,7 @@ func (dbContractSetMetric) TableName() string      { return "contract_sets" }
 func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn" }
 func (dbPerformanceMetric) TableName() string      { return "performance" }
 func (dbWalletMetric) TableName() string           { return "wallets" }
+func (dbSlabMetric) TableName() string             { return "slabs" }
 
 func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
 	metrics, err := s.contractMetrics(ctx, start, n, interval, opts)
@@ -334,6 +349,26 @@ func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.P
 	})
 }
 
+func (s *SQLStore) RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetric) error {
+	dbMetrics := make([]dbSlabMetric, len(metrics))
+	for i, metric := range metrics {
+		dbMetrics[i] = dbSlabMetric{
+			Timestamp: unixTimeMS(metric.Timestamp),
+
+			Action:          uint8(metric.Action),
+			SpeedBytesPerMS: unsigned64(metric.SpeedBytesPerMS),
+
+			MinShards:    uint8(metric.MinShards),
+			TotalShards:  uint8(metric.TotalShards),
+			NumMigrated:  uint8(metric.NumMigrated),
+			NumOverdrive: unsigned64(metric.NumOverdrive),
+		}
+	}
+	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&dbMetrics).Error
+	})
+}
+
 func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
 	metrics, err := s.walletMetrics(ctx, start, n, interval, opts)
 	if err != nil {
@@ -349,6 +384,28 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 			Confirmed:   toCurr(metrics[i].ConfirmedLo, metrics[i].ConfirmedHi),
 			Spendable:   toCurr(metrics[i].SpendableLo, metrics[i].SpendableHi),
 			Unconfirmed: toCurr(metrics[i].UnconfirmedLo, metrics[i].UnconfirmedHi),
+		}
+	}
+	return resp, nil
+}
+
+func (s *SQLStore) SlabMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.SlabMetricsQueryOpts) ([]api.SlabMetric, error) {
+	metrics, err := s.slabMetrics(ctx, start, n, interval, opts)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]api.SlabMetric, len(metrics))
+	for i := range resp {
+		resp[i] = api.SlabMetric{
+			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
+
+			Action:          api.SlabAction(metrics[i].Action),
+			SpeedBytesPerMS: uint64(metrics[i].SpeedBytesPerMS),
+
+			MinShards:    uint8(metrics[i].MinShards),
+			TotalShards:  uint8(metrics[i].TotalShards),
+			NumMigrated:  uint8(metrics[i].NumMigrated),
+			NumOverdrive: uint64(metrics[i].NumOverdrive),
 		}
 	}
 	return resp, nil
@@ -621,6 +678,26 @@ func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n
 
 func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
 	err = s.findPeriods(dbWalletMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
+	}
+	for i, m := range metrics {
+		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
+	}
+	return
+}
+
+func (s *SQLStore) slabMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.SlabMetricsQueryOpts) (metrics []dbSlabMetric, err error) {
+	whereExpr := gorm.Expr("TRUE")
+	if opts.Action != "" {
+		sa := api.ParseSlabAction(opts.Action)
+		if sa == api.SlabActionUnknown {
+			return nil, errors.New("unknown slab action")
+		}
+		whereExpr = gorm.Expr("? AND action = ?", whereExpr, uint8(sa))
+	}
+
+	err = s.findPeriods(dbSlabMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
 	}

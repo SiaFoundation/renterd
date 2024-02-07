@@ -508,7 +508,7 @@ func TestWalletMetrics(t *testing.T) {
 		}
 	}
 
-	// Fetch all metrcis
+	// Fetch all metrics
 	metrics, err := ss.WalletMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.WalletMetricsQueryOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -528,4 +528,60 @@ func TestWalletMetrics(t *testing.T) {
 	} else if len(metrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(metrics))
 	}
+}
+
+func TestSlabMetrics(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// Create metrics to query.
+	actions := []api.SlabAction{api.SlabActionDownload, api.SlabActionUpload, api.SlabActionMigrate}
+	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
+	for _, action := range actions {
+		for _, recordedTime := range times {
+			metric := api.SlabMetric{
+				Timestamp: api.TimeRFC3339(recordedTime),
+
+				Action:          action,
+				SpeedBytesPerMS: 1,
+
+				MinShards:    2,
+				TotalShards:  3,
+				NumMigrated:  4,
+				NumOverdrive: 5,
+			}
+			if err := ss.RecordSlabMetric(context.Background(), metric); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.SlabMetricsQueryOpts, expected int, cmp func(api.SlabMetric)) {
+		t.Helper()
+		metrics, err := ss.SlabMetrics(context.Background(), start, n, interval, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(metrics) != expected {
+			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
+		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
+			return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
+		}) {
+			t.Fatal("expected metrics to be sorted by time")
+		}
+		for _, m := range metrics {
+			cmp(m)
+		}
+	}
+
+	// Query without any filters.
+	start := time.UnixMilli(1)
+	assertMetrics(start, 3, time.Millisecond, api.SlabMetricsQueryOpts{}, 3, func(m api.SlabMetric) {})
+
+	// Filter by actions.
+	assertMetrics(start, 3, time.Millisecond, api.SlabMetricsQueryOpts{Action: "download"}, 3, func(m api.SlabMetric) {
+		if m.Action != actions[0] {
+			t.Fatalf("expected action to be %v, got %v", actions[0], m.Action)
+		}
+	})
 }

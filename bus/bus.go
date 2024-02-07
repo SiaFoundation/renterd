@@ -203,6 +203,7 @@ type (
 		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
 		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+		RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetric) error
 
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 	}
@@ -2044,6 +2045,15 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
 			return
 		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
+			return
+		}
+	case api.MetricSlab:
+		// TODO: jape hack - remove once jape can handle decoding multiple different request types
+		var req api.SlabMetricRequestPUT
+		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
+			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
+			return
+		} else if jc.Check("failed to record slab metric", b.mtrcs.RecordSlabMetric(jc.Request.Context(), req.Metrics...)) != nil {
 			return
 		}
 	default:
