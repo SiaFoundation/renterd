@@ -382,6 +382,8 @@ func newMockHost(hk types.PublicKey) *mockHost {
 	}
 }
 
+func (h *mockHost) PublicKey() types.PublicKey { return h.hk }
+
 func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
 	sector, exist := h.contract().sector(root)
 	if !exist {

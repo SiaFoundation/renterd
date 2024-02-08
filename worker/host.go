@@ -18,6 +18,8 @@ import (
 
 type (
 	Host interface {
+		PublicKey() types.PublicKey
+
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 
@@ -76,6 +78,8 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		priceTables:              w.priceTables,
 	}
 }
+
+func (h *host) PublicKey() types.PublicKey { return h.hk }
 
 func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
 	pt, err := h.priceTables.fetch(ctx, h.hk, nil)
