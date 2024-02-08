@@ -609,10 +609,11 @@ func (s *slabDownload) overdrive(ctx context.Context, resps *sectorResponses) (r
 			case <-timer.C:
 				if canOverdrive(timeout()) {
 					for {
-						if req := s.nextRequest(ctx, resps, true); req != nil {
-							s.launch(req)
+						req := s.nextRequest(ctx, resps, true)
+						if req == nil {
+							break
 						}
-						break
+						s.launch(req)
 					}
 				}
 				resetTimer()
@@ -646,16 +647,18 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 		hosts = append(hosts, host)
 	}
 
-	// no more sectors to download
+	// no more sectors to download - we don't know if the download failed at
+	// this point so we register an error that gets propagated in case it did
 	if len(hosts) == 0 {
+		s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
 		return nil
 	}
 
 	// select the fastest host
 	fastest := s.mgr.fastest(hosts)
 	if fastest == nil {
-		s.errs[types.PublicKey{}] = errors.New("no more downloaders available")
-		return nil // can happen if downloader got stopped
+		s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more downloaders", errDownloadNotEnoughHosts)
+		return nil
 	}
 
 	// pop the next sector
