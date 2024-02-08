@@ -656,7 +656,6 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	// select the fastest host
 	fastest := s.mgr.fastest(hosts)
 	if fastest == (types.PublicKey{}) {
-		s.mgr.logger.Debugw("missing downloaders for hosts", "hosts", len(hosts))
 		return nil // can happen if downloader got stopped
 	}
 
