@@ -73,9 +73,7 @@ type (
 		numOverpaid    uint64
 		numRelaunched  uint64
 
-		curr          types.PublicKey
 		hostToSectors map[types.PublicKey][]sectorInfo
-		used          map[types.PublicKey]struct{}
 
 		sectors [][]byte
 		errs    HostErrorSet
@@ -521,7 +519,6 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.Sl
 		overpay: migration && slice.Health <= downloadOverpayHealthThreshold,
 
 		hostToSectors: hostToSectors,
-		used:          make(map[types.PublicKey]struct{}),
 
 		sectors: make([][]byte, len(slice.Shards)),
 		errs:    make(HostErrorSet),
@@ -633,36 +630,34 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	defer s.mu.Unlock()
 
 	// prepare next sectors to download
-	if len(s.hostToSectors[s.curr]) == 0 {
-		// select all possible hosts
-		var hosts []types.PublicKey
-		for host, sectors := range s.hostToSectors {
-			if len(sectors) == 0 {
-				continue // ignore hosts with no more sectors
-			} else if _, used := s.used[host]; !used {
-				hosts = append(hosts, host)
-			}
+	// select all possible hosts
+	var hosts []types.PublicKey
+	for host, sectors := range s.hostToSectors {
+		if len(sectors) == 0 {
+			continue // ignore hosts with no more sectors
 		}
+		hosts = append(hosts, host)
+	}
 
-		// no more sectors to download
-		if len(hosts) == 0 {
-			return nil
-		}
+	// no more sectors to download
+	if len(hosts) == 0 {
+		return nil
+	}
 
-		// select the fastest host
-		fastest := s.mgr.fastest(hosts)
-		if fastest == (types.PublicKey{}) {
-			return nil // can happen if downloader got stopped
-		}
-
-		// make the fastest host the current host
-		s.curr = fastest
-		s.used[s.curr] = struct{}{}
+	// select the fastest host
+	fastest := s.mgr.fastest(hosts)
+	if fastest == (types.PublicKey{}) {
+		return nil // can happen if downloader got stopped
 	}
 
 	// pop the next sector
-	sector := s.hostToSectors[s.curr][0]
-	s.hostToSectors[s.curr] = s.hostToSectors[s.curr][1:]
+	sector := s.hostToSectors[fastest][0]
+	s.hostToSectors[fastest] = s.hostToSectors[fastest][1:]
+
+	// if host is out of sectors, remove it
+	if len(s.hostToSectors[fastest]) == 0 {
+		delete(s.hostToSectors, fastest)
+	}
 
 	// build the request
 	return &sectorDownloadReq{
@@ -808,14 +803,7 @@ func (s *slabDownload) finish() ([][]byte, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
-		var unused int
-		for host := range s.hostToSectors {
-			if _, used := s.used[host]; !used {
-				unused++
-			}
-		}
-
-		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), unused, len(s.errs), s.errs)
+		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), len(s.hostToSectors), len(s.errs), s.errs)
 	}
 	return s.sectors, s.numOverpaid > 0, nil
 }
