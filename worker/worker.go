@@ -1292,7 +1292,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
-	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
@@ -1303,9 +1302,13 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		logger:                  l.Sugar().Named("worker").Named(id),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]bool),
-		shutdownCtx:             shutdownCtx,
-		shutdownCtxCancel:       shutdownCtxCancel,
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, keyInteractionRecorder, w)
+	w.shutdownCtx = ctx
+	w.shutdownCtxCancel = cancel
+
 	w.initAccounts(b)
 	w.initPriceTables()
 	w.initTransportPool()
