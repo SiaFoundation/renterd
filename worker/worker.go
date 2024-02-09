@@ -1427,8 +1427,17 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		}
 		settings, pt, duration, err = scan()
 		if err == nil {
-			w.logger.Infof("successfully scanned host %v after retry", hostKey)
+			w.logger.Debug("successfully scanned host %v after retry", hostKey)
 		}
+	}
+
+	// check if the scan failed due to a shutdown - shouldn't be necessary but
+	// just in case since recording a failed scan might have serious
+	// repercussions
+	select {
+	case <-w.shutdownCtx.Done():
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, w.shutdownCtx.Err()
+	default:
 	}
 
 	// record host scan
