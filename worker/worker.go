@@ -1369,49 +1369,43 @@ func (w *worker) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, elapsed time.Duration, err error) {
-	// record host scan
-	defer func() {
-		HostInteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
-			HostKey:    hostKey,
-			Success:    isSuccessfulInteraction(err),
-			Timestamp:  time.Now(),
-			Settings:   settings,
-			PriceTable: pt,
-		})
-	}()
-
-	// resolve hostIP. We don't want to scan hosts on private networks.
-	if !w.allowPrivateIPs {
-		host, _, err := net.SplitHostPort(hostIP)
-		if err != nil {
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-		}
-		addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
-		if err != nil {
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-		}
-		for _, addr := range addrs {
-			if isPrivateIP(addr.IP) {
-				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, errors.New("host is on a private network")
+func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+	// prepare a helper for scanning
+	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+		// resolve hostIP. We don't want to scan hosts on private networks.
+		if !w.allowPrivateIPs {
+			host, _, err := net.SplitHostPort(hostIP)
+			if err != nil {
+				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+			}
+			addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+			if err != nil {
+				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+			}
+			for _, addr := range addrs {
+				if isPrivateIP(addr.IP) {
+					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, errors.New("host is on a private network")
+				}
 			}
 		}
-	}
 
-	// fetch the host settings
-	start := time.Now()
-	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-		if settings, err = RPCSettings(ctx, t); err == nil {
-			// NOTE: we overwrite the NetAddress with the host address here since we
-			// just used it to dial the host we know it's valid
-			settings.NetAddress = hostIP
+		// fetch the host settings
+		start := time.Now()
+		var settings rhpv2.HostSettings
+		err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
+			if settings, err = RPCSettings(ctx, t); err == nil {
+				// NOTE: we overwrite the NetAddress with the host address here since we
+				// just used it to dial the host we know it's valid
+				settings.NetAddress = hostIP
+			}
+			return err
+		})
+		if err != nil {
+			return settings, rhpv3.HostPriceTable{}, time.Since(start), errors.New("host is on a private network")
 		}
-		return err
-	})
-	elapsed = time.Since(start)
 
-	// fetch the host pricetable
-	if err == nil {
+		// fetch the host pricetable
+		var pt rhpv3.HostPriceTable
 		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
 			if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
 				return err
@@ -1420,8 +1414,32 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 				return nil
 			}
 		})
+		return settings, pt, time.Since(start), err
 	}
-	return
+
+	// scan: first try
+	settings, pt, duration, err := scan()
+	if err != nil {
+		// scan: second try
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+		}
+		settings, pt, duration, err = scan()
+		if err == nil {
+			w.logger.Infof("successfully scanned host %v after retry", hostKey)
+		}
+	}
+
+	// record host scan
+	HostInteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
+		HostKey:    hostKey,
+		Success:    isSuccessfulInteraction(err),
+		Timestamp:  time.Now(),
+		Settings:   settings,
+		PriceTable: pt,
+	})
+	return settings, pt, duration, err
 }
 
 func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
