@@ -254,7 +254,7 @@ jobs:
           name: renterd
           path: release/
   dispatch:
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'rc')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
     needs: [docker, build-linux, build-mac, build-windows]
     strategy:
         matrix:
