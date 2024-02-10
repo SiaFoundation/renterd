@@ -3079,19 +3079,5 @@ func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
 	if err != nil {
 		return nil, err
 	}
-	// fetch the upserted sectors
-	roots := make([][]byte, len(sectors))
-	for i, sector := range sectors {
-		roots[i] = sector.Root[:]
-	}
-	sectors = sectors[:0]
-
-	var batch []dbSector
-	if err := tx.Where("root IN (?)", roots).FindInBatches(&batch, sectorQueryBatchSize, func(tx *gorm.DB, _ int) error {
-		sectors = append(sectors, batch...)
-		return nil
-	}).Error; err != nil {
-		return nil, err
-	}
 	return sectors, nil
 }
