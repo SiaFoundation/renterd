@@ -1886,7 +1886,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 
 		// ensure the sectors exists
-		sectors, err = upsertSectors(tx, sectors)
+		sectorIDs, err := upsertSectors(tx, sectors)
 		if err != nil {
 			return fmt.Errorf("failed to create sector: %w", err)
 		}
@@ -1894,14 +1894,14 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// build contract <-> sector links
 		var contractSectors []dbContractSector
 		for i, shard := range s.Shards {
-			sector := sectors[i]
+			sectorID := sectorIDs[i]
 
 			// ensure the associations are updated
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sector.ID,
+							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
 					}
@@ -2179,7 +2179,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	// create sector that don't exist yet
-	sectors, err = upsertSectors(tx, sectors)
+	sectorIDs, err := upsertSectors(tx, sectors)
 	if err != nil {
 		return fmt.Errorf("failed to create sectors: %w", err)
 	}
@@ -2189,12 +2189,12 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	var contractSectors []dbContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
-			sector := sectors[sectorIdx]
+			sectorID := sectorIDs[sectorIdx]
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sector.ID,
+							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
 					}
@@ -3065,7 +3065,7 @@ func validateSort(sortBy, sortDir string) error {
 
 // upsertSectors creates a sector or updates it if it exists already. The
 // resulting ID is set on the input sector.
-func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
+func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]uint, error) {
 	if len(sectors) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -3079,5 +3079,16 @@ func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sectors, nil
+
+	sectorIDs := make([]uint, len(sectors))
+	for i := range sectors {
+		var id uint
+		if err := tx.Model(dbSector{}).
+			Where("root", sectors[i].Root).
+			Select("id").Take(&id).Error; err != nil {
+			return nil, err
+		}
+		sectorIDs[i] = id
+	}
+	return sectorIDs, nil
 }

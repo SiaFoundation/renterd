@@ -4028,13 +4028,16 @@ func TestUpsertSectors(t *testing.T) {
 			Root:      []byte{3},
 		},
 	}
-	result, err := upsertSectors(ss.db, sectors)
+	sectorIDs, err := upsertSectors(ss.db, sectors)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for i, sector := range result {
-		if sector.SlabIndex != i+1 {
+	for i, id := range sectorIDs {
+		var sector dbSector
+		if err := ss.db.Where("id", id).Take(&sector).Error; err != nil {
+			t.Fatal(err)
+		} else if sector.SlabIndex != i+1 {
 			t.Fatal("unexpected slab index", sector.SlabIndex)
 		}
 	}
