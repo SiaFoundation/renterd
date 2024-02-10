@@ -3989,3 +3989,56 @@ func TestSlabCleanupTrigger(t *testing.T) {
 		t.Fatalf("expected 1 slabs, got %v", slabCntr)
 	}
 }
+
+func TestUpsertSectors(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	err := ss.db.Create(&dbSlab{
+		DBContractSetID: 1,
+		Key:             []byte{1},
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = ss.db.Create(&dbSector{
+		DBSlabID:  1,
+		SlabIndex: 2,
+		Root:      []byte{2},
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sectors := []dbSector{
+		{
+			DBSlabID:  1,
+			SlabIndex: 1,
+			Root:      []byte{1},
+		},
+		{
+			DBSlabID:  1,
+			SlabIndex: 2,
+			Root:      []byte{2},
+		},
+		{
+			DBSlabID:  1,
+			SlabIndex: 3,
+			Root:      []byte{3},
+		},
+	}
+	sectorIDs, err := upsertSectors(ss.db, sectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, id := range sectorIDs {
+		var sector dbSector
+		if err := ss.db.Where("id", id).Take(&sector).Error; err != nil {
+			t.Fatal(err)
+		} else if sector.SlabIndex != i+1 {
+			t.Fatal("unexpected slab index", sector.SlabIndex)
+		}
+	}
+}
