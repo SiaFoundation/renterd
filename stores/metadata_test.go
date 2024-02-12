@@ -4043,7 +4043,7 @@ func TestUpsertSectors(t *testing.T) {
 	}
 }
 
-func TestUploadObject(t *testing.T) {
+func TestUpdateObjectReuseSlab(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
