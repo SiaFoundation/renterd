@@ -21,6 +21,7 @@ const (
 
 type (
 	downloader struct {
+		hk     types.PublicKey
 		host   Host
 		ms     MetricStore
 		logger *zap.SugaredLogger
@@ -55,6 +56,10 @@ func (mgr *downloadManager) newDownloader(c api.ContractMetadata) *downloader {
 		host:  mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
 		queue: make([]*sectorDownloadReq, 0),
 	}
+}
+
+func (d *downloader) PublicKey() types.PublicKey {
+	return d.host.PublicKey()
 }
 
 func (d *downloader) Stop() {
@@ -163,7 +168,7 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 				req.fail(err)
 			} else {
 				req.succeed(sector)
-				if err := d.recordMetrics(req.hk, req.length, elapsed); err != nil {
+				if err := d.recordMetrics(req.host.PublicKey(), req.length, elapsed); err != nil {
 					d.logger.Errorf("failed to record metrics, err %v", err)
 				}
 			}

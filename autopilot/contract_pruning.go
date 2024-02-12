@@ -80,7 +80,7 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 
 func (pr pruneResult) toMetric() api.ContractPruneMetric {
 	return api.ContractPruneMetric{
-		Timestamp:  pr.ts,
+		Timestamp:  api.TimeRFC3339(pr.ts),
 		ContractID: pr.fcid,
 		HostKey:    pr.hk,
 		Pruned:     pr.pruned,

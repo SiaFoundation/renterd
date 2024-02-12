@@ -74,9 +74,7 @@ type (
 		numOverpaid    uint64
 		numRelaunched  uint64
 
-		curr          types.PublicKey
-		hostToSectors map[types.PublicKey][]sectorInfo
-		used          map[types.PublicKey]struct{}
+		unusedHostSectors map[types.PublicKey][]sectorInfo
 
 		sectors [][]byte
 		errs    HostErrorSet
@@ -96,7 +94,7 @@ type (
 		length uint32
 		offset uint32
 		root   types.Hash256
-		hk     types.PublicKey
+		host   *downloader
 
 		overpay     bool
 		overdrive   bool
@@ -520,8 +518,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.Sl
 		created: time.Now(),
 		overpay: migration && slice.Health <= downloadOverpayHealthThreshold,
 
-		hostToSectors: hostToSectors,
-		used:          make(map[types.PublicKey]struct{}),
+		unusedHostSectors: hostToSectors,
 
 		sectors: make([][]byte, len(slice.Shards)),
 		errs:    make(HostErrorSet),
@@ -612,12 +609,11 @@ func (d *download) overdrive(ctx context.Context, resps *sectorResponses) (reset
 			case <-timer.C:
 				if canOverdrive(timeout()) {
 					for {
-						if req := d.nextRequest(ctx, resps, true); req != nil {
-							if err := d.launch(req); err != nil {
-								continue // try the next request if this fails to launch
-							}
+						req := d.nextRequest(ctx, resps, true)
+						if req == nil {
+							break
 						}
-						break
+						d.launch(req)
 					}
 				}
 				resetTimer()
@@ -633,36 +629,47 @@ func (d *download) nextRequest(ctx context.Context, resps *sectorResponses, over
 	defer d.mu.Unlock()
 
 	// prepare next sectors to download
-	if len(d.hostToSectors[d.curr]) == 0 {
-		// select all possible hosts
-		var hosts []types.PublicKey
-		for host, sectors := range d.hostToSectors {
-			if len(sectors) == 0 {
-				continue // ignore hosts with no more sectors
-			} else if _, used := d.used[host]; !used {
-				hosts = append(hosts, host)
+	// select all possible hosts
+	var hosts []types.PublicKey
+	for host, sectors := range d.unusedHostSectors {
+		// remove any sector that has been downloaded already
+		for i := range sectors {
+			if len(d.sectors[sectors[i].index]) > 0 {
+				sectors = append(sectors[:i], sectors[i+1:]...)
+				d.unusedHostSectors[host] = sectors
 			}
 		}
-
-		// no more sectors to download
-		if len(hosts) == 0 {
-			return nil
+		// remove host if no sectors are left
+		if len(sectors) == 0 {
+			delete(d.unusedHostSectors, host)
+			continue
 		}
+		hosts = append(hosts, host)
+	}
 
-		// select the fastest host
-		fastest := d.mgr.fastest(hosts)
-		if fastest == (types.PublicKey{}) {
-			return nil // can happen if downloader got stopped
-		}
+	// no more sectors to download - we don't know if the download failed at
+	// this point so we register an error that gets propagated in case it did
+	if len(hosts) == 0 {
+		d.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
+		return nil
+	}
 
-		// make the fastest host the current host
-		d.curr = fastest
-		d.used[d.curr] = struct{}{}
+	// select the fastest host
+	fastest := d.mgr.fastest(hosts)
+	if fastest == nil {
+		d.errs[types.PublicKey{}] = fmt.Errorf("%w: no more downloaders", errDownloadNotEnoughHosts)
+		return nil
 	}
 
 	// pop the next sector
-	sector := d.hostToSectors[d.curr][0]
-	d.hostToSectors[d.curr] = d.hostToSectors[d.curr][1:]
+	hk := fastest.PublicKey()
+	sector := d.unusedHostSectors[hk][0]
+	d.unusedHostSectors[hk] = d.unusedHostSectors[hk][1:]
+
+	// if host is out of sectors, remove it
+	if len(d.unusedHostSectors[hk]) == 0 {
+		delete(d.unusedHostSectors, hk)
+	}
 
 	// build the request
 	return &sectorDownloadReq{
@@ -671,7 +678,7 @@ func (d *download) nextRequest(ctx context.Context, resps *sectorResponses, over
 		offset: d.offset,
 		length: d.length,
 		root:   sector.Root,
-		hk:     sector.LatestHost,
+		host:   fastest,
 
 		// overpay is set to 'true' when a request is retried after the slab
 		// download failed and we realise that it might have succeeded if we
@@ -705,9 +712,9 @@ func (d *download) download(ctx context.Context) ([][]byte, bool, error) {
 		req := d.nextRequest(ctx, resps, false)
 		if req == nil {
 			return nil, false, fmt.Errorf("no host available for shard %d", i)
-		} else if err := d.launch(req); err == nil {
-			i++
 		}
+		d.launch(req)
+		i++
 	}
 
 	// collect requests that failed due to gouging
@@ -744,19 +751,17 @@ loop:
 				// launch overdrive requests
 				for {
 					if req := d.nextRequest(ctx, resps, true); req != nil {
-						if err := d.launch(req); err != nil {
-							continue
-						}
+						d.launch(req)
 					}
 					break
 				}
 
 				// handle lost sectors
 				if isSectorNotFound(resp.err) {
-					if err := d.mgr.os.DeleteHostSector(ctx, resp.req.hk, resp.req.root); err != nil {
-						d.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.hk, "root", resp.req.root, zap.Error(err))
+					if err := d.mgr.os.DeleteHostSector(ctx, resp.req.host.PublicKey(), resp.req.root); err != nil {
+						d.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root, zap.Error(err))
 					} else {
-						d.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.hk, "root", resp.req.root)
+						d.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root)
 					}
 				} else if isPriceTableGouging(resp.err) && d.overpay && !resp.req.overpay {
 					resp.req.overpay = true // ensures we don't retry the same request over and over again
@@ -768,7 +773,7 @@ loop:
 
 	if !done && len(gouging) >= d.missing() {
 		for _, req := range gouging {
-			_ = d.launch(req) // ignore error
+			d.launch(req)
 		}
 		gouging = nil
 		goto loop
@@ -809,14 +814,7 @@ func (d *download) finish() ([][]byte, bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.numCompleted < d.rs.MinShards {
-		var unused int
-		for host := range d.hostToSectors {
-			if _, used := d.used[host]; !used {
-				unused++
-			}
-		}
-
-		return nil, d.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", d.numCompleted, d.numInflight, d.numLaunched, d.numRelaunched, d.numOverpaid, d.mgr.numDownloaders(), unused, len(d.errs), d.errs)
+		return nil, d.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", d.numCompleted, d.numInflight, d.numLaunched, d.numRelaunched, d.numOverpaid, d.mgr.numDownloaders(), len(d.unusedHostSectors), len(d.errs), d.errs)
 	}
 	return d.sectors, d.numOverpaid > 0, nil
 }
@@ -836,25 +834,12 @@ func (d *download) inflight() uint64 {
 	return d.numInflight
 }
 
-func (d *download) launch(req *sectorDownloadReq) error {
+func (d *download) launch(req *sectorDownloadReq) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// check for nil
-	if req == nil {
-		return errors.New("no request given")
-	}
-
-	// check for completed sector
-	if len(d.sectors[req.sectorIndex]) > 0 {
-		return errors.New("sector already downloaded")
-	}
-
-	// launch the req
-	err := d.mgr.launch(req)
-	if err != nil {
-		return err
-	}
+	// queue the request
+	req.host.enqueue(req)
 
 	// update the state
 	d.numInflight++
@@ -866,7 +851,6 @@ func (d *download) launch(req *sectorDownloadReq) error {
 	} else {
 		d.numLaunched++
 	}
-	return nil
 }
 
 func (d *download) receive(resp sectorDownloadResp) (finished bool) {
@@ -881,7 +865,7 @@ func (d *download) receive(resp sectorDownloadResp) (finished bool) {
 	// failed reqs can't complete the upload
 	d.numInflight--
 	if resp.err != nil {
-		d.errs[resp.req.hk] = resp.err
+		d.errs[resp.req.host.PublicKey()] = resp.err
 		return false
 	}
 
@@ -897,7 +881,7 @@ func (d *download) receive(resp sectorDownloadResp) (finished bool) {
 	return d.numCompleted >= d.rs.MinShards
 }
 
-func (mgr *downloadManager) fastest(hosts []types.PublicKey) (fastest types.PublicKey) {
+func (mgr *downloadManager) fastest(hosts []types.PublicKey) (fastest *downloader) {
 	// recompute stats
 	mgr.tryRecomputeStats()
 
@@ -910,23 +894,10 @@ func (mgr *downloadManager) fastest(hosts []types.PublicKey) (fastest types.Publ
 			continue
 		} else if estimate := d.estimate(); estimate < lowest {
 			lowest = estimate
-			fastest = h
+			fastest = d
 		}
 	}
 	return
-}
-
-func (mgr *downloadManager) launch(req *sectorDownloadReq) error {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	downloader, exists := mgr.downloaders[req.hk]
-	if !exists {
-		return fmt.Errorf("no downloader for host %v", req.hk)
-	}
-
-	downloader.enqueue(req)
-	return nil
 }
 
 func (mgr *downloadManager) recordMetrics(rs api.RedundancySettings, speedBytesPerMS, numOverdriveSectors uint64) error {

@@ -124,7 +124,7 @@ type (
 	}
 
 	ContractPruneMetric struct {
-		Timestamp time.Time `json:"timestamp"`
+		Timestamp TimeRFC3339 `json:"timestamp"`
 
 		ContractID  types.FileContractID `json:"contractID"`
 		HostKey     types.PublicKey      `json:"hostKey"`

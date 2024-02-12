@@ -51,13 +51,13 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		{
 			ID: "00001_object_metadata",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration(tx, "00001_object_metadata", logger)
+				return performMigration(tx, "00001_object_metadata", false, logger)
 			},
 		},
 		{
 			ID: "00002_prune_slabs_trigger",
 			Migrate: func(tx *gorm.DB) error {
-				err := performMigration(tx, "00002_prune_slabs_trigger", logger)
+				err := performMigration(tx, "00002_prune_slabs_trigger", false, logger)
 				if err != nil && strings.Contains(err.Error(), errMySQLNoSuperPrivilege.Error()) {
 					logger.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
 				}
@@ -79,16 +79,19 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	return nil
 }
 
-func performMigration(db *gorm.DB, name string, logger *zap.SugaredLogger) error {
+func performMigration(db *gorm.DB, name string, metrics bool, logger *zap.SugaredLogger) error {
 	logger.Infof("performing migration %s", name)
 
 	// build path
-	var path string
-	if isSQLite(db) {
-		path = fmt.Sprintf("migrations/sqlite/main/migration_" + name + ".sql")
-	} else {
-		path = fmt.Sprintf("migrations/mysql/main/migration_" + name + ".sql")
+	folder := "main"
+	if metrics {
+		folder = "metrics"
 	}
+	protocol := "mysql"
+	if isSQLite(db) {
+		protocol = "sqlite"
+	}
+	path := fmt.Sprintf("migrations/%s/%s/migration_%s.sql", protocol, folder, name)
 
 	// read migration file
 	migration, err := migrations.ReadFile(path)

@@ -137,5 +137,5 @@ CREATE TABLE `slabs` (
   KEY `idx_slab_metric_min_shards` (`min_shards`),
   KEY `idx_slab_metric_total_shards` (`total_shards`),
   KEY `idx_slab_metric_num_migrated` (`num_migrated`),
-  KEY `idx_slab_metric_num_overdrive` (`num_overdrive`),
+  KEY `idx_slab_metric_num_overdrive` (`num_overdrive`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
