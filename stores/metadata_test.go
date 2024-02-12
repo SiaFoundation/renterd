@@ -4117,6 +4117,8 @@ func TestUploadObject(t *testing.T) {
 	var dbSlices []dbSlice
 	if err := ss.db.Where("db_object_id", dbObj.ID).Find(&dbSlices).Error; err != nil {
 		t.Fatal(err)
+	} else if len(dbSlices) != 2 {
+		t.Fatal("invalid number of slices", len(dbSlices))
 	}
 	for i, dbSlice := range dbSlices {
 		if dbSlice.ID != uint(i+1) {
@@ -4152,6 +4154,8 @@ func TestUploadObject(t *testing.T) {
 		var dbSectors []dbSector
 		if err := ss.db.Where("db_slab_id", dbSlab.ID).Find(&dbSectors).Error; err != nil {
 			t.Fatal(err)
+		} else if len(dbSectors) != totalShards {
+			t.Fatal("invalid number of sectors", len(dbSectors))
 		}
 		for j, dbSector := range dbSectors {
 			if dbSector.ID != uint(i*totalShards+j+1) {
@@ -4215,6 +4219,8 @@ func TestUploadObject(t *testing.T) {
 	var dbSlices2 []dbSlice
 	if err := ss.db.Where("db_object_id", dbObj2.ID).Find(&dbSlices2).Error; err != nil {
 		t.Fatal(err)
+	} else if len(dbSlices2) != 2 {
+		t.Fatal("invalid number of slices", len(dbSlices))
 	}
 
 	// check the first one
@@ -4244,6 +4250,8 @@ func TestUploadObject(t *testing.T) {
 	var dbSectors2 []dbSector
 	if err := ss.db.Where("db_slab_id", dbSlab2.ID).Find(&dbSectors2).Error; err != nil {
 		t.Fatal(err)
+	} else if len(dbSectors2) != totalShards {
+		t.Fatal("invalid number of sectors", len(dbSectors2))
 	}
 	for j, dbSector := range dbSectors2 {
 		if dbSector.ID != uint((len(obj.Slabs))*totalShards+j+1) {
@@ -4260,5 +4268,19 @@ func TestUploadObject(t *testing.T) {
 	// the second slab of obj2 should be the same as the first in obj
 	if dbSlices2[1].DBSlabID != 2 {
 		t.Fatal("wrong slab")
+	}
+
+	var contractSectors []dbContractSector
+	if err := ss.db.Find(&contractSectors).Error; err != nil {
+		t.Fatal(err)
+	} else if len(contractSectors) != 3*totalShards {
+		t.Fatal("invalid number of contract sectors", len(contractSectors))
+	}
+	for i, cs := range contractSectors {
+		if cs.DBContractID != uint(i+1) {
+			t.Fatal("invalid contract id")
+		} else if cs.DBSectorID != uint(i+1) {
+			t.Fatal("invalid sector id")
+		}
 	}
 }
