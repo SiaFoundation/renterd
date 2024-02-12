@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/stats"
 )
 
@@ -19,6 +20,7 @@ const (
 
 type (
 	downloader struct {
+		hk   types.PublicKey
 		host Host
 
 		statsDownloadSpeedBytesPerMS    *stats.DataPoints // keep track of this separately for stats (no decay is applied)
@@ -46,6 +48,10 @@ func newDownloader(ctx context.Context, host Host) *downloader {
 
 		queue: make([]*sectorDownloadReq, 0),
 	}
+}
+
+func (d *downloader) PublicKey() types.PublicKey {
+	return d.host.PublicKey()
 }
 
 func (d *downloader) Stop() {

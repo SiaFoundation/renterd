@@ -5,15 +5,14 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
 
 func TestHost(t *testing.T) {
-	c := newMockContract(types.FileContractID{1})
-	h := newMockHost(types.PublicKey{1}, newTestHostPriceTable(time.Now()), c)
+	h := newMockHost(types.PublicKey{1})
+	h.c = newMockContract(h.hk, types.FileContractID{1})
 	sector, root := newMockSector()
 
 	// upload the sector

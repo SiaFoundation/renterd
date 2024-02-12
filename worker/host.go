@@ -18,11 +18,13 @@ import (
 
 type (
 	Host interface {
+		PublicKey() types.PublicKey
+
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
 
 		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
-		FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error)
+		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
@@ -49,7 +51,7 @@ type (
 
 		acc                      *account
 		bus                      Bus
-		contractSpendingRecorder *contractSpendingRecorder
+		contractSpendingRecorder ContractSpendingRecorder
 		logger                   *zap.SugaredLogger
 		transportPool            *transportPoolV3
 		priceTables              *priceTables
@@ -76,6 +78,8 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		priceTables:              w.priceTables,
 	}
 }
+
+func (h *host) PublicKey() types.PublicKey { return h.hk }
 
 func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
 	pt, err := h.priceTables.fetch(ctx, h.hk, nil)
@@ -192,7 +196,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			InteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+			HostInteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
 				HostKey:    h.hk,
 				Success:    isSuccessfulInteraction(err),
 				Timestamp:  time.Now(),
@@ -209,11 +213,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	}
 
 	// pay by account
-	cs, err := h.bus.ConsensusState(ctx)
-	if err != nil {
-		return hostdb.HostPriceTable{}, err
-	}
-	return fetchPT(h.preparePriceTableAccountPayment(cs.BlockHeight))
+	return fetchPT(h.preparePriceTableAccountPayment())
 }
 
 func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
@@ -296,10 +296,10 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 //
 // NOTE: This is the preferred way of paying for a price table since it is
 // faster and doesn't require locking a contract.
-func (h *host) preparePriceTableAccountPayment(bh uint64) PriceTablePaymentFunc {
+func (h *host) preparePriceTableAccountPayment() PriceTablePaymentFunc {
 	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
 		account := rhpv3.Account(h.accountKey.PublicKey())
-		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
+		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 		return &payment, nil
 	}
 }
