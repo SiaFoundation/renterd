@@ -4081,7 +4081,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		for j := 0; j < totalShards; j++ {
 			obj.Slabs[i].Shards = append(obj.Slabs[i].Shards, object.Sector{
 				Contracts: map[types.PublicKey][]types.FileContractID{
-					hks[i*totalShards+j]: []types.FileContractID{
+					hks[i*totalShards+j]: {
 						fcids[i*totalShards+j],
 					},
 				},
