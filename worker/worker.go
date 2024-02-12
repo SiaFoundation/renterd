@@ -1400,8 +1400,9 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 			}
 			return err
 		})
+		elapsed := time.Since(start)
 		if err != nil {
-			return settings, rhpv3.HostPriceTable{}, time.Since(start), errors.New("host is on a private network")
+			return settings, rhpv3.HostPriceTable{}, elapsed, err
 		}
 
 		// fetch the host pricetable
@@ -1414,7 +1415,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 				return nil
 			}
 		})
-		return settings, pt, time.Since(start), err
+		return settings, pt, elapsed, err
 	}
 
 	// scan: first try
