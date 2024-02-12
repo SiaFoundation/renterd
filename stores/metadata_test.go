@@ -4042,3 +4042,245 @@ func TestUpsertSectors(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateObjectReuseSlab(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	minShards, totalShards := 10, 30
+
+	// create 90 hosts, enough for 3 slabs with 30 each
+	hks, err := ss.addTestHosts(3 * totalShards)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create one contract each
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+	}
+	// add 2 slabs
+	for i := 0; i < 2; i++ {
+		obj.Slabs = append(obj.Slabs, object.SlabSlice{
+			Offset: 0,
+			Length: uint32(minShards) * rhpv2.SectorSize,
+			Slab: object.Slab{
+				Key:       object.GenerateEncryptionKey(),
+				MinShards: uint8(minShards),
+			},
+		})
+	}
+	// 30 shards each
+	for i := 0; i < len(obj.Slabs); i++ {
+		for j := 0; j < totalShards; j++ {
+			obj.Slabs[i].Shards = append(obj.Slabs[i].Shards, object.Sector{
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hks[i*totalShards+j]: {
+						fcids[i*totalShards+j],
+					},
+				},
+				LatestHost: hks[i*totalShards+j],
+				Root:       frand.Entropy256(),
+			})
+		}
+	}
+
+	// add the object
+	_, err = ss.addTestObject("1", obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the object
+	var dbObj dbObject
+	if err := ss.db.Where("db_bucket_id", 1).Take(&dbObj).Error; err != nil {
+		t.Fatal(err)
+	} else if dbObj.ID != 1 {
+		t.Fatal("unexpected id", dbObj.ID)
+	} else if dbObj.DBBucketID != 1 {
+		t.Fatal("bucket id mismatch", dbObj.DBBucketID)
+	} else if dbObj.ObjectID != "1" {
+		t.Fatal("object id mismatch", dbObj.ObjectID)
+	} else if dbObj.Health != 1 {
+		t.Fatal("health mismatch", dbObj.Health)
+	} else if dbObj.Size != obj.TotalSize() {
+		t.Fatal("size mismatch", dbObj.Size)
+	}
+
+	// fetch its slices
+	var dbSlices []dbSlice
+	if err := ss.db.Where("db_object_id", dbObj.ID).Find(&dbSlices).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbSlices) != 2 {
+		t.Fatal("invalid number of slices", len(dbSlices))
+	}
+	for i, dbSlice := range dbSlices {
+		if dbSlice.ID != uint(i+1) {
+			t.Fatal("unexpected id", dbSlice.ID)
+		} else if dbSlice.ObjectIndex != uint(i+1) {
+			t.Fatal("unexpected object index", dbSlice.ObjectIndex)
+		} else if dbSlice.Offset != 0 || dbSlice.Length != uint32(minShards)*rhpv2.SectorSize {
+			t.Fatal("invalid offset/length", dbSlice.Offset, dbSlice.Length)
+		}
+
+		// fetch the slab
+		var dbSlab dbSlab
+		key, _ := obj.Slabs[i].Key.MarshalBinary()
+		if err := ss.db.Where("id", dbSlice.DBSlabID).Take(&dbSlab).Error; err != nil {
+			t.Fatal(err)
+		} else if dbSlab.ID != uint(i+1) {
+			t.Fatal("unexpected id", dbSlab.ID)
+		} else if dbSlab.DBContractSetID != 1 {
+			t.Fatal("invalid contract set id", dbSlab.DBContractSetID)
+		} else if dbSlab.Health != 1 {
+			t.Fatal("invalid health", dbSlab.Health)
+		} else if dbSlab.HealthValidUntil != 0 {
+			t.Fatal("invalid health validity", dbSlab.HealthValidUntil)
+		} else if dbSlab.MinShards != uint8(minShards) {
+			t.Fatal("invalid minShards", dbSlab.MinShards)
+		} else if dbSlab.TotalShards != uint8(totalShards) {
+			t.Fatal("invalid totalShards", dbSlab.TotalShards)
+		} else if !bytes.Equal(dbSlab.Key, key) {
+			t.Fatal("wrong key")
+		}
+
+		// fetch the sectors
+		var dbSectors []dbSector
+		if err := ss.db.Where("db_slab_id", dbSlab.ID).Find(&dbSectors).Error; err != nil {
+			t.Fatal(err)
+		} else if len(dbSectors) != totalShards {
+			t.Fatal("invalid number of sectors", len(dbSectors))
+		}
+		for j, dbSector := range dbSectors {
+			if dbSector.ID != uint(i*totalShards+j+1) {
+				t.Fatal("invalid id", dbSector.ID)
+			} else if dbSector.DBSlabID != dbSlab.ID {
+				t.Fatal("invalid slab id", dbSector.DBSlabID)
+			} else if dbSector.LatestHost != publicKey(hks[i*totalShards+j]) {
+				t.Fatal("invalid host")
+			} else if !bytes.Equal(dbSector.Root, obj.Slabs[i].Shards[j].Root[:]) {
+				t.Fatal("invalid root")
+			}
+		}
+	}
+
+	obj2 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+	}
+	// add 1 slab with 30 shards
+	obj2.Slabs = append(obj2.Slabs, object.SlabSlice{
+		Offset: 0,
+		Length: uint32(minShards) * rhpv2.SectorSize,
+		Slab: object.Slab{
+			Key:       object.GenerateEncryptionKey(),
+			MinShards: uint8(minShards),
+		},
+	})
+	// 30 shards each
+	for i := 0; i < totalShards; i++ {
+		obj2.Slabs[0].Shards = append(obj2.Slabs[0].Shards, object.Sector{
+			Contracts: map[types.PublicKey][]types.FileContractID{
+				hks[len(obj.Slabs)*totalShards+i]: {
+					fcids[len(obj.Slabs)*totalShards+i],
+				},
+			},
+			LatestHost: hks[len(obj.Slabs)*totalShards+i],
+			Root:       frand.Entropy256(),
+		})
+	}
+	// add the second slab of the first object too
+	obj2.Slabs = append(obj2.Slabs, obj.Slabs[1])
+
+	// add the object
+	_, err = ss.addTestObject("2", obj2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the object
+	var dbObj2 dbObject
+	if err := ss.db.Where("db_bucket_id", 1).
+		Where("object_id", "2").
+		Take(&dbObj2).Error; err != nil {
+		t.Fatal(err)
+	} else if dbObj2.ID != 2 {
+		t.Fatal("unexpected id", dbObj2.ID)
+	} else if dbObj.Size != obj2.TotalSize() {
+		t.Fatal("size mismatch", dbObj2.Size)
+	}
+
+	// fetch its slices
+	var dbSlices2 []dbSlice
+	if err := ss.db.Where("db_object_id", dbObj2.ID).Find(&dbSlices2).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbSlices2) != 2 {
+		t.Fatal("invalid number of slices", len(dbSlices))
+	}
+
+	// check the first one
+	dbSlice2 := dbSlices2[0]
+	if dbSlice2.ID != uint(len(dbSlices)+1) {
+		t.Fatal("unexpected id", dbSlice2.ID)
+	} else if dbSlice2.ObjectIndex != uint(1) {
+		t.Fatal("unexpected object index", dbSlice2.ObjectIndex)
+	} else if dbSlice2.Offset != 0 || dbSlice2.Length != uint32(minShards)*rhpv2.SectorSize {
+		t.Fatal("invalid offset/length", dbSlice2.Offset, dbSlice2.Length)
+	}
+
+	// fetch the slab
+	var dbSlab2 dbSlab
+	key, _ := obj2.Slabs[0].Key.MarshalBinary()
+	if err := ss.db.Where("id", dbSlice2.DBSlabID).Take(&dbSlab2).Error; err != nil {
+		t.Fatal(err)
+	} else if dbSlab2.ID != uint(len(dbSlices)+1) {
+		t.Fatal("unexpected id", dbSlab2.ID)
+	} else if dbSlab2.DBContractSetID != 1 {
+		t.Fatal("invalid contract set id", dbSlab2.DBContractSetID)
+	} else if !bytes.Equal(dbSlab2.Key, key) {
+		t.Fatal("wrong key")
+	}
+
+	// fetch the sectors
+	var dbSectors2 []dbSector
+	if err := ss.db.Where("db_slab_id", dbSlab2.ID).Find(&dbSectors2).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbSectors2) != totalShards {
+		t.Fatal("invalid number of sectors", len(dbSectors2))
+	}
+	for j, dbSector := range dbSectors2 {
+		if dbSector.ID != uint((len(obj.Slabs))*totalShards+j+1) {
+			t.Fatal("invalid id", dbSector.ID)
+		} else if dbSector.DBSlabID != dbSlab2.ID {
+			t.Fatal("invalid slab id", dbSector.DBSlabID)
+		} else if dbSector.LatestHost != publicKey(hks[(len(obj.Slabs))*totalShards+j]) {
+			t.Fatal("invalid host")
+		} else if !bytes.Equal(dbSector.Root, obj2.Slabs[0].Shards[j].Root[:]) {
+			t.Fatal("invalid root")
+		}
+	}
+
+	// the second slab of obj2 should be the same as the first in obj
+	if dbSlices2[1].DBSlabID != 2 {
+		t.Fatal("wrong slab")
+	}
+
+	var contractSectors []dbContractSector
+	if err := ss.db.Find(&contractSectors).Error; err != nil {
+		t.Fatal(err)
+	} else if len(contractSectors) != 3*totalShards {
+		t.Fatal("invalid number of contract sectors", len(contractSectors))
+	}
+	for i, cs := range contractSectors {
+		if cs.DBContractID != uint(i+1) {
+			t.Fatal("invalid contract id")
+		} else if cs.DBSectorID != uint(i+1) {
+			t.Fatal("invalid sector id")
+		}
+	}
+}
