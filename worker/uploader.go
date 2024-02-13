@@ -36,6 +36,7 @@ type (
 		fcid      types.FileContractID
 		host      Host
 		queue     []*sectorUploadReq
+		stopped   bool
 
 		// stats related field
 		consecutiveFailures uint64
@@ -136,6 +137,10 @@ outer:
 }
 
 func (u *uploader) Stop(err error) {
+	u.mu.Lock()
+	u.stopped = true
+	u.mu.Unlock()
+
 	for {
 		upload := u.pop()
 		if upload == nil {
@@ -148,12 +153,19 @@ func (u *uploader) Stop(err error) {
 }
 
 func (u *uploader) enqueue(req *sectorUploadReq) {
+	u.mu.Lock()
+	// check for stopped
+	if u.stopped {
+		u.mu.Unlock()
+		go req.fail(errors.New("uploader stopped")) // don't block the caller
+		return
+	}
+
 	// decorate the request
-	req.fcid = u.ContractID()
+	req.fcid = u.fcid
 	req.hk = u.hk
 
 	// enqueue the request
-	u.mu.Lock()
 	u.queue = append(u.queue, req)
 	u.mu.Unlock()
 
