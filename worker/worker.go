@@ -342,7 +342,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	var err error
 	var hpt hostdb.HostPriceTable
 	defer func() {
-		HostInteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+		w.hostInteractionRecorder.RecordPriceTableUpdate(hostdb.PriceTableUpdate{
 			HostKey:    rptr.HostKey,
 			Success:    isSuccessfulInteraction(err),
 			Timestamp:  time.Now(),
@@ -1442,7 +1442,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	}
 
 	// record host scan
-	HostInteractionRecorderFromContext(ctx).RecordHostScan(hostdb.HostScan{
+	w.hostInteractionRecorder.RecordHostScan(hostdb.HostScan{
 		HostKey:    hostKey,
 		Success:    isSuccessfulInteraction(err),
 		Timestamp:  time.Now(),

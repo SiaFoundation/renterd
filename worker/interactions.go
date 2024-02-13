@@ -42,14 +42,6 @@ var (
 	_ HostInteractionRecorder = (*hostInteractionRecorder)(nil)
 )
 
-func HostInteractionRecorderFromContext(ctx context.Context) HostInteractionRecorder {
-	ir, ok := ctx.Value(keyInteractionRecorder).(HostInteractionRecorder)
-	if !ok {
-		panic("no interaction recorder attached to the context") // developer error
-	}
-	return ir
-}
-
 func interactionMiddleware(ir HostInteractionRecorder, routes map[string]jape.Handler) map[string]jape.Handler {
 	for route, handler := range routes {
 		routes[route] = jape.Adapt(func(h http.Handler) http.Handler {
