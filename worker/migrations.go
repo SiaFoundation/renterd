@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -11,6 +12,8 @@ import (
 )
 
 func (w *worker) migrate(ctx context.Context, s *object.Slab, contractSet string, dlContracts, ulContracts []api.ContractMetadata, bh uint64) (int, bool, error) {
+	start := time.Now()
+
 	// make a map of good hosts
 	goodHosts := make(map[types.PublicKey]map[types.FileContractID]bool)
 	for _, c := range ulContracts {
@@ -79,7 +82,8 @@ SHARDS:
 	}
 
 	// acquire memory for the migration
-	mem := w.uploadManager.mm.AcquireMemory(ctx, uint64(len(shardIndices))*rhpv2.SectorSize)
+	totalSize := uint64(len(shardIndices)) * rhpv2.SectorSize
+	mem := w.uploadManager.mm.AcquireMemory(ctx, totalSize)
 	if mem == nil {
 		return 0, false, fmt.Errorf("failed to acquire memory for migration")
 	}
@@ -111,6 +115,18 @@ SHARDS:
 	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, lockingPriorityUpload, mem)
 	if err != nil {
 		return 0, surchargeApplied, fmt.Errorf("failed to upload slab for migration: %w", err)
+	}
+
+	// record metric
+	err = w.bus.RecordSlabMetric(ctx, api.SlabMetric{
+		Timestamp:       api.TimeNow(),
+		Action:          api.SlabActionMigrate,
+		SpeedBytesPerMS: totalSize / uint64(time.Since(start).Milliseconds()),
+		MinShards:       uint8(s.MinShards),
+		TotalShards:     uint8(len(s.Shards)),
+	})
+	if err != nil {
+		w.logger.Errorf("failed to record slab metric: %v", err)
 	}
 
 	return len(shards), surchargeApplied, nil
