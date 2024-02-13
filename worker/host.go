@@ -55,6 +55,7 @@ type (
 		logger                   *zap.SugaredLogger
 		transportPool            *transportPoolV3
 		priceTables              *priceTables
+		interactionRecorder      HostInteractionRecorder
 	}
 )
 
@@ -76,6 +77,7 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		accountKey:               w.accounts.deriveAccountKey(hk),
 		transportPool:            w.transportPoolV3,
 		priceTables:              w.priceTables,
+		interactionRecorder:      w.hostInteractionRecorder,
 	}
 }
 
@@ -196,7 +198,7 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			HostInteractionRecorderFromContext(ctx).RecordPriceTableUpdate(hostdb.PriceTableUpdate{
+			h.interactionRecorder.RecordPriceTableUpdate(hostdb.PriceTableUpdate{
 				HostKey:    h.hk,
 				Success:    isSuccessfulInteraction(err),
 				Timestamp:  time.Now(),
