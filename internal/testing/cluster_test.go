@@ -1915,7 +1915,7 @@ func TestAlerts(t *testing.T) {
 	tt.OK(b.RegisterAlert(context.Background(), alert))
 	findAlert := func(id types.Hash256) *alerts.Alert {
 		t.Helper()
-		alerts, err := b.Alerts()
+		alerts, err := b.Alerts(alerts.AlertsOpts{})
 		tt.OK(err)
 		for _, alert := range alerts {
 			if alert.ID == id {
@@ -1937,6 +1937,40 @@ func TestAlerts(t *testing.T) {
 	foundAlert = findAlert(alert.ID)
 	if foundAlert != nil {
 		t.Fatal("alert found")
+	}
+
+	// register 2 alerts
+	alert2 := alert
+	alert2.ID = frand.Entropy256()
+	alert2.Timestamp = time.Now().Add(time.Second)
+	tt.OK(b.RegisterAlert(context.Background(), alert))
+	tt.OK(b.RegisterAlert(context.Background(), alert2))
+	if foundAlert := findAlert(alert.ID); foundAlert == nil {
+		t.Fatal("alert not found")
+	} else if foundAlert := findAlert(alert2.ID); foundAlert == nil {
+		t.Fatal("alert not found")
+	}
+
+	// try to find with offset = 1
+	foundAlerts, err := b.Alerts(alerts.AlertsOpts{Offset: 1})
+	tt.OK(err)
+	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert.ID {
+		t.Fatal("wrong alert")
+	}
+
+	// try to find with limit = 1
+	foundAlerts, err = b.Alerts(alerts.AlertsOpts{Limit: 1})
+	tt.OK(err)
+	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
+		t.Fatal("wrong alert")
+	}
+
+	// dismiss all
+	tt.OK(b.DismissAllAlerts(context.Background()))
+	foundAlerts, err = b.Alerts(alerts.AlertsOpts{})
+	tt.OK(err)
+	if len(foundAlerts) != 0 {
+		t.Fatal("expected 0 alerts", len(foundAlerts))
 	}
 }
 
