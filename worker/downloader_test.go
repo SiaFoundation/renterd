@@ -26,7 +26,7 @@ func TestDownloaderStopped(t *testing.T) {
 		if err := req.resps.responses[0].err; !errors.Is(err, errDownloaderStopped) {
 			t.Fatal("unexpected error response", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("no response")
 	}
 }

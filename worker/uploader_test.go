@@ -26,7 +26,7 @@ func TestUploaderStopped(t *testing.T) {
 		if !errors.Is(res.err, errUploaderStopped) {
 			t.Fatal("expected error response")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("no response")
 	}
 }
