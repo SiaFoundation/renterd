@@ -19,6 +19,10 @@ const (
 	sectorUploadTimeout = 60 * time.Second
 )
 
+var (
+	errUploaderStopped = errors.New("uploader was stopped")
+)
+
 type (
 	uploader struct {
 		os     ObjectStore
@@ -157,7 +161,7 @@ func (u *uploader) enqueue(req *sectorUploadReq) {
 	// check for stopped
 	if u.stopped {
 		u.mu.Unlock()
-		go req.fail(errors.New("uploader stopped")) // don't block the caller
+		go req.fail(errUploaderStopped) // don't block the caller
 		return
 	}
 

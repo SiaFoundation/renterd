@@ -18,6 +18,10 @@ const (
 	maxConcurrentSectorsPerHost = 3
 )
 
+var (
+	errDownloaderStopped = errors.New("downloader was stopped")
+)
+
 type (
 	downloader struct {
 		host Host
@@ -65,7 +69,7 @@ func (d *downloader) Stop() {
 			break
 		}
 		if !download.done() {
-			download.fail(errors.New("downloader stopped"))
+			download.fail(errDownloaderStopped)
 		}
 	}
 }
@@ -88,7 +92,7 @@ func (d *downloader) enqueue(download *sectorDownloadReq) {
 	// check for stopped
 	if d.stopped {
 		d.mu.Unlock()
-		go download.fail(errors.New("downloader stopped")) // don't block the caller
+		go download.fail(errDownloaderStopped) // don't block the caller
 		return
 	}
 
