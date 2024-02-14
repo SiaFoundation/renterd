@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -61,9 +60,9 @@ func TestSQLHostDB(t *testing.T) {
 		blockHeight: 42,
 		blockID:     types.BlockID{1, 2, 3},
 		timestamp:   time.Now().UTC().Round(time.Second),
-		Announcement: chain.Announcement{
+		hk:          hk,
+		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address",
-			PublicKey:  hk,
 		},
 	}
 	err = ss.insertTestAnnouncement(a)
@@ -111,12 +110,12 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert another announcement for an unknown host.
 	unknownKeyAnn := a
-	unknownKeyAnn.PublicKey = types.PublicKey{1, 4, 7}
+	unknownKeyAnn.hk = types.PublicKey{1, 4, 7}
 	err = ss.insertTestAnnouncement(unknownKeyAnn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h3, err := ss.Host(ctx, unknownKeyAnn.PublicKey)
+	h3, err := ss.Host(ctx, unknownKeyAnn.hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,20 +510,18 @@ func TestInsertAnnouncements(t *testing.T) {
 		timestamp:   time.Now(),
 		blockHeight: 1,
 		blockID:     types.BlockID{1},
-		Announcement: chain.Announcement{
+		hk:          types.GeneratePrivateKey().PublicKey(),
+		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "foo.bar:1000",
-			PublicKey:  types.GeneratePrivateKey().PublicKey(),
 		},
 	}
 	ann2 := announcement{
-		Announcement: chain.Announcement{
-			PublicKey: types.GeneratePrivateKey().PublicKey(),
-		},
+		hk:               types.GeneratePrivateKey().PublicKey(),
+		HostAnnouncement: chain.HostAnnouncement{},
 	}
 	ann3 := announcement{
-		Announcement: chain.Announcement{
-			PublicKey: types.GeneratePrivateKey().PublicKey(),
-		},
+		hk:               types.GeneratePrivateKey().PublicKey(),
+		HostAnnouncement: chain.HostAnnouncement{},
 	}
 
 	// Insert the first one and check that all fields are set.
@@ -537,7 +534,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 	ann.Model = Model{} // ignore
 	expectedAnn := dbAnnouncement{
-		HostKey:     publicKey(ann1.PublicKey),
+		HostKey:     publicKey(ann1.hk),
 		BlockHeight: 1,
 		BlockID:     types.BlockID{1}.String(),
 		NetAddress:  "foo.bar:1000",
@@ -1099,10 +1096,8 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	s.unappliedHostKeys[hk] = struct{}{}
 	s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
-		Announcement: chain.Announcement{
-			NetAddress: na,
-			PublicKey:  hk,
-		},
+		hk:               hk,
+		HostAnnouncement: chain.HostAnnouncement{NetAddress: na},
 	}}...)
 	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)
@@ -1142,25 +1137,14 @@ func newTestPK() (types.PublicKey, types.PrivateKey) {
 	return pk, sk
 }
 
-func newTestHostAnnouncement(na string) (chain.Announcement, types.PrivateKey) {
-	uk, sk := newTestPK()
-	a := chain.Announcement{
+func newTestHostAnnouncement(na string) (chain.HostAnnouncement, types.PrivateKey) {
+	_, sk := newTestPK()
+	a := chain.HostAnnouncement{
 		NetAddress: na,
-		PublicKey:  uk,
 	}
 	return a, sk
 }
 
-func newTestTransaction(ha chain.Announcement, sk types.PrivateKey) stypes.Transaction {
-	buf := new(bytes.Buffer)
-	enc := types.NewEncoder(buf)
-	v1Ann := chain.V1Announcement{
-		Specifier:  types.NewSpecifier(chain.AnnouncementSpecifier),
-		NetAddress: ha.NetAddress,
-		PublicKey:  sk.PublicKey().UnlockKey(),
-	}
-	v1Ann.Sign(sk)
-	v1Ann.EncodeTo(enc)
-	enc.Flush()
-	return stypes.Transaction{ArbitraryData: [][]byte{buf.Bytes()}}
+func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) stypes.Transaction {
+	return stypes.Transaction{ArbitraryData: [][]byte{ha.ToArbitraryData(sk)}}
 }
