@@ -116,7 +116,7 @@ type (
 		Model
 		Timestamp unixTimeMS `gorm:"index;NOT NULL"`
 
-		Action          uint8      `gorm:"index:idx_slab_metric_action;NOT NULL"`
+		Action          string     `gorm:"index:idx_slab_metric_action;NOT NULL"`
 		SpeedBytesPerMS unsigned64 `gorm:"index:idx_slab_metric_speed;default:0;NOT NULL"`
 
 		MinShards    uint8      `gorm:"index:idx_slab_metric_min_shards;default:0;NOT NULL"`
@@ -355,7 +355,7 @@ func (s *SQLStore) RecordSlabMetric(ctx context.Context, metrics ...api.SlabMetr
 		dbMetrics[i] = dbSlabMetric{
 			Timestamp: unixTimeMS(metric.Timestamp),
 
-			Action:          uint8(metric.Action),
+			Action:          metric.Action,
 			SpeedBytesPerMS: unsigned64(metric.SpeedBytesPerMS),
 
 			MinShards:    uint8(metric.MinShards),
@@ -399,7 +399,7 @@ func (s *SQLStore) SlabMetrics(ctx context.Context, start time.Time, n uint64, i
 		resp[i] = api.SlabMetric{
 			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
 
-			Action:          api.SlabAction(metrics[i].Action),
+			Action:          metrics[i].Action,
 			SpeedBytesPerMS: uint64(metrics[i].SpeedBytesPerMS),
 
 			MinShards:    uint8(metrics[i].MinShards),
@@ -690,11 +690,7 @@ func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64,
 func (s *SQLStore) slabMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.SlabMetricsQueryOpts) (metrics []dbSlabMetric, err error) {
 	whereExpr := gorm.Expr("TRUE")
 	if opts.Action != "" {
-		sa := api.ParseSlabAction(opts.Action)
-		if sa == api.SlabActionUnknown {
-			return nil, errors.New("unknown slab action")
-		}
-		whereExpr = gorm.Expr("? AND action = ?", whereExpr, uint8(sa))
+		whereExpr = gorm.Expr("? AND action = ?", whereExpr, opts.Action)
 	}
 
 	err = s.findPeriods(dbSlabMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))

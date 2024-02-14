@@ -3,7 +3,7 @@ CREATE TABLE `slabs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `timestamp` bigint NOT NULL,
-  `action` TINYINT UNSIGNED NOT NULL,
+  `action` varchar(191) NOT NULL,
   `speed_bytes_per_ms` bigint NOT NULL,
   `min_shards` TINYINT UNSIGNED NOT NULL,
   `total_shards` TINYINT UNSIGNED NOT NULL,

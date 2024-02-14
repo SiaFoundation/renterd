@@ -535,7 +535,7 @@ func TestSlabMetrics(t *testing.T) {
 	defer ss.Close()
 
 	// Create metrics to query.
-	actions := []api.SlabAction{api.SlabActionDownload, api.SlabActionUpload, api.SlabActionMigrate}
+	actions := []string{api.SlabActionDownload, api.SlabActionUpload, api.SlabActionMigrate}
 	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
 	for _, action := range actions {
 		for _, recordedTime := range times {
