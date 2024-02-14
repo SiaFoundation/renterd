@@ -66,8 +66,8 @@ type (
 	}
 
 	AlertsOpts struct {
-		Offset uint64
-		Limit  uint64
+		Offset int
+		Limit  int
 	}
 )
 
@@ -176,12 +176,14 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 }
 
 // Active returns the host's active alerts.
-func (m *Manager) Active(offset, limit uint64) []Alert {
+func (m *Manager) Active(offset, limit int) []Alert {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if offset >= uint64(len(m.alerts)) {
+	if offset >= len(m.alerts) {
 		return nil
+	} else if limit == -1 {
+		limit = len(m.alerts)
 	}
 
 	alerts := make([]Alert, 0, len(m.alerts))
@@ -192,7 +194,7 @@ func (m *Manager) Active(offset, limit uint64) []Alert {
 		return alerts[i].Timestamp.After(alerts[j].Timestamp)
 	})
 	alerts = alerts[offset:]
-	if limit < uint64(len(alerts)) {
+	if limit < len(alerts) {
 		alerts = alerts[:limit]
 	}
 	return alerts

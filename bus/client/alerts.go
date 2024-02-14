@@ -12,7 +12,7 @@ import (
 // Alerts fetches the active alerts from the bus.
 func (c *Client) Alerts(opts alerts.AlertsOpts) (alerts []alerts.Alert, err error) {
 	values := url.Values{}
-	if opts.Offset > 0 {
+	if opts.Offset != 0 {
 		values.Set("offset", fmt.Sprint(opts.Offset))
 	}
 	if opts.Limit != 0 {

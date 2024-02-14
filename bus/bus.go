@@ -1713,13 +1713,14 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlerts(jc jape.Context) {
-	var offset, limit uint64
+	offset, limit := 0, -1
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	} else if jc.DecodeForm("limit", &limit) != nil {
 		return
-	} else if limit == 0 {
-		limit = math.MaxUint64
+	} else if offset < 0 {
+		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
+		return
 	}
 	jc.Encode(b.alertMgr.Active(offset, limit))
 }
