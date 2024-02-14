@@ -19,9 +19,12 @@ const (
 	maxConcurrentSectorsPerHost = 3
 )
 
+var (
+	errDownloaderStopped = errors.New("downloader was stopped")
+)
+
 type (
 	downloader struct {
-		hk     types.PublicKey
 		host   Host
 		ms     MetricStore
 		logger *zap.SugaredLogger
@@ -36,6 +39,7 @@ type (
 		consecutiveFailures uint64
 		numDownloads        uint64
 		queue               []*sectorDownloadReq
+		stopped             bool
 	}
 )
 
@@ -63,13 +67,17 @@ func (d *downloader) PublicKey() types.PublicKey {
 }
 
 func (d *downloader) Stop() {
+	d.mu.Lock()
+	d.stopped = true
+	d.mu.Unlock()
+
 	for {
 		download := d.pop()
 		if download == nil {
 			break
 		}
 		if !download.done() {
-			download.fail(errors.New("downloader stopped"))
+			download.fail(errDownloaderStopped)
 		}
 	}
 }
@@ -88,8 +96,15 @@ func (d *downloader) fillBatch() (batch []*sectorDownloadReq) {
 }
 
 func (d *downloader) enqueue(download *sectorDownloadReq) {
-	// enqueue the job
 	d.mu.Lock()
+	// check for stopped
+	if d.stopped {
+		d.mu.Unlock()
+		go download.fail(errDownloaderStopped) // don't block the caller
+		return
+	}
+
+	// enqueue the job
 	d.queue = append(d.queue, download)
 	d.mu.Unlock()
 
