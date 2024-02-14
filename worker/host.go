@@ -52,10 +52,10 @@ type (
 		acc                      *account
 		bus                      Bus
 		contractSpendingRecorder ContractSpendingRecorder
+		interactionRecorder      HostInteractionRecorder
 		logger                   *zap.SugaredLogger
 		transportPool            *transportPoolV3
 		priceTables              *priceTables
-		interactionRecorder      HostInteractionRecorder
 	}
 )
 
@@ -70,6 +70,7 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		acc:                      w.accounts.ForHost(hk),
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
+		interactionRecorder:      w.hostInteractionRecorder,
 		logger:                   w.logger.Named(hk.String()[:4]),
 		fcid:                     fcid,
 		siamuxAddr:               siamuxAddr,
@@ -77,7 +78,6 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		accountKey:               w.accounts.deriveAccountKey(hk),
 		transportPool:            w.transportPoolV3,
 		priceTables:              w.priceTables,
-		interactionRecorder:      w.hostInteractionRecorder,
 	}
 }
 
