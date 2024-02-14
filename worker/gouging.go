@@ -72,17 +72,16 @@ func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingPa
 
 		// adjust the max download price if we are dealing with a critical
 		// migration that might be failing due to gouging checks
+		settings := gp.GougingSettings
 		if criticalMigration && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
-			if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); overflow {
-				return gougingChecker{}, errors.New("failed to apply the 'MigrationSurchargeMultiplier', overflow detected")
-			} else {
-				gp.GougingSettings.MaxDownloadPrice = adjustedMaxDownloadPrice
+			if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); !overflow {
+				settings.MaxDownloadPrice = adjustedMaxDownloadPrice
 			}
 		}
 
 		return gougingChecker{
 			consensusState: consensusState,
-			settings:       gp.GougingSettings,
+			settings:       settings,
 			txFee:          gp.TransactionFee,
 
 			// NOTE:
