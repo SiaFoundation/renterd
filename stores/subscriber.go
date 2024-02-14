@@ -20,18 +20,18 @@ type (
 	chainSubscriber struct {
 		announcementMaxAge time.Duration
 		db                 *gorm.DB
-		tip                types.ChainIndex
 		logger             *zap.SugaredLogger
+		persistInterval    time.Duration
 		retryIntervals     []time.Duration
 		walletAddress      types.Address
 
 		// buffered state
-		mu              sync.Mutex
-		closed          bool
-		lastSave        time.Time
-		knownContracts  map[types.FileContractID]struct{}
-		persistInterval time.Duration
-		persistTimer    *time.Timer
+		mu             sync.Mutex
+		closed         bool
+		lastSave       time.Time
+		tip            types.ChainIndex
+		knownContracts map[types.FileContractID]struct{}
+		persistTimer   *time.Timer
 
 		announcements []announcement
 		contractState map[types.Hash256]contractState
@@ -113,6 +113,12 @@ func (cs *chainSubscriber) ProcessChainRevertUpdate(cru *chain.RevertUpdate) err
 	cs.mayCommit = true
 
 	return cs.tryCommit()
+}
+
+func (cs *chainSubscriber) Tip() types.ChainIndex {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.tip
 }
 
 func (cs *chainSubscriber) isKnownContract(id types.FileContractID) bool {

@@ -12,6 +12,7 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
@@ -111,6 +112,28 @@ type SiacoinElement struct {
 	MaturityHeight uint64        `json:"maturityHeight"`
 }
 
+func convertToSiacoinElement(sce types.SiacoinElement) SiacoinElement {
+	return SiacoinElement{
+		ID: sce.StateElement.ID,
+		SiacoinOutput: types.SiacoinOutput{
+			Value:   sce.SiacoinOutput.Value,
+			Address: sce.SiacoinOutput.Address,
+		},
+		MaturityHeight: sce.MaturityHeight,
+	}
+}
+
+func converToTransaction(txn wallet.Transaction) Transaction {
+	return Transaction{
+		Raw:       txn.Transaction,
+		Index:     txn.Index,
+		ID:        txn.ID,
+		Inflow:    txn.Inflow,
+		Outflow:   txn.Outflow,
+		Timestamp: txn.Timestamp,
+	}
+}
+
 // A Transaction is an on-chain transaction relevant to a particular wallet,
 // paired with useful metadata.
 type Transaction struct {
@@ -125,9 +148,11 @@ type Transaction struct {
 // A SingleAddressStore stores the state of a single-address wallet.
 // Implementations are assumed to be thread safe.
 type SingleAddressStore interface {
-	Height() uint64
-	UnspentSiacoinElements(matured bool) ([]SiacoinElement, error)
-	Transactions(before, since time.Time, offset, limit int) ([]Transaction, error)
+	wallet.SingleAddressStore
+
+	// TODO PJ: this needs to move out of the store interface, perhaps we can
+	// wrap the SingleAddressWallet from coreutils and subscribe it to record
+	// the wallet metrics in the store on every change in consensus.
 	RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
 }
 
@@ -172,10 +197,27 @@ func (w *SingleAddressWallet) Address() types.Address {
 
 // Balance returns the balance of the wallet.
 func (w *SingleAddressWallet) Balance() (spendable, confirmed, unconfirmed types.Currency, _ error) {
-	sces, err := w.store.UnspentSiacoinElements(true)
+	sces, err := w.unspentSiacoinElements()
 	if err != nil {
 		return types.Currency{}, types.Currency{}, types.Currency{}, err
 	}
+
+	// fetch block height
+	tip, err := w.store.Tip()
+	if err != nil {
+		return types.Currency{}, types.Currency{}, types.Currency{}, err
+	}
+	bh := tip.Height
+
+	// filter outputs that haven't matured yet
+	filtered := sces[:0]
+	for _, sce := range sces {
+		if sce.MaturityHeight >= bh {
+			filtered = append(filtered, sce)
+		}
+	}
+	sces = filtered
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, sce := range sces {
@@ -192,14 +234,10 @@ func (w *SingleAddressWallet) Balance() (spendable, confirmed, unconfirmed types
 	return
 }
 
-func (w *SingleAddressWallet) Height() uint64 {
-	return w.store.Height()
-}
-
 // UnspentOutputs returns the set of unspent Siacoin outputs controlled by the
 // wallet.
 func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
-	sces, err := w.store.UnspentSiacoinElements(false)
+	sces, err := w.unspentSiacoinElements()
 	if err != nil {
 		return nil, err
 	}
@@ -216,8 +254,17 @@ func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
 
 // Transactions returns up to max transactions relevant to the wallet that have
 // a timestamp later than since.
-func (w *SingleAddressWallet) Transactions(before, since time.Time, offset, limit int) ([]Transaction, error) {
-	return w.store.Transactions(before, since, offset, limit)
+func (w *SingleAddressWallet) Transactions(offset, limit int) ([]Transaction, error) {
+	txns, err := w.store.Transactions(offset, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Transaction, len(txns))
+	for i := range txns {
+		out[i] = converToTransaction(txns[i])
+	}
+	return out, nil
 }
 
 // FundTransaction adds siacoin inputs worth at least the requested amount to
@@ -228,11 +275,9 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 	if amount.IsZero() {
 		return nil, nil
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	// fetch all unspent siacoin elements
-	utxos, err := w.store.UnspentSiacoinElements(false)
+	utxos, err := w.unspentSiacoinElements()
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +286,9 @@ func (w *SingleAddressWallet) FundTransaction(cs consensus.State, txn *types.Tra
 	sort.Slice(utxos, func(i, j int) bool {
 		return utxos[i].Value.Cmp(utxos[j].Value) > 0
 	})
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	// add all unconfirmed outputs to the end of the slice as a last resort
 	if useUnconfirmedTxns {
@@ -364,9 +412,6 @@ func (w *SingleAddressWallet) SignTransaction(cs consensus.State, txn *types.Tra
 // selecting a minimal set of inputs to cover the creation of the requested
 // outputs. It also returns a list of output IDs that need to be signed.
 func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	// build map of inputs currently in the tx pool
 	inPool := make(map[types.Hash256]bool)
 	for _, ptxn := range pool {
@@ -376,10 +421,13 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	}
 
 	// fetch unspent transaction outputs
-	utxos, err := w.store.UnspentSiacoinElements(false)
+	utxos, err := w.unspentSiacoinElements()
 	if err != nil {
 		return nil, nil, err
 	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	// check whether a redistribution is necessary, adjust number of desired
 	// outputs accordingly
@@ -481,6 +529,11 @@ func (w *SingleAddressWallet) Redistribute(cs consensus.State, outputs int, amou
 	return txns, toSign, nil
 }
 
+// Tip returns the consensus change ID and block height of the last wallet
+// change.
+func (w *SingleAddressWallet) Tip() (types.ChainIndex, error) {
+	return w.store.Tip()
+}
 func (w *SingleAddressWallet) isOutputUsed(id types.Hash256) bool {
 	inPool := w.tpoolSpent[types.SiacoinOutputID(id)]
 	lastUsed := w.lastUsed[id]
@@ -523,13 +576,20 @@ func (w *SingleAddressWallet) ProcessConsensusChange(cc modules.ConsensusChange)
 // ReceiveUpdatedUnconfirmedTransactions implements modules.TransactionPoolSubscriber.
 func (w *SingleAddressWallet) ReceiveUpdatedUnconfirmedTransactions(diff *modules.TransactionPoolDiff) {
 	siacoinOutputs := make(map[types.SiacoinOutputID]SiacoinElement)
-	utxos, err := w.store.UnspentSiacoinElements(false)
+	utxos, err := w.unspentSiacoinElements()
 	if err != nil {
 		return
 	}
 	for _, output := range utxos {
 		siacoinOutputs[types.SiacoinOutputID(output.ID)] = output
 	}
+
+	// fetch current heith
+	tip, err := w.store.Tip()
+	if err != nil {
+		return
+	}
+	currentHeight := tip.Height
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -553,8 +613,6 @@ func (w *SingleAddressWallet) ReceiveUpdatedUnconfirmedTransactions(diff *module
 		}
 		delete(w.tpoolTxns, types.Hash256(txnsetID))
 	}
-
-	currentHeight := w.store.Height()
 
 	for _, txnset := range diff.AppliedTransactions {
 		var relevantTxns []Transaction
@@ -613,6 +671,21 @@ func (w *SingleAddressWallet) ReceiveUpdatedUnconfirmedTransactions(diff *module
 			w.tpoolTxns[types.Hash256(txnset.ID)] = relevantTxns
 		}
 	}
+}
+
+// unspentSiacoinElements is a helper that fetches UnspentSiacoinElements from
+// the store and converts them to SiacoinElements.
+func (w *SingleAddressWallet) unspentSiacoinElements() ([]SiacoinElement, error) {
+	unspent, err := w.store.UnspentSiacoinElements()
+	if err != nil {
+		return nil, err
+	}
+
+	utxos := make([]SiacoinElement, len(unspent))
+	for i := range unspent {
+		utxos[i] = convertToSiacoinElement(unspent[i])
+	}
+	return utxos, nil
 }
 
 // SumOutputs returns the total value of the supplied outputs.

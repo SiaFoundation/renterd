@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/modules"
@@ -34,6 +36,10 @@ var migrations embed.FS
 
 var (
 	exprTRUE = gorm.Expr("TRUE")
+)
+
+var (
+	_ wallet.SingleAddressStore = (*SQLStore)(nil)
 )
 
 type (
@@ -63,6 +69,7 @@ type (
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		alerts    alerts.Alerter
+		cs        *chainSubscriber
 		db        *gorm.DB
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
@@ -250,9 +257,13 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
 
+	// Create chain subscriber
+	cs := NewChainSubscriber(db, cfg.Logger, cfg.RetryTransactionIntervals, cfg.PersistInterval, cfg.WalletAddress, cfg.AnnouncementMaxAge)
+
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:                 cfg.Alerts,
+		cs:                     cs,
 		db:                     db,
 		dbMetrics:              dbMetrics,
 		logger:                 l,
@@ -369,6 +380,16 @@ func (s *SQLStore) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 	return nil
+}
+
+// ProcessChainApplyUpdate implements chain.Subscriber.
+func (s *SQLStore) ProcessChainApplyUpdate(cau *chain.ApplyUpdate, mayCommit bool) error {
+	return s.cs.ProcessChainApplyUpdate(cau, mayCommit)
+}
+
+// ProcessChainRevertUpdate implements chain.Subscriber.
+func (s *SQLStore) ProcessChainRevertUpdate(cru *chain.RevertUpdate) error {
+	return s.cs.ProcessChainRevertUpdate(cru)
 }
 
 // ProcessConsensusChange implements consensus.Subscriber.

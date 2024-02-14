@@ -4,10 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -16,16 +17,22 @@ import (
 // mockStore implements wallet.SingleAddressStore and allows to manipulate the
 // wallet's utxos
 type mockStore struct {
-	utxos []SiacoinElement
+	utxos []types.SiacoinElement
 }
 
+func (s *mockStore) ProcessChainApplyUpdate(cau *chain.ApplyUpdate, mayCommit bool) error { return nil }
+func (s *mockStore) ProcessChainRevertUpdate(cru *chain.RevertUpdate) error               { return nil }
+
 func (s *mockStore) Balance() (types.Currency, error) { return types.ZeroCurrency, nil }
-func (s *mockStore) Height() uint64                   { return 0 }
-func (s *mockStore) UnspentSiacoinElements(bool) ([]SiacoinElement, error) {
+func (s *mockStore) Tip() (types.ChainIndex, error)   { return types.ChainIndex{}, nil }
+func (s *mockStore) UnspentSiacoinElements() ([]types.SiacoinElement, error) {
 	return s.utxos, nil
 }
-func (s *mockStore) Transactions(before, since time.Time, offset, limit int) ([]Transaction, error) {
+func (s *mockStore) Transactions(offset, limit int) ([]wallet.Transaction, error) {
 	return nil, nil
+}
+func (s *mockStore) TransactionCount() (uint64, error) {
+	return 0, nil
 }
 func (s *mockStore) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
 	return nil
@@ -46,15 +53,19 @@ func TestWalletRedistribute(t *testing.T) {
 	// create a wallet with one output
 	priv := types.GeneratePrivateKey()
 	pub := priv.PublicKey()
-	utxo := SiacoinElement{
-		types.SiacoinOutput{
+	utxo := types.SiacoinElement{
+		StateElement: types.StateElement{
+			ID: randomOutputID(),
+			// TODO: LeafIndex missing
+			// TODO: MerkleProof missing
+		},
+		SiacoinOutput: types.SiacoinOutput{
 			Value:   oneSC.Mul64(20),
 			Address: StandardAddress(pub),
 		},
-		randomOutputID(),
-		0,
+		MaturityHeight: 0,
 	}
-	s := &mockStore{utxos: []SiacoinElement{utxo}}
+	s := &mockStore{utxos: []types.SiacoinElement{utxo}}
 	w := NewSingleAddressWallet(priv, s, 0, zap.NewNop().Sugar())
 
 	numOutputsWithValue := func(v types.Currency) (c uint64) {
@@ -77,7 +88,15 @@ func TestWalletRedistribute(t *testing.T) {
 			}
 		}
 		for _, output := range txn.SiacoinOutputs {
-			s.utxos = append(s.utxos, SiacoinElement{output, randomOutputID(), 0})
+			s.utxos = append(s.utxos, types.SiacoinElement{
+				StateElement: types.StateElement{
+					ID: randomOutputID(),
+					// TODO: LeafIndex missing
+					// TODO: MerkleProof missing
+				},
+				SiacoinOutput:  output,
+				MaturityHeight: 0,
+			})
 		}
 	}
 

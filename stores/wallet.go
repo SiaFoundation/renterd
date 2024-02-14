@@ -7,7 +7,7 @@ import (
 
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 )
@@ -58,24 +58,27 @@ func (s *SQLStore) Height() uint64 {
 	return height
 }
 
-// UnspentSiacoinElements implements wallet.SingleAddressStore.
-func (s *SQLStore) UnspentSiacoinElements(matured bool) ([]wallet.SiacoinElement, error) {
-	s.persistMu.Lock()
-	height := s.chainIndex.Height
-	s.persistMu.Unlock()
+// Tip returns the consensus change ID and block height of the last wallet
+// change.
+func (s *SQLStore) Tip() (types.ChainIndex, error) {
+	return s.cs.Tip(), nil
+}
 
-	tx := s.db
+// UnspentSiacoinElements returns a list of all unspent siacoin outputs
+func (s *SQLStore) UnspentSiacoinElements() ([]types.SiacoinElement, error) {
 	var elems []dbSiacoinElement
-	if matured {
-		tx = tx.Where("maturity_height <= ?", height)
-	}
-	if err := tx.Find(&elems).Error; err != nil {
+	if err := s.db.Find(&elems).Error; err != nil {
 		return nil, err
 	}
-	utxo := make([]wallet.SiacoinElement, len(elems))
+
+	utxo := make([]types.SiacoinElement, len(elems))
 	for i := range elems {
-		utxo[i] = wallet.SiacoinElement{
-			ID:             types.Hash256(elems[i].OutputID),
+		utxo[i] = types.SiacoinElement{
+			StateElement: types.StateElement{
+				ID: types.Hash256(elems[i].OutputID),
+				// TODO: LeafIndex missing
+				// TODO: MerkleProof missing
+			},
 			MaturityHeight: elems[i].MaturityHeight,
 			SiacoinOutput: types.SiacoinOutput{
 				Address: types.Address(elems[i].Address),
@@ -86,23 +89,17 @@ func (s *SQLStore) UnspentSiacoinElements(matured bool) ([]wallet.SiacoinElement
 	return utxo, nil
 }
 
-// Transactions implements wallet.SingleAddressStore.
-func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error) {
-	beforeX := int64(math.MaxInt64)
-	sinceX := int64(0)
-	if !before.IsZero() {
-		beforeX = before.Unix()
-	}
-	if !since.IsZero() {
-		sinceX = since.Unix()
-	}
+// Transactions returns a paginated list of transactions ordered by maturity
+// height, descending. If no more transactions are available, (nil, nil) should
+// be returned.
+func (s *SQLStore) Transactions(offset, limit int) ([]wallet.Transaction, error) {
 	if limit == 0 || limit == -1 {
 		limit = math.MaxInt64
 	}
 
 	var dbTxns []dbTransaction
-	err := s.db.Raw("SELECT * FROM transactions WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-		sinceX, beforeX, limit, offset).Scan(&dbTxns).
+	err := s.db.Raw("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		limit, offset).Scan(&dbTxns).
 		Error
 	if err != nil {
 		return nil, err
@@ -111,7 +108,7 @@ func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]w
 	txns := make([]wallet.Transaction, len(dbTxns))
 	for i := range dbTxns {
 		txns[i] = wallet.Transaction{
-			Raw: dbTxns[i].Raw,
+			Transaction: dbTxns[i].Raw,
 			Index: types.ChainIndex{
 				Height: dbTxns[i].Height,
 				ID:     types.BlockID(dbTxns[i].BlockID),
@@ -123,6 +120,15 @@ func (s *SQLStore) Transactions(before, since time.Time, offset, limit int) ([]w
 		}
 	}
 	return txns, nil
+}
+
+// TransactionCount returns the total number of transactions in the wallet.
+func (s *SQLStore) TransactionCount() (uint64, error) {
+	var count int64
+	if err := s.db.Model(&dbTransaction{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return uint64(count), nil
 }
 
 // ProcessConsensusChange implements chain.Subscriber.
