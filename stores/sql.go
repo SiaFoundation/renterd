@@ -553,7 +553,8 @@ func retryTransaction(db *gorm.DB, logger *zap.SugaredLogger, fc func(tx *gorm.D
 			strings.Contains(err.Error(), "no such table") ||
 			strings.Contains(err.Error(), "Duplicate entry") ||
 			errors.Is(err, api.ErrPartNotFound) ||
-			errors.Is(err, api.ErrSlabNotFound) {
+			errors.Is(err, api.ErrSlabNotFound) ||
+			errors.Is(err, ErrPeerNotFound) {
 			return true
 		}
 		return false

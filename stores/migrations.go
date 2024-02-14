@@ -64,6 +64,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return err
 			},
 		},
+		{
+			ID: "00003_peer_store",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, "00003_peer_store", logger)
+			},
+		},
 	}
 
 	// Create migrator.
