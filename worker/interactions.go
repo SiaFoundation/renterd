@@ -3,11 +3,9 @@ package worker
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
 	"go.uber.org/zap"
 )
@@ -41,18 +39,6 @@ type (
 var (
 	_ HostInteractionRecorder = (*hostInteractionRecorder)(nil)
 )
-
-func interactionMiddleware(ir HostInteractionRecorder, routes map[string]jape.Handler) map[string]jape.Handler {
-	for route, handler := range routes {
-		routes[route] = jape.Adapt(func(h http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ctx := context.WithValue(r.Context(), keyInteractionRecorder, ir)
-				h.ServeHTTP(w, r.WithContext(ctx))
-			})
-		})(handler)
-	}
-	return routes
-}
 
 func (w *worker) initHostInteractionRecorder(flushInterval time.Duration) {
 	if w.hostInteractionRecorder != nil {

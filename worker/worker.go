@@ -1323,7 +1323,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
-	return jape.Mux(interactionMiddleware(w.hostInteractionRecorder, map[string]jape.Handler{
+	return jape.Mux(map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
@@ -1351,7 +1351,7 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
-	}))
+	})
 }
 
 // Shutdown shuts down the worker.
