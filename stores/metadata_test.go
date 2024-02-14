@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -4282,5 +4284,64 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		} else if cs.DBSectorID != uint(i+1) {
 			t.Fatal("invalid sector id")
 		}
+	}
+}
+
+func TestTypeCurrency(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	tests := []struct {
+		a   types.Currency
+		b   types.Currency
+		cmp string
+	}{
+		{
+			a:   types.ZeroCurrency,
+			b:   types.NewCurrency64(1),
+			cmp: "<",
+		},
+		{
+			a:   types.NewCurrency64(1),
+			b:   types.NewCurrency64(1),
+			cmp: "=",
+		},
+		{
+			a:   types.NewCurrency(0, math.MaxUint64),
+			b:   types.NewCurrency(math.MaxUint64, 0),
+			cmp: "<",
+		},
+		{
+			a:   types.NewCurrency(math.MaxUint64, 0),
+			b:   types.NewCurrency(0, math.MaxUint64),
+			cmp: ">",
+		},
+	}
+	for _, test := range tests {
+		var result bool
+		err := ss.db.Raw("SELECT ? "+test.cmp+" ?", bCurrency(test.a), bCurrency(test.b)).Scan(&result).Error
+		if err != nil {
+			t.Fatal(err)
+		} else if !result {
+			t.Fatal("unexpected result", result)
+		}
+	}
+
+	c := func(c uint64) bCurrency {
+		return bCurrency(types.NewCurrency64(c))
+	}
+
+	var currencies []bCurrency
+	err := ss.db.Raw(`
+WITH input(col) as
+(values (?),(?),(?))
+SELECT * FROM input ORDER BY col ASC
+`, c(3), c(1), c(2)).Scan(&currencies).Error
+	if err != nil {
+		t.Fatal(err)
+	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
+		return types.Currency(currencies[i]).Cmp(types.Currency(currencies[j])) < 0
+	}) {
+		t.Fatal("currencies not sorted", currencies)
 	}
 }
