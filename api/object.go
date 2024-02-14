@@ -119,6 +119,10 @@ type (
 		Mode   string `json:"mode"`
 	}
 
+	ObjectsStatsOpts struct {
+		Bucket string
+	}
+
 	// ObjectsStatsResponse is the response type for the /bus/stats/objects endpoint.
 	ObjectsStatsResponse struct {
 		NumObjects                 uint64  `json:"numObjects"`                 // number of objects

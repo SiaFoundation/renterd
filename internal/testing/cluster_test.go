@@ -697,24 +697,29 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// check objects stats.
-	info, err := cluster.Bus.ObjectsStats()
-	tt.OK(err)
-	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
-	if info.TotalObjectsSize != objectsSize {
-		t.Error("wrong size", info.TotalObjectsSize, objectsSize)
-	}
-	sectorsSize := 15 * rhpv2.SectorSize
-	if info.TotalSectorsSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
-	}
-	if info.TotalUploadedSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
-	}
-	if info.NumObjects != 4 {
-		t.Error("wrong number of objects", info.NumObjects, 4)
-	}
-	if info.MinHealth != 1 {
-		t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+	for _, opts := range []api.ObjectsStatsOpts{
+		{},                              // any bucket
+		{Bucket: api.DefaultBucketName}, // specific bucket
+	} {
+		info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+		tt.OK(err)
+		objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+		if info.TotalObjectsSize != objectsSize {
+			t.Error("wrong size", info.TotalObjectsSize, objectsSize)
+		}
+		sectorsSize := 15 * rhpv2.SectorSize
+		if info.TotalSectorsSize != uint64(sectorsSize) {
+			t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
+		}
+		if info.TotalUploadedSize != uint64(sectorsSize) {
+			t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
+		}
+		if info.NumObjects != 4 {
+			t.Error("wrong number of objects", info.NumObjects, 4)
+		}
+		if info.MinHealth != 1 {
+			t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+		}
 	}
 
 	// download the data
@@ -1633,7 +1638,7 @@ func TestUploadPacking(t *testing.T) {
 	download("file4", data4, 0, int64(len(data4)))
 
 	// assert number of objects
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 5 {
 		t.Fatalf("expected 5 objects, got %v", os.NumObjects)
@@ -1642,7 +1647,7 @@ func TestUploadPacking(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1796,7 +1801,7 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data1), api.DefaultBucketName, "1", api.UploadObjectOptions{}))
 
 	// assert number of objects
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 1 {
 		t.Fatalf("expected 1 object, got %d", os.NumObjects)
@@ -1805,7 +1810,7 @@ func TestSlabBufferStats(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1853,7 +1858,7 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data2), api.DefaultBucketName, "2", api.UploadObjectOptions{}))
 
 	// assert number of objects
-	os, err = b.ObjectsStats()
+	os, err = b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 2 {
 		t.Fatalf("expected 1 object, got %d", os.NumObjects)
@@ -1862,7 +1867,7 @@ func TestSlabBufferStats(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		tt.OK(err)
 		if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
 			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1)+len(data2), os.TotalObjectsSize)
@@ -2006,7 +2011,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Check objects stats.
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 0 {
 		t.Fatalf("expected 0 object, got %v", os.NumObjects)
@@ -2065,7 +2070,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Check objects stats.
-	os, err = b.ObjectsStats()
+	os, err = b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 1 {
 		t.Fatalf("expected 1 object, got %v", os.NumObjects)
