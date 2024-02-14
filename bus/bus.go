@@ -1349,7 +1349,7 @@ func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
 
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 	opts := api.ObjectsStatsOpts{}
-	if jc.DecodeForm(("bucket"), &opts.Bucket) != nil {
+	if jc.DecodeForm("bucket", &opts.Bucket) != nil {
 		return
 	}
 	info, err := b.ms.ObjectsStats(jc.Request.Context(), opts)
