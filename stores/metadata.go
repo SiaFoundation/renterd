@@ -582,7 +582,15 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // ObjectsStats returns some info related to the objects stored in the store. To
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
-func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
+func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	// if no bucket is specified, we consider all objects
+	whereBucket := func(table string) clause.Expr {
+		if opts.Bucket == "" {
+			return exprTRUE
+		}
+		return sqlWhereBucket(table, opts.Bucket)
+	}
+
 	// number of objects
 	var objInfo struct {
 		NumObjects       uint64
@@ -592,6 +600,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	err := s.db.
 		Model(&dbObject{}).
 		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
+		Where(whereBucket(dbObject{}.TableName())).
 		Scan(&objInfo).
 		Error
 	if err != nil {
@@ -603,6 +612,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	err = s.db.
 		Model(&dbMultipartUpload{}).
 		Select("COUNT(*)").
+		Where(whereBucket(dbMultipartUpload{}.TableName())).
 		Scan(&unfinishedObjects).
 		Error
 	if err != nil {
@@ -613,11 +623,24 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 	var totalUnfinishedObjectsSize uint64
 	err = s.db.
 		Model(&dbMultipartPart{}).
+		Joins("INNER JOIN multipart_uploads mu ON multipart_parts.db_multipart_upload_id = mu.id").
 		Select("COALESCE(SUM(size), 0)").
+		Where(whereBucket("mu")).
 		Scan(&totalUnfinishedObjectsSize).
 		Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
+	}
+
+	fromContractSectors := gorm.Expr("contract_sectors cs")
+	if opts.Bucket != "" {
+		fromContractSectors = gorm.Expr(`
+				contract_sectors cs
+				INNER JOIN sectors s ON s.id = cs.db_sector_id
+				INNER JOIN slabs sla ON sla.id = s.db_slab_id
+				INNER JOIN slices sli ON sli.db_slab_id = sla.id
+				INNER JOIN objects o ON o.id = sli.db_object_id AND (?)
+			`, whereBucket("o"))
 	}
 
 	var totalSectors uint64
@@ -631,7 +654,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		}
 		res := s.db.
 			Model(&dbSector{}).
-			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM contract_sectors cs WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", marker, batchSize).
+			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM ? WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", fromContractSectors, marker, batchSize).
 			Scan(&result)
 		if err := res.Error; err != nil {
 			return api.ObjectsStatsResponse{}, err
@@ -644,7 +667,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 
 	var totalUploaded int64
 	err = s.db.
-		Model(&dbContractSector{}).
+		Table("?", fromContractSectors).
 		Count(&totalUploaded).
 		Error
 	if err != nil {

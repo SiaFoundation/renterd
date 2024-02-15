@@ -139,7 +139,7 @@ type (
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
-		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
+		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
@@ -1348,7 +1348,11 @@ func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {
-	info, err := b.ms.ObjectsStats(jc.Request.Context())
+	opts := api.ObjectsStatsOpts{}
+	if jc.DecodeForm("bucket", &opts.Bucket) != nil {
+		return
+	}
+	info, err := b.ms.ObjectsStats(jc.Request.Context(), opts)
 	if jc.Check("couldn't get objects stats", err) != nil {
 		return
 	}

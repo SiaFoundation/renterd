@@ -2435,7 +2435,7 @@ func TestObjectsStats(t *testing.T) {
 	defer ss.Close()
 
 	// Fetch stats on clean database.
-	info, err := ss.ObjectsStats(context.Background())
+	info, err := ss.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2499,21 +2499,37 @@ func TestObjectsStats(t *testing.T) {
 	}
 
 	// Check sizes.
-	info, err = ss.ObjectsStats(context.Background())
-	if err != nil {
+	for _, opts := range []api.ObjectsStatsOpts{
+		{},                              // any bucket
+		{Bucket: api.DefaultBucketName}, // specific bucket
+	} {
+		info, err = ss.ObjectsStats(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		} else if info.TotalObjectsSize != objectsSize {
+			t.Fatal("wrong size", info.TotalObjectsSize, objectsSize)
+		} else if info.TotalSectorsSize != sectorsSize {
+			t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
+		} else if info.TotalUploadedSize != sectorsSize*2 {
+			t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
+		} else if info.NumObjects != 2 {
+			t.Fatal("wrong number of objects", info.NumObjects, 2)
+		}
+	}
+
+	// Check other bucket.
+	if err := ss.CreateBucket(context.Background(), "other", api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	}
-	if info.TotalObjectsSize != objectsSize {
-		t.Fatal("wrong size", info.TotalObjectsSize, objectsSize)
-	}
-	if info.TotalSectorsSize != sectorsSize {
-		t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
-	}
-	if info.TotalUploadedSize != sectorsSize*2 {
-		t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
-	}
-	if info.NumObjects != 2 {
-		t.Fatal("wrong number of objects", info.NumObjects, 2)
+	} else if info, err := ss.ObjectsStats(context.Background(), api.ObjectsStatsOpts{Bucket: "other"}); err != nil {
+		t.Fatal(err)
+	} else if info.TotalObjectsSize != 0 {
+		t.Fatal("wrong size", info.TotalObjectsSize)
+	} else if info.TotalSectorsSize != 0 {
+		t.Fatal("wrong size", info.TotalSectorsSize)
+	} else if info.TotalUploadedSize != 0 {
+		t.Fatal("wrong size", info.TotalUploadedSize)
+	} else if info.NumObjects != 0 {
+		t.Fatal("wrong number of objects", info.NumObjects)
 	}
 }
 
@@ -2908,7 +2924,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// assert there's two objects
-	s, err := ss.ObjectsStats(context.Background())
+	s, err := ss.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
