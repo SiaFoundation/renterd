@@ -584,11 +584,18 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // within a single transaction.
 func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	// if no bucket is specified, we consider all objects
+	var bucketID uint
+	if opts.Bucket != "" {
+		err := s.db.Model(&dbBucket{}).Select("id").Where("name = ?", opts.Bucket).Take(&bucketID).Error
+		if err != nil {
+			return api.ObjectsStatsResponse{}, err
+		}
+	}
 	whereBucket := func(table string) clause.Expr {
 		if opts.Bucket == "" {
 			return exprTRUE
 		}
-		return sqlWhereBucket(table, opts.Bucket)
+		return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = ?", table), bucketID)
 	}
 
 	// number of objects
@@ -632,37 +639,49 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		return api.ObjectsStatsResponse{}, err
 	}
 
-	fromContractSectors := gorm.Expr("contract_sectors cs")
+	fromContractSectors := gorm.Expr("contract_sectors cs WHERE 1=1")
 	if opts.Bucket != "" {
 		fromContractSectors = gorm.Expr(`
 				contract_sectors cs
 				INNER JOIN sectors s ON s.id = cs.db_sector_id
 				INNER JOIN slabs sla ON sla.id = s.db_slab_id
-				INNER JOIN slices sli ON sli.db_slab_id = sla.id
-				INNER JOIN objects o ON o.id = sli.db_object_id AND (?)
-			`, whereBucket("o"))
+				WHERE EXISTS (
+					SELECT 1 FROM slices sli
+					INNER JOIN objects o ON o.id = sli.db_object_id
+					WHERE sli.db_slab_id = sla.id AND o.db_bucket_id = ?
+				)
+			`, bucketID)
 	}
 
 	var totalSectors uint64
 
-	batchSize := 500000
-	marker := uint64(0)
-	for offset := 0; ; offset += batchSize {
-		var result struct {
-			Sectors uint64
-			Marker  uint64
+	var sectorsInfo struct {
+		MinID uint
+		MaxID uint
+		Total uint
+	}
+	err = s.db.Model(&dbContractSector{}).
+		Raw("SELECT MIN(db_sector_id) as MinID, MAX(db_sector_id) as MaxID, COUNT(*) as Total FROM contract_sectors").
+		Scan(&sectorsInfo).Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
+
+	// compute a good batch size for the ids
+	batchSize := (sectorsInfo.MaxID - sectorsInfo.MinID) / (sectorsInfo.Total/500000 + 1)
+
+	if sectorsInfo.Total > 0 {
+		for from, to := sectorsInfo.MinID, sectorsInfo.MinID+batchSize; from <= sectorsInfo.MaxID; from, to = to, to+batchSize {
+			var nSectors uint64
+			err := s.db.
+				Model(&dbSector{}).
+				Raw("SELECT COUNT(DISTINCT cs.db_sector_id) FROM ? AND cs.db_sector_id >= ? AND cs.db_sector_id < ?", fromContractSectors, from, to).
+				Scan(&nSectors).Error
+			if err != nil {
+				return api.ObjectsStatsResponse{}, err
+			}
+			totalSectors += nSectors
 		}
-		res := s.db.
-			Model(&dbSector{}).
-			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM ? WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", fromContractSectors, marker, batchSize).
-			Scan(&result)
-		if err := res.Error; err != nil {
-			return api.ObjectsStatsResponse{}, err
-		} else if result.Sectors == 0 {
-			break // done
-		}
-		totalSectors += result.Sectors
-		marker = result.Marker
 	}
 
 	var totalUploaded int64
