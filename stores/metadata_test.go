@@ -2524,10 +2524,10 @@ func TestObjectsStats(t *testing.T) {
 		t.Fatal(err)
 	} else if info.TotalObjectsSize != 0 {
 		t.Fatal("wrong size", info.TotalObjectsSize)
-	} else if info.TotalSectorsSize != 0 {
-		t.Fatal("wrong size", info.TotalSectorsSize)
-	} else if info.TotalUploadedSize != 0 {
-		t.Fatal("wrong size", info.TotalUploadedSize)
+	} else if info.TotalSectorsSize != sectorsSize {
+		t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
+	} else if info.TotalUploadedSize != sectorsSize*2 {
+		t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
 	} else if info.NumObjects != 0 {
 		t.Fatal("wrong number of objects", info.NumObjects)
 	}

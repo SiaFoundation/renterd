@@ -639,54 +639,17 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		return api.ObjectsStatsResponse{}, err
 	}
 
-	fromContractSectors := gorm.Expr("contract_sectors cs WHERE 1=1")
-	if opts.Bucket != "" {
-		fromContractSectors = gorm.Expr(`
-				contract_sectors cs
-				INNER JOIN sectors s ON s.id = cs.db_sector_id
-				INNER JOIN slabs sla ON sla.id = s.db_slab_id
-				WHERE EXISTS (
-					SELECT 1 FROM slices sli
-					INNER JOIN objects o ON o.id = sli.db_object_id
-					WHERE sli.db_slab_id = sla.id AND o.db_bucket_id = ?
-				)
-			`, bucketID)
-	}
-
-	var totalSectors uint64
-
-	var sectorsInfo struct {
-		MinID uint
-		MaxID uint
-		Total uint
-	}
-	err = s.db.Model(&dbContractSector{}).
-		Raw("SELECT MIN(db_sector_id) as MinID, MAX(db_sector_id) as MaxID, COUNT(*) as Total FROM contract_sectors").
-		Scan(&sectorsInfo).Error
+	var totalSectors int64
+	err = s.db.
+		Model(&dbSector{}).
+		Count(&totalSectors).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
-	// compute a good batch size for the ids
-	batchSize := (sectorsInfo.MaxID - sectorsInfo.MinID) / (sectorsInfo.Total/500000 + 1)
-
-	if sectorsInfo.Total > 0 {
-		for from, to := sectorsInfo.MinID, sectorsInfo.MinID+batchSize; from <= sectorsInfo.MaxID; from, to = to, to+batchSize {
-			var nSectors uint64
-			err := s.db.
-				Model(&dbSector{}).
-				Raw("SELECT COUNT(*) FROM (SELECT DISTINCT cs.db_sector_id FROM ? AND cs.db_sector_id >= ? AND cs.db_sector_id < ?)", fromContractSectors, from, to).
-				Scan(&nSectors).Error
-			if err != nil {
-				return api.ObjectsStatsResponse{}, err
-			}
-			totalSectors += nSectors
-		}
-	}
-
 	var totalUploaded int64
 	err = s.db.
-		Table("?", fromContractSectors).
+		Model(&dbContractSector{}).
 		Count(&totalUploaded).
 		Error
 	if err != nil {
@@ -699,7 +662,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		NumUnfinishedObjects:       unfinishedObjects,
 		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
 		TotalObjectsSize:           objInfo.TotalObjectsSize,
-		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
+		TotalSectorsSize:           uint64(totalSectors) * rhpv2.SectorSize,
 		TotalUploadedSize:          uint64(totalUploaded) * rhpv2.SectorSize,
 	}, nil
 }
