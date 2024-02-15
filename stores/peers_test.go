@@ -139,4 +139,26 @@ func TestPeers(t *testing.T) {
 	} else if banned {
 		t.Fatal("expected unbanned")
 	}
+
+	// ban by cidr
+	err = ss.Ban("192.168.1.0/30", time.Hour, "too many hits")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert address within subnet is banned
+	banned, err = ss.Banned("192.168.1.1")
+	if err != nil {
+		t.Fatal(err)
+	} else if !banned {
+		t.Fatal("expected banned")
+	}
+
+	// assert address outside subnet is not banned
+	banned, err = ss.Banned("192.168.1.4")
+	if err != nil {
+		t.Fatal(err)
+	} else if banned {
+		t.Fatal("expected unbanned")
+	}
 }
