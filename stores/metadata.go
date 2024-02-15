@@ -641,8 +641,9 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 
 	var totalSectors int64
 	err = s.db.
-		Model(&dbSector{}).
-		Count(&totalSectors).Error
+		Model(&dbSlab{}).
+		Select("COALESCE(SUM(total_shards), 0)").
+		Scan(&totalSectors).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
