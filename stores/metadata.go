@@ -675,7 +675,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 			var nSectors uint64
 			err := s.db.
 				Model(&dbSector{}).
-				Raw("SELECT COUNT(DISTINCT cs.db_sector_id) FROM ? AND cs.db_sector_id >= ? AND cs.db_sector_id < ?", fromContractSectors, from, to).
+				Raw("SELECT COUNT(*) FROM (SELECT DISTINCT cs.db_sector_id FROM ? AND cs.db_sector_id >= ? AND cs.db_sector_id < ?)", fromContractSectors, from, to).
 				Scan(&nSectors).Error
 			if err != nil {
 				return api.ObjectsStatsResponse{}, err
