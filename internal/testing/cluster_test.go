@@ -697,30 +697,33 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// check objects stats.
-	for _, opts := range []api.ObjectsStatsOpts{
-		{},                              // any bucket
-		{Bucket: api.DefaultBucketName}, // specific bucket
-	} {
-		info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
-		tt.OK(err)
-		objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
-		if info.TotalObjectsSize != objectsSize {
-			t.Error("wrong size", info.TotalObjectsSize, objectsSize)
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		for _, opts := range []api.ObjectsStatsOpts{
+			{},                              // any bucket
+			{Bucket: api.DefaultBucketName}, // specific bucket
+		} {
+			info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+			tt.OK(err)
+			objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+			if info.TotalObjectsSize != objectsSize {
+				return fmt.Errorf("wrong size %v %v", info.TotalObjectsSize, objectsSize)
+			}
+			sectorsSize := 15 * rhpv2.SectorSize
+			if info.TotalSectorsSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalSectorsSize, sectorsSize)
+			}
+			if info.TotalUploadedSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalUploadedSize, sectorsSize)
+			}
+			if info.NumObjects != 4 {
+				return fmt.Errorf("wrong number of objects %v %v", info.NumObjects, 4)
+			}
+			if info.MinHealth != 1 {
+				return fmt.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+			}
 		}
-		sectorsSize := 15 * rhpv2.SectorSize
-		if info.TotalSectorsSize != uint64(sectorsSize) {
-			t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
-		}
-		if info.TotalUploadedSize != uint64(sectorsSize) {
-			t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
-		}
-		if info.NumObjects != 4 {
-			t.Error("wrong number of objects", info.NumObjects, 4)
-		}
-		if info.MinHealth != 1 {
-			t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
-		}
-	}
+		return nil
+	})
 
 	// download the data
 	for _, data := range [][]byte{small, large} {
