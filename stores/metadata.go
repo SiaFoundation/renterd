@@ -639,9 +639,18 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		return api.ObjectsStatsResponse{}, err
 	}
 
+	fromSlabs := gorm.Expr("slabs sla")
+	if opts.Bucket != "" {
+		fromSlabs = gorm.Expr(`
+			slabs sla
+			INNER JOIN slices sli ON sli.db_slab_id = sla.id
+			INNER JOIN objects o ON o.id = sli.db_object_id AND (?)
+		`, whereBucket("o"))
+	}
+
 	var totalSectors int64
 	err = s.db.
-		Model(&dbSlab{}).
+		Table("?", fromSlabs).
 		Select("COALESCE(SUM(total_shards), 0)").
 		Scan(&totalSectors).Error
 	if err != nil {
@@ -650,9 +659,16 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 
 	var totalUploaded int64
 	err = s.db.
-		Model(&dbContractSector{}).
-		Count(&totalUploaded).
+		Model(&dbContract{}).
+		Select("COALESCE(SUM(size), 0)").
+		Scan(&totalUploaded).
 		Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
+	}
+
+	var contracts []dbContract
+	err = s.db.Find(&contracts).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
@@ -664,7 +680,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
 		TotalObjectsSize:           objInfo.TotalObjectsSize,
 		TotalSectorsSize:           uint64(totalSectors) * rhpv2.SectorSize,
-		TotalUploadedSize:          uint64(totalUploaded) * rhpv2.SectorSize,
+		TotalUploadedSize:          uint64(totalUploaded),
 	}, nil
 }
 

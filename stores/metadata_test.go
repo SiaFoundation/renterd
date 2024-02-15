@@ -2446,6 +2446,7 @@ func TestObjectsStats(t *testing.T) {
 	// Create a few objects of different size.
 	var objectsSize uint64
 	var sectorsSize uint64
+	var totalUploadedSize uint64
 	for i := 0; i < 2; i++ {
 		obj := newTestObject(1)
 		objectsSize += uint64(obj.TotalSize())
@@ -2458,10 +2459,11 @@ func TestObjectsStats(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, fcid := range fcids {
-						_, err := ss.addTestContract(fcid, hpk)
+						c, err := ss.addTestContract(fcid, hpk)
 						if err != nil {
 							t.Fatal(err)
 						}
+						totalUploadedSize += c.Size
 					}
 				}
 			}
@@ -2482,10 +2484,11 @@ func TestObjectsStats(t *testing.T) {
 	}
 	var newContractID types.FileContractID
 	frand.Read(newContractID[:])
-	_, err = ss.addTestContract(newContractID, types.PublicKey{})
+	c, err := ss.addTestContract(newContractID, types.PublicKey{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	totalUploadedSize += c.Size
 	newContract, err := ss.contract(context.Background(), fileContractID(newContractID))
 	if err != nil {
 		t.Fatal(err)
@@ -2510,8 +2513,8 @@ func TestObjectsStats(t *testing.T) {
 			t.Fatal("wrong size", info.TotalObjectsSize, objectsSize)
 		} else if info.TotalSectorsSize != sectorsSize {
 			t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
-		} else if info.TotalUploadedSize != sectorsSize*2 {
-			t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
+		} else if info.TotalUploadedSize != totalUploadedSize {
+			t.Fatal("wrong size", info.TotalUploadedSize, totalUploadedSize)
 		} else if info.NumObjects != 2 {
 			t.Fatal("wrong number of objects", info.NumObjects, 2)
 		}
@@ -2524,10 +2527,10 @@ func TestObjectsStats(t *testing.T) {
 		t.Fatal(err)
 	} else if info.TotalObjectsSize != 0 {
 		t.Fatal("wrong size", info.TotalObjectsSize)
-	} else if info.TotalSectorsSize != sectorsSize {
-		t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
-	} else if info.TotalUploadedSize != sectorsSize*2 {
-		t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
+	} else if info.TotalSectorsSize != 0 {
+		t.Fatal("wrong size", info.TotalSectorsSize, 0)
+	} else if info.TotalUploadedSize != totalUploadedSize {
+		t.Fatal("wrong size", info.TotalUploadedSize, totalUploadedSize)
 	} else if info.NumObjects != 0 {
 		t.Fatal("wrong number of objects", info.NumObjects)
 	}
