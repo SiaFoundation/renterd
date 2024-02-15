@@ -61,6 +61,7 @@ func TestSQLHostDB(t *testing.T) {
 		blockHeight: 42,
 		blockID:     types.BlockID{1, 2, 3},
 		timestamp:   time.Now().UTC().Round(time.Second),
+		hk:          hk,
 		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address",
 		},
@@ -110,12 +111,12 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert another announcement for an unknown host.
 	unknownKeyAnn := a
-	unknownKeyAnn.pk = types.PublicKey{1, 4, 7}
+	unknownKeyAnn.hk = types.PublicKey{1, 4, 7}
 	err = ss.insertTestAnnouncement(unknownKeyAnn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h3, err := ss.Host(ctx, unknownKeyAnn.pk)
+	h3, err := ss.Host(ctx, unknownKeyAnn.hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,16 +512,17 @@ func TestInsertAnnouncements(t *testing.T) {
 		timestamp:   time.Now(),
 		blockHeight: 1,
 		blockID:     types.BlockID{1},
+		hk:          types.GeneratePrivateKey().PublicKey(),
 		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "foo.bar:1000",
 		},
 	}
 	ann2 := announcement{
-		pk:               types.GeneratePrivateKey().PublicKey(),
+		hk:               types.GeneratePrivateKey().PublicKey(),
 		HostAnnouncement: chain.HostAnnouncement{},
 	}
 	ann3 := announcement{
-		pk:               types.GeneratePrivateKey().PublicKey(),
+		hk:               types.GeneratePrivateKey().PublicKey(),
 		HostAnnouncement: chain.HostAnnouncement{},
 	}
 
@@ -534,7 +536,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	}
 	ann.Model = Model{} // ignore
 	expectedAnn := dbAnnouncement{
-		HostKey:     publicKey(ann1.pk),
+		HostKey:     publicKey(ann1.hk),
 		BlockHeight: 1,
 		BlockID:     types.BlockID{1}.String(),
 		NetAddress:  "foo.bar:1000",
@@ -1096,10 +1098,8 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	s.unappliedHostKeys[hk] = struct{}{}
 	s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
-		pk: hk,
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: na,
-		},
+		hk:               hk,
+		HostAnnouncement: chain.HostAnnouncement{NetAddress: na},
 	}}...)
 	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)

@@ -254,19 +254,18 @@ func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate)
 	if time.Since(b.Timestamp) > cs.announcementMaxAge {
 		return // ignore old announcements
 	}
-
-	chain.ForEachHostAnnouncement(b, func(pk types.PublicKey, ha chain.HostAnnouncement) {
+	chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
 		if ha.NetAddress == "" {
 			return // ignore
 		}
 		cs.announcements = append(cs.announcements, announcement{
-			pk:               pk,
-			HostAnnouncement: ha,
 			blockHeight:      cau.State.Index.Height,
 			blockID:          b.ID(),
+			hk:               hk,
 			timestamp:        b.Timestamp,
+			HostAnnouncement: ha,
 		})
-		cs.hosts[pk] = struct{}{}
+		cs.hosts[hk] = struct{}{}
 	})
 }
 

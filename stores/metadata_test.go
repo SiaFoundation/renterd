@@ -219,9 +219,9 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Add an announcement.
 	err = ss.insertTestAnnouncement(announcement{
-		Announcement: chain.HostAnnouncement{
+		hk: hk,
+		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address",
-			PublicKey:  hk,
 		},
 	})
 	if err != nil {
@@ -515,7 +515,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Add announcements.
 	err = ss.insertTestAnnouncement(announcement{
-		pk: hk,
+		hk: hk,
 		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address",
 		},
@@ -524,7 +524,7 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = ss.insertTestAnnouncement(announcement{
-		pk: hk2,
+		hk: hk2,
 		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address2",
 		},
@@ -2279,7 +2279,7 @@ func TestRecordContractSpending(t *testing.T) {
 
 	// Add an announcement.
 	err = ss.insertTestAnnouncement(announcement{
-		pk: hk,
+		hk: hk,
 		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address",
 		},
