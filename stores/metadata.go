@@ -2329,7 +2329,7 @@ func (s *SQLStore) objectHydrate(ctx context.Context, tx *gorm.DB, bucket, path 
 			obj[0].ObjectModTime,
 			obj[0].ObjectSize,
 		),
-		Object: object.Object{
+		Object: &object.Object{
 			Key:   key,
 			Slabs: slabs,
 		},
