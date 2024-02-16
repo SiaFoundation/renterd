@@ -1,6 +1,7 @@
 -- drop tables
 DROP TABLE IF EXISTS `siacoin_elements`;
 DROP TABLE IF EXISTS `transactions`;
+-- TODO: DROP TABLE IF EXISTS `consensus_infos`;
 
 -- dbWalletEvent
 CREATE TABLE `wallet_events` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`event_id` blob NOT NULL,`inflow` text,`outflow` text,`transaction` text,`maturity_height` integer,`source` text,`timestamp` integer,`height` integer, `block_id` blob);

@@ -1,6 +1,7 @@
 -- drop tables
 DROP TABLE IF EXISTS `siacoin_elements`;
 DROP TABLE IF EXISTS `transactions`;
+-- TODO: DROP TABLE IF EXISTS `consensus_infos`;
 
 -- dbWalletEvent
 CREATE TABLE `wallet_events` (

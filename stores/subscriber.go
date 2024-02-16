@@ -212,7 +212,7 @@ func (cs *chainSubscriber) commit() error {
 	cs.contractState = make(map[types.Hash256]contractState)
 	cs.hosts = make(map[types.PublicKey]struct{})
 	cs.mayCommit = false
-	cs.elements = nil
+	cs.elements = make(map[types.Hash256]outputChange)
 	cs.proofs = make(map[types.Hash256]uint64)
 	cs.revisions = make(map[types.Hash256]revisionUpdate)
 	cs.events = nil
@@ -480,9 +480,6 @@ func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error, opts ...
 
 // AddEvents is called with all relevant events added in the update.
 func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	for _, event := range events {
 		cs.events = append(cs.events, eventChange{
 			addition: true,
@@ -505,9 +502,6 @@ func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
 // AddSiacoinElements is called with all new siacoin elements in the
 // update. Ephemeral siacoin elements are not included.
 func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	for _, el := range elements {
 		if _, ok := cs.elements[el.ID]; ok {
 			return fmt.Errorf("siacoin element %q already exists", el.ID)
@@ -533,9 +527,6 @@ func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) 
 // RemoveSiacoinElements is called with all siacoin elements that were
 // spent in the update.
 func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	for _, id := range ids {
 		if _, ok := cs.elements[types.Hash256(id)]; !ok {
 			return fmt.Errorf("siacoin element %q does not exist", id)
@@ -548,9 +539,6 @@ func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) er
 // WalletStateElements returns all state elements in the database. It is used
 // to update the proofs of all state elements affected by the update.
 func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement, _ error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	// TODO: should we keep all siacoin elements in memory at all times?
 	for id, el := range cs.elements {
 		elements = append(elements, types.StateElement{
@@ -565,9 +553,6 @@ func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement,
 // UpdateStateElements updates the proofs of all state elements affected by the
 // update.
 func (cs *chainSubscriber) UpdateStateElements(elements []types.StateElement) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	for _, se := range elements {
 		curr := cs.elements[se.ID]
 		curr.se.MerkleProof = se.MerkleProof
@@ -580,9 +565,6 @@ func (cs *chainSubscriber) UpdateStateElements(elements []types.StateElement) er
 // RevertIndex is called with the chain index that is being reverted. Any events
 // and siacoin elements that were created by the index should be removed.
 func (cs *chainSubscriber) RevertIndex(index types.ChainIndex) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	// remove any events that were added in the reverted block
 	filtered := cs.events[:0]
 	for i := range cs.events {

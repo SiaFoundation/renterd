@@ -48,36 +48,6 @@ func NewClient(addr, password string) *Client {
 	}
 }
 
-func convertToSiacoinElements(sces []wallet.SiacoinElement) []api.SiacoinElement {
-	elements := make([]api.SiacoinElement, len(sces))
-	for i, sce := range sces {
-		elements[i] = api.SiacoinElement{
-			ID: sce.StateElement.ID,
-			SiacoinOutput: types.SiacoinOutput{
-				Value:   sce.SiacoinOutput.Value,
-				Address: sce.SiacoinOutput.Address,
-			},
-			MaturityHeight: sce.MaturityHeight,
-		}
-	}
-	return elements
-}
-
-func convertToTransactions(events []wallet.Event) []api.Transaction {
-	transactions := make([]api.Transaction, len(events))
-	for i, e := range events {
-		transactions[i] = api.Transaction{
-			Raw:       e.Transaction,
-			Index:     e.Index,
-			ID:        types.TransactionID(e.ID),
-			Inflow:    e.Inflow,
-			Outflow:   e.Outflow,
-			Timestamp: e.Timestamp,
-		}
-	}
-	return transactions
-}
-
 type (
 	// A ChainManager manages blockchain state.
 	ChainManager interface {
@@ -587,7 +557,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	if before.IsZero() && since.IsZero() {
 		events, err := b.w.Events(offset, limit)
 		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(convertToTransactions(events))
+			jc.Encode(api.ConvertToTransactions(events))
 		}
 		return
 	}
@@ -607,9 +577,9 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	}
 	events = filtered
 	if limit == 0 || limit == -1 {
-		jc.Encode(convertToTransactions(events[offset:]))
+		jc.Encode(api.ConvertToTransactions(events[offset:]))
 	} else {
-		jc.Encode(convertToTransactions(events[offset : offset+limit]))
+		jc.Encode(api.ConvertToTransactions(events[offset : offset+limit]))
 	}
 	return
 }
@@ -617,7 +587,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 func (b *bus) walletOutputsHandler(jc jape.Context) {
 	utxos, err := b.w.SpendableOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
-		jc.Encode(convertToSiacoinElements(utxos))
+		jc.Encode(api.ConvertToSiacoinElements(utxos))
 	}
 }
 

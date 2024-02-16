@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 )
 
 type (
@@ -39,6 +40,36 @@ type (
 		Timestamp time.Time           `json:"timestamp"`
 	}
 )
+
+func ConvertToSiacoinElements(sces []wallet.SiacoinElement) []SiacoinElement {
+	elements := make([]SiacoinElement, len(sces))
+	for i, sce := range sces {
+		elements[i] = SiacoinElement{
+			ID: sce.StateElement.ID,
+			SiacoinOutput: types.SiacoinOutput{
+				Value:   sce.SiacoinOutput.Value,
+				Address: sce.SiacoinOutput.Address,
+			},
+			MaturityHeight: sce.MaturityHeight,
+		}
+	}
+	return elements
+}
+
+func ConvertToTransactions(events []wallet.Event) []Transaction {
+	transactions := make([]Transaction, len(events))
+	for i, e := range events {
+		transactions[i] = Transaction{
+			Raw:       e.Transaction,
+			Index:     e.Index,
+			ID:        types.TransactionID(e.ID),
+			Inflow:    e.Inflow,
+			Outflow:   e.Outflow,
+			Timestamp: e.Timestamp,
+		}
+	}
+	return transactions
+}
 
 type (
 	// UploadParams contains the metadata needed by a worker to upload an object.
