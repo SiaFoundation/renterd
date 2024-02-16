@@ -2354,7 +2354,8 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// start a new multipart upload. We upload the parts in reverse order
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	key := object.GenerateEncryptionKey()
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: &key})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")

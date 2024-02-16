@@ -405,7 +405,7 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
 	convertToSiaMetadataHeaders(meta)
 	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, api.CreateMultipartOptions{
-		Key:      object.NoOpKey,
+		Key:      &object.NoOpKey,
 		MimeType: meta["Content-Type"],
 		Metadata: api.ExtractObjectUserMetadataFrom(meta),
 	})
