@@ -245,9 +245,10 @@ func (b *bus) Handler() http.Handler {
 		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
 		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
 
-		"GET    /alerts":          b.handleGETAlerts,
-		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
-		"POST   /alerts/register": b.handlePOSTAlertsRegister,
+		"GET    /alerts":            b.handleGETAlerts,
+		"POST   /alerts/dismiss":    b.handlePOSTAlertsDismiss,
+		"POST   /alerts/dismissall": b.handlePOSTAlertsDismissAll,
+		"POST   /alerts/register":   b.handlePOSTAlertsRegister,
 
 		"GET    /autopilots":    b.autopilotsListHandlerGET,
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
@@ -1715,8 +1716,17 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) handleGETAlerts(c jape.Context) {
-	c.Encode(b.alertMgr.Active())
+func (b *bus) handleGETAlerts(jc jape.Context) {
+	offset, limit := 0, -1
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
+		return
+	}
+	jc.Encode(b.alertMgr.Active(offset, limit))
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
@@ -1725,6 +1735,10 @@ func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 		return
 	}
 	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
+}
+
+func (b *bus) handlePOSTAlertsDismissAll(jc jape.Context) {
+	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
 }
 
 func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
