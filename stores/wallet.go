@@ -65,34 +65,37 @@ func (s *SQLStore) Tip() (types.ChainIndex, error) {
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
-func (s *SQLStore) UnspentSiacoinElements() ([]types.SiacoinElement, error) {
+func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 	var elems []dbSiacoinElement
 	if err := s.db.Find(&elems).Error; err != nil {
 		return nil, err
 	}
 
-	utxo := make([]types.SiacoinElement, len(elems))
+	utxo := make([]wallet.SiacoinElement, len(elems))
 	for i := range elems {
-		utxo[i] = types.SiacoinElement{
-			StateElement: types.StateElement{
-				ID: types.Hash256(elems[i].OutputID),
-				// TODO: LeafIndex missing
-				// TODO: MerkleProof missing
+		utxo[i] = wallet.SiacoinElement{
+			SiacoinElement: types.SiacoinElement{
+				StateElement: types.StateElement{
+					ID: types.Hash256(elems[i].OutputID),
+					// TODO: LeafIndex missing
+					// TODO: MerkleProof missing
+				},
+				SiacoinOutput: types.SiacoinOutput{
+					Address: types.Address(elems[i].Address),
+					Value:   types.Currency(elems[i].Value),
+				},
+				MaturityHeight: elems[i].MaturityHeight,
 			},
-			MaturityHeight: elems[i].MaturityHeight,
-			SiacoinOutput: types.SiacoinOutput{
-				Address: types.Address(elems[i].Address),
-				Value:   types.Currency(elems[i].Value),
-			},
+			// TODO: Index missing
 		}
 	}
 	return utxo, nil
 }
 
-// Transactions returns a paginated list of transactions ordered by maturity
+// WalletEvents returns a paginated list of transactions ordered by maturity
 // height, descending. If no more transactions are available, (nil, nil) should
 // be returned.
-func (s *SQLStore) Transactions(offset, limit int) ([]wallet.Transaction, error) {
+func (s *SQLStore) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	if limit == 0 || limit == -1 {
 		limit = math.MaxInt64
 	}
@@ -105,15 +108,15 @@ func (s *SQLStore) Transactions(offset, limit int) ([]wallet.Transaction, error)
 		return nil, err
 	}
 
-	txns := make([]wallet.Transaction, len(dbTxns))
+	txns := make([]wallet.Event, len(dbTxns))
 	for i := range dbTxns {
-		txns[i] = wallet.Transaction{
+		txns[i] = wallet.Event{
 			Transaction: dbTxns[i].Raw,
 			Index: types.ChainIndex{
 				Height: dbTxns[i].Height,
 				ID:     types.BlockID(dbTxns[i].BlockID),
 			},
-			ID:        types.TransactionID(dbTxns[i].TransactionID),
+			ID:        types.Hash256(dbTxns[i].TransactionID),
 			Inflow:    types.Currency(dbTxns[i].Inflow),
 			Outflow:   types.Currency(dbTxns[i].Outflow),
 			Timestamp: time.Unix(dbTxns[i].Timestamp, 0),
@@ -122,8 +125,8 @@ func (s *SQLStore) Transactions(offset, limit int) ([]wallet.Transaction, error)
 	return txns, nil
 }
 
-// TransactionCount returns the total number of transactions in the wallet.
-func (s *SQLStore) TransactionCount() (uint64, error) {
+// WalletEventCount returns the total number of transactions in the wallet.
+func (s *SQLStore) WalletEventCount() (uint64, error) {
 	var count int64
 	if err := s.db.Model(&dbTransaction{}).Count(&count).Error; err != nil {
 		return 0, err

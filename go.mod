@@ -1,8 +1,8 @@
 module go.sia.tech/renterd
 
-go 1.21
+go 1.21.6
 
-toolchain go1.21.6
+toolchain go1.22.0
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3
@@ -14,7 +14,7 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.1
-	go.sia.tech/coreutils v0.0.1
+	go.sia.tech/coreutils v0.0.2
 	go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2
 	go.sia.tech/hostd v1.0.2-beta.2.0.20240131203318-9d84aad6ef13
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
@@ -22,8 +22,8 @@ require (
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
 	go.sia.tech/web/renterd v0.43.0
 	go.uber.org/zap v1.26.0
-	golang.org/x/crypto v0.18.0
-	golang.org/x/term v0.16.0
+	golang.org/x/crypto v0.19.0
+	golang.org/x/term v0.17.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.2
 	gorm.io/driver/sqlite v1.5.4
@@ -78,7 +78,7 @@ require (
 	go.sia.tech/web v0.0.0-20231213145933-3f175a86abff // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
-	golang.org/x/sys v0.16.0 // indirect
+	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.16.1 // indirect
