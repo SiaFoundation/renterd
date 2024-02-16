@@ -231,10 +231,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// check if any used hosts have lost data to warn the user
+	var toDismiss []types.Hash256
 	for _, h := range hosts {
 		if h.Interactions.LostSectors > 0 {
 			c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
+		} else {
+			toDismiss = append(toDismiss, alertIDForHost(alertLostSectorsID, h.PublicKey))
 		}
+	}
+	if len(toDismiss) > 0 {
+		c.ap.DismissAlert(ctx, toDismiss...)
 	}
 
 	// fetch candidate hosts

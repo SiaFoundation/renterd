@@ -48,8 +48,8 @@ func (ap *Autopilot) RegisterAlert(ctx context.Context, a alerts.Alert) {
 	}
 }
 
-func (ap *Autopilot) DismissAlert(ctx context.Context, id types.Hash256) {
-	if err := ap.alerts.DismissAlerts(ctx, id); err != nil {
+func (ap *Autopilot) DismissAlert(ctx context.Context, ids ...types.Hash256) {
+	if err := ap.alerts.DismissAlerts(ctx, ids...); err != nil {
 		ap.logger.Errorf("failed to dismiss alert: %v", err)
 	}
 }
