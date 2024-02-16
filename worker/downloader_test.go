@@ -16,7 +16,7 @@ func TestDownloaderStopped(t *testing.T) {
 
 	req := sectorDownloadReq{
 		resps: &sectorResponses{
-			c: make(chan struct{}),
+			c: make(chan struct{}, 1),
 		},
 	}
 	dl.enqueue(&req)
