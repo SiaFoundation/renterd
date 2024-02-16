@@ -2,6 +2,7 @@ package stores
 
 import (
 	"database/sql/driver"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ type (
 	unixTimeMS     time.Time
 	datetime       time.Time
 	currency       types.Currency
+	bCurrency      types.Currency
 	fileContractID types.FileContractID
 	hash256        types.Hash256
 	publicKey      types.PublicKey
@@ -337,4 +339,30 @@ func (u *unsigned64) Scan(value interface{}) error {
 // Value returns a datetime value, implements driver.Valuer interface.
 func (u unsigned64) Value() (driver.Value, error) {
 	return int64(u), nil
+}
+
+func (bCurrency) GormDataType() string {
+	return "bytes"
+}
+
+// Scan implements the sql.Scanner interface.
+func (sc *bCurrency) Scan(src any) error {
+	buf, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot scan %T to Currency", src)
+	} else if len(buf) != 16 {
+		return fmt.Errorf("cannot scan %d bytes to Currency", len(buf))
+	}
+
+	sc.Lo = binary.LittleEndian.Uint64(buf[:8])
+	sc.Hi = binary.LittleEndian.Uint64(buf[8:])
+	return nil
+}
+
+// Value implements the driver.Valuer interface.
+func (sc bCurrency) Value() (driver.Value, error) {
+	buf := make([]byte, 16)
+	binary.LittleEndian.PutUint64(buf[:8], sc.Lo)
+	binary.LittleEndian.PutUint64(buf[8:], sc.Hi)
+	return buf, nil
 }
