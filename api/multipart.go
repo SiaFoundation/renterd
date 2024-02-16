@@ -46,9 +46,10 @@ type (
 	}
 
 	CreateMultipartOptions struct {
-		Key      object.EncryptionKey
-		MimeType string
-		Metadata ObjectUserMetadata
+		GenerateKey bool
+		Key         object.EncryptionKey
+		MimeType    string
+		Metadata    ObjectUserMetadata
 	}
 )
 
@@ -86,6 +87,10 @@ type (
 		Key      object.EncryptionKey `json:"key"`
 		MimeType string               `json:"mimeType"`
 		Metadata ObjectUserMetadata   `json:"metadata"`
+
+		// TODO: The next major version change should invert this to create a
+		// key by default
+		GenerateKey bool `json:"generateKey"`
 	}
 
 	MultipartCreateResponse struct {

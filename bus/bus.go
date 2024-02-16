@@ -2178,7 +2178,9 @@ func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
 	}
 
 	key := req.Key
-	if key == (object.EncryptionKey{}) {
+	if req.GenerateKey {
+		key = object.GenerateEncryptionKey()
+	} else if key == (object.EncryptionKey{}) {
 		key = object.NoOpKey
 	}
 
