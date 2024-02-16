@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -404,9 +405,17 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 
 	// TODO: should we extend the API with a way to accept multiple blocks at once?
 	// TODO: should we deprecate this route in favor of /addblocks
-
 	if jc.Check("failed to accept block", b.cm.AddBlocks([]types.Block{block})) != nil {
 		return
+	}
+
+	if block.V2 == nil {
+		b.s.BroadcastHeader(gateway.BlockHeader{
+			ParentID:   block.ParentID,
+			Nonce:      block.Nonce,
+			Timestamp:  block.Timestamp,
+			MerkleRoot: block.MerkleRoot(),
+		})
 	}
 }
 
@@ -416,7 +425,11 @@ func (b *bus) syncerAddrHandler(jc jape.Context) {
 }
 
 func (b *bus) syncerPeersHandler(jc jape.Context) {
-	jc.Encode(b.s.Peers())
+	var peers []string
+	for _, p := range b.s.Peers() {
+		peers = append(peers, p.String())
+	}
+	jc.Encode(peers)
 }
 
 func (b *bus) syncerConnectHandler(jc jape.Context) {
@@ -448,11 +461,17 @@ func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
 
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
-	if jc.Decode(&txnSet) == nil {
-		// TODO: should we handle 'known' return value
-		_, err := b.cm.AddPoolTransactions(txnSet)
-		jc.Check("couldn't broadcast transaction set", err)
+	if jc.Decode(&txnSet) != nil {
+		return
 	}
+
+	// TODO: should we handle 'known' return value
+	_, err := b.cm.AddPoolTransactions(txnSet)
+	if jc.Check("couldn't broadcast transaction set", err) != nil {
+		return
+	}
+
+	b.s.BroadcastTransactionSet(txnSet)
 }
 
 func (b *bus) bucketsHandlerGET(jc jape.Context) {
@@ -597,6 +616,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		return
 	}
 	txn := wfr.Transaction
+
 	if len(txn.MinerFees) == 0 {
 		// if no fees are specified, we add some
 		fee := b.cm.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
@@ -689,6 +709,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
+
 	b.w.SignTransaction(&txn, toSign, ExplicitCoveredFields(txn))
 
 	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)

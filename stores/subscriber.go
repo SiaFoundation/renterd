@@ -36,16 +36,33 @@ type (
 
 		announcements []announcement
 		contractState map[types.Hash256]contractState
-		elements      map[types.Hash256]outputChange
 		events        []eventChange
 		hosts         map[types.PublicKey]struct{}
 		mayCommit     bool
+		outputs       map[types.Hash256]outputChange
 		proofs        map[types.Hash256]uint64
 		revisions     map[types.Hash256]revisionUpdate
 	}
 )
 
-func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address, ancmtMaxAge time.Duration) *chainSubscriber {
+func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address, ancmtMaxAge time.Duration) (*chainSubscriber, error) {
+	var activeFCIDs, archivedFCIDs []fileContractID
+	if err := db.Model(&dbContract{}).
+		Select("fcid").
+		Find(&activeFCIDs).Error; err != nil {
+		return nil, err
+	}
+	if err := db.Model(&dbArchivedContract{}).
+		Select("fcid").
+		Find(&archivedFCIDs).Error; err != nil {
+		return nil, err
+	}
+
+	knownContracts := make(map[types.FileContractID]struct{})
+	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
+		knownContracts[types.FileContractID(fcid)] = struct{}{}
+	}
+
 	return &chainSubscriber{
 		announcementMaxAge: ancmtMaxAge,
 		db:                 db,
@@ -55,12 +72,13 @@ func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Du
 		lastSave:           time.Now(),
 		persistInterval:    persistInterval,
 
-		elements:      make(map[types.Hash256]outputChange),
-		contractState: make(map[types.Hash256]contractState),
-		hosts:         make(map[types.PublicKey]struct{}),
-		proofs:        make(map[types.Hash256]uint64),
-		revisions:     make(map[types.Hash256]revisionUpdate),
-	}
+		contractState:  make(map[types.Hash256]contractState),
+		hosts:          make(map[types.PublicKey]struct{}),
+		outputs:        make(map[types.Hash256]outputChange),
+		proofs:         make(map[types.Hash256]uint64),
+		revisions:      make(map[types.Hash256]revisionUpdate),
+		knownContracts: knownContracts,
+	}, nil
 }
 
 func (cs *chainSubscriber) Close() error {
@@ -127,6 +145,12 @@ func (cs *chainSubscriber) Tip() types.ChainIndex {
 	return cs.tip
 }
 
+func (cs *chainSubscriber) addKnownContract(id types.FileContractID) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.knownContracts[id] = struct{}{}
+}
+
 func (cs *chainSubscriber) isKnownContract(id types.FileContractID) bool {
 	_, ok := cs.knownContracts[id]
 	return ok
@@ -174,7 +198,7 @@ func (cs *chainSubscriber) commit() error {
 				return fmt.Errorf("%w; failed to update proof height", err)
 			}
 		}
-		for _, oc := range cs.elements {
+		for _, oc := range cs.outputs {
 			if oc.addition {
 				err = applyUnappliedOutputAdditions(tx, oc.se)
 			} else {
@@ -186,9 +210,9 @@ func (cs *chainSubscriber) commit() error {
 		}
 		for _, tc := range cs.events {
 			if tc.addition {
-				err = applyUnappliedTxnAdditions(tx, tc.event)
+				err = applyUnappliedEventAdditions(tx, tc.event)
 			} else {
-				err = applyUnappliedTxnRemovals(tx, tc.event.EventID)
+				err = applyUnappliedEventRemovals(tx, tc.event.EventID)
 			}
 			if err != nil {
 				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
@@ -212,7 +236,7 @@ func (cs *chainSubscriber) commit() error {
 	cs.contractState = make(map[types.Hash256]contractState)
 	cs.hosts = make(map[types.PublicKey]struct{})
 	cs.mayCommit = false
-	cs.elements = make(map[types.Hash256]outputChange)
+	cs.outputs = make(map[types.Hash256]outputChange)
 	cs.proofs = make(map[types.Hash256]uint64)
 	cs.revisions = make(map[types.Hash256]revisionUpdate)
 	cs.events = nil
@@ -227,7 +251,7 @@ func (cs *chainSubscriber) shouldCommit() bool {
 	hasAnnouncements := len(cs.announcements) > 0
 	hasRevisions := len(cs.revisions) > 0
 	hasProofs := len(cs.proofs) > 0
-	hasOutputChanges := len(cs.elements) > 0
+	hasOutputChanges := len(cs.outputs) > 0
 	hasTxnChanges := len(cs.events) > 0
 	hasContractState := len(cs.contractState) > 0
 	return mayCommit || persistIntervalPassed || hasAnnouncements || hasRevisions ||
@@ -503,10 +527,10 @@ func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
 // update. Ephemeral siacoin elements are not included.
 func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) error {
 	for _, el := range elements {
-		if _, ok := cs.elements[el.ID]; ok {
+		if _, ok := cs.outputs[el.ID]; ok {
 			return fmt.Errorf("siacoin element %q already exists", el.ID)
 		}
-		cs.elements[el.ID] = outputChange{
+		cs.outputs[el.ID] = outputChange{
 			addition: true,
 			se: dbWalletOutput{
 				OutputID:       hash256(el.ID),
@@ -528,10 +552,19 @@ func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) 
 // spent in the update.
 func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
 	for _, id := range ids {
-		if _, ok := cs.elements[types.Hash256(id)]; !ok {
-			return fmt.Errorf("siacoin element %q does not exist", id)
+		// TODO: not sure if we need to check whether there's already an output
+		// change for this id
+		if _, ok := cs.outputs[types.Hash256(id)]; ok {
+			return fmt.Errorf("siacoin element %q conflicts", id)
 		}
-		delete(cs.elements, types.Hash256(id))
+
+		// TODO: don't we need index info to revert this output change?
+		cs.outputs[types.Hash256(id)] = outputChange{
+			addition: false,
+			se: dbWalletOutput{
+				OutputID: hash256(id),
+			},
+		}
 	}
 	return nil
 }
@@ -540,7 +573,7 @@ func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) er
 // to update the proofs of all state elements affected by the update.
 func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement, _ error) {
 	// TODO: should we keep all siacoin elements in memory at all times?
-	for id, el := range cs.elements {
+	for id, el := range cs.outputs {
 		elements = append(elements, types.StateElement{
 			ID:          id,
 			LeafIndex:   el.se.LeafIndex,
@@ -554,10 +587,10 @@ func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement,
 // update.
 func (cs *chainSubscriber) UpdateStateElements(elements []types.StateElement) error {
 	for _, se := range elements {
-		curr := cs.elements[se.ID]
+		curr := cs.outputs[se.ID]
 		curr.se.MerkleProof = se.MerkleProof
 		curr.se.LeafIndex = se.LeafIndex
-		cs.elements[se.ID] = curr
+		cs.outputs[se.ID] = curr
 	}
 	return nil
 }
@@ -575,9 +608,9 @@ func (cs *chainSubscriber) RevertIndex(index types.ChainIndex) error {
 	cs.events = filtered
 
 	// remove any siacoin elements that were added in the reverted block
-	for id, el := range cs.elements {
+	for id, el := range cs.outputs {
 		if el.se.Index() == index {
-			delete(cs.elements, id)
+			delete(cs.outputs, id)
 		}
 	}
 

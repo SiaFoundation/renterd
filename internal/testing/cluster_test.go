@@ -101,7 +101,7 @@ func TestNewTestCluster(t *testing.T) {
 	// revision first.
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
-	cluster.MineBlocks(int(contract.WindowStart - cs.BlockHeight - 4))
+	cluster.MineBlocks(contract.WindowStart - cs.BlockHeight - 4)
 	cluster.Sync()
 	if cs.LastBlockTime.IsZero() {
 		t.Fatal("last block time not set")
@@ -1341,7 +1341,7 @@ func TestContractArchival(t *testing.T) {
 	endHeight := contracts[0].WindowEnd
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
-	cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1))
+	cluster.MineBlocks(endHeight - cs.BlockHeight + 1)
 
 	// check that we have 0 contracts
 	tt.Retry(100, 100*time.Millisecond, func() error {

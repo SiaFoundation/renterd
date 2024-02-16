@@ -1348,7 +1348,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if isErr(err, wallet.ErrNotEnoughFunds) {
+		if isErr(err, wallet.ErrNotEnoughFunds) || isErr(err, api.ErrInsufficientBalance) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1431,7 +1431,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 			return api.ContractMetadata{}, true, err
 		}
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if isErr(err, wallet.ErrNotEnoughFunds) {
+		if isErr(err, wallet.ErrNotEnoughFunds) || isErr(err, api.ErrInsufficientBalance) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1495,7 +1495,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		if isErr(err, wallet.ErrNotEnoughFunds) {
+		if isErr(err, wallet.ErrNotEnoughFunds) || isErr(err, api.ErrInsufficientBalance) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err

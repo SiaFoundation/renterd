@@ -33,6 +33,7 @@ import (
 // RHP4 TODOs:
 // - get rid of dbConsensusInfo
 // - get rid of returned chain manager in bus constructor
+// - pass last tip to AddSubscriber
 // - all wallet metrics support
 // - add UPNP support
 
@@ -146,7 +147,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}
-	s := syncer.New(l, cm, sqlStore, header)
+	s := syncer.New(l, cm, sqlStore, header, syncer.WithSyncInterval(100*time.Millisecond), syncer.WithLogger(logger.Named("syncer")))
 
 	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {

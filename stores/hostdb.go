@@ -906,39 +906,6 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ho
 	})
 }
 
-func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
-	height := uint64(cc.InitialHeight())
-	for range cc.RevertedBlocks {
-		height--
-	}
-
-	var newAnnouncements []announcement
-	for _, sb := range cc.AppliedBlocks {
-		var b types.Block
-		convertToCore(sb, (*types.V1Block)(&b))
-
-		// Process announcements, but only if they are not too old.
-		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			chain.ForEachHostAnnouncement(types.Block(b), func(hk types.PublicKey, ha chain.HostAnnouncement) {
-				if ha.NetAddress == "" {
-					return
-				}
-				newAnnouncements = append(newAnnouncements, announcement{
-					blockHeight:      height,
-					blockID:          b.ID(),
-					hk:               hk,
-					timestamp:        b.Timestamp,
-					HostAnnouncement: ha,
-				})
-				ss.unappliedHostKeys[hk] = struct{}{}
-			})
-		}
-		height++
-	}
-
-	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
-}
-
 // excludeBlocked can be used as a scope for a db transaction to exclude blocked
 // hosts.
 func (ss *SQLStore) excludeBlocked(db *gorm.DB) *gorm.DB {

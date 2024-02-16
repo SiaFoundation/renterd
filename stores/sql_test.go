@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -226,63 +225,6 @@ func (s *SQLStore) overrideSlabHealth(objectID string, health float64) (err erro
 	return
 }
 
-// TestConsensusReset is a unit test for ResetConsensusSubscription.
-func TestConsensusReset(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-	if ss.ccid != modules.ConsensusChangeBeginning {
-		t.Fatal("wrong ccid", ss.ccid, modules.ConsensusChangeBeginning)
-	}
-
-	// Manually insert into the consenus_infos, the transactions and siacoin_elements tables.
-	ccid2 := modules.ConsensusChangeID{1}
-	ss.db.Create(&dbConsensusInfo{
-		CCID: ccid2[:],
-	})
-	ss.db.Create(&dbWalletOutput{
-		OutputID: hash256{2},
-	})
-	ss.db.Create(&dbWalletEvent{
-		EventID: hash256{3},
-	})
-
-	// Reset the consensus.
-	if err := ss.ResetConsensusSubscription(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Reopen the SQLStore.
-	ss = ss.Reopen()
-	defer ss.Close()
-
-	// Check tables.
-	var count int64
-	if err := ss.db.Model(&dbConsensusInfo{}).Count(&count).Error; err != nil || count != 1 {
-		t.Fatal("table should have 1 entry", err, count)
-	} else if err = ss.db.Model(&dbWalletEvent{}).Count(&count).Error; err != nil || count > 0 {
-		t.Fatal("table not empty", err)
-	} else if err = ss.db.Model(&dbWalletOutput{}).Count(&count).Error; err != nil || count > 0 {
-		t.Fatal("table not empty", err)
-	}
-
-	// Check consensus info.
-	var ci dbConsensusInfo
-	if err := ss.db.Take(&ci).Error; err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(ci.CCID, modules.ConsensusChangeBeginning[:]) {
-		t.Fatal("wrong ccid", ci.CCID, modules.ConsensusChangeBeginning)
-	} else if ci.Height != 0 {
-		t.Fatal("wrong height", ci.Height, 0)
-	}
-
-	// Check SQLStore.
-	if ss.chainIndex.Height != 0 {
-		t.Fatal("wrong height", ss.chainIndex.Height, 0)
-	} else if ss.chainIndex.ID != (types.BlockID{}) {
-		t.Fatal("wrong id", ss.chainIndex.ID, types.BlockID{})
-	}
-}
-
 type queryPlanExplain struct {
 	ID      int    `json:"id"`
 	Parent  int    `json:"parent"`
@@ -332,27 +274,5 @@ func TestQueryPlan(t *testing.T) {
 			strings.Contains(explain.Detail, "USING COVERING INDEX")) {
 			t.Fatalf("query '%s' should use an index, instead the plan was '%s'", query, explain.Detail)
 		}
-	}
-}
-
-func TestApplyUpdatesErr(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	before := ss.lastSave
-
-	// drop consensus_infos table to cause update to fail
-	if err := ss.db.Exec("DROP TABLE consensus_infos").Error; err != nil {
-		t.Fatal(err)
-	}
-
-	// call applyUpdates with 'force' set to true
-	if err := ss.applyUpdates(true); err == nil {
-		t.Fatal("expected error")
-	}
-
-	// save shouldn't have happened
-	if ss.lastSave != before {
-		t.Fatal("lastSave should not have changed")
 	}
 }
