@@ -239,11 +239,11 @@ func TestConsensusReset(t *testing.T) {
 	ss.db.Create(&dbConsensusInfo{
 		CCID: ccid2[:],
 	})
-	ss.db.Create(&dbSiacoinElement{
+	ss.db.Create(&dbWalletOutput{
 		OutputID: hash256{2},
 	})
-	ss.db.Create(&dbTransaction{
-		TransactionID: hash256{3},
+	ss.db.Create(&dbWalletEvent{
+		EventID: hash256{3},
 	})
 
 	// Reset the consensus.
@@ -259,9 +259,9 @@ func TestConsensusReset(t *testing.T) {
 	var count int64
 	if err := ss.db.Model(&dbConsensusInfo{}).Count(&count).Error; err != nil || count != 1 {
 		t.Fatal("table should have 1 entry", err, count)
-	} else if err = ss.db.Model(&dbTransaction{}).Count(&count).Error; err != nil || count > 0 {
+	} else if err = ss.db.Model(&dbWalletEvent{}).Count(&count).Error; err != nil || count > 0 {
 		t.Fatal("table not empty", err)
-	} else if err = ss.db.Model(&dbSiacoinElement{}).Count(&count).Error; err != nil || count > 0 {
+	} else if err = ss.db.Model(&dbWalletOutput{}).Count(&count).Error; err != nil || count > 0 {
 		t.Fatal("table not empty", err)
 	}
 

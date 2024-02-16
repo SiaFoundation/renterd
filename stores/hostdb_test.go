@@ -57,7 +57,6 @@ func TestSQLHostDB(t *testing.T) {
 	// Insert an announcement for the host and another one for an unknown
 	// host.
 	a := announcement{
-		pk:          hk,
 		blockHeight: 42,
 		blockID:     types.BlockID{1, 2, 3},
 		timestamp:   time.Now().UTC().Round(time.Second),
@@ -508,7 +507,6 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// Create announcements for 2 hosts.
 	ann1 := announcement{
-		pk:          types.GeneratePrivateKey().PublicKey(),
 		timestamp:   time.Now(),
 		blockHeight: 1,
 		blockID:     types.BlockID{1},

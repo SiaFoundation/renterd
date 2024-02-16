@@ -520,7 +520,7 @@ func (b *bus) bucketHandlerGET(jc jape.Context) {
 
 func (b *bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
-	spendable, confirmed, unconfirmed, err := b.w.Balance()
+	balance, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
@@ -533,9 +533,10 @@ func (b *bus) walletHandler(jc jape.Context) {
 	jc.Encode(api.WalletResponse{
 		ScanHeight:  tip.Height,
 		Address:     address,
-		Confirmed:   confirmed,
-		Spendable:   spendable,
-		Unconfirmed: unconfirmed,
+		Confirmed:   balance.Confirmed,
+		Spendable:   balance.Spendable,
+		Unconfirmed: balance.Unconfirmed,
+		Immature:    balance.Immature,
 	})
 }
 
@@ -555,31 +556,31 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	}
 
 	if before.IsZero() && since.IsZero() {
-		txns, err := b.w.Transactions(offset, limit)
+		events, err := b.w.Events(offset, limit)
 		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(rwallet.ConvertToTransactions(txns))
+			jc.Encode(rwallet.ConvertToTransactions(events))
 		}
 		return
 	}
 
 	// TODO: remove this when 'before' and 'since' are deprecated, until then we
 	// fetch all transactions and paginate manually if either is specified
-	txns, err := b.w.Transactions(0, -1)
+	events, err := b.w.Events(0, -1)
 	if jc.Check("couldn't load transactions", err) != nil {
 		return
 	}
-	filtered := txns[:0]
-	for _, txn := range txns {
+	filtered := events[:0]
+	for _, txn := range events {
 		if (before.IsZero() || txn.Timestamp.Before(before)) &&
 			(since.IsZero() || txn.Timestamp.After(since)) {
 			filtered = append(filtered, txn)
 		}
 	}
-	txns = filtered
+	events = filtered
 	if limit == 0 || limit == -1 {
-		jc.Encode(rwallet.ConvertToTransactions(txns[offset:]))
+		jc.Encode(rwallet.ConvertToTransactions(events[offset:]))
 	} else {
-		jc.Encode(rwallet.ConvertToTransactions(txns[offset : offset+limit]))
+		jc.Encode(rwallet.ConvertToTransactions(events[offset : offset+limit]))
 	}
 	return
 }

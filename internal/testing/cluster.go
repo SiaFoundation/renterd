@@ -545,10 +545,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			res, err := cluster.Bus.Wallet(ctx)
 			if err != nil {
 				return err
-			}
-			fmt.Printf("wallet details %v %v\n", res.Address, res)
-
-			if res.Confirmed.IsZero() {
+			} else if res.Confirmed.IsZero() {
 				tt.Fatal("wallet not funded")
 			}
 			return nil

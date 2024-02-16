@@ -138,7 +138,7 @@ func (c *Client) WalletSign(ctx context.Context, txn *types.Transaction, toSign 
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
-func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Transaction, err error) {
+func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Event, err error) {
 	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
 
 	values := url.Values{}

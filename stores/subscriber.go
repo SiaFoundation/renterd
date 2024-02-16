@@ -10,6 +10,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -35,12 +36,12 @@ type (
 
 		announcements []announcement
 		contractState map[types.Hash256]contractState
+		elements      map[types.Hash256]outputChange
+		events        []eventChange
 		hosts         map[types.PublicKey]struct{}
 		mayCommit     bool
-		outputs       []outputChange
 		proofs        map[types.Hash256]uint64
 		revisions     map[types.Hash256]revisionUpdate
-		transactions  []txnChange
 	}
 )
 
@@ -54,6 +55,7 @@ func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Du
 		lastSave:           time.Now(),
 		persistInterval:    persistInterval,
 
+		elements:      make(map[types.Hash256]outputChange),
 		contractState: make(map[types.Hash256]contractState),
 		hosts:         make(map[types.PublicKey]struct{}),
 		proofs:        make(map[types.Hash256]uint64),
@@ -87,7 +89,9 @@ func (cs *chainSubscriber) ProcessChainApplyUpdate(cau *chain.ApplyUpdate, mayCo
 
 	cs.processChainApplyUpdateHostDB(cau)
 	cs.processChainApplyUpdateContracts(cau)
-	// TODO: handle wallet here
+	if err := cs.processChainApplyUpdateWallet(cau); err != nil {
+		return err
+	}
 
 	cs.tip = cau.State.Index
 	cs.mayCommit = mayCommit
@@ -107,7 +111,9 @@ func (cs *chainSubscriber) ProcessChainRevertUpdate(cru *chain.RevertUpdate) err
 
 	cs.processChainRevertUpdateHostDB(cru)
 	cs.processChainRevertUpdateContracts(cru)
-	// TODO: handle wallet here
+	if err := cs.processChainRevertUpdateWallet(cru); err != nil {
+		return err
+	}
 
 	cs.tip = cru.State.Index
 	cs.mayCommit = true
@@ -168,21 +174,21 @@ func (cs *chainSubscriber) commit() error {
 				return fmt.Errorf("%w; failed to update proof height", err)
 			}
 		}
-		for _, oc := range cs.outputs {
+		for _, oc := range cs.elements {
 			if oc.addition {
-				err = applyUnappliedOutputAdditions(tx, oc.sco)
+				err = applyUnappliedOutputAdditions(tx, oc.se)
 			} else {
-				err = applyUnappliedOutputRemovals(tx, oc.oid)
+				err = applyUnappliedOutputRemovals(tx, oc.se.OutputID)
 			}
 			if err != nil {
 				return fmt.Errorf("%w; failed to apply unapplied output change", err)
 			}
 		}
-		for _, tc := range cs.transactions {
+		for _, tc := range cs.events {
 			if tc.addition {
-				err = applyUnappliedTxnAdditions(tx, tc.txn)
+				err = applyUnappliedTxnAdditions(tx, tc.event)
 			} else {
-				err = applyUnappliedTxnRemovals(tx, tc.txnID)
+				err = applyUnappliedTxnRemovals(tx, tc.event.EventID)
 			}
 			if err != nil {
 				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
@@ -206,10 +212,10 @@ func (cs *chainSubscriber) commit() error {
 	cs.contractState = make(map[types.Hash256]contractState)
 	cs.hosts = make(map[types.PublicKey]struct{})
 	cs.mayCommit = false
-	cs.outputs = nil
+	cs.elements = nil
 	cs.proofs = make(map[types.Hash256]uint64)
 	cs.revisions = make(map[types.Hash256]revisionUpdate)
-	cs.transactions = nil
+	cs.events = nil
 	cs.lastSave = time.Now()
 	return nil
 }
@@ -221,8 +227,8 @@ func (cs *chainSubscriber) shouldCommit() bool {
 	hasAnnouncements := len(cs.announcements) > 0
 	hasRevisions := len(cs.revisions) > 0
 	hasProofs := len(cs.proofs) > 0
-	hasOutputChanges := len(cs.outputs) > 0
-	hasTxnChanges := len(cs.transactions) > 0
+	hasOutputChanges := len(cs.elements) > 0
+	hasTxnChanges := len(cs.events) > 0
 	hasContractState := len(cs.contractState) > 0
 	return mayCommit || persistIntervalPassed || hasAnnouncements || hasRevisions ||
 		hasProofs || hasOutputChanges || hasTxnChanges || hasContractState
@@ -460,6 +466,138 @@ func (cs *chainSubscriber) processChainRevertUpdateContracts(cru *chain.RevertUp
 	})
 }
 
+func (cs *chainSubscriber) processChainApplyUpdateWallet(cau *chain.ApplyUpdate) error {
+	return wallet.ApplyChainUpdates(cs, cs.walletAddress, []*chain.ApplyUpdate{cau})
+}
+
+func (cs *chainSubscriber) processChainRevertUpdateWallet(cru *chain.RevertUpdate) error {
+	return wallet.RevertChainUpdate(cs, cs.walletAddress, cru)
+}
+
 func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	return retryTransaction(cs.db, cs.logger, fc, cs.retryIntervals, opts...)
+}
+
+// AddEvents is called with all relevant events added in the update.
+func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	for _, event := range events {
+		cs.events = append(cs.events, eventChange{
+			addition: true,
+			event: dbWalletEvent{
+				EventID:        hash256(event.ID),
+				Inflow:         currency(event.Inflow),
+				Outflow:        currency(event.Outflow),
+				Transaction:    event.Transaction,
+				MaturityHeight: event.MaturityHeight,
+				Source:         string(event.Source),
+				Timestamp:      event.Timestamp.Unix(),
+				Height:         event.Index.Height,
+				BlockID:        hash256(event.Index.ID),
+			},
+		})
+	}
+	return nil
+}
+
+// AddSiacoinElements is called with all new siacoin elements in the
+// update. Ephemeral siacoin elements are not included.
+func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	for _, el := range elements {
+		if _, ok := cs.elements[el.ID]; ok {
+			return fmt.Errorf("siacoin element %q already exists", el.ID)
+		}
+		cs.elements[el.ID] = outputChange{
+			addition: true,
+			se: dbWalletOutput{
+				OutputID:       hash256(el.ID),
+				LeafIndex:      el.StateElement.LeafIndex,
+				MerkleProof:    el.StateElement.MerkleProof,
+				Value:          currency(el.SiacoinOutput.Value),
+				Address:        hash256(el.SiacoinOutput.Address),
+				MaturityHeight: el.MaturityHeight,
+				Height:         el.Index.Height,
+				BlockID:        hash256(el.Index.ID),
+			},
+		}
+	}
+
+	return nil
+}
+
+// RemoveSiacoinElements is called with all siacoin elements that were
+// spent in the update.
+func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	for _, id := range ids {
+		if _, ok := cs.elements[types.Hash256(id)]; !ok {
+			return fmt.Errorf("siacoin element %q does not exist", id)
+		}
+		delete(cs.elements, types.Hash256(id))
+	}
+	return nil
+}
+
+// WalletStateElements returns all state elements in the database. It is used
+// to update the proofs of all state elements affected by the update.
+func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement, _ error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	// TODO: should we keep all siacoin elements in memory at all times?
+	for id, el := range cs.elements {
+		elements = append(elements, types.StateElement{
+			ID:          id,
+			LeafIndex:   el.se.LeafIndex,
+			MerkleProof: el.se.MerkleProof,
+		})
+	}
+	return
+}
+
+// UpdateStateElements updates the proofs of all state elements affected by the
+// update.
+func (cs *chainSubscriber) UpdateStateElements(elements []types.StateElement) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	for _, se := range elements {
+		curr := cs.elements[se.ID]
+		curr.se.MerkleProof = se.MerkleProof
+		curr.se.LeafIndex = se.LeafIndex
+		cs.elements[se.ID] = curr
+	}
+	return nil
+}
+
+// RevertIndex is called with the chain index that is being reverted. Any events
+// and siacoin elements that were created by the index should be removed.
+func (cs *chainSubscriber) RevertIndex(index types.ChainIndex) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	// remove any events that were added in the reverted block
+	filtered := cs.events[:0]
+	for i := range cs.events {
+		if cs.events[i].event.Index() != index {
+			filtered = append(filtered, cs.events[i])
+		}
+	}
+	cs.events = filtered
+
+	// remove any siacoin elements that were added in the reverted block
+	for id, el := range cs.elements {
+		if el.se.Index() == index {
+			delete(cs.elements, id)
+		}
+	}
+
+	return nil
 }

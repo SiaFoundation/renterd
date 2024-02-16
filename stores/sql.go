@@ -89,7 +89,7 @@ type (
 		unappliedRevisions     map[types.FileContractID]revisionUpdate
 		unappliedProofs        map[types.FileContractID]uint64
 		unappliedOutputChanges []outputChange
-		unappliedTxnChanges    []txnChange
+		unappliedTxnChanges    []eventChange
 
 		// HostDB related fields
 		announcementMaxAge time.Duration
@@ -492,9 +492,9 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 		}
 		for _, oc := range ss.unappliedOutputChanges {
 			if oc.addition {
-				err = applyUnappliedOutputAdditions(tx, oc.sco)
+				err = applyUnappliedOutputAdditions(tx, oc.se)
 			} else {
-				err = applyUnappliedOutputRemovals(tx, oc.oid)
+				err = applyUnappliedOutputRemovals(tx, oc.se.OutputID)
 			}
 			if err != nil {
 				return fmt.Errorf("%w; failed to apply unapplied output change", err)
@@ -502,9 +502,9 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 		}
 		for _, tc := range ss.unappliedTxnChanges {
 			if tc.addition {
-				err = applyUnappliedTxnAdditions(tx, tc.txn)
+				err = applyUnappliedTxnAdditions(tx, tc.event)
 			} else {
-				err = applyUnappliedTxnRemovals(tx, tc.txnID)
+				err = applyUnappliedTxnRemovals(tx, tc.event.EventID)
 			}
 			if err != nil {
 				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
@@ -598,9 +598,9 @@ func (s *SQLStore) ResetConsensusSubscription() error {
 	err := s.retryTransaction(func(tx *gorm.DB) error {
 		if err := s.db.Exec("DELETE FROM consensus_infos").Error; err != nil {
 			return err
-		} else if err := s.db.Exec("DELETE FROM siacoin_elements").Error; err != nil {
+		} else if err := s.db.Exec("DELETE FROM wallet_outputs").Error; err != nil {
 			return err
-		} else if err := s.db.Exec("DELETE FROM transactions").Error; err != nil {
+		} else if err := s.db.Exec("DELETE FROM wallet_events").Error; err != nil {
 			return err
 		} else if ci, _, err = initConsensusInfo(tx); err != nil {
 			return err

@@ -1,8 +1,8 @@
 module go.sia.tech/renterd
 
-go 1.21
+go 1.21.6
 
-toolchain go1.21.6
+replace go.sia.tech/coreutils => /Users/peterjan/code/siafoundation/coreutils
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3

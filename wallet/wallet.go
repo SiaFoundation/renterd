@@ -46,21 +46,21 @@ func convertToSiacoinElement(sce types.SiacoinElement) SiacoinElement {
 	}
 }
 
-func ConvertToTransactions(txns []wallet.Transaction) []Transaction {
-	transactions := make([]Transaction, len(txns))
-	for i, txn := range txns {
-		transactions[i] = converToTransaction(txn)
+func ConvertToTransactions(events []wallet.Event) []Transaction {
+	transactions := make([]Transaction, len(events))
+	for i, event := range events {
+		transactions[i] = converToTransaction(event)
 	}
 	return transactions
 }
 
-func converToTransaction(txn wallet.Transaction) Transaction {
+func converToTransaction(e wallet.Event) Transaction {
 	return Transaction{
-		Raw:       txn.Transaction,
-		Index:     txn.Index,
-		ID:        txn.ID,
-		Inflow:    txn.Inflow,
-		Outflow:   txn.Outflow,
-		Timestamp: txn.Timestamp,
+		Raw:       e.Transaction,
+		Index:     e.Index,
+		ID:        types.TransactionID(e.ID),
+		Inflow:    e.Inflow,
+		Outflow:   e.Outflow,
+		Timestamp: e.Timestamp,
 	}
 }

@@ -16,6 +16,7 @@ import (
 )
 
 const (
+	proofHashSize = 32
 	secretKeySize = 32
 )
 
@@ -33,6 +34,7 @@ type (
 	balance        big.Int
 	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
+	merkleProof    []types.Hash256
 )
 
 // GormDataType implements gorm.GormDataTypeInterface.
@@ -337,4 +339,40 @@ func (u *unsigned64) Scan(value interface{}) error {
 // Value returns a datetime value, implements driver.Valuer interface.
 func (u unsigned64) Value() (driver.Value, error) {
 	return int64(u), nil
+}
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (mp *merkleProof) GormDataType() string {
+	return "bytes"
+}
+
+// Scan scans value into mp, implements sql.Scanner interface.
+func (mp *merkleProof) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal merkleProof value:", value))
+	} else if len(bytes)%proofHashSize != 0 {
+		return fmt.Errorf("failed to unmarshal merkleProof value due to invalid number of bytes %v is not a multiple of %v: %v", len(bytes), proofHashSize, value)
+	} else if len(bytes) == 0 {
+		return errors.New("failed to unmarshal merkleProof value, no bytes found")
+	}
+
+	n := len(bytes) / proofHashSize
+	hashes := make([]types.Hash256, n)
+	for i := 0; i < n; i++ {
+		copy(hashes[i][:], bytes[:proofHashSize])
+		bytes = bytes[proofHashSize:]
+	}
+	*mp = hashes
+	return nil
+}
+
+// Value returns a merkle proof value, implements driver.Valuer interface.
+func (mp merkleProof) Value() (driver.Value, error) {
+	var i int
+	out := make([]byte, len(mp)*proofHashSize)
+	for _, ph := range mp {
+		i += copy(out[i:], ph[:])
+	}
+	return out, nil
 }

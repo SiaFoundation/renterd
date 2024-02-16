@@ -73,6 +73,7 @@ type (
 		Spendable   types.Currency `json:"spendable"`
 		Confirmed   types.Currency `json:"confirmed"`
 		Unconfirmed types.Currency `json:"unconfirmed"`
+		Immature    types.Currency `json:"immature"`
 	}
 
 	// WalletSignRequest is the request type for the /wallet/sign endpoint.

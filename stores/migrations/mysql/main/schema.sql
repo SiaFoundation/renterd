@@ -344,20 +344,6 @@ CREATE TABLE `settings` (
   KEY `idx_settings_key` (`key`)
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbSiacoinElement
-CREATE TABLE `siacoin_elements` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `value` longtext,
-  `address` varbinary(32) DEFAULT NULL,
-  `output_id` varbinary(32) NOT NULL,
-  `maturity_height` bigint unsigned DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `output_id` (`output_id`),
-  KEY `idx_siacoin_elements_output_id` (`output_id`),
-  KEY `idx_siacoin_elements_maturity_height` (`maturity_height`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbSlice
 CREATE TABLE `slices` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -376,23 +362,6 @@ CREATE TABLE `slices` (
   CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`),
   CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`),
   CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- dbTransaction
-CREATE TABLE `transactions` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `raw` longtext,
-  `height` bigint unsigned DEFAULT NULL,
-  `block_id` varbinary(32) DEFAULT NULL,
-  `transaction_id` varbinary(32) NOT NULL,
-  `inflow` longtext,
-  `outflow` longtext,
-  `timestamp` bigint DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `transaction_id` (`transaction_id`),
-  KEY `idx_transactions_transaction_id` (`transaction_id`),
-  KEY `idx_transactions_timestamp` (`timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbWebhook
@@ -477,4 +446,43 @@ CREATE TABLE `syncer_bans` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_syncer_bans_net_cidr` (`net_cidr`),
   KEY `idx_syncer_bans_expiration` (`expiration`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- dbWalletEvent
+CREATE TABLE `wallet_events` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) DEFAULT NULL,
+  `event_id` varbinary(32) NOT NULL,
+  `inflow` longtext,
+  `outflow` longtext,
+  `transaction` longtext,
+  `maturity_height` bigint unsigned DEFAULT NULL,
+  `source` longtext,
+  `timestamp` bigint DEFAULT NULL,
+  `height` bigint unsigned DEFAULT NULL,
+  `block_id` varbinary(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `event_id` (`event_id`),
+  KEY `idx_wallet_events_maturity_height` (`maturity_height`),
+  KEY `idx_wallet_events_source` (`source`),
+  KEY `idx_wallet_events_timestamp` (`timestamp`),
+  KEY `idx_wallet_events_height` (`height`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- dbWalletOutput
+CREATE TABLE `wallet_outputs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) DEFAULT NULL,
+  `output_id` varbinary(32) NOT NULL,
+  `leaf_index` bigint,
+  `merkle_proof` blob NOT NULL,
+  `value` longtext,
+  `address` varbinary(32) DEFAULT NULL,
+  `maturity_height` bigint unsigned DEFAULT NULL,
+  `height` bigint unsigned DEFAULT NULL,
+  `block_id` varbinary(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `output_id` (`output_id`),
+  KEY `idx_wallet_outputs_maturity_height` (`maturity_height`),
+  KEY `idx_wallet_outputs_height` (`height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
