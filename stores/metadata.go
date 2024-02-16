@@ -652,6 +652,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 	err = s.db.
 		Table("?", fromSlabs).
 		Select("COALESCE(SUM(total_shards), 0)").
+		Where("db_buffered_slab_id IS NULL").
 		Scan(&totalSectors).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
