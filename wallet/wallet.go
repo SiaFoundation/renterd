@@ -112,7 +112,7 @@ type SiacoinElement struct {
 	MaturityHeight uint64        `json:"maturityHeight"`
 }
 
-func convertToSiacoinElement(sce types.SiacoinElement) SiacoinElement {
+func convertToSiacoinElement(sce wallet.SiacoinElement) SiacoinElement {
 	return SiacoinElement{
 		ID: sce.StateElement.ID,
 		SiacoinOutput: types.SiacoinOutput{
@@ -123,11 +123,11 @@ func convertToSiacoinElement(sce types.SiacoinElement) SiacoinElement {
 	}
 }
 
-func converToTransaction(txn wallet.Transaction) Transaction {
+func converToTransaction(txn wallet.Event) Transaction {
 	return Transaction{
 		Raw:       txn.Transaction,
 		Index:     txn.Index,
-		ID:        txn.ID,
+		ID:        types.TransactionID(txn.ID),
 		Inflow:    txn.Inflow,
 		Outflow:   txn.Outflow,
 		Timestamp: txn.Timestamp,
@@ -255,7 +255,7 @@ func (w *SingleAddressWallet) UnspentOutputs() ([]SiacoinElement, error) {
 // Transactions returns up to max transactions relevant to the wallet that have
 // a timestamp later than since.
 func (w *SingleAddressWallet) Transactions(offset, limit int) ([]Transaction, error) {
-	txns, err := w.store.Transactions(offset, limit)
+	txns, err := w.store.WalletEvents(offset, limit)
 	if err != nil {
 		return nil, err
 	}
