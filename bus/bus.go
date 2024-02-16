@@ -245,10 +245,9 @@ func (b *bus) Handler() http.Handler {
 		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
 		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
 
-		"GET    /alerts":            b.handleGETAlerts,
-		"POST   /alerts/dismiss":    b.handlePOSTAlertsDismiss,
-		"POST   /alerts/dismissall": b.handlePOSTAlertsDismissAll,
-		"POST   /alerts/register":   b.handlePOSTAlertsRegister,
+		"GET    /alerts":          b.handleGETAlerts,
+		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
+		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
 		"GET    /autopilots":    b.autopilotsListHandlerGET,
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
@@ -1730,15 +1729,18 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
+	var all bool
+	if jc.DecodeForm("all", &all) != nil {
+		return
+	} else if all {
+		jc.Check("failed to dismiss all alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
+		return
+	}
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return
 	}
 	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
-}
-
-func (b *bus) handlePOSTAlertsDismissAll(jc jape.Context) {
-	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
 }
 
 func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {

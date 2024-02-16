@@ -22,14 +22,22 @@ func (c *Client) Alerts(opts alerts.AlertsOpts) (alerts []alerts.Alert, err erro
 	return
 }
 
-// DismissAllAlerts dimisses all alerts.
-func (c *Client) DismissAllAlerts(ctx context.Context) error {
-	return c.c.WithContext(ctx).POST("/alerts/dismissall", nil, nil)
-}
-
 // DismissAlerts dimisses the alerts with the given IDs.
 func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
-	return c.c.WithContext(ctx).POST("/alerts/dismiss", ids, nil)
+	return c.dismissAlerts(ctx, false, ids...)
+}
+
+// DismissAllAlerts dimisses all registered alerts.
+func (c *Client) DismissAllAlerts(ctx context.Context) error {
+	return c.dismissAlerts(ctx, true)
+}
+
+func (c *Client) dismissAlerts(ctx context.Context, all bool, ids ...types.Hash256) error {
+	values := url.Values{}
+	if all {
+		values.Set("all", fmt.Sprint(true))
+	}
+	return c.c.WithContext(ctx).POST("/alerts/dismiss?"+values.Encode(), ids, nil)
 }
 
 // RegisterAlert registers the given alert.
