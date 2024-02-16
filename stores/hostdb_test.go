@@ -59,8 +59,8 @@ func TestSQLHostDB(t *testing.T) {
 	a := announcement{
 		blockHeight: 42,
 		blockID:     types.BlockID{1, 2, 3},
-		timestamp:   time.Now().UTC().Round(time.Second),
 		hk:          hk,
+		timestamp:   time.Now().UTC().Round(time.Second),
 		HostAnnouncement: chain.HostAnnouncement{
 			NetAddress: "address",
 		},

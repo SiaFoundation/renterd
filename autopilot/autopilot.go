@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -82,7 +81,7 @@ type Bus interface {
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
+	WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }

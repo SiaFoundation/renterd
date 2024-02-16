@@ -109,6 +109,7 @@ func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 				Height: el.Height,
 				ID:     types.BlockID(el.BlockID),
 			},
+			// TODO: Index missing
 		}
 	}
 	return elements, nil
