@@ -2015,7 +2015,7 @@ func TestMultipartUploads(t *testing.T) {
 	// correctly.
 	putPart := func(partNum int, offset int, data []byte) string {
 		t.Helper()
-		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: offset})
+		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: &offset})
 		tt.OK(err)
 		if res.ETag == "" {
 			t.Fatal("expected non-empty ETag")
@@ -2362,22 +2362,25 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// upload a part that is a partial slab
 	part3Data := bytes.Repeat([]byte{3}, int(slabSize)/4)
+	offset := int(slabSize + slabSize/4)
 	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize + slabSize/4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload a part that is exactly a full slab
 	part2Data := bytes.Repeat([]byte{2}, int(slabSize))
+	offset = int(slabSize / 4)
 	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize / 4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload another part the same size as the first one
 	part1Data := bytes.Repeat([]byte{1}, int(slabSize)/4)
+	offset = 0
 	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: 0,
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
