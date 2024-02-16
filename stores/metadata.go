@@ -583,19 +583,13 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
 func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
-	// if no bucket is specified, we consider all objects
+	// fetch bucket id if a bucket was specified
 	var bucketID uint
 	if opts.Bucket != "" {
 		err := s.db.Model(&dbBucket{}).Select("id").Where("name = ?", opts.Bucket).Take(&bucketID).Error
 		if err != nil {
 			return api.ObjectsStatsResponse{}, err
 		}
-	}
-	whereBucket := func(table string) clause.Expr {
-		if opts.Bucket == "" {
-			return exprTRUE
-		}
-		return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = ?", table), bucketID)
 	}
 
 	// number of objects
@@ -604,37 +598,40 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		MinHealth        float64
 		TotalObjectsSize uint64
 	}
-	err := s.db.
+	objInfoQuery := s.db.
 		Model(&dbObject{}).
-		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
-		Where(whereBucket(dbObject{}.TableName())).
-		Scan(&objInfo).
-		Error
+		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize")
+	if opts.Bucket != "" {
+		objInfoQuery = objInfoQuery.Where("db_bucket_id", bucketID)
+	}
+	err := objInfoQuery.Scan(&objInfo).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
 	// number of unfinished objects
 	var unfinishedObjects uint64
-	err = s.db.
+	unfinishedObjectsQuery := s.db.
 		Model(&dbMultipartUpload{}).
-		Select("COUNT(*)").
-		Where(whereBucket(dbMultipartUpload{}.TableName())).
-		Scan(&unfinishedObjects).
-		Error
+		Select("COUNT(*)")
+	if opts.Bucket != "" {
+		unfinishedObjectsQuery = unfinishedObjectsQuery.Where("db_bucket_id", bucketID)
+	}
+	err = unfinishedObjectsQuery.Scan(&unfinishedObjects).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
 	// size of unfinished objects
 	var totalUnfinishedObjectsSize uint64
-	err = s.db.
+	totalUnfinishedObjectsSizeQuery := s.db.
 		Model(&dbMultipartPart{}).
 		Joins("INNER JOIN multipart_uploads mu ON multipart_parts.db_multipart_upload_id = mu.id").
-		Select("COALESCE(SUM(size), 0)").
-		Where(whereBucket("mu")).
-		Scan(&totalUnfinishedObjectsSize).
-		Error
+		Select("COALESCE(SUM(size), 0)")
+	if opts.Bucket != "" {
+		totalUnfinishedObjectsSizeQuery = totalUnfinishedObjectsSizeQuery.Where("db_bucket_id", bucketID)
+	}
+	err = totalUnfinishedObjectsSizeQuery.Scan(&totalUnfinishedObjectsSize).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
@@ -665,12 +662,6 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		Select("COALESCE(SUM(size), 0)").
 		Scan(&totalUploaded).
 		Error
-	if err != nil {
-		return api.ObjectsStatsResponse{}, err
-	}
-
-	var contracts []dbContract
-	err = s.db.Find(&contracts).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
