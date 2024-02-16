@@ -137,7 +137,7 @@ func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid type
 	}
 }
 
-func newContractSetChangeAlert(name string, set map[types.FileContractID]types.PublicKey, additions map[types.FileContractID]contractSetAddition, removals map[types.FileContractID]contractSetRemoval) alerts.Alert {
+func newContractSetChangeAlert(name string, additions map[types.FileContractID]contractSetAddition, removals map[types.FileContractID]contractSetRemoval) alerts.Alert {
 	var hint string
 	if len(removals) > 0 {
 		hint = "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set."
@@ -154,7 +154,6 @@ func newContractSetChangeAlert(name string, set map[types.FileContractID]types.P
 		Message:  "Contract set changed",
 		Data: map[string]any{
 			"name":          name,
-			"set":           set,
 			"set_additions": additions,
 			"set_removals":  removals,
 			"hint":          hint,

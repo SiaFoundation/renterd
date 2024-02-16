@@ -447,7 +447,6 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	}
 
 	// log added and removed contracts
-	set := make(map[types.FileContractID]types.PublicKey)
 	setAdditions := make(map[types.FileContractID]contractSetAddition)
 	setRemovals := make(map[types.FileContractID]contractSetRemoval)
 	for _, contract := range oldSet {
@@ -477,7 +476,6 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 			}
 			c.logger.Debugf("contract %v was added to the contract set, size: %v", contract.ID, contractData[contract.ID])
 		}
-		set[contract.ID] = contract.HostKey
 	}
 
 	// log renewed contracts that did not make it into the contract set
@@ -532,7 +530,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	)
 	hasChanged := len(setAdditions)+len(setRemovals) > 0
 	if hasChanged {
-		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, set, setAdditions, setRemovals))
+		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, setAdditions, setRemovals))
 	}
 	return hasChanged
 }
