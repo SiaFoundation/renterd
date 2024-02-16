@@ -56,9 +56,6 @@ func (k EncryptionKey) MarshalText() ([]byte, error) {
 
 // UnmarshalText implements the encoding.TextUnmarshaler interface.
 func (k *EncryptionKey) UnmarshalText(b []byte) error {
-	if len(b) == 0 {
-		return nil
-	}
 	k.entropy = new([32]byte)
 	if n, err := hex.Decode(k.entropy[:], []byte(bytes.TrimPrefix(b, []byte("key:")))); err != nil {
 		return err
