@@ -639,25 +639,22 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 		return api.ObjectsStatsResponse{}, err
 	}
 
-	fromSlabs := gorm.Expr("slabs sla")
-	if opts.Bucket != "" {
-		fromSlabs = gorm.Expr(`
-			(SELECT * FROM
-			slabs sla
-			WHERE EXISTS (
-				SELECT 1 FROM slices sli
-				INNER JOIN objects o ON o.id = sli.db_object_id AND ?
-				WHERE sli.db_slab_id = sla.id
-			)) sla
-		`, whereBucket("o"))
-	}
-
 	var totalSectors int64
-	err = s.db.
-		Table("?", fromSlabs).
+	totalSectorsQuery := s.db.
+		Table("slabs sla").
 		Select("COALESCE(SUM(total_shards), 0)").
-		Where("db_buffered_slab_id IS NULL").
-		Scan(&totalSectors).Error
+		Where("db_buffered_slab_id IS NULL")
+
+	if opts.Bucket != "" {
+		totalSectorsQuery = totalSectorsQuery.Where(`
+			EXISTS (
+				SELECT 1 FROM slices sli
+				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
+				WHERE sli.db_slab_id = sla.id
+			)
+		`, bucketID)
+	}
+	err = totalSectorsQuery.Scan(&totalSectors).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
