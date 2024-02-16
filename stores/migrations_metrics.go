@@ -20,7 +20,7 @@ func performMetricsMigrations(tx *gorm.DB, logger *zap.SugaredLogger) error {
 	m := gormigrate.New(tx, gormigrate.DefaultOptions, migrations)
 
 	// Set init function.
-	m.InitSchema(initSchema(tx, true, logger))
+	m.InitSchema(initSchema(tx, "metrics", logger))
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {

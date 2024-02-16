@@ -453,3 +453,6 @@ AND NOT EXISTS (
     FROM slices
     WHERE slices.db_slab_id = OLD.db_slab_id
 );
+
+-- create default bucket
+INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

@@ -24,13 +24,13 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		{
 			ID: "00001_object_metadata",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration(tx, "00001_object_metadata", false, logger)
+				return performMigration(tx, "main", "00001_object_metadata", logger)
 			},
 		},
 		{
 			ID: "00002_prune_slabs_trigger",
 			Migrate: func(tx *gorm.DB) error {
-				err := performMigration(tx, "00002_prune_slabs_trigger", false, logger)
+				err := performMigration(tx, "main", "00002_prune_slabs_trigger", logger)
 				if err != nil && strings.Contains(err.Error(), errMySQLNoSuperPrivilege.Error()) {
 					logger.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
 				}
@@ -43,7 +43,7 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
 
 	// Set init function.
-	m.InitSchema(initSchema(db, false, logger))
+	m.InitSchema(initSchema(db, "main", logger))
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {
