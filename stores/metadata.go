@@ -642,9 +642,13 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 	fromSlabs := gorm.Expr("slabs sla")
 	if opts.Bucket != "" {
 		fromSlabs = gorm.Expr(`
+			(SELECT * FROM
 			slabs sla
-			INNER JOIN slices sli ON sli.db_slab_id = sla.id
-			INNER JOIN objects o ON o.id = sli.db_object_id AND (?)
+			WHERE EXISTS (
+				SELECT 1 FROM slices sli
+				INNER JOIN objects o ON o.id = sli.db_object_id AND ?
+				WHERE sli.db_slab_id = sla.id
+			)) sla
 		`, whereBucket("o"))
 	}
 
