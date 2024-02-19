@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/core/wallet"
+	"go.sia.tech/coreutils/wallet"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
