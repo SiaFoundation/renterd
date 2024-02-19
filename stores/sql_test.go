@@ -96,8 +96,16 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 
 	var conn, connMetrics gorm.Dialector
 	if dbURI != "" {
-		conn = NewMySQLConnection(dbURI, dbUser, dbPassword, dbName)
-		connMetrics = NewMySQLConnection(dbURI, dbUser, dbPassword, dbMetricsName)
+		if tmpDB, err := gorm.Open(NewMySQLConnection(dbUser, dbPassword, dbURI, "")); err != nil {
+			t.Fatal(err)
+		} else if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", dbName)).Error; err != nil {
+			t.Fatal(err)
+		} else if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", dbMetricsName)).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		conn = NewMySQLConnection(dbUser, dbPassword, dbURI, dbName)
+		connMetrics = NewMySQLConnection(dbUser, dbPassword, dbURI, dbMetricsName)
 	} else if cfg.persistent {
 		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
 		connMetrics = NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite"))
@@ -146,6 +154,18 @@ func (s *testSQLStore) Close() error {
 		s.t.Error(err)
 	}
 	return nil
+}
+
+func (s *testSQLStore) DefaultBucketID() uint {
+	var b dbBucket
+	if err := s.db.
+		Model(&dbBucket{}).
+		Where("name = ?", api.DefaultBucketName).
+		Take(&b).
+		Error; err != nil {
+		s.t.Fatal(err)
+	}
+	return b.ID
 }
 
 func (s *testSQLStore) Reopen() *testSQLStore {
@@ -240,11 +260,13 @@ func (s *SQLStore) contractsCount() (cnt int64, err error) {
 func (s *SQLStore) overrideSlabHealth(objectID string, health float64) (err error) {
 	err = s.db.Exec(fmt.Sprintf(`
 	UPDATE slabs SET health = %v WHERE id IN (
-		SELECT sla.id
-		FROM objects o
-		INNER JOIN slices sli ON o.id = sli.db_object_id
-		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-		WHERE o.object_id = "%s"
+		SELECT * FROM (
+			SELECT sla.id
+			FROM objects o
+			INNER JOIN slices sli ON o.id = sli.db_object_id
+			INNER JOIN slabs sla ON sli.db_slab_id = sla.id
+			WHERE o.object_id = "%s"
+		) AS sub
 	)`, health, objectID)).Error
 	return
 }
@@ -306,11 +328,24 @@ func TestConsensusReset(t *testing.T) {
 	}
 }
 
-type queryPlanExplain struct {
-	ID      int    `json:"id"`
-	Parent  int    `json:"parent"`
-	NotUsed bool   `json:"notused"`
-	Detail  string `json:"detail"`
+type sqliteQueryPlan struct {
+	Detail string `json:"detail"`
+}
+
+func (p sqliteQueryPlan) usesIndex() bool {
+	d := strings.ToLower(p.Detail)
+	return strings.Contains(d, "using index") || strings.Contains(d, "using covering index")
+}
+
+//nolint:tagliatelle
+type mysqlQueryPlan struct {
+	Extra        string `json:"Extra"`
+	PossibleKeys string `json:"possible_keys"`
+}
+
+func (p mysqlQueryPlan) usesIndex() bool {
+	d := strings.ToLower(p.Extra)
+	return strings.Contains(d, "using index") || strings.Contains(p.PossibleKeys, "idx_")
 }
 
 func TestQueryPlan(t *testing.T) {
@@ -346,14 +381,20 @@ func TestQueryPlan(t *testing.T) {
 	}
 
 	for _, query := range queries {
-		var explain queryPlanExplain
-		err := ss.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !(strings.Contains(explain.Detail, "USING INDEX") ||
-			strings.Contains(explain.Detail, "USING COVERING INDEX")) {
-			t.Fatalf("query '%s' should use an index, instead the plan was '%s'", query, explain.Detail)
+		if isSQLite(ss.db) {
+			var explain sqliteQueryPlan
+			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error; err != nil {
+				t.Fatal(err)
+			} else if !explain.usesIndex() {
+				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
+			}
+		} else {
+			var explain mysqlQueryPlan
+			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&explain).Error; err != nil {
+				t.Fatal(err)
+			} else if !explain.usesIndex() {
+				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
+			}
 		}
 	}
 }

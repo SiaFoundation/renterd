@@ -605,9 +605,7 @@ func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n
 		WHERE ?
 		GROUP BY
 			p.period_start
-		ORDER BY
-			p.period_start ASC
-		) i ON %s.id = i.id
+		) i ON %s.id = i.id ORDER BY Period ASC
 	`, table, table, table, table),
 		unixTimeMS(start),
 		interval.Milliseconds(),
