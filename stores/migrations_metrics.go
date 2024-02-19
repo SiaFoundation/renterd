@@ -9,6 +9,7 @@ import (
 )
 
 func performMetricsMigrations(tx *gorm.DB, logger *zap.SugaredLogger) error {
+	dbIdentifier := "metrics"
 	migrations := []*gormigrate.Migration{
 		{
 			ID:      "00001_init",
@@ -20,7 +21,7 @@ func performMetricsMigrations(tx *gorm.DB, logger *zap.SugaredLogger) error {
 	m := gormigrate.New(tx, gormigrate.DefaultOptions, migrations)
 
 	// Set init function.
-	m.InitSchema(initSchema(tx, "metrics", logger))
+	m.InitSchema(initSchema(tx, dbIdentifier, logger))
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {

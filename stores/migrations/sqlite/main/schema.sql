@@ -50,6 +50,7 @@ CREATE INDEX `idx_objects_db_bucket_id` ON `objects`(`db_bucket_id`);
 CREATE INDEX `idx_objects_etag` ON `objects`(`etag`);
 CREATE INDEX `idx_objects_health` ON `objects`(`health`);
 CREATE INDEX `idx_objects_object_id` ON `objects`(`object_id`);
+CREATE INDEX `idx_objects_size` ON `objects`(`size`);
 CREATE UNIQUE INDEX `idx_object_bucket` ON `objects`(`db_bucket_id`,`object_id`);
 
 -- dbMultipartUpload
