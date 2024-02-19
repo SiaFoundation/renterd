@@ -177,7 +177,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert it matches
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
