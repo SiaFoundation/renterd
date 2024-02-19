@@ -2661,7 +2661,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj, fetched.Object) {
+	if !reflect.DeepEqual(obj, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
@@ -2697,7 +2697,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj2, fetched.Object) {
+	if !reflect.DeepEqual(obj2, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj2, fetched.Object))
 	}
 
@@ -2745,7 +2745,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj3, fetched.Object) {
+	if !reflect.DeepEqual(obj3, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj3, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
