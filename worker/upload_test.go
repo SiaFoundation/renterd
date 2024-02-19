@@ -185,7 +185,7 @@ func TestUploadPackedSlab(t *testing.T) {
 		t.Fatal("expected 1 packed slab")
 	}
 	ps := pss[0]
-	mem := mm.AcquireMemory(context.Background(), uint64(params.rs.TotalShards*rhpv2.SectorSize))
+	mem := mm.AcquireMemory(context.Background(), params.rs.SlabSizeWithRedundancy())
 
 	// upload the packed slab
 	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.contracts(), 0, lockingPriorityUpload)
