@@ -48,6 +48,9 @@ type testSQLStore struct {
 }
 
 type testSQLStoreConfig struct {
+	dbURI           string
+	dbUser          string
+	dbPassword      string
 	dbName          string
 	dbMetricsName   string
 	dir             string
@@ -65,9 +68,26 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	if dir == "" {
 		dir = t.TempDir()
 	}
-	dbName := cfg.dbName
+
+	dbURI, dbUser, dbPassword, dbName := DBConfigFromEnv()
+	if dbURI == "" {
+		dbURI = cfg.dbURI
+	}
+	if cfg.persistent && dbURI != "" {
+		t.Fatal("invalid store config, can't use both persistent and dbURI")
+	}
+	if dbUser == "" {
+		dbUser = cfg.dbUser
+	}
+	if dbPassword == "" {
+		dbPassword = cfg.dbPassword
+	}
 	if dbName == "" {
-		dbName = hex.EncodeToString(frand.Bytes(32)) // random name for db
+		if cfg.dbName != "" {
+			dbName = cfg.dbName
+		} else {
+			dbName = hex.EncodeToString(frand.Bytes(32)) // random name for db
+		}
 	}
 	dbMetricsName := cfg.dbMetricsName
 	if dbMetricsName == "" {
@@ -75,7 +95,10 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 
 	var conn, connMetrics gorm.Dialector
-	if cfg.persistent {
+	if dbURI != "" {
+		conn = NewMySQLConnection(dbURI, dbUser, dbPassword, dbName)
+		connMetrics = NewMySQLConnection(dbURI, dbUser, dbPassword, dbMetricsName)
+	} else if cfg.persistent {
 		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
 		connMetrics = NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite"))
 	} else {
