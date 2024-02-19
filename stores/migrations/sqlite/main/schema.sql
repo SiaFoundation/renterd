@@ -184,3 +184,6 @@ BEGIN
         WHERE slices.db_slab_id = OLD.db_slab_id
     );
 END;
+
+-- create default bucket
+INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');
