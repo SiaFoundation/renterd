@@ -89,7 +89,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
@@ -120,7 +120,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got2.Object, want2) {
+	if !reflect.DeepEqual(*got2.Object, want2) {
 		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
 	}
 }
