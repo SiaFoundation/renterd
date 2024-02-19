@@ -1071,7 +1071,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
@@ -1184,7 +1184,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
