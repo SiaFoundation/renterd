@@ -2689,9 +2689,9 @@ func pruneSlabs(tx *gorm.DB) error {
 	// delete slabs without any associated slices or buffers
 	return tx.Exec(`
 DELETE
-FROM slabs sla
-WHERE NOT EXISTS (SELECT 1 FROM slices sli WHERE sli.db_slab_id = sla.id)
-AND sla.db_buffered_slab_id IS NULL
+FROM slabs
+WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
+AND slabs.db_buffered_slab_id IS NULL
 `).Error
 }
 
