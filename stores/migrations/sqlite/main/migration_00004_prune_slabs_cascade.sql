@@ -22,7 +22,7 @@ CREATE INDEX `idx_multipart_parts_etag` ON `multipart_parts`(`etag`);
 PRAGMA foreign_keys=on;
 
 -- drop triggers
-DROP TRIGGER before_delete_on_objects_delete_slices
-DROP TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
-DROP TRIGGER before_delete_on_multipart_parts_delete_slices
-DROP TRIGGER after_delete_on_slices_delete_slabs
+DROP TRIGGER IF EXISTS before_delete_on_objects_delete_slices
+DROP TRIGGER IF EXISTS before_delete_on_multipart_uploads_delete_multipart_parts
+DROP TRIGGER IF EXISTS before_delete_on_multipart_parts_delete_slices
+DROP TRIGGER IF EXISTS after_delete_on_slices_delete_slabs

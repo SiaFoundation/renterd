@@ -18,7 +18,7 @@ ALTER TABLE multipart_parts DROP FOREIGN KEY fk_multipart_uploads_parts;
 ALTER TABLE multipart_parts ADD CONSTRAINT fk_multipart_uploads_parts FOREIGN KEY (db_multipart_upload_id) REFERENCES multipart_uploads (id) ON DELETE CASCADE
 
 -- drop triggers
-DROP TRIGGER before_delete_on_objects_delete_slices
-DROP TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
-DROP TRIGGER before_delete_on_multipart_parts_delete_slices
-DROP TRIGGER after_delete_on_slices_delete_slabs
+DROP TRIGGER IF EXISTS before_delete_on_objects_delete_slices
+DROP TRIGGER IF EXISTS before_delete_on_multipart_uploads_delete_multipart_parts
+DROP TRIGGER IF EXISTS before_delete_on_multipart_parts_delete_slices
+DROP TRIGGER IF EXISTS after_delete_on_slices_delete_slabs
