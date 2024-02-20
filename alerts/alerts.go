@@ -37,7 +37,6 @@ type (
 	Alerter interface {
 		RegisterAlert(_ context.Context, a Alert) error
 		DismissAlerts(_ context.Context, ids ...types.Hash256) error
-		DismissAllAlerts(_ context.Context) error
 	}
 
 	// Severity indicates the severity of an alert.
@@ -142,17 +141,6 @@ func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 	})
 }
 
-// DismissAllAlerts implements the Alerter interface.
-func (m *Manager) DismissAllAlerts(ctx context.Context) error {
-	m.mu.Lock()
-	toDismiss := make([]types.Hash256, 0, len(m.alerts))
-	for alertID := range m.alerts {
-		toDismiss = append(toDismiss, alertID)
-	}
-	m.mu.Unlock()
-	return m.DismissAlerts(ctx, toDismiss...)
-}
-
 // DismissAlerts implements the Alerter interface.
 func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
 	var dismissed []types.Hash256
@@ -250,11 +238,6 @@ func (a *originAlerter) RegisterAlert(ctx context.Context, alert Alert) error {
 	}
 	alert.Data["origin"] = a.origin
 	return a.alerter.RegisterAlert(ctx, alert)
-}
-
-// DismissAllAlerts implements the Alerter interface.
-func (a *originAlerter) DismissAllAlerts(ctx context.Context) error {
-	return a.alerter.DismissAllAlerts(ctx)
 }
 
 // DismissAlerts implements the Alerter interface.

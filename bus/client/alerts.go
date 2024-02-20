@@ -25,11 +25,6 @@ func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) error 
 	return c.dismissAlerts(ctx, false, ids...)
 }
 
-// DismissAllAlerts dimisses all registered alerts.
-func (c *Client) DismissAllAlerts(ctx context.Context) error {
-	return c.dismissAlerts(ctx, true)
-}
-
 func (c *Client) dismissAlerts(ctx context.Context, all bool, ids ...types.Hash256) error {
 	values := url.Values{}
 	if all {

@@ -1738,13 +1738,6 @@ func (b *bus) handleGETAlertsPaginated(jc jape.Context) {
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
-	var all bool
-	if jc.DecodeForm("all", &all) != nil {
-		return
-	} else if all {
-		jc.Check("failed to dismiss all alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
-		return
-	}
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return

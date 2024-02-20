@@ -1974,15 +1974,6 @@ func TestAlerts(t *testing.T) {
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
 		t.Fatal("wrong alert")
 	}
-
-	// dismiss all
-	tt.OK(b.DismissAllAlerts(context.Background()))
-	ar, err = b.Alerts(alerts.AlertsOpts{})
-	foundAlerts = ar.Alerts
-	tt.OK(err)
-	if len(foundAlerts) != 0 {
-		t.Fatal("expected 0 alerts", len(foundAlerts))
-	}
 }
 
 func TestMultipartUploads(t *testing.T) {
