@@ -1716,6 +1716,15 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlerts(jc jape.Context) {
+	if jc.Request.FormValue("offset") != "" || jc.Request.FormValue("limit") != "" {
+		b.handleGETAlertsPaginated(jc)
+		return
+	}
+	ar := b.alertMgr.Active(0, -1)
+	jc.Encode(ar.Alerts)
+}
+
+func (b *bus) handleGETAlertsPaginated(jc jape.Context) {
 	offset, limit := 0, -1
 	if jc.DecodeForm("offset", &offset) != nil {
 		return

@@ -69,6 +69,12 @@ type (
 		Offset int
 		Limit  int
 	}
+
+	AlertsResponse struct {
+		Alerts  []Alert `json:"alerts"`
+		HasMore bool    `json:"hasMore"`
+		Total   int     `json:"total"`
+	}
 )
 
 // String implements the fmt.Stringer interface.
@@ -176,12 +182,16 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 }
 
 // Active returns the host's active alerts.
-func (m *Manager) Active(offset, limit int) []Alert {
+func (m *Manager) Active(offset, limit int) AlertsResponse {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	resp := AlertsResponse{
+		Total: len(m.alerts),
+	}
+
 	if offset >= len(m.alerts) {
-		return nil
+		return resp
 	} else if limit == -1 {
 		limit = len(m.alerts)
 	}
@@ -196,8 +206,10 @@ func (m *Manager) Active(offset, limit int) []Alert {
 	alerts = alerts[offset:]
 	if limit < len(alerts) {
 		alerts = alerts[:limit]
+		resp.HasMore = true
 	}
-	return alerts
+	resp.Alerts = alerts
+	return resp
 }
 
 func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {

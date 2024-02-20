@@ -10,15 +10,13 @@ import (
 )
 
 // Alerts fetches the active alerts from the bus.
-func (c *Client) Alerts(opts alerts.AlertsOpts) (alerts []alerts.Alert, err error) {
+func (c *Client) Alerts(opts alerts.AlertsOpts) (resp alerts.AlertsResponse, err error) {
 	values := url.Values{}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
+	values.Set("offset", fmt.Sprint(opts.Offset))
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
-	err = c.c.GET("/alerts?"+values.Encode(), &alerts)
+	err = c.c.GET("/alerts?"+values.Encode(), &resp)
 	return
 }
 
