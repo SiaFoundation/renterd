@@ -3941,7 +3941,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete the object
-	if err := ss.db.Delete(&obj1).Error; err != nil {
+	err := ss.RemoveObject(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -3954,7 +3955,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete second object
-	if err := ss.db.Delete(&obj2).Error; err != nil {
+	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -3998,7 +4000,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete third object
-	if err := ss.db.Delete(&obj3).Error; err != nil {
+	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj3.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {

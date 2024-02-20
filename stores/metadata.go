@@ -2739,13 +2739,12 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 			if err := res.Error; err != nil {
 				return res.Error
 			}
-			duration = time.Since(start)
-			rowsAffected = res.RowsAffected
-
 			// prune slabs if we deleted an object
+			rowsAffected = res.RowsAffected
 			if rowsAffected > 0 {
 				return pruneSlabs(tx)
 			}
+			duration = time.Since(start)
 			return nil
 		}); err != nil {
 			return 0, fmt.Errorf("failed to delete objects: %w", err)
