@@ -16,6 +16,7 @@ var (
 )
 
 func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
+	dbIdentifier := "main"
 	migrations := []*gormigrate.Migration{
 		{
 			ID:      "00001_init",
@@ -24,17 +25,23 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		{
 			ID: "00001_object_metadata",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration(tx, "main", "00001_object_metadata", logger)
+				return performMigration(tx, dbIdentifier, "00001_object_metadata", logger)
 			},
 		},
 		{
 			ID: "00002_prune_slabs_trigger",
 			Migrate: func(tx *gorm.DB) error {
-				err := performMigration(tx, "main", "00002_prune_slabs_trigger", logger)
+				err := performMigration(tx, dbIdentifier, "00002_prune_slabs_trigger", logger)
 				if err != nil && strings.Contains(err.Error(), errMySQLNoSuperPrivilege.Error()) {
 					logger.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
 				}
 				return err
+			},
+		},
+		{
+			ID: "00003_idx_objects_size",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00003_idx_objects_size", logger)
 			},
 		},
 	}
@@ -43,7 +50,7 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
 
 	// Set init function.
-	m.InitSchema(initSchema(db, "main", logger))
+	m.InitSchema(initSchema(db, dbIdentifier, logger))
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {

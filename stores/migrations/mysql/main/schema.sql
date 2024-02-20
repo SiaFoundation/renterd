@@ -330,6 +330,7 @@ CREATE TABLE `objects` (
   KEY `idx_objects_object_id` (`object_id`),
   KEY `idx_objects_health` (`health`),
   KEY `idx_objects_etag` (`etag`),
+  KEY `idx_objects_size` (`size`),
   CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
