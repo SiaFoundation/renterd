@@ -1155,7 +1155,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// make sure only one of the following is set
 	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && jc.Request.FormValue("offset") == "" {
-		jc.Error(errors.New("if presharding encryption isn't disabled, the offset needs to be set"), http.StatusBadRequest)
+		jc.Error(errors.New("if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set"), http.StatusBadRequest)
 		return
 	} else if encryptionEnabled {
 		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
