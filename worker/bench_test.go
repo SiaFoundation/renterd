@@ -18,12 +18,11 @@ func (z *zeroReader) Read(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// BenchmarkUploaderSingleObjectNoPacking benchmarks uploading a single object
-// without packing.
+// BenchmarkUploaderSingleObject benchmarks uploading a single object.
 //
 // Speed       | CPU    | Commit
 // 201.59 MB/s | M2 Pro | c31245f
-func BenchmarkUploaderSingleObjectNoPacking(b *testing.B) {
+func BenchmarkUploaderSingleObject(b *testing.B) {
 	w := newMockWorker()
 
 	up := testParameters(b.TempDir())
@@ -44,12 +43,11 @@ func BenchmarkUploaderSingleObjectNoPacking(b *testing.B) {
 	}
 }
 
-// BenchmarkUploaderSingleObjectNoPacking benchmarks uploading one object per
-// slab without packing.
+// BenchmarkUploaderSingleObject benchmarks uploading one object per slab.
 //
 // Speed       | CPU    | Commit
 // 116.40 MB/s | M2 Pro | c31245f
-func BenchmarkUploaderMultiObjectNoPacking(b *testing.B) {
+func BenchmarkUploaderMultiObject(b *testing.B) {
 	w := newMockWorker()
 
 	up := testParameters(b.TempDir())
