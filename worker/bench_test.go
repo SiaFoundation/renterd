@@ -18,36 +18,66 @@ func (z *zeroReader) Read(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// BenchmarkUploaderPacking benchmarks the Upload function with packing
-// disabled.
-func BenchmarkUploaderNoPacking(b *testing.B) {
+// BenchmarkUploaderSingleObjectNoPacking benchmarks uploading a single object
+// without packing.
+//
+// Speed       | CPU    | Commit
+// 201.59 MB/s | M2 Pro | c31245f
+func BenchmarkUploaderSingleObjectNoPacking(b *testing.B) {
 	w := newMockWorker()
 
-	minDataPieces := 10
-	totalDataPieces := 30
-
-	w.addHosts(totalDataPieces)
-
-	// create a reader that returns dev/null
-	data := io.LimitReader(&zeroReader{}, int64(b.N*rhpv2.SectorSize*minDataPieces))
-
 	up := testParameters(b.TempDir())
-	up.rs.MinShards = minDataPieces
-	up.rs.TotalShards = totalDataPieces
+	up.rs.MinShards = 10
+	up.rs.TotalShards = 30
 	up.packing = false
 
-	b.ResetTimer()
+	w.addHosts(up.rs.TotalShards)
 
+	// create a reader that returns dev/null
+	data := io.LimitReader(&zeroReader{}, int64(b.N*rhpv2.SectorSize*up.rs.MinShards))
+	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
+
+	b.ResetTimer()
 	_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.SetBytes(int64(rhpv2.SectorSize * minDataPieces))
+}
+
+// BenchmarkUploaderSingleObjectNoPacking benchmarks uploading one object per
+// slab without packing.
+//
+// Speed       | CPU    | Commit
+// 116.40 MB/s | M2 Pro | c31245f
+func BenchmarkUploaderMultiObjectNoPacking(b *testing.B) {
+	w := newMockWorker()
+
+	up := testParameters(b.TempDir())
+	up.rs.MinShards = 10
+	up.rs.TotalShards = 30
+	up.packing = false
+
+	w.addHosts(up.rs.TotalShards)
+
+	// create a reader that returns dev/null
+	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		data := io.LimitReader(&zeroReader{}, int64(rhpv2.SectorSize*up.rs.MinShards))
+		_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 // BenchmarkSectorRoot30Goroutines benchmarks the SectorRoot function with 30
 // goroutines processing roots in parallel to simulate sequential uploads of
 // slabs.
+//
+// Speed        | CPU    | Commit
+// 1671.26 MB/s | M2 Pro | c31245f
 func BenchmarkSectorRoot30Goroutines(b *testing.B) {
 	data := make([]byte, rhpv2.SectorSize)
 	b.SetBytes(int64(rhpv2.SectorSize))
@@ -78,6 +108,9 @@ func BenchmarkSectorRoot30Goroutines(b *testing.B) {
 }
 
 // BenchmarkSectorRootSingleGoroutine benchmarks the SectorRoot function.
+//
+// Speed       | CPU    | Commit
+// 176.43 MB/s | M2 Pro | c31245f
 func BenchmarkSectorRootSingleGoroutine(b *testing.B) {
 	data := make([]byte, rhpv2.SectorSize)
 	b.SetBytes(rhpv2.SectorSize)
