@@ -3,6 +3,7 @@ package object
 import (
 	"bytes"
 	"io"
+	"sync"
 
 	"github.com/klauspost/reedsolomon"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -79,11 +80,17 @@ func (s Slab) Length() int {
 // Encrypt xors shards with the keystream derived from s.Key, using a
 // different nonce for each shard.
 func (s Slab) Encrypt(shards [][]byte) {
-	for i, shard := range shards {
-		nonce := [24]byte{1: byte(i)}
-		c, _ := chacha20.NewUnauthenticatedCipher(s.Key.entropy[:], nonce[:])
-		c.XORKeyStream(shard, shard)
+	var wg sync.WaitGroup
+	for i := range shards {
+		wg.Add(1)
+		go func(i int) {
+			nonce := [24]byte{1: byte(i)}
+			c, _ := chacha20.NewUnauthenticatedCipher(s.Key.entropy[:], nonce[:])
+			c.XORKeyStream(shards[i], shards[i])
+			wg.Done()
+		}(i)
 	}
+	wg.Wait()
 }
 
 // Encode encodes slab data into sector-sized shards. The supplied shards should
