@@ -922,7 +922,9 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errDownloadCancelled) {
+			if !errors.Is(err, ErrShuttingDown) &&
+				!errors.Is(err, errDownloadCancelled) &&
+				!errors.Is(err, io.ErrClosedPipe) {
 				w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
 			}
 		}
