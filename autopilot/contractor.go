@@ -85,6 +85,7 @@ const (
 type (
 	contractor struct {
 		ap       *Autopilot
+		churn    *accumulatedChurn
 		resolver *ipResolver
 		logger   *zap.SugaredLogger
 
@@ -130,7 +131,7 @@ type (
 	contractSetRemoval struct {
 		Size    uint64          `json:"size"`
 		HostKey types.PublicKey `json:"hostKey"`
-		Reason  string          `json:"reason"`
+		Reason  string          `json:"reasons"`
 	}
 
 	renewal struct {
@@ -143,6 +144,7 @@ type (
 func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
 	return &contractor{
 		ap:     ap,
+		churn:  newAccumulatedChurn(),
 		logger: ap.logger.Named("contractor"),
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
@@ -536,7 +538,11 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	)
 	hasChanged := len(setAdditions)+len(setRemovals) > 0
 	if hasChanged {
-		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, setAdditions, setRemovals))
+		if !c.ap.HasAlert(ctx, alertChurnID) {
+			c.churn.Reset()
+		}
+		c.churn.Apply(setAdditions, setRemovals)
+		c.ap.RegisterAlert(ctx, c.churn.Alert(name))
 	}
 	return hasChanged
 }
