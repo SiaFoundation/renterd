@@ -765,20 +765,26 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	responseChan := make(chan sectorUploadResp)
 
 	// prepare sectors
+	var wg sync.WaitGroup
 	sectors := make([]*sectorUpload, len(shards))
-	for sI, shard := range shards {
-		// create the ctx
-		sCtx, sCancel := context.WithCancel(ctx)
+	for sI := range shards {
+		wg.Add(1)
+		go func(idx int) {
+			// create the ctx
+			sCtx, sCancel := context.WithCancel(ctx)
 
-		// create the sector
-		sectors[sI] = &sectorUpload{
-			data:   (*[rhpv2.SectorSize]byte)(shard),
-			index:  sI,
-			root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shard)),
-			ctx:    sCtx,
-			cancel: sCancel,
-		}
+			// create the sector
+			sectors[idx] = &sectorUpload{
+				data:   (*[rhpv2.SectorSize]byte)(shards[idx]),
+				index:  idx,
+				root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shards[idx])),
+				ctx:    sCtx,
+				cancel: sCancel,
+			}
+			wg.Done()
+		}(sI)
 	}
+	wg.Wait()
 
 	// prepare candidates
 	candidates := make([]*candidate, len(uploaders))
@@ -833,8 +839,6 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 }
 
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
-	start := time.Now()
-
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -870,6 +874,10 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 
 	// create a request buffer
 	var buffer []*sectorUploadReq
+
+	// start the timer after the upload has started
+	// newSlabUpload is quite slow due to computing the sector roots
+	start := time.Now()
 
 	// collect responses
 	var used bool
@@ -930,6 +938,9 @@ loop:
 	// calculate the upload speed
 	bytes := slab.numUploaded * rhpv2.SectorSize
 	ms := time.Since(start).Milliseconds()
+	if ms == 0 {
+		ms = 1
+	}
 	uploadSpeed = int64(bytes) / ms
 
 	// calculate overdrive pct
