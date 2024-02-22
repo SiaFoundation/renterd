@@ -119,6 +119,10 @@ type (
 		Mode   string `json:"mode"`
 	}
 
+	ObjectsStatsOpts struct {
+		Bucket string
+	}
+
 	// ObjectsStatsResponse is the response type for the /bus/stats/objects endpoint.
 	ObjectsStatsResponse struct {
 		NumObjects                 uint64  `json:"numObjects"`                 // number of objects
@@ -231,20 +235,18 @@ type (
 
 	// UploadObjectOptions is the options type for the worker client.
 	UploadObjectOptions struct {
-		Offset                       int
-		MinShards                    int
-		TotalShards                  int
-		ContractSet                  string
-		DisablePreshardingEncryption bool
-		ContentLength                int64
-		MimeType                     string
-		Metadata                     ObjectUserMetadata
+		Offset        int
+		MinShards     int
+		TotalShards   int
+		ContractSet   string
+		ContentLength int64
+		MimeType      string
+		Metadata      ObjectUserMetadata
 	}
 
 	UploadMultipartUploadPartOptions struct {
-		DisablePreshardingEncryption bool
-		EncryptionOffset             int
-		ContentLength                int64
+		EncryptionOffset *int
+		ContentLength    int64
 	}
 )
 
@@ -264,9 +266,6 @@ func (opts UploadObjectOptions) ApplyValues(values url.Values) {
 	if opts.MimeType != "" {
 		values.Set("mimetype", opts.MimeType)
 	}
-	if opts.DisablePreshardingEncryption {
-		values.Set("disablepreshardingencryption", "true")
-	}
 }
 
 func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
@@ -276,11 +275,8 @@ func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 }
 
 func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
-	if opts.DisablePreshardingEncryption {
-		values.Set("disablepreshardingencryption", "true")
-	}
-	if !opts.DisablePreshardingEncryption || opts.EncryptionOffset != 0 {
-		values.Set("offset", fmt.Sprint(opts.EncryptionOffset))
+	if opts.EncryptionOffset != nil {
+		values.Set("offset", fmt.Sprint(*opts.EncryptionOffset))
 	}
 }
 

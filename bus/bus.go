@@ -139,7 +139,7 @@ type (
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
-		ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error)
+		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
@@ -1383,7 +1383,11 @@ func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {
-	info, err := b.ms.ObjectsStats(jc.Request.Context())
+	opts := api.ObjectsStatsOpts{}
+	if jc.DecodeForm("bucket", &opts.Bucket) != nil {
+		return
+	}
+	info, err := b.ms.ObjectsStats(jc.Request.Context(), opts)
 	if jc.Check("couldn't get objects stats", err) != nil {
 		return
 	}
@@ -1746,11 +1750,27 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) handleGETAlerts(c jape.Context) {
-	c.Encode(b.alertMgr.Active())
+func (b *bus) handleGETAlerts(jc jape.Context) {
+	offset, limit := 0, -1
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
+		return
+	}
+	jc.Encode(b.alertMgr.Active(offset, limit))
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
+	var all bool
+	if jc.DecodeForm("all", &all) != nil {
+		return
+	} else if all {
+		jc.Check("failed to dismiss all alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
+		return
+	}
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return
@@ -2194,9 +2214,13 @@ func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
 		return
 	}
 
-	key := req.Key
-	if key == (object.EncryptionKey{}) {
+	var key object.EncryptionKey
+	if req.GenerateKey {
+		key = object.GenerateEncryptionKey()
+	} else if req.Key == nil {
 		key = object.NoOpKey
+	} else {
+		key = *req.Key
 	}
 
 	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType, req.Metadata)

@@ -23,7 +23,7 @@ const (
 	ipCacheEntryValidity = 24 * time.Hour
 
 	// resolverLookupTimeout is the timeout we apply when resolving a host's IP address
-	resolverLookupTimeout = 5 * time.Second
+	resolverLookupTimeout = 10 * time.Second
 )
 
 var (
