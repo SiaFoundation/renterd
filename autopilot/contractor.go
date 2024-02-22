@@ -122,9 +122,20 @@ type (
 		recoverable bool
 	}
 
+	contractSetAddition struct {
+		Size    uint64          `json:"size"`
+		HostKey types.PublicKey `json:"hostKey"`
+	}
+
+	contractSetRemoval struct {
+		Size    uint64          `json:"size"`
+		HostKey types.PublicKey `json:"hostKey"`
+		Reason  string          `json:"reason"`
+	}
+
 	renewal struct {
-		from types.FileContractID
-		to   types.FileContractID
+		from api.ContractMetadata
+		to   api.ContractMetadata
 		ci   contractInfo
 	}
 )
@@ -231,10 +242,16 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// check if any used hosts have lost data to warn the user
+	var toDismiss []types.Hash256
 	for _, h := range hosts {
 		if h.Interactions.LostSectors > 0 {
 			c.ap.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Interactions.LostSectors))
+		} else {
+			toDismiss = append(toDismiss, alertIDForHost(alertLostSectorsID, h.PublicKey))
 		}
+	}
+	if len(toDismiss) > 0 {
+		c.ap.DismissAlert(ctx, toDismiss...)
 	}
 
 	// fetch candidate hosts
@@ -246,10 +263,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore, err = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
-		if err != nil {
-			return false, fmt.Errorf("failed to determine min score for contract check: %w", err)
-		}
+		minScore = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
@@ -328,17 +342,15 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// set afterwards
 	var renewed []renewal
 	if limit > 0 {
-		var toKeep []contractInfo
+		var toKeep []api.ContractMetadata
 		renewed, toKeep = c.runContractRenewals(ctx, w, toRenew, &remaining, limit)
 		for _, ri := range renewed {
 			if ri.ci.usable || ri.ci.recoverable {
 				updatedSet = append(updatedSet, ri.to)
 			}
-			contractData[ri.to] = contractData[ri.from]
+			contractData[ri.to.ID] = contractData[ri.from.ID]
 		}
-		for _, ci := range toKeep {
-			updatedSet = append(updatedSet, ci.contract.ID)
-		}
+		updatedSet = append(updatedSet, toKeep...)
 	}
 
 	// run contract refreshes
@@ -350,7 +362,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			if ri.ci.usable || ri.ci.recoverable {
 				updatedSet = append(updatedSet, ri.to)
 			}
-			contractData[ri.to] = contractData[ri.from]
+			contractData[ri.to.ID] = contractData[ri.from.ID]
 		}
 	}
 
@@ -363,7 +375,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// check if we need to form contracts and add them to the contract set
-	var formed []types.FileContractID
+	var formed []api.ContractMetadata
 	if uint64(len(updatedSet)) < threshold {
 		// no need to try and form contracts if wallet is completely empty
 		wallet, err := c.ap.bus.Wallet(ctx)
@@ -379,34 +391,40 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 			} else {
 				for _, fc := range formed {
 					updatedSet = append(updatedSet, fc)
-					contractData[fc] = 0
+					contractData[fc.ID] = 0
 				}
 			}
 		}
 	}
 
 	// cap the amount of contracts we want to keep to the configured amount
-	for _, fcid := range updatedSet {
-		if _, exists := contractData[fcid]; !exists {
-			c.logger.Errorf("contract %v not found in contractData", fcid)
+	for _, contract := range updatedSet {
+		if _, exists := contractData[contract.ID]; !exists {
+			c.logger.Errorf("contract %v not found in contractData", contract.ID)
 		}
 	}
 	if len(updatedSet) > int(state.cfg.Contracts.Amount) {
 		// sort by contract size
 		sort.Slice(updatedSet, func(i, j int) bool {
-			return contractData[updatedSet[i]] > contractData[updatedSet[j]]
+			return contractData[updatedSet[i].ID] > contractData[updatedSet[j].ID]
 		})
-		for _, c := range updatedSet[state.cfg.Contracts.Amount:] {
-			toStopUsing[c] = "truncated"
+		for _, contract := range updatedSet[state.cfg.Contracts.Amount:] {
+			toStopUsing[contract.ID] = "truncated"
 		}
 		updatedSet = updatedSet[:state.cfg.Contracts.Amount]
+	}
+
+	// convert to set of file contract ids
+	var newSet []types.FileContractID
+	for _, contract := range updatedSet {
+		newSet = append(newSet, contract.ID)
 	}
 
 	// update contract set
 	if c.ap.isStopped() {
 		return false, errors.New("autopilot stopped before maintenance could be completed")
 	}
-	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, updatedSet)
+	err = c.ap.bus.SetContractSet(ctx, state.cfg.Contracts.Set, newSet)
 	if err != nil {
 		return false, err
 	}
@@ -415,54 +433,62 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	return c.computeContractSetChanged(ctx, state.cfg.Contracts.Set, currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
 }
 
-func (c *contractor) computeContractSetChanged(ctx context.Context, name string, oldSet []api.ContractMetadata, newSet, formed []types.FileContractID, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
-	// build some maps for easier lookups
-	previous := make(map[types.FileContractID]struct{})
+func (c *contractor) computeContractSetChanged(ctx context.Context, name string, oldSet, newSet []api.ContractMetadata, formed []api.ContractMetadata, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
+	// build set lookups
+	inOldSet := make(map[types.FileContractID]struct{})
 	for _, c := range oldSet {
-		previous[c.ID] = struct{}{}
+		inOldSet[c.ID] = struct{}{}
 	}
-	updated := make(map[types.FileContractID]struct{})
+	inNewSet := make(map[types.FileContractID]struct{})
 	for _, c := range newSet {
-		updated[c] = struct{}{}
+		inNewSet[c.ID] = struct{}{}
 	}
+
+	// build renewal lookups
 	renewalsFromTo := make(map[types.FileContractID]types.FileContractID)
 	renewalsToFrom := make(map[types.FileContractID]types.FileContractID)
 	for _, c := range append(refreshed, renewed...) {
-		renewalsFromTo[c.from] = c.to
-		renewalsToFrom[c.to] = c.from
+		renewalsFromTo[c.from.ID] = c.to.ID
+		renewalsToFrom[c.to.ID] = c.from.ID
 	}
 
 	// log added and removed contracts
-	var added []types.FileContractID
-	var removed []types.FileContractID
-	removedReasons := make(map[string]string)
+	setAdditions := make(map[types.FileContractID]contractSetAddition)
+	setRemovals := make(map[types.FileContractID]contractSetRemoval)
 	for _, contract := range oldSet {
-		_, exists := updated[contract.ID]
-		_, renewed := updated[renewalsFromTo[contract.ID]]
+		_, exists := inNewSet[contract.ID]
+		_, renewed := inNewSet[renewalsFromTo[contract.ID]]
 		if !exists && !renewed {
-			removed = append(removed, contract.ID)
 			reason, ok := toStopUsing[contract.ID]
 			if !ok {
 				reason = "unknown"
 			}
-			removedReasons[contract.ID.String()] = reason
+
+			setRemovals[contract.ID] = contractSetRemoval{
+				Size:    contractData[contract.ID],
+				HostKey: contract.HostKey,
+				Reason:  reason,
+			}
 			c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
 		}
 	}
-	for _, fcid := range newSet {
-		_, existed := previous[fcid]
-		_, renewed := renewalsToFrom[fcid]
+	for _, contract := range newSet {
+		_, existed := inOldSet[contract.ID]
+		_, renewed := renewalsToFrom[contract.ID]
 		if !existed && !renewed {
-			added = append(added, fcid)
-			c.logger.Debugf("contract %v was added to the contract set, size: %v", fcid, contractData[fcid])
+			setAdditions[contract.ID] = contractSetAddition{
+				Size:    contractData[contract.ID],
+				HostKey: contract.HostKey,
+			}
+			c.logger.Debugf("contract %v was added to the contract set, size: %v", contract.ID, contractData[contract.ID])
 		}
 	}
 
 	// log renewed contracts that did not make it into the contract set
 	for _, fcid := range renewed {
-		_, exists := updated[fcid.to]
+		_, exists := inNewSet[fcid.to.ID]
 		if !exists {
-			c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to])
+			c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to.ID])
 		}
 	}
 
@@ -475,7 +501,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	// record churn metrics
 	now := api.TimeNow()
 	var metrics []api.ContractSetChurnMetric
-	for _, fcid := range added {
+	for fcid := range setAdditions {
 		metrics = append(metrics, api.ContractSetChurnMetric{
 			Name:       c.ap.state.cfg.Contracts.Set,
 			ContractID: fcid,
@@ -483,12 +509,12 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 			Timestamp:  now,
 		})
 	}
-	for _, fcid := range removed {
+	for fcid, removal := range setRemovals {
 		metrics = append(metrics, api.ContractSetChurnMetric{
 			Name:       c.ap.state.cfg.Contracts.Set,
 			ContractID: fcid,
 			Direction:  api.ChurnDirRemoved,
-			Reason:     removedReasons[fcid.String()],
+			Reason:     removal.Reason,
 			Timestamp:  now,
 		})
 	}
@@ -505,12 +531,12 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 		"renewed", len(renewed),
 		"refreshed", len(refreshed),
 		"contracts", len(newSet),
-		"added", len(added),
-		"removed", len(removed),
+		"added", len(setAdditions),
+		"removed", len(setRemovals),
 	)
-	hasChanged := len(added)+len(removed) > 0
+	hasChanged := len(setAdditions)+len(setRemovals) > 0
 	if hasChanged {
-		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, len(added), len(removed), removedReasons))
+		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, setAdditions, setRemovals))
 	}
 	return hasChanged
 }
@@ -605,7 +631,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []types.FileContractID, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -737,7 +763,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			} else if !state.cfg.Hosts.AllowRedundantIPs && ipFilter.IsRedundantIP(contract.HostIP, contract.HostKey) {
 				toStopUsing[fcid] = fmt.Sprintf("%v; %v", errHostRedundantIP, errContractNoRevision)
 			} else {
-				toKeep = append(toKeep, fcid)
+				toKeep = append(toKeep, contract.ContractMetadata)
 				remainingKeepLeeway-- // we let it slide
 			}
 			continue // can't perform contract checks without revision
@@ -780,18 +806,17 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		} else if refresh {
 			toRefresh = append(toRefresh, ci)
 		} else if usable {
-			toKeep = append(toKeep, ci.contract.ID)
+			toKeep = append(toKeep, ci.contract.ContractMetadata)
 		}
 	}
 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) ([]types.FileContractID, error) {
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
 	if c.ap.isStopped() {
 		return nil, nil
 	}
-	var formed []types.FileContractID
 
 	// convenience variables
 	state := c.ap.State()
@@ -893,7 +918,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, candid
 		formedContract, proceed, err := c.formContract(ctx, w, host, minInitialContractFunds, maxInitialContractFunds, budget)
 		if err == nil {
 			// add contract to contract set
-			formed = append(formed, formedContract.ID)
+			formed = append(formed, formedContract)
 			missing--
 		}
 		if !proceed {
@@ -973,7 +998,7 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 	}
 }
 
-func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []contractInfo) {
+func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []api.ContractMetadata) {
 	c.logger.Debugw(
 		"run contracts renewals",
 		"torenew", len(toRenew),
@@ -1007,11 +1032,11 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 		if err != nil {
 			c.ap.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
 			if toRenew[i].usable {
-				toKeep = append(toKeep, toRenew[i])
+				toKeep = append(toKeep, toRenew[i].contract.ContractMetadata)
 			}
 		} else {
 			c.ap.DismissAlert(ctx, alertIDForContract(alertRenewalFailedID, contract.ID))
-			renewals = append(renewals, renewal{from: contract.ID, to: renewed.ID, ci: toRenew[i]})
+			renewals = append(renewals, renewal{from: contract, to: renewed, ci: toRenew[i]})
 		}
 
 		// break if we don't want to proceed
@@ -1024,7 +1049,7 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 	// they're usable and we have 'limit' left
 	for j := i; j < len(toRenew); j++ {
 		if len(renewals)+len(toKeep) < limit && toRenew[j].usable {
-			toKeep = append(toKeep, toRenew[j])
+			toKeep = append(toKeep, toRenew[j].contract.ContractMetadata)
 		}
 	}
 
@@ -1054,7 +1079,7 @@ func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, toRefre
 		// refresh and add if it succeeds
 		renewed, proceed, err := c.refreshContract(ctx, w, ci, budget)
 		if err == nil {
-			refreshed = append(refreshed, renewal{from: ci.contract.ID, to: renewed.ID, ci: ci})
+			refreshed = append(refreshed, renewal{from: ci.contract.ContractMetadata, to: renewed, ci: ci})
 		}
 
 		// break if we don't want to proceed
@@ -1190,18 +1215,24 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) (float64, error) {
+func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) float64 {
 	// return early if there's no hosts
 	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return math.SmallestNonzeroFloat64, nil
+		return math.SmallestNonzeroFloat64
 	}
+
+	// determine the number of random hosts we fetch per iteration when
+	// calculating the min score - it contains a constant factor in case the
+	// number of contracts is very low and a linear factor to make sure the
+	// number is relative to the number of contracts we want to form
+	randSetSize := 2*int(numContracts) + 50
 
 	// do multiple rounds to select the lowest score
 	var lowestScores []float64
 	for r := 0; r < 5; r++ {
 		lowestScore := math.MaxFloat64
-		for _, host := range scoredHosts(candidates).randSelectByScore(int(numContracts) + 50) { // buffer
+		for _, host := range scoredHosts(candidates).randSelectByScore(randSetSize) {
 			if host.score < lowestScore {
 				lowestScore = host.score
 			}
@@ -1210,16 +1241,29 @@ func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredH
 	}
 
 	// compute the min score
+	var lowestScore float64
 	lowestScore, err := stats.Float64Data(lowestScores).Median()
 	if err != nil {
-		return 0, err
+		panic("never fails since len(candidates) > 0 so len(lowestScores) > 0 as well")
 	}
 	minScore := lowestScore / minAllowedScoreLeeway
 
+	// make sure the min score allows for 'numContracts' contracts to be formed
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+	if len(candidates) < int(numContracts) {
+		return math.SmallestNonzeroFloat64
+	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
+		minScore = cutoff
+	}
+
 	c.logger.Infow("finished computing minScore",
+		"candidates", len(candidates),
 		"minScore", minScore,
+		"numContracts", numContracts,
 		"lowestScore", lowestScore)
-	return minScore, nil
+	return minScore
 }
 
 func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {

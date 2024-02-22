@@ -405,7 +405,7 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
 	convertToSiaMetadataHeaders(meta)
 	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, api.CreateMultipartOptions{
-		Key:      object.NoOpKey,
+		Key:      &object.NoOpKey,
 		MimeType: meta["Content-Type"],
 		Metadata: api.ExtractObjectUserMetadataFrom(meta),
 	})
@@ -418,8 +418,7 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
 	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
-		DisablePreshardingEncryption: true,
-		ContentLength:                contentLength,
+		ContentLength: contentLength,
 	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())

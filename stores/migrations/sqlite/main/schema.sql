@@ -50,6 +50,7 @@ CREATE INDEX `idx_objects_db_bucket_id` ON `objects`(`db_bucket_id`);
 CREATE INDEX `idx_objects_etag` ON `objects`(`etag`);
 CREATE INDEX `idx_objects_health` ON `objects`(`health`);
 CREATE INDEX `idx_objects_object_id` ON `objects`(`object_id`);
+CREATE INDEX `idx_objects_size` ON `objects`(`size`);
 CREATE UNIQUE INDEX `idx_object_bucket` ON `objects`(`db_bucket_id`,`object_id`);
 
 -- dbMultipartUpload
@@ -193,3 +194,6 @@ CREATE UNIQUE INDEX `idx_syncer_peers_address` ON `syncer_peers`(`address`);
 CREATE TABLE `syncer_bans` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`net_cidr` text  NOT NULL,`reason` text,`expiration` BIGINT NOT NULL);
 CREATE UNIQUE INDEX `idx_syncer_bans_net_cidr` ON `syncer_bans`(`net_cidr`);
 CREATE INDEX `idx_syncer_bans_expiration` ON `syncer_bans`(`expiration`);
+
+-- create default bucket
+INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

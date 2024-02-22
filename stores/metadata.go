@@ -582,70 +582,85 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // ObjectsStats returns some info related to the objects stored in the store. To
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
-func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
+func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	// fetch bucket id if a bucket was specified
+	var bucketID uint
+	if opts.Bucket != "" {
+		err := s.db.Model(&dbBucket{}).Select("id").Where("name = ?", opts.Bucket).Take(&bucketID).Error
+		if err != nil {
+			return api.ObjectsStatsResponse{}, err
+		}
+	}
+
 	// number of objects
 	var objInfo struct {
 		NumObjects       uint64
 		MinHealth        float64
 		TotalObjectsSize uint64
 	}
-	err := s.db.
+	objInfoQuery := s.db.
 		Model(&dbObject{}).
-		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
-		Scan(&objInfo).
-		Error
+		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize")
+	if opts.Bucket != "" {
+		objInfoQuery = objInfoQuery.Where("db_bucket_id", bucketID)
+	}
+	err := objInfoQuery.Scan(&objInfo).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
 	// number of unfinished objects
 	var unfinishedObjects uint64
-	err = s.db.
+	unfinishedObjectsQuery := s.db.
 		Model(&dbMultipartUpload{}).
-		Select("COUNT(*)").
-		Scan(&unfinishedObjects).
-		Error
+		Select("COUNT(*)")
+	if opts.Bucket != "" {
+		unfinishedObjectsQuery = unfinishedObjectsQuery.Where("db_bucket_id", bucketID)
+	}
+	err = unfinishedObjectsQuery.Scan(&unfinishedObjects).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
 	// size of unfinished objects
 	var totalUnfinishedObjectsSize uint64
-	err = s.db.
+	totalUnfinishedObjectsSizeQuery := s.db.
 		Model(&dbMultipartPart{}).
-		Select("COALESCE(SUM(size), 0)").
-		Scan(&totalUnfinishedObjectsSize).
-		Error
+		Joins("INNER JOIN multipart_uploads mu ON multipart_parts.db_multipart_upload_id = mu.id").
+		Select("COALESCE(SUM(size), 0)")
+	if opts.Bucket != "" {
+		totalUnfinishedObjectsSizeQuery = totalUnfinishedObjectsSizeQuery.Where("db_bucket_id", bucketID)
+	}
+	err = totalUnfinishedObjectsSizeQuery.Scan(&totalUnfinishedObjectsSize).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
-	var totalSectors uint64
+	var totalSectors int64
+	totalSectorsQuery := s.db.
+		Table("slabs sla").
+		Select("COALESCE(SUM(total_shards), 0)").
+		Where("db_buffered_slab_id IS NULL")
 
-	batchSize := 500000
-	marker := uint64(0)
-	for offset := 0; ; offset += batchSize {
-		var result struct {
-			Sectors uint64
-			Marker  uint64
-		}
-		res := s.db.
-			Model(&dbSector{}).
-			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM contract_sectors cs WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", marker, batchSize).
-			Scan(&result)
-		if err := res.Error; err != nil {
-			return api.ObjectsStatsResponse{}, err
-		} else if result.Sectors == 0 {
-			break // done
-		}
-		totalSectors += result.Sectors
-		marker = result.Marker
+	if opts.Bucket != "" {
+		totalSectorsQuery = totalSectorsQuery.Where(`
+			EXISTS (
+				SELECT 1 FROM slices sli
+				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
+				WHERE sli.db_slab_id = sla.id
+			)
+		`, bucketID)
+	}
+	err = totalSectorsQuery.Scan(&totalSectors).Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
 	}
 
 	var totalUploaded int64
 	err = s.db.
-		Model(&dbContractSector{}).
-		Count(&totalUploaded).
+		Model(&dbContract{}).
+		Select("COALESCE(SUM(size), 0)").
+		Scan(&totalUploaded).
 		Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
@@ -657,8 +672,8 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		NumUnfinishedObjects:       unfinishedObjects,
 		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
 		TotalObjectsSize:           objInfo.TotalObjectsSize,
-		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
-		TotalUploadedSize:          uint64(totalUploaded) * rhpv2.SectorSize,
+		TotalSectorsSize:           uint64(totalSectors) * rhpv2.SectorSize,
+		TotalUploadedSize:          uint64(totalUploaded),
 	}, nil
 }
 
@@ -1886,7 +1901,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 
 		// ensure the sectors exists
-		sectors, err = upsertSectors(tx, sectors)
+		sectorIDs, err := upsertSectors(tx, sectors)
 		if err != nil {
 			return fmt.Errorf("failed to create sector: %w", err)
 		}
@@ -1894,14 +1909,14 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// build contract <-> sector links
 		var contractSectors []dbContractSector
 		for i, shard := range s.Shards {
-			sector := sectors[i]
+			sectorID := sectorIDs[i]
 
 			// ensure the associations are updated
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sector.ID,
+							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
 					}
@@ -2179,7 +2194,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	// create sector that don't exist yet
-	sectors, err = upsertSectors(tx, sectors)
+	sectorIDs, err := upsertSectors(tx, sectors)
 	if err != nil {
 		return fmt.Errorf("failed to create sectors: %w", err)
 	}
@@ -2189,12 +2204,12 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	var contractSectors []dbContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
-			sector := sectors[sectorIdx]
+			sectorID := sectorIDs[sectorIdx]
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sector.ID,
+							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
 					}
@@ -3065,7 +3080,7 @@ func validateSort(sortBy, sortDir string) error {
 
 // upsertSectors creates a sector or updates it if it exists already. The
 // resulting ID is set on the input sector.
-func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
+func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]uint, error) {
 	if len(sectors) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -3079,19 +3094,16 @@ func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
 	if err != nil {
 		return nil, err
 	}
-	// fetch the upserted sectors
-	roots := make([][]byte, len(sectors))
-	for i, sector := range sectors {
-		roots[i] = sector.Root[:]
-	}
-	sectors = sectors[:0]
 
-	var batch []dbSector
-	if err := tx.Where("root IN (?)", roots).FindInBatches(&batch, sectorQueryBatchSize, func(tx *gorm.DB, _ int) error {
-		sectors = append(sectors, batch...)
-		return nil
-	}).Error; err != nil {
-		return nil, err
+	sectorIDs := make([]uint, len(sectors))
+	for i := range sectors {
+		var id uint
+		if err := tx.Model(dbSector{}).
+			Where("root", sectors[i].Root).
+			Select("id").Take(&id).Error; err != nil {
+			return nil, err
+		}
+		sectorIDs[i] = id
 	}
-	return sectors, nil
+	return sectorIDs, nil
 }

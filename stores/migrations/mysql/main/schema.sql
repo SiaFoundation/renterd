@@ -330,6 +330,7 @@ CREATE TABLE `objects` (
   KEY `idx_objects_object_id` (`object_id`),
   KEY `idx_objects_health` (`health`),
   KEY `idx_objects_etag` (`etag`),
+  KEY `idx_objects_size` (`size`),
   CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -478,3 +479,6 @@ CREATE TABLE `syncer_bans` (
   UNIQUE KEY `idx_syncer_bans_net_cidr` (`net_cidr`),
   KEY `idx_syncer_bans_expiration` (`expiration`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- create default bucket
+INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

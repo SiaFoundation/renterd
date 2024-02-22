@@ -3,11 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"sync"
 	"time"
 
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/hostdb"
+	"go.uber.org/zap"
 )
 
 const (
@@ -15,81 +15,119 @@ const (
 )
 
 type (
-	InteractionRecorder interface {
+	HostInteractionRecorder interface {
 		RecordHostScan(...hostdb.HostScan)
 		RecordPriceTableUpdate(...hostdb.PriceTableUpdate)
+		Stop(context.Context)
+	}
+
+	hostInteractionRecorder struct {
+		flushInterval time.Duration
+
+		bus    Bus
+		logger *zap.SugaredLogger
+
+		mu                sync.Mutex
+		hostScans         []hostdb.HostScan
+		priceTableUpdates []hostdb.PriceTableUpdate
+
+		flushCtx   context.Context
+		flushTimer *time.Timer
 	}
 )
 
-var _ InteractionRecorder = &worker{}
+var (
+	_ HostInteractionRecorder = (*hostInteractionRecorder)(nil)
+)
 
-func interactionMiddleware(ir InteractionRecorder, routes map[string]jape.Handler) map[string]jape.Handler {
-	for route, handler := range routes {
-		routes[route] = jape.Adapt(func(h http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ctx := context.WithValue(r.Context(), keyInteractionRecorder, ir)
-				h.ServeHTTP(w, r.WithContext(ctx))
-			})
-		})(handler)
+func (w *worker) initHostInteractionRecorder(flushInterval time.Duration) {
+	if w.hostInteractionRecorder != nil {
+		panic("HostInteractionRecorder already initialized") // developer error
 	}
-	return routes
-}
+	w.hostInteractionRecorder = &hostInteractionRecorder{
+		bus:    w.bus,
+		logger: w.logger,
 
-func InteractionRecorderFromContext(ctx context.Context) InteractionRecorder {
-	ir, ok := ctx.Value(keyInteractionRecorder).(InteractionRecorder)
-	if !ok {
-		panic("no interaction recorder attached to the context") // developer error
+		flushCtx:      w.shutdownCtx,
+		flushInterval: flushInterval,
+
+		hostScans:         make([]hostdb.HostScan, 0),
+		priceTableUpdates: make([]hostdb.PriceTableUpdate, 0),
 	}
-	return ir
 }
 
-func (w *worker) RecordHostScan(scans ...hostdb.HostScan) {
-	w.interactionsMu.Lock()
-	defer w.interactionsMu.Unlock()
-
-	w.interactionsScans = append(w.interactionsScans, scans...)
-	w.tryFlushInteractionsBuffer()
+func (r *hostInteractionRecorder) RecordHostScan(scans ...hostdb.HostScan) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hostScans = append(r.hostScans, scans...)
+	r.tryFlushInteractionsBuffer()
 }
 
-func (w *worker) RecordPriceTableUpdate(ptUpdates ...hostdb.PriceTableUpdate) {
-	w.interactionsMu.Lock()
-	defer w.interactionsMu.Unlock()
-
-	w.interactionsPriceTableUpdates = append(w.interactionsPriceTableUpdates, ptUpdates...)
-	w.tryFlushInteractionsBuffer()
+func (r *hostInteractionRecorder) RecordPriceTableUpdate(ptUpdates ...hostdb.PriceTableUpdate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.priceTableUpdates = append(r.priceTableUpdates, ptUpdates...)
+	r.tryFlushInteractionsBuffer()
 }
 
-func (w *worker) tryFlushInteractionsBuffer() {
-	// If a thread was scheduled to flush the buffer we are done.
-	if w.interactionsFlushTimer != nil {
+func (r *hostInteractionRecorder) Stop(ctx context.Context) {
+	// stop the flush timer
+	r.mu.Lock()
+	if r.flushTimer != nil {
+		r.flushTimer.Stop()
+	}
+	r.flushCtx = ctx
+	r.mu.Unlock()
+
+	// flush all interactions
+	r.flush()
+
+	// log if we weren't able to flush them
+	r.mu.Lock()
+	if len(r.hostScans) > 0 {
+		r.logger.Errorw(fmt.Sprintf("failed to record %d host scans on worker shutdown", len(r.hostScans)))
+	}
+	if len(r.priceTableUpdates) > 0 {
+		r.logger.Errorw(fmt.Sprintf("failed to record %d price table updates on worker shutdown", len(r.priceTableUpdates)))
+	}
+	r.mu.Unlock()
+}
+
+func (r *hostInteractionRecorder) flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// NOTE: don't bother flushing if the context is cancelled, we can safely
+	// ignore the buffered scans and price tables since we'll flush on shutdown
+	// and log in case we weren't able to flush all interactions to the bus
+	select {
+	case <-r.flushCtx.Done():
+		r.flushTimer = nil
 		return
+	default:
 	}
 
-	// Otherwise we schedule a flush.
-	w.interactionsFlushTimer = time.AfterFunc(w.busFlushInterval, func() {
-		w.interactionsMu.Lock()
-		w.flushInteractions()
-		w.interactionsMu.Unlock()
-	})
+	if len(r.hostScans) > 0 {
+		if err := r.bus.RecordHostScans(r.flushCtx, r.hostScans); err != nil {
+			r.logger.Errorw(fmt.Sprintf("failed to record scans: %v", err))
+		} else if err == nil {
+			r.hostScans = nil
+		}
+	}
+	if len(r.priceTableUpdates) > 0 {
+		if err := r.bus.RecordPriceTables(r.flushCtx, r.priceTableUpdates); err != nil {
+			r.logger.Errorw(fmt.Sprintf("failed to record price table updates: %v", err))
+		} else if err == nil {
+			r.priceTableUpdates = nil
+		}
+	}
+	r.flushTimer = nil
 }
 
-// flushInteractions flushes the worker's interaction buffer to the bus.
-func (w *worker) flushInteractions() {
-	if len(w.interactionsScans) > 0 {
-		if err := w.bus.RecordHostScans(w.shutdownCtx, w.interactionsScans); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record scans: %v", err))
-		} else {
-			w.interactionsScans = nil
-		}
+func (r *hostInteractionRecorder) tryFlushInteractionsBuffer() {
+	if r.flushTimer == nil {
+		r.flushTimer = time.AfterFunc(r.flushInterval, r.flush)
 	}
-	if len(w.interactionsPriceTableUpdates) > 0 {
-		if err := w.bus.RecordPriceTables(w.shutdownCtx, w.interactionsPriceTableUpdates); err != nil {
-			w.logger.Errorw(fmt.Sprintf("failed to record price table updates: %v", err))
-		} else {
-			w.interactionsPriceTableUpdates = nil
-		}
-	}
-	w.interactionsFlushTimer = nil
 }
 
 func isSuccessfulInteraction(err error) bool {
