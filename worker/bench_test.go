@@ -23,7 +23,7 @@ func (z *zeroReader) Read(p []byte) (n int, err error) {
 
 // BenchmarkDownlaoderSingleObject benchmarks downloading a single, slab-sized
 // object.
-// 485.48 MB/s | M2 Pro | bae6e77
+// 1036.74 MB/s | M2 Pro | c9dc1b6
 func BenchmarkDownloaderSingleObject(b *testing.B) {
 	w := newMockWorker()
 
