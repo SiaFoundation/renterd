@@ -354,15 +354,15 @@ func (sc *bCurrency) Scan(src any) error {
 		return fmt.Errorf("cannot scan %d bytes to Currency", len(buf))
 	}
 
-	sc.Lo = binary.LittleEndian.Uint64(buf[:8])
-	sc.Hi = binary.LittleEndian.Uint64(buf[8:])
+	sc.Hi = binary.BigEndian.Uint64(buf[:8])
+	sc.Lo = binary.BigEndian.Uint64(buf[8:])
 	return nil
 }
 
 // Value implements the driver.Valuer interface.
 func (sc bCurrency) Value() (driver.Value, error) {
 	buf := make([]byte, 16)
-	binary.LittleEndian.PutUint64(buf[:8], sc.Lo)
-	binary.LittleEndian.PutUint64(buf[8:], sc.Hi)
+	binary.BigEndian.PutUint64(buf[:8], sc.Hi)
+	binary.BigEndian.PutUint64(buf[8:], sc.Lo)
 	return buf, nil
 }

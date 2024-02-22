@@ -26,6 +26,7 @@ const (
 
 var (
 	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
+	errDownloadCancelled      = errors.New("download was cancelled")
 )
 
 type (
@@ -290,7 +291,7 @@ outer:
 		case <-mgr.shutdownCtx.Done():
 			return ErrShuttingDown
 		case <-ctx.Done():
-			return errors.New("download timed out")
+			return errDownloadCancelled
 		case resp = <-responseChan:
 		}
 
