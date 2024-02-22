@@ -185,7 +185,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 
 	// try and upload one slab synchronously
 	if bufferSizeLimitReached {
-		mem := w.uploadManager.mm.AcquireMemory(ctx, up.rs.SlabSizeWithRedundancy())
+		mem := w.uploadManager.mm.AcquireMemory(ctx, up.rs.SlabSize())
 		if mem != nil {
 			defer mem.Release()
 
@@ -239,7 +239,7 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	var wg sync.WaitGroup
 	for {
 		// block until we have memory
-		mem := w.uploadManager.mm.AcquireMemory(interruptCtx, rs.SlabSizeWithRedundancy())
+		mem := w.uploadManager.mm.AcquireMemory(interruptCtx, rs.SlabSize())
 		if mem == nil {
 			break // interrupted
 		}
@@ -439,8 +439,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	numSlabsChan := make(chan int, 1)
 
 	// prepare slab sizes
+	slabSizeNoRedundancy := up.rs.SlabSizeNoRedundancy()
 	slabSize := up.rs.SlabSize()
-	slabSizeWithRedundancy := up.rs.SlabSizeWithRedundancy()
 	var partialSlab []byte
 
 	// launch uploads in a separate goroutine
@@ -455,14 +455,14 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 			default:
 			}
 			// acquire memory
-			mem := mgr.mm.AcquireMemory(ctx, slabSizeWithRedundancy)
+			mem := mgr.mm.AcquireMemory(ctx, slabSize)
 			if mem == nil {
 				return // interrupted
 			}
 
 			// read next slab's data
-			data := make([]byte, slabSize)
-			length, err := io.ReadFull(io.LimitReader(cr, int64(slabSize)), data)
+			data := make([]byte, slabSizeNoRedundancy)
+			length, err := io.ReadFull(io.LimitReader(cr, int64(slabSizeNoRedundancy)), data)
 			if err == io.EOF {
 				mem.Release()
 

@@ -206,7 +206,7 @@ func TestSectorPruning(t *testing.T) {
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		res, err = b.PrunableData(context.Background())
 		tt.OK(err)
-		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSizeWithRedundancy() {
+		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
 			return fmt.Errorf("unexpected prunable data %v", n)
 		}
 		return nil

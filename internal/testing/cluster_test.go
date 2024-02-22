@@ -2349,7 +2349,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
-	slabSize := testRedundancySettings.SlabSize()
+	slabSize := testRedundancySettings.SlabSizeNoRedundancy()
 	tt := cluster.tt
 
 	// start a new multipart upload. We upload the parts in reverse order
