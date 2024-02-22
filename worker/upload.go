@@ -269,9 +269,6 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
 			defer cancel()
 
-			// attach interaction recorder to the context
-			ctx = context.WithValue(ctx, keyInteractionRecorder, w)
-
 			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
 			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
 				mu.Lock()
