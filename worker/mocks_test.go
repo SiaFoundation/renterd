@@ -274,7 +274,7 @@ func (os *mockObjectStore) Object(ctx context.Context, bucket, path string, opts
 
 	return api.ObjectsResponse{Object: &api.Object{
 		ObjectMetadata: api.ObjectMetadata{Name: path, Size: o.TotalSize()},
-		Object:         o,
+		Object:         &o,
 	}}, nil
 }
 

@@ -517,7 +517,7 @@ func TestWalletMetrics(t *testing.T) {
 	} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
 		return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
 	}) {
-		t.Fatal("expected metrics to be sorted by time")
+		t.Fatalf("expected metrics to be sorted by time, %+v", metrics)
 	}
 
 	// Prune metrics

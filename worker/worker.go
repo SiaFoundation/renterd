@@ -200,7 +200,6 @@ type worker struct {
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]bool
 
-	hostInteractionRecorder  HostInteractionRecorder
 	contractSpendingRecorder ContractSpendingRecorder
 	contractLockingDuration  time.Duration
 
@@ -351,11 +350,13 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	var err error
 	var hpt hostdb.HostPriceTable
 	defer func() {
-		w.hostInteractionRecorder.RecordPriceTableUpdate(hostdb.PriceTableUpdate{
-			HostKey:    rptr.HostKey,
-			Success:    isSuccessfulInteraction(err),
-			Timestamp:  time.Now(),
-			PriceTable: hpt,
+		w.bus.RecordPriceTables(ctx, []hostdb.PriceTableUpdate{
+			{
+				HostKey:    rptr.HostKey,
+				Success:    isSuccessfulInteraction(err),
+				Timestamp:  time.Now(),
+				PriceTable: hpt,
+			},
 		})
 	}()
 
@@ -928,10 +929,12 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// create a download function
 	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
-		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
+		err = w.downloadManager.DownloadObject(ctx, wr, *res.Object.Object, uint64(offset), uint64(length), contracts)
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) {
+			if !errors.Is(err, ErrShuttingDown) &&
+				!errors.Is(err, errDownloadCancelled) &&
+				!errors.Is(err, io.ErrClosedPipe) {
 				w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
 			}
 		}
@@ -1135,20 +1138,21 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// make sure only one of the following is set
-	var disablePreshardingEncryption bool
-	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
-		return
-	}
-	if !disablePreshardingEncryption && jc.Request.FormValue("offset") == "" {
-		jc.Error(errors.New("if presharding encryption isn't disabled, the offset needs to be set"), http.StatusBadRequest)
-		return
-	}
+	// get the offset
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	} else if offset < 0 {
 		jc.Error(errors.New("offset must be positive"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch upload from bus
+	upload, err := w.bus.MultipartUpload(ctx, uploadID)
+	if isError(err, api.ErrMultipartUploadNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch multipart upload", err) != nil {
 		return
 	}
 
@@ -1158,17 +1162,15 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
+		WithCustomKey(upload.Key),
 	}
-	if disablePreshardingEncryption {
-		opts = append(opts, WithCustomKey(object.NoOpKey))
-	} else {
-		upload, err := w.bus.MultipartUpload(ctx, uploadID)
-		if err != nil {
-			jc.Error(err, http.StatusBadRequest)
-			return
-		}
+
+	// make sure only one of the following is set
+	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && jc.Request.FormValue("offset") == "" {
+		jc.Error(errors.New("if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set"), http.StatusBadRequest)
+		return
+	} else if encryptionEnabled {
 		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
-		opts = append(opts, WithCustomKey(upload.Key))
 	}
 
 	// attach gouging checker to the context
@@ -1301,6 +1303,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
@@ -1311,12 +1314,9 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		logger:                  l.Sugar().Named("worker").Named(id),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]bool),
+		shutdownCtx:             ctx,
+		shutdownCtxCancel:       cancel,
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = context.WithValue(ctx, keyInteractionRecorder, w)
-	w.shutdownCtx = ctx
-	w.shutdownCtxCancel = cancel
 
 	w.initAccounts(b)
 	w.initPriceTables()
@@ -1326,7 +1326,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
 
 	w.initContractSpendingRecorder(busFlushInterval)
-	w.initHostInteractionRecorder(busFlushInterval)
 	return w, nil
 }
 
@@ -1373,7 +1372,6 @@ func (w *worker) Shutdown(ctx context.Context) error {
 	w.uploadManager.Stop()
 
 	// stop recorders
-	w.hostInteractionRecorder.Stop(ctx)
 	w.contractSpendingRecorder.Stop(ctx)
 	return nil
 }
@@ -1450,14 +1448,23 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	default:
 	}
 
-	// record host scan
-	w.hostInteractionRecorder.RecordHostScan(hostdb.HostScan{
-		HostKey:    hostKey,
-		Success:    isSuccessfulInteraction(err),
-		Timestamp:  time.Now(),
-		Settings:   settings,
-		PriceTable: pt,
+	// record host scan - make sure this isn't interrupted by the same context
+	// used to time out the scan itself because otherwise we won't be able to
+	// record scans that timed out.
+	recordCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	scanErr := w.bus.RecordHostScans(recordCtx, []hostdb.HostScan{
+		{
+			HostKey:    hostKey,
+			Success:    isSuccessfulInteraction(err),
+			Timestamp:  time.Now(),
+			Settings:   settings,
+			PriceTable: pt,
+		},
 	})
+	if scanErr != nil {
+		w.logger.Errorf("failed to record host scan: %v", scanErr)
+	}
 	return settings, pt, duration, err
 }
 

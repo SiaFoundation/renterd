@@ -287,7 +287,10 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true})
+	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{
+		IgnoreDelim:  true,
+		OnlyMetadata: true,
+	})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
@@ -405,7 +408,7 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
 	convertToSiaMetadataHeaders(meta)
 	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, api.CreateMultipartOptions{
-		Key:      object.NoOpKey,
+		Key:      &object.NoOpKey,
 		MimeType: meta["Content-Type"],
 		Metadata: api.ExtractObjectUserMetadataFrom(meta),
 	})
@@ -418,8 +421,7 @@ func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta
 
 func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.UploadID, partNumber int, contentLength int64, input io.Reader) (*gofakes3.UploadPartResult, error) {
 	res, err := s.w.UploadMultipartUploadPart(ctx, input, bucket, object, string(id), partNumber, api.UploadMultipartUploadPartOptions{
-		DisablePreshardingEncryption: true,
-		ContentLength:                contentLength,
+		ContentLength: contentLength,
 	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())

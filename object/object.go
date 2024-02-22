@@ -43,6 +43,9 @@ func (k *EncryptionKey) UnmarshalBinary(b []byte) error {
 
 // String implements fmt.Stringer.
 func (k EncryptionKey) String() string {
+	if k.entropy == nil {
+		return ""
+	}
 	return "key:" + hex.EncodeToString(k.entropy[:])
 }
 
