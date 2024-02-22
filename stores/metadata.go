@@ -410,14 +410,14 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 }
 
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
-	return api.ObjectMetadata{
-		ETag:     raw.ETag,
-		Health:   raw.Health,
-		MimeType: raw.MimeType,
-		ModTime:  api.TimeRFC3339(time.Time(raw.ModTime).UTC()),
-		Name:     raw.Name,
-		Size:     raw.Size,
-	}
+	return newObjectMetadata(
+		raw.Name,
+		raw.ETag,
+		raw.MimeType,
+		raw.Health,
+		time.Time(raw.ModTime),
+		raw.Size,
+	)
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -1552,13 +1552,14 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			// No copying is happening. We just update the metadata on the src
 			// object.
 			srcObj.MimeType = mimeType
-			om = api.ObjectMetadata{
-				Health:   srcObj.Health,
-				MimeType: srcObj.MimeType,
-				ModTime:  api.TimeRFC3339(srcObj.CreatedAt.UTC()),
-				Name:     srcObj.ObjectID,
-				Size:     srcObj.Size,
-			}
+			om = newObjectMetadata(
+				srcObj.ObjectID,
+				srcObj.Etag,
+				srcObj.MimeType,
+				srcObj.Health,
+				srcObj.CreatedAt,
+				srcObj.Size,
+			)
 			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
 				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
@@ -1606,14 +1607,14 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create object metadata: %w", err)
 		}
 
-		om = api.ObjectMetadata{
-			MimeType: dstObj.MimeType,
-			ETag:     dstObj.Etag,
-			Health:   srcObj.Health,
-			ModTime:  api.TimeRFC3339(dstObj.CreatedAt.UTC()),
-			Name:     dstObj.ObjectID,
-			Size:     dstObj.Size,
-		}
+		om = newObjectMetadata(
+			dstObj.ObjectID,
+			dstObj.Etag,
+			dstObj.MimeType,
+			dstObj.Health,
+			dstObj.CreatedAt,
+			dstObj.Size,
+		)
 		return nil
 	})
 	return
@@ -2316,19 +2317,55 @@ func (s *SQLStore) objectHydrate(ctx context.Context, tx *gorm.DB, bucket, path 
 	// return object
 	return api.Object{
 		Metadata: metadata,
-		ObjectMetadata: api.ObjectMetadata{
-			ETag:     obj[0].ObjectETag,
-			Health:   obj[0].ObjectHealth,
-			MimeType: obj[0].ObjectMimeType,
-			ModTime:  api.TimeRFC3339(obj[0].ObjectModTime.UTC()),
-			Name:     obj[0].ObjectName,
-			Size:     obj[0].ObjectSize,
-		},
-		Object: object.Object{
+		ObjectMetadata: newObjectMetadata(
+			obj[0].ObjectName,
+			obj[0].ObjectETag,
+			obj[0].ObjectMimeType,
+			obj[0].ObjectHealth,
+			obj[0].ObjectModTime,
+			obj[0].ObjectSize,
+		),
+		Object: &object.Object{
 			Key:   key,
 			Slabs: slabs,
 		},
 	}, nil
+}
+
+// ObjectMetadata returns an object's metadata
+func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
+	var resp api.Object
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var obj dbObject
+		err := tx.Model(&dbObject{}).
+			Joins("INNER JOIN buckets b ON objects.db_bucket_id = b.id").
+			Where("b.name", bucket).
+			Where("object_id", path).
+			Take(&obj).
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrObjectNotFound
+		} else if err != nil {
+			return err
+		}
+		oum, err := s.objectMetadata(ctx, tx, bucket, path)
+		if err != nil {
+			return err
+		}
+		resp = api.Object{
+			ObjectMetadata: newObjectMetadata(
+				obj.ObjectID,
+				obj.Etag,
+				obj.MimeType,
+				obj.Health,
+				obj.CreatedAt,
+				obj.Size,
+			),
+			Metadata: oum,
+		}
+		return nil
+	})
+	return resp, err
 }
 
 func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {
@@ -2349,6 +2386,17 @@ func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path
 		metadata[row.Key] = row.Value
 	}
 	return metadata, nil
+}
+
+func newObjectMetadata(name, etag, mimeType string, health float64, modTime time.Time, size int64) api.ObjectMetadata {
+	return api.ObjectMetadata{
+		ETag:     etag,
+		Health:   health,
+		ModTime:  api.TimeRFC3339(modTime.UTC()),
+		Name:     name,
+		Size:     size,
+		MimeType: mimeType,
+	}
 }
 
 func (s *SQLStore) objectRaw(ctx context.Context, txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {

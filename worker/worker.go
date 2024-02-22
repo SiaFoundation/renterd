@@ -920,7 +920,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// create a download function
 	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
-		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
+		err = w.downloadManager.DownloadObject(ctx, wr, *res.Object.Object, uint64(offset), uint64(length), contracts)
 		if err != nil {
 			w.logger.Error(err)
 			if !errors.Is(err, ErrShuttingDown) {

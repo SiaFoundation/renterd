@@ -87,7 +87,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
@@ -118,7 +118,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got2.Object, want2) {
+	if !reflect.DeepEqual(*got2.Object, want2) {
 		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
 	}
 }
@@ -175,7 +175,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert it matches
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
@@ -1069,7 +1069,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
@@ -1183,7 +1183,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
@@ -2662,7 +2662,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj, fetched.Object) {
+	if !reflect.DeepEqual(obj, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
@@ -2698,7 +2698,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj2, fetched.Object) {
+	if !reflect.DeepEqual(obj2, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj2, fetched.Object))
 	}
 
@@ -2746,7 +2746,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj3, fetched.Object) {
+	if !reflect.DeepEqual(obj3, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj3, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 

@@ -54,7 +54,7 @@ type (
 	Object struct {
 		Metadata ObjectUserMetadata `json:"metadata,omitempty"`
 		ObjectMetadata
-		object.Object
+		*object.Object `json:"omitempty"`
 	}
 
 	// ObjectMetadata contains various metadata about an object.
@@ -212,13 +212,14 @@ type (
 	}
 
 	GetObjectOptions struct {
-		Prefix      string
-		Offset      int
-		Limit       int
-		IgnoreDelim bool
-		Marker      string
-		SortBy      string
-		SortDir     string
+		Prefix       string
+		Offset       int
+		Limit        int
+		IgnoreDelim  bool
+		Marker       string
+		OnlyMetadata bool
+		SortBy       string
+		SortDir      string
 	}
 
 	ListObjectOptions struct {
@@ -315,6 +316,9 @@ func (opts GetObjectOptions) Apply(values url.Values) {
 	}
 	if opts.Marker != "" {
 		values.Set("marker", opts.Marker)
+	}
+	if opts.OnlyMetadata {
+		values.Set("onlymetadata", "true")
 	}
 	if opts.SortBy != "" {
 		values.Set("sortBy", opts.SortBy)
