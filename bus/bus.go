@@ -2179,9 +2179,13 @@ func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
 		return
 	}
 
-	key := req.Key
-	if key == (object.EncryptionKey{}) {
+	var key object.EncryptionKey
+	if req.GenerateKey {
+		key = object.GenerateEncryptionKey()
+	} else if req.Key == nil {
 		key = object.NoOpKey
+	} else {
+		key = *req.Key
 	}
 
 	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType, req.Metadata)

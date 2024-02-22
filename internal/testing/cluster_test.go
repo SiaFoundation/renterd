@@ -697,30 +697,33 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// check objects stats.
-	for _, opts := range []api.ObjectsStatsOpts{
-		{},                              // any bucket
-		{Bucket: api.DefaultBucketName}, // specific bucket
-	} {
-		info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
-		tt.OK(err)
-		objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
-		if info.TotalObjectsSize != objectsSize {
-			t.Error("wrong size", info.TotalObjectsSize, objectsSize)
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		for _, opts := range []api.ObjectsStatsOpts{
+			{},                              // any bucket
+			{Bucket: api.DefaultBucketName}, // specific bucket
+		} {
+			info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+			tt.OK(err)
+			objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+			if info.TotalObjectsSize != objectsSize {
+				return fmt.Errorf("wrong size %v %v", info.TotalObjectsSize, objectsSize)
+			}
+			sectorsSize := 15 * rhpv2.SectorSize
+			if info.TotalSectorsSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalSectorsSize, sectorsSize)
+			}
+			if info.TotalUploadedSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalUploadedSize, sectorsSize)
+			}
+			if info.NumObjects != 4 {
+				return fmt.Errorf("wrong number of objects %v %v", info.NumObjects, 4)
+			}
+			if info.MinHealth != 1 {
+				return fmt.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+			}
 		}
-		sectorsSize := 15 * rhpv2.SectorSize
-		if info.TotalSectorsSize != uint64(sectorsSize) {
-			t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
-		}
-		if info.TotalUploadedSize != uint64(sectorsSize) {
-			t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
-		}
-		if info.NumObjects != 4 {
-			t.Error("wrong number of objects", info.NumObjects, 4)
-		}
-		if info.MinHealth != 1 {
-			t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
-		}
-	}
+		return nil
+	})
 
 	// download the data
 	for _, data := range [][]byte{small, large} {
@@ -1996,7 +1999,7 @@ func TestMultipartUploads(t *testing.T) {
 
 	// Start a new multipart upload.
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{GenerateKey: true})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -2015,7 +2018,7 @@ func TestMultipartUploads(t *testing.T) {
 	// correctly.
 	putPart := func(partNum int, offset int, data []byte) string {
 		t.Helper()
-		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: offset})
+		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: &offset})
 		tt.OK(err)
 		if res.ETag == "" {
 			t.Fatal("expected non-empty ETag")
@@ -2354,7 +2357,8 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// start a new multipart upload. We upload the parts in reverse order
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	key := object.GenerateEncryptionKey()
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: &key})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -2362,22 +2366,25 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// upload a part that is a partial slab
 	part3Data := bytes.Repeat([]byte{3}, int(slabSize)/4)
+	offset := int(slabSize + slabSize/4)
 	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize + slabSize/4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload a part that is exactly a full slab
 	part2Data := bytes.Repeat([]byte{2}, int(slabSize))
+	offset = int(slabSize / 4)
 	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize / 4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload another part the same size as the first one
 	part1Data := bytes.Repeat([]byte{1}, int(slabSize)/4)
+	offset = 0
 	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: 0,
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 

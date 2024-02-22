@@ -1126,20 +1126,21 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// make sure only one of the following is set
-	var disablePreshardingEncryption bool
-	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
-		return
-	}
-	if !disablePreshardingEncryption && jc.Request.FormValue("offset") == "" {
-		jc.Error(errors.New("if presharding encryption isn't disabled, the offset needs to be set"), http.StatusBadRequest)
-		return
-	}
+	// get the offset
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	} else if offset < 0 {
 		jc.Error(errors.New("offset must be positive"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch upload from bus
+	upload, err := w.bus.MultipartUpload(ctx, uploadID)
+	if isError(err, api.ErrMultipartUploadNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch multipart upload", err) != nil {
 		return
 	}
 
@@ -1149,17 +1150,15 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
+		WithCustomKey(upload.Key),
 	}
-	if disablePreshardingEncryption {
-		opts = append(opts, WithCustomKey(object.NoOpKey))
-	} else {
-		upload, err := w.bus.MultipartUpload(ctx, uploadID)
-		if err != nil {
-			jc.Error(err, http.StatusBadRequest)
-			return
-		}
+
+	// make sure only one of the following is set
+	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && jc.Request.FormValue("offset") == "" {
+		jc.Error(errors.New("if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set"), http.StatusBadRequest)
+		return
+	} else if encryptionEnabled {
 		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
-		opts = append(opts, WithCustomKey(upload.Key))
 	}
 
 	// attach gouging checker to the context
