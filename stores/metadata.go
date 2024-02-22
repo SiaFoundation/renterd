@@ -1499,6 +1499,10 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")), prefixNew,
 				utf8.RuneCountInString(prefixOld)+1, prefixOld+"%",
 				utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+
+			if !isSQLite(tx) {
+				inner = tx.Raw("SELECT * FROM (?) as i", inner)
+			}
 			resp := tx.Model(&dbObject{}).
 				Where("object_id IN (?)", inner).
 				Delete(&dbObject{})
