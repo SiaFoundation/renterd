@@ -4326,13 +4326,13 @@ func TestTypeCurrency(t *testing.T) {
 			cmp: "=",
 		},
 		{
-			a:   types.NewCurrency(0, math.MaxUint64),
-			b:   types.NewCurrency(math.MaxUint64, 0),
+			a:   types.NewCurrency(math.MaxUint64, 0),
+			b:   types.NewCurrency(0, math.MaxUint64),
 			cmp: "<",
 		},
 		{
-			a:   types.NewCurrency(math.MaxUint64, 0),
-			b:   types.NewCurrency(0, math.MaxUint64),
+			a:   types.NewCurrency(0, math.MaxUint64),
+			b:   types.NewCurrency(math.MaxUint64, 0),
 			cmp: ">",
 		},
 	}
@@ -4342,7 +4342,13 @@ func TestTypeCurrency(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		} else if !result {
-			t.Fatal("unexpected result", result)
+			t.Fatalf("unexpected result %v for %v %v %v", result, test.a, test.cmp, test.b)
+		} else if test.cmp == "<" && test.a.Cmp(test.b) >= 0 {
+			t.Fatal("invalid result")
+		} else if test.cmp == ">" && test.a.Cmp(test.b) <= 0 {
+			t.Fatal("invalid result")
+		} else if test.cmp == "=" && test.a.Cmp(test.b) != 0 {
+			t.Fatal("invalid result")
 		}
 	}
 
