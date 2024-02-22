@@ -158,12 +158,18 @@ func (ss SlabSlice) SectorRegion() (offset, length uint32) {
 // slice offset), using a different nonce for each shard.
 func (ss SlabSlice) Decrypt(shards [][]byte) {
 	offset := ss.Offset / (rhpv2.LeafSize * uint32(ss.MinShards))
-	for i, shard := range shards {
-		nonce := [24]byte{1: byte(i)}
-		c, _ := chacha20.NewUnauthenticatedCipher(ss.Key.entropy[:], nonce[:])
-		c.SetCounter(offset)
-		c.XORKeyStream(shard, shard)
+	var wg sync.WaitGroup
+	for i := range shards {
+		wg.Add(1)
+		go func(i int) {
+			nonce := [24]byte{1: byte(i)}
+			c, _ := chacha20.NewUnauthenticatedCipher(ss.Key.entropy[:], nonce[:])
+			c.SetCounter(offset)
+			c.XORKeyStream(shards[i], shards[i])
+			wg.Done()
+		}(i)
 	}
+	wg.Wait()
 }
 
 // Recover recovers a slice of slab data from the supplied shards.

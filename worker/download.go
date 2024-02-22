@@ -195,12 +195,13 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		hosts[c.HostKey] = struct{}{}
 	}
 
-	// buffer the writer
-	bw := bufio.NewWriter(w)
-	defer bw.Flush()
-
 	// create the cipher writer
-	cw := o.Key.Decrypt(bw, offset)
+	cw := o.Key.Decrypt(w, offset)
+
+	// buffer the writer we recover to making sure that we don't hammer the
+	// response writer with tiny writes
+	bw := bufio.NewWriter(cw)
+	defer bw.Flush()
 
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
@@ -322,7 +323,7 @@ outer:
 					} else {
 						// Regular slab.
 						slabs[respIndex].Decrypt(next.shards)
-						err := slabs[respIndex].Recover(cw, next.shards)
+						err := slabs[respIndex].Recover(bw, next.shards)
 						if err != nil {
 							mgr.logger.Errorf("failed to recover slab %v: %v", respIndex, err)
 							return err
