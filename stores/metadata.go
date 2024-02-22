@@ -2708,7 +2708,7 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	} else if err := pruneSlabs(tx); err != nil {
-		return 0, err
+		return numDeleted, err
 	}
 	return numDeleted, nil
 }
