@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -109,7 +108,6 @@ type (
 
 	dbConsensusInfo struct {
 		Model
-		CCID    []byte
 		Height  uint64
 		BlockID hash256
 	}
@@ -952,18 +950,6 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 		blocked = true
 	}
 	return
-}
-
-func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {
-	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-		Model: Model{
-			ID: consensusInfoID,
-		},
-	}).Updates(map[string]interface{}{
-		"CCID":     newCCID[:],
-		"height":   newTip.Height,
-		"block_id": hash256(newTip.ID),
-	}).Error
 }
 
 func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {

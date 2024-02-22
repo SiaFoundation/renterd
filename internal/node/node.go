@@ -91,7 +91,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	walletAddr := types.StandardUnlockHash(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	sqlStore, _, err := stores.NewSQLStore(stores.Config{
+	sqlStore, err := stores.NewSQLStore(stores.Config{
 		Conn:                          dbConn,
 		ConnMetrics:                   dbMetricsConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),

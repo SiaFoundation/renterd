@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
@@ -43,7 +42,6 @@ type testSQLStore struct {
 	dbName        string
 	dbMetricsName string
 	dir           string
-	ccid          modules.ConsensusChangeID
 }
 
 type testSQLStoreConfig struct {
@@ -84,7 +82,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(Config{
+	sqlStore, err := NewSQLStore(Config{
 		Conn:                          conn,
 		ConnMetrics:                   connMetrics,
 		Alerts:                        alerts,
@@ -112,7 +110,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		dbName:        dbName,
 		dbMetricsName: dbMetricsName,
 		dir:           dir,
-		ccid:          ccid,
 		t:             t,
 	}
 }

@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
@@ -27,9 +26,6 @@ func (s *SQLStore) insertTestAnnouncement(a announcement) error {
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	if ss.ccid != modules.ConsensusChangeBeginning {
-		t.Fatal("wrong ccid", ss.ccid, modules.ConsensusChangeBeginning)
-	}
 
 	// Try to fetch a random host. Should fail.
 	ctx := context.Background()

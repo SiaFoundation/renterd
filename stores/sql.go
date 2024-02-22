@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -74,30 +73,25 @@ type (
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
 
-		slabBufferMgr *SlabBufferManager
-
-		retryTransactionIntervals []time.Duration
-
 		// HostDB related fields
 		announcementMaxAge time.Duration
 
-		// SettingsDB related fields.
+		// ObjectDB related fields
+		slabBufferMgr    *SlabBufferManager
+		slabPruneSigChan chan struct{}
+
+		// SettingsDB related fields
 		settingsMu sync.Mutex
 		settings   map[string]string
 
 		// WalletDB related fields.
 		walletAddress types.Address
 
-		// Consensus related fields.
-		ccid       modules.ConsensusChangeID
-		chainIndex types.ChainIndex
+		retryTransactionIntervals []time.Duration
 
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
-		slabPruneSigChan chan struct{}
-
-		wg           sync.WaitGroup
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
@@ -159,14 +153,14 @@ func DBConfigFromEnv() (uri, user, password, dbName string) {
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
+func NewSQLStore(cfg Config) (*SQLStore, error) {
 	// Sanity check announcement max age.
 	if cfg.AnnouncementMaxAge == 0 {
-		return nil, modules.ConsensusChangeID{}, errors.New("announcementMaxAge must be non-zero")
+		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
 
 	if err := os.MkdirAll(cfg.PartialSlabDir, 0700); err != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create partial slab dir: %v", err)
+		return nil, fmt.Errorf("failed to create partial slab dir: %v", err)
 	}
 	db, err := gorm.Open(cfg.Conn, &gorm.Config{
 		Logger:                   cfg.GormLogger, // custom logger
@@ -174,13 +168,13 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		DisableNestedTransaction: true,
 	})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
+		return nil, fmt.Errorf("failed to open SQL db")
 	}
 	dbMetrics, err := gorm.Open(cfg.ConnMetrics, &gorm.Config{
 		Logger: cfg.GormLogger, // custom logger
 	})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open metrics db")
+		return nil, fmt.Errorf("failed to open metrics db")
 	}
 	l := cfg.Logger.Named("sql")
 
@@ -195,40 +189,34 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		dbName = "MySQL"
 	}
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db version: %v", err)
+		return nil, fmt.Errorf("failed to fetch db version: %v", err)
 	}
 	l.Infof("Using %s version %s", dbName, dbVersion)
 
 	// Perform migrations.
 	if cfg.Migrate {
 		if err := performMigrations(db, l); err != nil {
-			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
+			return nil, fmt.Errorf("failed to perform migrations: %v", err)
 		}
 		if err := performMetricsMigrations(dbMetrics, l); err != nil {
-			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
+			return nil, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
-	}
-
-	// Get latest consensus change ID or init db.
-	ci, ccid, err := initConsensusInfo(db)
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
 	}
 
 	// Check allowlist and blocklist counts
 	allowlistCnt, err := tableCount(db, &dbAllowlistEntry{})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, err
 	}
 	blocklistCnt, err := tableCount(db, &dbBlocklistEntry{})
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, err
 	}
 
 	// Create chain subscriber
 	cs, err := NewChainSubscriber(db, cfg.Logger, cfg.RetryTransactionIntervals, cfg.PersistInterval, cfg.WalletAddress, cfg.AnnouncementMaxAge)
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, err
 	}
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
@@ -242,14 +230,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		hasBlocklist:     blocklistCnt > 0,
 		settings:         make(map[string]string),
 		slabPruneSigChan: make(chan struct{}, 1),
+		walletAddress:    cfg.WalletAddress,
 
 		announcementMaxAge: cfg.AnnouncementMaxAge,
-
-		walletAddress: cfg.WalletAddress,
-		chainIndex: types.ChainIndex{
-			Height: ci.Height,
-			ID:     types.BlockID(ci.BlockID),
-		},
 
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
@@ -259,9 +242,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 	ss.slabBufferMgr, err = newSlabBufferManager(ss, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
 	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
+		return nil, err
 	}
-	return ss, ccid, nil
+	return ss, nil
 }
 
 func isSQLite(db *gorm.DB) bool {
@@ -315,7 +298,6 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 // Close closes the underlying database connection of the store.
 func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
-	s.wg.Wait()
 
 	db, err := s.db.DB()
 	if err != nil {
@@ -399,21 +381,4 @@ func retryTransaction(db *gorm.DB, logger *zap.SugaredLogger, fc func(tx *gorm.D
 
 func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	return retryTransaction(s.db, s.logger, fc, s.retryTransactionIntervals, opts...)
-}
-
-func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID, error) {
-	var ci dbConsensusInfo
-	if err := db.
-		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
-		Attrs(dbConsensusInfo{
-			Model: Model{ID: consensusInfoID},
-			CCID:  modules.ConsensusChangeBeginning[:],
-		}).
-		FirstOrCreate(&ci).
-		Error; err != nil {
-		return dbConsensusInfo{}, modules.ConsensusChangeID{}, err
-	}
-	var ccid modules.ConsensusChangeID
-	copy(ccid[:], ci.CCID)
-	return ci, ccid, nil
 }

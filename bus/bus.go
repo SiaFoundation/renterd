@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -50,25 +49,6 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
-	// A ChainManager manages blockchain state.
-	ChainManager interface {
-		AcceptBlock(types.Block) error
-		BlockAtHeight(height uint64) (types.Block, bool)
-		IndexAtHeight(height uint64) (types.ChainIndex, error)
-		LastBlockTime() time.Time
-		Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error
-		Synced() bool
-		TipState() consensus.State
-	}
-
-	// A Syncer can connect to other peers and synchronize the blockchain.
-	Syncer interface {
-		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
-		Connect(addr string) error
-		Peers() []string
-		SyncerAddress(ctx context.Context) (string, error)
-	}
-
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
@@ -77,19 +57,6 @@ type (
 		Subscribe(subscriber modules.TransactionPoolSubscriber)
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
-	}
-
-	// A Wallet can spend and receive siacoins.
-	Wallet interface {
-		Address() types.Address
-		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
-		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error)
-		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error)
-		ReleaseInputs(txn ...types.Transaction)
-		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-		Tip() (types.ChainIndex, error)
-		Transactions(offset, limit int) ([]api.Transaction, error)
-		UnspentOutputs() ([]api.SiacoinElement, error)
 	}
 
 	// A HostDB stores information about hosts.
