@@ -9,7 +9,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 )
 
@@ -137,7 +136,7 @@ func (c *Client) WalletSign(ctx context.Context, txn *types.Transaction, toSign 
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
-func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Event, err error) {
+func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []api.Transaction, err error) {
 	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
 
 	values := url.Values{}
