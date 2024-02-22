@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"sync"
 	"testing"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -98,53 +97,5 @@ func BenchmarkUploaderMultiObject(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-// BenchmarkSectorRoot30Goroutines benchmarks the SectorRoot function with 30
-// goroutines processing roots in parallel to simulate sequential uploads of
-// slabs.
-//
-// Speed        | CPU    | Commit
-// 1658.49 MB/s | M2 Pro | bae6e77
-func BenchmarkSectorRoot30Goroutines(b *testing.B) {
-	data := make([]byte, rhpv2.SectorSize)
-	b.SetBytes(int64(rhpv2.SectorSize))
-
-	// spin up workers
-	c := make(chan struct{})
-	work := func() {
-		for range c {
-			rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(data))
-		}
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < 30; i++ {
-		wg.Add(1)
-		go func() {
-			work()
-			wg.Done()
-		}()
-	}
-	b.ResetTimer()
-
-	// run the benchmark
-	for i := 0; i < b.N; i++ {
-		c <- struct{}{}
-	}
-	close(c)
-	wg.Wait()
-}
-
-// BenchmarkSectorRootSingleGoroutine benchmarks the SectorRoot function.
-//
-// Speed       | CPU    | Commit
-// 177.33 MB/s | M2 Pro | bae6e77
-func BenchmarkSectorRootSingleGoroutine(b *testing.B) {
-	data := make([]byte, rhpv2.SectorSize)
-	b.SetBytes(rhpv2.SectorSize)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(data))
 	}
 }
