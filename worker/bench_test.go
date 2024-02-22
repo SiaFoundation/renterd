@@ -1,12 +1,15 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"sync"
 	"testing"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/renterd/api"
+	"lukechampine.com/frand"
 )
 
 // zeroReader is a reader that leaves the buffer unchanged and returns no error.
@@ -16,6 +19,38 @@ type zeroReader struct{}
 
 func (z *zeroReader) Read(p []byte) (n int, err error) {
 	return len(p), nil
+}
+
+// BenchmarkDownlaoderSingleObject benchmarks downloading a single, slab-sized
+// object.
+// 485.48 MB/s | M2 Pro | bae6e77
+func BenchmarkDownloaderSingleObject(b *testing.B) {
+	w := newMockWorker()
+
+	up := testParameters(b.TempDir())
+	up.rs.MinShards = 10
+	up.rs.TotalShards = 30
+	up.packing = false
+	w.addHosts(up.rs.TotalShards)
+
+	data := bytes.NewReader(frand.Bytes(int(up.rs.SlabSizeNoRedundancy())))
+	_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
+	if err != nil {
+		b.Fatal(err)
+	}
+	o, err := w.os.Object(context.Background(), testBucket, up.path, api.GetObjectOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.SetBytes(o.Object.Size)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err = w.dl.DownloadObject(context.Background(), io.Discard, *o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 // BenchmarkUploaderSingleObject benchmarks uploading a single object.
@@ -29,14 +64,12 @@ func BenchmarkUploaderSingleObject(b *testing.B) {
 	up.rs.MinShards = 10
 	up.rs.TotalShards = 30
 	up.packing = false
-
 	w.addHosts(up.rs.TotalShards)
 
-	// create a reader that returns dev/null
 	data := io.LimitReader(&zeroReader{}, int64(b.N*rhpv2.SectorSize*up.rs.MinShards))
 	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
-
 	b.ResetTimer()
+
 	_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
 	if err != nil {
 		b.Fatal(err)
@@ -54,13 +87,11 @@ func BenchmarkUploaderMultiObject(b *testing.B) {
 	up.rs.MinShards = 10
 	up.rs.TotalShards = 30
 	up.packing = false
-
 	w.addHosts(up.rs.TotalShards)
 
-	// create a reader that returns dev/null
 	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
-
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		data := io.LimitReader(&zeroReader{}, int64(rhpv2.SectorSize*up.rs.MinShards))
 		_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
