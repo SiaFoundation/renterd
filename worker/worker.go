@@ -210,6 +210,15 @@ type worker struct {
 	logger *zap.SugaredLogger
 }
 
+func (w *worker) isStopped() bool {
+	select {
+	case <-w.shutdownCtx.Done():
+		return true
+	default:
+	}
+	return false
+}
+
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
 		h := w.Host(hk, fcid, siamuxAddr)

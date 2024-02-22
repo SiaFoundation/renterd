@@ -152,15 +152,6 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *worker) isStopped() bool {
-	select {
-	case <-w.shutdownCtx.Done():
-		return true
-	default:
-	}
-	return false
-}
-
 func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
 	// apply the options
 	for _, opt := range opts {
@@ -196,11 +187,20 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 	if bufferSizeLimitReached {
 		mem := w.uploadManager.mm.AcquireMemory(ctx, up.rs.SlabSizeWithRedundancy())
 		if mem != nil {
-			_, err := w.tryUploadPackedSlab(ctx, mem, defaultPackedSlabsLockDuration, up.rs, up.contractSet, lockingPriorityBlockedUpload)
+			defer mem.Release()
+
+			// fetch packed slab to upload
+			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, lockingPriorityBlockedUpload, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
 			if err != nil {
-				w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
+				return "", fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			}
-			mem.Release()
+
+			// upload packed slab
+			if len(packedSlabs) > 0 {
+				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
+					w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
+				}
+			}
 		}
 	}
 
@@ -244,8 +244,22 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			break // interrupted
 		}
 
+		// fetch packed slab to upload
+		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
+		if err != nil {
+			mu.Lock()
+			errs = errors.Join(errs, fmt.Errorf("couldn't fetch packed slabs from bus: %v", err))
+			mu.Unlock()
+		}
+
+		// no more packed slabs to upload
+		if len(packedSlabs) == 0 {
+			mem.Release()
+			break
+		}
+
 		wg.Add(1)
-		go func() {
+		go func(ps api.PackedSlab) {
 			defer wg.Done()
 			defer mem.Release()
 
@@ -259,51 +273,36 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			ctx = context.WithValue(ctx, keyInteractionRecorder, w)
 
 			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
-			ok, err := w.tryUploadPackedSlab(ctx, mem, defaultPackedSlabsLockDuration, rs, contractSet, lockPriority)
-			if err != nil {
+			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
 				mu.Lock()
 				errs = errors.Join(errs, err)
 				mu.Unlock()
 				interruptCancel() // prevent new uploads from being launched
-			} else if !ok {
-				interruptCancel() // no more packed slabs to upload
-			} else if w.isStopped() {
-				interruptCancel() // worker shut down
 			}
-		}()
+		}(packedSlabs[0])
 	}
 
 	// wait for all threads to finish
 	wg.Wait()
 
-	// return collected errors
+	// log errors
 	if err := errors.Join(errs); err != nil {
 		w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
 	}
 	return
 }
 
-func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, lockingDuration time.Duration, rs api.RedundancySettings, contractSet string, lockPriority int) (bool, error) {
-	// fetch packed slab to upload
-	packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, lockingDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
-	if err != nil {
-		err = fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
-		return false, err
-	} else if len(packedSlabs) == 0 {
-		return false, nil // no more slabs
-	}
-	ps := packedSlabs[0]
-
+func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
-		return false, fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
 	}
 
 	// fetch upload params
 	up, err := w.bus.UploadParams(ctx)
 	if err != nil {
-		return false, fmt.Errorf("couldn't fetch upload params from bus: %v", err)
+		return fmt.Errorf("couldn't fetch upload params from bus: %v", err)
 	}
 
 	// attach gouging checker to the context
@@ -312,10 +311,10 @@ func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, lockingDur
 	// upload packed slab
 	err = w.uploadManager.UploadPackedSlab(ctx, rs, ps, mem, contracts, up.CurrentHeight, lockPriority)
 	if err != nil {
-		return false, fmt.Errorf("couldn't upload packed slab, err: %v", err)
+		return fmt.Errorf("couldn't upload packed slab, err: %v", err)
 	}
 
-	return true, nil
+	return nil
 }
 
 func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
