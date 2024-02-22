@@ -4317,13 +4317,7 @@ func TestTypeCurrency(t *testing.T) {
 	}
 
 	// insert currencies in random order
-	values := []interface{}{
-		bCurrency(types.ZeroCurrency),
-		bCurrency(types.NewCurrency64(1)),
-		bCurrency(types.MaxCurrency),
-	}
-	frand.Shuffle(len(values), func(i, j int) { values[i], values[j] = values[j], values[i] })
-	if err := ss.db.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", values...).Error; err != nil {
+	if err := ss.db.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
 		t.Fatal(err)
 	}
 
