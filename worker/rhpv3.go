@@ -385,19 +385,14 @@ func withAccountLock(ctx context.Context, as AccountStore, id rhpv3.Account, hk 
 	if err != nil {
 		return err
 	}
+	err = fn(acc)
 
-	defer func() {
-		select {
-		case <-ctx.Done():
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-		default:
-		}
-		as.UnlockAccount(ctx, acc.ID, lockID)
-	}()
+	// unlock account
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	_ = as.UnlockAccount(ctx, acc.ID, lockID) // ignore error
+	cancel()
 
-	return fn(acc)
+	return nil
 }
 
 // Balance returns the account balance.
@@ -450,36 +445,23 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 
 		// execute amtFn
 		amt, err := amtFn()
+
+		// in case of an insufficient balance, we schedule a sync
 		if isBalanceInsufficient(err) {
-			// in case of an insufficient balance, we schedule a sync
-			if scheduleErr := a.scheduleSync(); scheduleErr != nil {
-				err = fmt.Errorf("%w; failed to set requiresSync flag on bus, error: %v", err, scheduleErr)
-			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			err = errors.Join(err, a.as.ScheduleSync(ctx, a.id, a.host))
+			cancel()
 		}
 
-		// if an amount was returned, we withdraw it.
-		if withdrawErr := a.withdrawFromBalance(amt); withdrawErr != nil {
-			err = fmt.Errorf("%w; failed to withdraw from account, error: %v", err, withdrawErr)
+		// if an amount was returned, we withdraw it
+		if !amt.IsZero() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			err = errors.Join(err, a.as.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big())))
+			cancel()
 		}
 
 		return err
 	})
-}
-
-func (a *account) withdrawFromBalance(amt types.Currency) error {
-	if amt.IsZero() {
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	return a.as.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big()))
-}
-
-func (a *account) scheduleSync() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	return a.as.ScheduleSync(ctx, a.id, a.host)
 }
 
 // deriveAccountKey derives an account plus key for a given host and worker.
