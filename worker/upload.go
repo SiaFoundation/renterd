@@ -770,6 +770,12 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 			sCtx, sCancel := context.WithCancel(ctx)
 
 			// create the sector
+			// NOTE: we are computing the sector root here and pass it all the
+			// way down to the RPC to avoid having to recompute it for the proof
+			// verification. This is necessary because we need it ahead of time
+			// for the call to AddUploadingSector in uploader.go
+			// Once we upload to temp storage we don't need AddUploadingSector
+			// anymore and can move it back to the RPC.
 			sectors[idx] = &sectorUpload{
 				data:   (*[rhpv2.SectorSize]byte)(shards[idx]),
 				index:  idx,

@@ -21,7 +21,7 @@ func (z *zeroReader) Read(p []byte) (n int, err error) {
 // BenchmarkUploaderSingleObject benchmarks uploading a single object.
 //
 // Speed       | CPU    | Commit
-// 232.97 MB/s | M2 Pro | 26d3119
+// 433.86 MB/s | M2 Pro | bae6e77
 func BenchmarkUploaderSingleObject(b *testing.B) {
 	w := newMockWorker()
 
@@ -46,7 +46,7 @@ func BenchmarkUploaderSingleObject(b *testing.B) {
 // BenchmarkUploaderSingleObject benchmarks uploading one object per slab.
 //
 // Speed       | CPU    | Commit
-// 185.10 MB/s | M2 Pro | 26d3119
+// 282.47 MB/s | M2 Pro | bae6e77
 func BenchmarkUploaderMultiObject(b *testing.B) {
 	w := newMockWorker()
 
@@ -75,7 +75,7 @@ func BenchmarkUploaderMultiObject(b *testing.B) {
 // slabs.
 //
 // Speed        | CPU    | Commit
-// 1668.87 MB/s | M2 Pro | 26d3119
+// 1658.49 MB/s | M2 Pro | bae6e77
 func BenchmarkSectorRoot30Goroutines(b *testing.B) {
 	data := make([]byte, rhpv2.SectorSize)
 	b.SetBytes(int64(rhpv2.SectorSize))
@@ -108,7 +108,7 @@ func BenchmarkSectorRoot30Goroutines(b *testing.B) {
 // BenchmarkSectorRootSingleGoroutine benchmarks the SectorRoot function.
 //
 // Speed       | CPU    | Commit
-// 176.91 MB/s | M2 Pro | 26d3119
+// 177.33 MB/s | M2 Pro | bae6e77
 func BenchmarkSectorRootSingleGoroutine(b *testing.B) {
 	data := make([]byte, rhpv2.SectorSize)
 	b.SetBytes(rhpv2.SectorSize)
