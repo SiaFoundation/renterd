@@ -392,7 +392,7 @@ func withAccountLock(ctx context.Context, as AccountStore, id rhpv3.Account, hk 
 	_ = as.UnlockAccount(ctx, acc.ID, lockID) // ignore error
 	cancel()
 
-	return nil
+	return err
 }
 
 // Balance returns the account balance.
