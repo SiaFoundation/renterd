@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -732,7 +733,11 @@ func TestSQLHostAllowlist(t *testing.T) {
 }
 
 func TestSQLHostBlocklist(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	cfg := defaultTestSQLStoreConfig
+	cfg.persistent = true
+	cfg.dir = "/Users/peterjan/testing"
+	os.RemoveAll(cfg.dir)
+	ss := newTestSQLStore(t, cfg)
 	defer ss.Close()
 
 	ctx := context.Background()
@@ -1040,16 +1045,15 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
-	// TODO: fix
-	//
-	// s.unappliedHostKeys[hk] = struct{}{}
-	// s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
-	// 	hk:               hk,
-	// 	HostAnnouncement: chain.HostAnnouncement{NetAddress: na},
-	// }}...)
-	// s.lastSave = time.Now().Add(s.persistInterval * -2)
-	// return s.applyUpdates(false)
-	return nil
+	// NOTE: insert through subscriber to ensure allowlist/blocklist get updated
+	s.cs.announcements = append(s.cs.announcements, announcement{
+		blockHeight:      s.cs.tip.Height,
+		blockID:          s.cs.tip.ID,
+		hk:               hk,
+		timestamp:        time.Now(),
+		HostAnnouncement: chain.HostAnnouncement{NetAddress: na},
+	})
+	return s.cs.commit()
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all

@@ -35,9 +35,9 @@ type (
 		persistTimer   *time.Timer
 
 		announcements []announcement
-		contractState map[types.Hash256]contractState
 		events        []eventChange
-		hosts         map[types.PublicKey]struct{}
+
+		contractState map[types.Hash256]contractState
 		mayCommit     bool
 		outputs       map[types.Hash256]outputChange
 		proofs        map[types.Hash256]uint64
@@ -73,7 +73,6 @@ func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Du
 		persistInterval:    persistInterval,
 
 		contractState:  make(map[types.Hash256]contractState),
-		hosts:          make(map[types.PublicKey]struct{}),
 		outputs:        make(map[types.Hash256]outputChange),
 		proofs:         make(map[types.Hash256]uint64),
 		revisions:      make(map[types.Hash256]revisionUpdate),
@@ -181,11 +180,15 @@ func (cs *chainSubscriber) commit() error {
 			if err = insertAnnouncements(tx, cs.announcements); err != nil {
 				return fmt.Errorf("%w; failed to insert %d announcements", err, len(cs.announcements))
 			}
-		}
-		if len(cs.hosts) > 0 && (len(allowlist)+len(blocklist)) > 0 {
-			for host := range cs.hosts {
-				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
-					cs.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
+			if len(allowlist)+len(blocklist) > 0 {
+				updated := make(map[types.PublicKey]struct{})
+				for _, ann := range cs.announcements {
+					if _, seen := updated[ann.hk]; !seen {
+						updated[ann.hk] = struct{}{}
+						if err := updateBlocklist(tx, ann.hk, allowlist, blocklist); err != nil {
+							cs.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
+						}
+					}
 				}
 			}
 		}
@@ -235,7 +238,6 @@ func (cs *chainSubscriber) commit() error {
 
 	cs.announcements = nil
 	cs.contractState = make(map[types.Hash256]contractState)
-	cs.hosts = make(map[types.PublicKey]struct{})
 	cs.mayCommit = false
 	cs.outputs = make(map[types.Hash256]outputChange)
 	cs.proofs = make(map[types.Hash256]uint64)
@@ -293,17 +295,15 @@ func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate)
 		return // ignore old announcements
 	}
 	chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
-		if ha.NetAddress == "" {
-			return // ignore
+		if ha.NetAddress != "" {
+			cs.announcements = append(cs.announcements, announcement{
+				blockHeight:      cau.State.Index.Height,
+				blockID:          b.ID(),
+				hk:               hk,
+				timestamp:        b.Timestamp,
+				HostAnnouncement: ha,
+			})
 		}
-		cs.announcements = append(cs.announcements, announcement{
-			blockHeight:      cau.State.Index.Height,
-			blockID:          b.ID(),
-			hk:               hk,
-			timestamp:        b.Timestamp,
-			HostAnnouncement: ha,
-		})
-		cs.hosts[hk] = struct{}{}
 	})
 }
 

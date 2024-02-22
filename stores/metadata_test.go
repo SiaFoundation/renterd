@@ -1182,6 +1182,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		slabs[i].Shards[0].Model = Model{}
 		slabs[i].Shards[0].Contracts[0].Model = Model{}
 		slabs[i].Shards[0].Contracts[0].Host.Model = Model{}
+		slabs[i].Shards[0].Contracts[0].Host.LastAnnouncement = time.Time{}
 		slabs[i].HealthValidUntil = 0
 	}
 	if !reflect.DeepEqual(slab1, expectedObjSlab1) {
