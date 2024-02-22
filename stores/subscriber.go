@@ -86,12 +86,13 @@ func (cs *chainSubscriber) Close() error {
 	defer cs.mu.Unlock()
 
 	cs.closed = true
-	cs.persistTimer.Stop()
-	select {
-	case <-cs.persistTimer.C:
-	default:
+	if cs.persistTimer != nil {
+		cs.persistTimer.Stop()
+		select {
+		case <-cs.persistTimer.C:
+		default:
+		}
 	}
-
 	return nil
 }
 
@@ -267,6 +268,13 @@ func (cs *chainSubscriber) tryCommit() error {
 	}
 
 	// force a persist if no block has been received for some time
+	if cs.persistTimer != nil {
+		cs.persistTimer.Stop()
+		select {
+		case <-cs.persistTimer.C:
+		default:
+		}
+	}
 	cs.persistTimer = time.AfterFunc(10*time.Second, func() {
 		cs.mu.Lock()
 		defer cs.mu.Unlock()
