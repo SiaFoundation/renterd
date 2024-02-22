@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -531,14 +529,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
 
-	// calculate the eTag
-	h := md5.New()
-	for _, slab := range o.Slabs {
-		for _, shard := range slab.Shards {
-			h.Write(shard.Root[:])
-		}
-	}
-	eTag = string(hex.EncodeToString(h.Sum(nil)))
+	// compute etag
+	eTag = o.ComputeETag()
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
