@@ -190,7 +190,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 			defer mem.Release()
 
 			// fetch packed slab to upload
-			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, lockingPriorityBlockedUpload, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
+			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
 			if err != nil {
 				return "", fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			}
