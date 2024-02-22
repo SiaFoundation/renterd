@@ -137,9 +137,8 @@ type (
 	}
 
 	sectorUploadResp struct {
-		req  *sectorUploadReq
-		root types.Hash256
-		err  error
+		req *sectorUploadReq
+		err error
 	}
 )
 
@@ -1065,12 +1064,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 		return false, false
 	}
 
-	// sanity check we receive the expected root
-	if resp.root != req.sector.root {
-		s.errs[req.hk] = fmt.Errorf("root mismatch, %v != %v", resp.root, req.sector.root)
-		return false, false
-	}
-
 	// redundant sectors can't complete the upload
 	if sector.uploaded.Root != (types.Hash256{}) {
 		return false, false
@@ -1080,7 +1073,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	sector.finish(object.Sector{
 		Contracts:  map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
 		LatestHost: req.hk,
-		Root:       resp.root,
+		Root:       req.sector.root,
 	})
 
 	// update uploaded sectors
@@ -1127,22 +1120,12 @@ func (req *sectorUploadReq) done() bool {
 	}
 }
 
-func (req *sectorUploadReq) fail(err error) {
+func (req *sectorUploadReq) finish(err error) {
 	select {
 	case <-req.sector.ctx.Done():
 	case req.responseChan <- sectorUploadResp{
 		req: req,
 		err: err,
-	}:
-	}
-}
-
-func (req *sectorUploadReq) succeed(root types.Hash256) {
-	select {
-	case <-req.sector.ctx.Done():
-	case req.responseChan <- sectorUploadResp{
-		req:  req,
-		root: root,
 	}:
 	}
 }

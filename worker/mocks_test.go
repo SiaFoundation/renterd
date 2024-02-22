@@ -396,8 +396,9 @@ func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 	return err
 }
 
-func (h *mockHost) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error) {
-	return h.contract().addSector(sector), nil
+func (h *mockHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
+	h.contract().addSector(sectorRoot, sector)
+	return nil
 }
 
 func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (rev types.FileContractRevision, _ error) {
@@ -448,12 +449,10 @@ func newMockContract(hk types.PublicKey, fcid types.FileContractID) *mockContrac
 	}
 }
 
-func (c *mockContract) addSector(sector *[rhpv2.SectorSize]byte) (root types.Hash256) {
-	root = rhpv2.SectorRoot(sector)
+func (c *mockContract) addSector(sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) {
 	c.mu.Lock()
-	c.sectors[root] = sector
+	c.sectors[sectorRoot] = sector
 	c.mu.Unlock()
-	return
 }
 
 func (c *mockContract) sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
