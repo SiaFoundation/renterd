@@ -1726,7 +1726,10 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
-	ar := b.alertMgr.Active(0, -1)
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
+	if jc.Check("failed to fetch alerts", err) != nil {
+		return
+	}
 	jc.Encode(ar.Alerts)
 }
 
@@ -1744,7 +1747,11 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
 		return
 	}
-	jc.Encode(b.alertMgr.Active(offset, limit))
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: offset, Limit: limit})
+	if jc.Check("failed to fetch alerts", err) != nil {
+		return
+	}
+	jc.Encode(ar)
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {

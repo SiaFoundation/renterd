@@ -1923,7 +1923,7 @@ func TestAlerts(t *testing.T) {
 	tt.OK(b.RegisterAlert(context.Background(), alert))
 	findAlert := func(id types.Hash256) *alerts.Alert {
 		t.Helper()
-		ar, err := b.Alerts(alerts.AlertsOpts{})
+		ar, err := b.Alerts(context.Background(), alerts.AlertsOpts{})
 		tt.OK(err)
 		for _, alert := range ar.Alerts {
 			if alert.ID == id {
@@ -1960,7 +1960,7 @@ func TestAlerts(t *testing.T) {
 	}
 
 	// try to find with offset = 1
-	ar, err := b.Alerts(alerts.AlertsOpts{Offset: 1})
+	ar, err := b.Alerts(context.Background(), alerts.AlertsOpts{Offset: 1})
 	foundAlerts := ar.Alerts
 	tt.OK(err)
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert.ID {
@@ -1968,7 +1968,7 @@ func TestAlerts(t *testing.T) {
 	}
 
 	// try to find with limit = 1
-	ar, err = b.Alerts(alerts.AlertsOpts{Limit: 1})
+	ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Limit: 1})
 	foundAlerts = ar.Alerts
 	tt.OK(err)
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
