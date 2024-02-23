@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
 
@@ -166,11 +167,76 @@ func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
+		"POST   /config":        ap.configHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
 	})
+}
+
+func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode request
+	var req api.ConfigEvaluationRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// fetch necessary information
+	apCfg := req.AutopilotConfig
+	gs := req.GougingSettings
+	rs := req.RedundancySettings
+	cs, err := ap.bus.ConsensusState(ctx)
+	if jc.Check("failed to get consensus state", err) != nil {
+		return
+	}
+	gc := worker.NewGougingChecker(gs, cs, ap.State().fee, ap.State().period, apCfg.Contracts.RenewWindow)
+
+	// fetch hosts
+	hosts, err := ap.bus.Hosts(ctx, api.GetHostsOptions{})
+	if jc.Check("failed to get hosts", err) != nil {
+		return
+	}
+
+	var resp api.ConfigEvaluationResponse
+	for _, host := range hosts {
+		usable, usableBreakdown := isUsableHost(apCfg, rs, gc, host, 0, 0)
+		if usable {
+			resp.Usable++
+			continue
+		}
+		resp.Total++
+		if usableBreakdown.blocked > 0 {
+			resp.Blocked++
+		}
+		if usableBreakdown.notacceptingcontracts > 0 {
+			resp.NotAcceptingContracts++
+		}
+		if usableBreakdown.notcompletingscan > 0 {
+			resp.NotScanned++
+		}
+		if usableBreakdown.unknown > 0 {
+			resp.Other++
+		}
+		if usableBreakdown.gougingBreakdown.ContractErr != "" {
+			resp.Gouging.Contract++
+		}
+		if usableBreakdown.gougingBreakdown.DownloadErr != "" {
+			resp.Gouging.Download++
+		}
+		if usableBreakdown.gougingBreakdown.GougingErr != "" {
+			resp.Gouging.Gouging++
+		}
+		if usableBreakdown.gougingBreakdown.PruneErr != "" {
+			resp.Gouging.Pruning++
+		}
+		if usableBreakdown.gougingBreakdown.UploadErr != "" {
+			resp.Gouging.Upload++
+		}
+	}
+	jc.Encode(resp)
 }
 
 func (ap *Autopilot) Run() error {
