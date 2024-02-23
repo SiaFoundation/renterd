@@ -315,7 +315,7 @@ outer:
 					s := slabs[respIndex]
 					if s.PartialSlab {
 						// Partial slab.
-						_, err = cw.Write(s.Data)
+						_, err = bw.Write(s.Data)
 						if err != nil {
 							mgr.logger.Errorf("failed to send partial slab", respIndex, err)
 							return err
