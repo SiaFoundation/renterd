@@ -37,7 +37,6 @@ type (
 	Alerter interface {
 		RegisterAlert(_ context.Context, a Alert) error
 		DismissAlerts(_ context.Context, ids ...types.Hash256) error
-		DismissAllAlerts(_ context.Context) error
 	}
 
 	// Severity indicates the severity of an alert.
@@ -68,6 +67,12 @@ type (
 	AlertsOpts struct {
 		Offset int
 		Limit  int
+	}
+
+	AlertsResponse struct {
+		Alerts  []Alert `json:"alerts"`
+		HasMore bool    `json:"hasMore"`
+		Total   int     `json:"total"`
 	}
 )
 
@@ -136,17 +141,6 @@ func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 	})
 }
 
-// DismissAllAlerts implements the Alerter interface.
-func (m *Manager) DismissAllAlerts(ctx context.Context) error {
-	m.mu.Lock()
-	toDismiss := make([]types.Hash256, 0, len(m.alerts))
-	for alertID := range m.alerts {
-		toDismiss = append(toDismiss, alertID)
-	}
-	m.mu.Unlock()
-	return m.DismissAlerts(ctx, toDismiss...)
-}
-
 // DismissAlerts implements the Alerter interface.
 func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
 	var dismissed []types.Hash256
@@ -176,12 +170,16 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 }
 
 // Active returns the host's active alerts.
-func (m *Manager) Active(offset, limit int) []Alert {
+func (m *Manager) Active(offset, limit int) AlertsResponse {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	resp := AlertsResponse{
+		Total: len(m.alerts),
+	}
+
 	if offset >= len(m.alerts) {
-		return nil
+		return resp
 	} else if limit == -1 {
 		limit = len(m.alerts)
 	}
@@ -196,8 +194,10 @@ func (m *Manager) Active(offset, limit int) []Alert {
 	alerts = alerts[offset:]
 	if limit < len(alerts) {
 		alerts = alerts[:limit]
+		resp.HasMore = true
 	}
-	return alerts
+	resp.Alerts = alerts
+	return resp
 }
 
 func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {
@@ -238,11 +238,6 @@ func (a *originAlerter) RegisterAlert(ctx context.Context, alert Alert) error {
 	}
 	alert.Data["origin"] = a.origin
 	return a.alerter.RegisterAlert(ctx, alert)
-}
-
-// DismissAllAlerts implements the Alerter interface.
-func (a *originAlerter) DismissAllAlerts(ctx context.Context) error {
-	return a.alerter.DismissAllAlerts(ctx)
 }
 
 // DismissAlerts implements the Alerter interface.

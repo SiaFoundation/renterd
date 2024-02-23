@@ -1923,9 +1923,9 @@ func TestAlerts(t *testing.T) {
 	tt.OK(b.RegisterAlert(context.Background(), alert))
 	findAlert := func(id types.Hash256) *alerts.Alert {
 		t.Helper()
-		alerts, err := b.Alerts(alerts.AlertsOpts{})
+		ar, err := b.Alerts(alerts.AlertsOpts{})
 		tt.OK(err)
-		for _, alert := range alerts {
+		for _, alert := range ar.Alerts {
 			if alert.ID == id {
 				return &alert
 			}
@@ -1960,25 +1960,19 @@ func TestAlerts(t *testing.T) {
 	}
 
 	// try to find with offset = 1
-	foundAlerts, err := b.Alerts(alerts.AlertsOpts{Offset: 1})
+	ar, err := b.Alerts(alerts.AlertsOpts{Offset: 1})
+	foundAlerts := ar.Alerts
 	tt.OK(err)
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert.ID {
 		t.Fatal("wrong alert")
 	}
 
 	// try to find with limit = 1
-	foundAlerts, err = b.Alerts(alerts.AlertsOpts{Limit: 1})
+	ar, err = b.Alerts(alerts.AlertsOpts{Limit: 1})
+	foundAlerts = ar.Alerts
 	tt.OK(err)
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
 		t.Fatal("wrong alert")
-	}
-
-	// dismiss all
-	tt.OK(b.DismissAllAlerts(context.Background()))
-	foundAlerts, err = b.Alerts(alerts.AlertsOpts{})
-	tt.OK(err)
-	if len(foundAlerts) != 0 {
-		t.Fatal("expected 0 alerts", len(foundAlerts))
 	}
 }
 

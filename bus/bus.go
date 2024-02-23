@@ -1725,7 +1725,16 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
+	ar := b.alertMgr.Active(0, -1)
+	jc.Encode(ar.Alerts)
+}
+
 func (b *bus) handleGETAlerts(jc jape.Context) {
+	if jc.Request.FormValue("offset") == "" && jc.Request.FormValue("limit") == "" {
+		b.handleGETAlertsDeprecated(jc)
+		return
+	}
 	offset, limit := 0, -1
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
@@ -1739,13 +1748,6 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
-	var all bool
-	if jc.DecodeForm("all", &all) != nil {
-		return
-	} else if all {
-		jc.Check("failed to dismiss all alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
-		return
-	}
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return
