@@ -761,8 +761,6 @@ loop:
 				if isSectorNotFound(resp.err) {
 					if err := s.mgr.os.DeleteHostSector(ctx, resp.req.host.PublicKey(), resp.req.root); err != nil {
 						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root, zap.Error(err))
-					} else {
-						s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root)
 					}
 				} else if isPriceTableGouging(resp.err) && s.overpay && !resp.req.overpay {
 					resp.req.overpay = true // ensures we don't retry the same request over and over again

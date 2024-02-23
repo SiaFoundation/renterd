@@ -3582,8 +3582,10 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Prune the sector from hk1.
-	if err := ss.DeleteHostSector(context.Background(), hk1, root); err != nil {
+	if n, err := ss.DeleteHostSector(context.Background(), hk1, root); err != nil {
 		t.Fatal(err)
+	} else if n == 0 {
+		t.Fatal("no sectors were pruned")
 	}
 
 	// Make sure 2 contractSector entries exist.

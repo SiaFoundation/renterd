@@ -126,7 +126,7 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
-		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
 		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
@@ -1409,9 +1409,11 @@ func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	} else if jc.DecodeParam("root", &root) != nil {
 		return
 	}
-	err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
+	n, err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
 	if jc.Check("failed to mark sector as lost", err) != nil {
 		return
+	} else if n > 0 {
+		b.logger.Infow("successfully marked sector as lost", "hk", hk, "root", root)
 	}
 }
 

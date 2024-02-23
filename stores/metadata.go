@@ -1620,8 +1620,9 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
-func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
+	var deletedSectors int
+	err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract_sectors to delete.
 		var sectors []dbContractSector
 		err := tx.Raw(`
@@ -1660,6 +1661,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 			} else if res.RowsAffected != int64(len(sectors)) {
 				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
 			}
+			deletedSectors = len(sectors)
 
 			// Increment the host's lostSectors by the number of lost sectors.
 			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
@@ -1687,6 +1689,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 		}
 		return nil
 	})
+	return deletedSectors, err
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
