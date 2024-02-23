@@ -9,15 +9,15 @@ import (
 
 type (
 	accumulatedChurn struct {
-		additions map[types.FileContractID][]contractSetAddition
-		removals  map[types.FileContractID][]contractSetRemoval
+		additions map[types.FileContractID]contractSetAdditions
+		removals  map[types.FileContractID]contractSetRemovals
 	}
 )
 
 func newAccumulatedChurn() *accumulatedChurn {
 	return &accumulatedChurn{
-		additions: make(map[types.FileContractID][]contractSetAddition),
-		removals:  make(map[types.FileContractID][]contractSetRemoval),
+		additions: make(map[types.FileContractID]contractSetAdditions),
+		removals:  make(map[types.FileContractID]contractSetRemovals),
 	}
 }
 
@@ -25,13 +25,6 @@ func (c *accumulatedChurn) Alert(name string) alerts.Alert {
 	var hint string
 	if len(c.removals) > 0 {
 		hint = "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set."
-	}
-
-	removedReasons := make(map[string][]string, len(c.removals))
-	for fcid, contractRemovals := range c.removals {
-		for _, removal := range contractRemovals {
-			removedReasons[fcid.String()] = append(removedReasons[fcid.String()], removal.Reason)
-		}
 	}
 
 	return alerts.Alert{
@@ -48,16 +41,28 @@ func (c *accumulatedChurn) Alert(name string) alerts.Alert {
 	}
 }
 
-func (c *accumulatedChurn) Apply(additions map[types.FileContractID]contractSetAddition, removals map[types.FileContractID]contractSetRemoval) {
-	for fcid, addition := range additions {
-		c.additions[fcid] = append(c.additions[fcid], addition)
+func (c *accumulatedChurn) Apply(additions map[types.FileContractID]contractSetAdditions, removals map[types.FileContractID]contractSetRemovals) {
+	for fcid, a := range additions {
+		if _, exists := c.additions[fcid]; !exists {
+			c.additions[fcid] = a
+		} else {
+			additions := c.additions[fcid]
+			additions.Additions = append(additions.Additions, a.Additions...)
+			c.additions[fcid] = additions
+		}
 	}
-	for fcid, removal := range removals {
-		c.removals[fcid] = append(c.removals[fcid], removal)
+	for fcid, r := range removals {
+		if _, exists := c.removals[fcid]; !exists {
+			c.removals[fcid] = r
+		} else {
+			removals := c.removals[fcid]
+			removals.Removals = append(removals.Removals, r.Removals...)
+			c.removals[fcid] = removals
+		}
 	}
 }
 
 func (c *accumulatedChurn) Reset() {
-	c.additions = make(map[types.FileContractID][]contractSetAddition)
-	c.removals = make(map[types.FileContractID][]contractSetRemoval)
+	c.additions = make(map[types.FileContractID]contractSetAdditions)
+	c.removals = make(map[types.FileContractID]contractSetRemovals)
 }
