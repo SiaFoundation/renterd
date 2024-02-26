@@ -39,6 +39,7 @@ type (
 		hm     HostManager
 		mm     MemoryManager
 		os     ObjectStore
+		cl     ContractLocker
 		cs     ContractStore
 		logger *zap.SugaredLogger
 
@@ -148,8 +149,8 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 		panic("upload manager already initialized") // developer error
 	}
 
-	mm := newMemoryManager(logger, maxMemory)
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
+	mm := newMemoryManager(logger.Named("memorymanager"), maxMemory)
+	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
 func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
@@ -314,11 +315,12 @@ func (w *worker) uploadPackedSlab(ctx context.Context, rs api.RedundancySettings
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		hm:     hm,
 		mm:     mm,
 		os:     os,
+		cl:     cl,
 		cs:     cs,
 		logger: logger,
 
@@ -336,9 +338,10 @@ func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os 
 	}
 }
 
-func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
+func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
 	return &uploader{
 		os:     os,
+		cl:     cl,
 		cs:     cs,
 		hm:     hm,
 		logger: mgr.logger,
@@ -751,7 +754,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists && bh < c.WindowEnd {
-			uploader := mgr.newUploader(mgr.os, mgr.cs, mgr.hm, c)
+			uploader := mgr.newUploader(mgr.os, mgr.cl, mgr.cs, mgr.hm, c)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}

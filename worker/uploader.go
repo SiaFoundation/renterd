@@ -27,6 +27,7 @@ type (
 	uploader struct {
 		os     ObjectStore
 		cs     ContractStore
+		cl     ContractLocker
 		hm     HostManager
 		logger *zap.SugaredLogger
 
@@ -200,13 +201,13 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	u.mu.Unlock()
 
 	// acquire contract lock
-	lockID, err := u.cs.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
+	lockID, err := u.cl.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
 	if err != nil {
 		return types.Hash256{}, 0, err
 	}
 
 	// defer the release
-	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cs, u.logger)
+	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
 	defer func() {
 		ctx, cancel := context.WithTimeout(u.shutdownCtx, 10*time.Second)
 		lock.Release(ctx)

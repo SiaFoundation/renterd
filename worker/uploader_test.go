@@ -8,11 +8,13 @@ import (
 )
 
 func TestUploaderStopped(t *testing.T) {
-	w := newMockWorker()
-	w.addHost()
-	w.ul.refreshUploaders(w.contracts(), 1)
+	w := newTestWorker(t)
+	w.addHosts(1)
 
-	ul := w.ul.uploaders[0]
+	um := w.uploadManager
+	um.refreshUploaders(w.contracts(), 1)
+
+	ul := um.uploaders[0]
 	ul.Stop(errors.New("test"))
 
 	req := sectorUploadReq{

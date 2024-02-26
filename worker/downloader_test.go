@@ -7,11 +7,15 @@ import (
 )
 
 func TestDownloaderStopped(t *testing.T) {
-	w := newMockWorker()
-	h := w.addHost()
-	w.dl.refreshDownloaders(w.contracts())
+	w := newTestWorker(t)
+	hosts := w.addHosts(1)
 
-	dl := w.dl.downloaders[h.PublicKey()]
+	// convenience variables
+	dm := w.downloadManager
+	h := hosts[0]
+
+	dm.refreshDownloaders(w.contracts())
+	dl := w.downloadManager.downloaders[h.PublicKey()]
 	dl.Stop()
 
 	req := sectorDownloadReq{

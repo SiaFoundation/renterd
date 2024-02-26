@@ -14,26 +14,23 @@ import (
 	"lukechampine.com/frand"
 )
 
-const (
-	testBucket      = "testbucket"
-	testContractSet = "testcontractset"
-)
-
 var (
+	testBucket             = "testbucket"
+	testContractSet        = "testcontractset"
 	testRedundancySettings = api.RedundancySettings{MinShards: 2, TotalShards: 6}
 )
 
 func TestUpload(t *testing.T) {
-	// mock worker
-	w := newMockWorker()
+	// create test worker
+	w := newTestWorker(t)
 
 	// add hosts to worker
 	w.addHosts(testRedundancySettings.TotalShards * 2)
 
 	// convenience variables
 	os := w.os
-	dl := w.dl
-	ul := w.ul
+	dl := w.downloadManager
+	ul := w.uploadManager
 
 	// create test data
 	data := make([]byte, 128)
@@ -115,7 +112,7 @@ func TestUpload(t *testing.T) {
 	// try and upload into a bucket that does not exist
 	params.bucket = "doesnotexist"
 	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.contracts(), params, lockingPriorityUpload)
-	if !errors.Is(err, errBucketNotFound) {
+	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected bucket not found error", err)
 	}
 
@@ -129,17 +126,17 @@ func TestUpload(t *testing.T) {
 }
 
 func TestUploadPackedSlab(t *testing.T) {
-	// mock worker
-	w := newMockWorker()
+	// create test worker
+	w := newTestWorker(t)
 
 	// add hosts to worker
 	w.addHosts(testRedundancySettings.TotalShards * 2)
 
 	// convenience variables
 	os := w.os
-	mm := w.mm
-	dl := w.dl
-	ul := w.ul
+	mm := w.ulmm
+	dl := w.downloadManager
+	ul := w.uploadManager
 
 	// create test data
 	data := make([]byte, 128)
@@ -215,17 +212,17 @@ func TestUploadPackedSlab(t *testing.T) {
 }
 
 func TestUploadShards(t *testing.T) {
-	// mock worker
-	w := newMockWorker()
+	// create test worker
+	w := newTestWorker(t)
 
 	// add hosts to worker
 	w.addHosts(testRedundancySettings.TotalShards * 2)
 
 	// convenience variables
 	os := w.os
-	mm := w.mm
-	dl := w.dl
-	ul := w.ul
+	mm := w.ulmm
+	dl := w.downloadManager
+	ul := w.uploadManager
 
 	// create test data
 	data := make([]byte, 128)
@@ -334,16 +331,16 @@ func TestUploadShards(t *testing.T) {
 }
 
 func TestRefreshUploaders(t *testing.T) {
-	// mock worker
-	w := newMockWorker()
+	// create test worker
+	w := newTestWorker(t)
 
 	// add hosts to worker
 	w.addHosts(testRedundancySettings.TotalShards)
 
 	// convenience variables
-	ul := w.ul
-	hm := w.hm
+	ul := w.uploadManager
 	cs := w.cs
+	hm := w.hm
 
 	// create test data
 	data := make([]byte, 128)
@@ -356,7 +353,7 @@ func TestRefreshUploaders(t *testing.T) {
 
 	// upload data
 	contracts := w.contracts()
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), contracts, params, lockingPriorityUpload)
+	_, err := w.upload(context.Background(), bytes.NewReader(data), contracts, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +370,7 @@ func TestRefreshUploaders(t *testing.T) {
 	// remove the host from the second contract
 	c2 := contracts[1]
 	delete(hm.hosts, c2.HostKey)
-	delete(cs.locks, c2.ID)
+	delete(cs.contracts, c2.ID)
 
 	// add a new host/contract
 	hNew := w.addHost()
@@ -389,7 +386,7 @@ func TestRefreshUploaders(t *testing.T) {
 	var added, renewed int
 	for _, ul := range ul.uploaders {
 		switch ul.ContractID() {
-		case hNew.c.metadata.ID:
+		case hNew.metadata.ID:
 			added++
 		case c1Renewed.metadata.ID:
 			renewed++
@@ -410,7 +407,7 @@ func TestRefreshUploaders(t *testing.T) {
 	// manually add a request to the queue of one of the uploaders we're about to expire
 	responseChan := make(chan sectorUploadResp, 1)
 	for _, ul := range ul.uploaders {
-		if ul.fcid == hNew.c.metadata.ID {
+		if ul.fcid == hNew.metadata.ID {
 			ul.mu.Lock()
 			ul.queue = append(ul.queue, &sectorUploadReq{responseChan: responseChan, sector: &sectorUpload{ctx: context.Background()}})
 			ul.mu.Unlock()
@@ -436,17 +433,17 @@ func TestRefreshUploaders(t *testing.T) {
 }
 
 func TestUploadRegression(t *testing.T) {
-	// mock worker
-	w := newMockWorker()
+	// create test worker
+	w := newTestWorker(t)
 
 	// add hosts to worker
 	w.addHosts(testRedundancySettings.TotalShards)
 
 	// convenience variables
-	mm := w.mm
 	os := w.os
-	ul := w.ul
-	dl := w.dl
+	mm := w.ulmm
+	ul := w.uploadManager
+	dl := w.downloadManager
 
 	// create test data
 	data := make([]byte, 128)
