@@ -441,8 +441,6 @@ func TestUploadRegression(t *testing.T) {
 
 	// convenience variables
 	os := w.os
-	mm := w.ulmm
-	ul := w.uploadManager
 	dl := w.downloadManager
 
 	// create test data
@@ -455,21 +453,21 @@ func TestUploadRegression(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// make sure the memory manager blocks
-	mm.memBlockChan = make(chan struct{})
+	unblock := w.blockUploads()
 
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, _, err := ul.Upload(ctx, bytes.NewReader(data), w.contracts(), params, lockingPriorityUpload)
+	_, err := w.upload(ctx, bytes.NewReader(data), w.contracts(), params)
 	if !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
 
 	// unblock the memory manager
-	close(mm.memBlockChan)
+	unblock()
 
 	// upload data
-	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.contracts(), params, lockingPriorityUpload)
+	_, err = w.upload(context.Background(), bytes.NewReader(data), w.contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}

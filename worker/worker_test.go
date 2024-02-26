@@ -37,8 +37,8 @@ func newTestWorker(t *testing.T) *testWorker {
 
 	// create worker dependencies
 	b := newBusMock(cs, hs, os)
-	dlmm := &memoryManagerMock{}
-	ulmm := &memoryManagerMock{}
+	dlmm := newMemoryManagerMock()
+	ulmm := newMemoryManagerMock()
 
 	// create worker
 	w, err := New(blake2b.Sum256([]byte("testwork")), "test", b, time.Second, time.Second, time.Second, time.Second, 0, 0, 1, 1, false, zap.NewNop())
@@ -60,8 +60,8 @@ func newTestWorker(t *testing.T) *testWorker {
 		cs,
 		os,
 		hs,
-		ulmm,
 		dlmm,
+		ulmm,
 		hm,
 	}
 }
@@ -79,6 +79,18 @@ func (w *testWorker) addHost() *testHost {
 	host := newTestHost(h, c)
 	w.hm.addHost(host)
 	return host
+}
+
+func (w *testWorker) blockUploads() func() {
+	select {
+	case <-w.ulmm.memBlockChan:
+	case <-time.After(time.Second):
+		w.t.Fatal("already blocking")
+	}
+
+	blockChan := make(chan struct{})
+	w.ulmm.memBlockChan = blockChan
+	return func() { close(blockChan) }
 }
 
 func (w *testWorker) contracts() []api.ContractMetadata {

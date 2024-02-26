@@ -322,19 +322,23 @@ type (
 	memoryManagerMock struct{ memBlockChan chan struct{} }
 )
 
+func newMemoryManagerMock() *memoryManagerMock {
+	mm := &memoryManagerMock{memBlockChan: make(chan struct{})}
+	close(mm.memBlockChan)
+	return mm
+}
+
 func (m *memoryMock) Release()           {}
 func (m *memoryMock) ReleaseSome(uint64) {}
 
 func (mm *memoryManagerMock) Limit(amt uint64) (MemoryManager, error) {
-	return &memoryManagerMock{}, nil
+	return mm, nil
 }
 
 func (mm *memoryManagerMock) Status() api.MemoryStatus { return api.MemoryStatus{} }
 
 func (mm *memoryManagerMock) AcquireMemory(ctx context.Context, amt uint64) Memory {
-	if mm.memBlockChan != nil {
-		<-mm.memBlockChan
-	}
+	<-mm.memBlockChan
 	return &memoryMock{}
 }
 
