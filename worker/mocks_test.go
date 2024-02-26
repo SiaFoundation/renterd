@@ -55,6 +55,9 @@ var _ alerts.Alerter = (*alerterMock)(nil)
 
 type alerterMock struct{}
 
+func (*alerterMock) Alerts(_ context.Context, opts alerts.AlertsOpts) (resp alerts.AlertsResponse, err error) {
+	return alerts.AlertsResponse{}, nil
+}
 func (*alerterMock) RegisterAlert(context.Context, alerts.Alert) error     { return nil }
 func (*alerterMock) DismissAlerts(context.Context, ...types.Hash256) error { return nil }
 
