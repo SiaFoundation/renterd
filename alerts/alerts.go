@@ -35,6 +35,7 @@ const (
 
 type (
 	Alerter interface {
+		Alerts(_ context.Context, opts AlertsOpts) (resp AlertsResponse, err error)
 		RegisterAlert(_ context.Context, a Alert) error
 		DismissAlerts(_ context.Context, ids ...types.Hash256) error
 	}
@@ -169,17 +170,18 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	})
 }
 
-// Active returns the host's active alerts.
-func (m *Manager) Active(offset, limit int) AlertsResponse {
+// Alerts returns the host's active alerts.
+func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	offset, limit := opts.Offset, opts.Limit
 	resp := AlertsResponse{
 		Total: len(m.alerts),
 	}
 
 	if offset >= len(m.alerts) {
-		return resp
+		return resp, nil
 	} else if limit == -1 {
 		limit = len(m.alerts)
 	}
@@ -197,7 +199,7 @@ func (m *Manager) Active(offset, limit int) AlertsResponse {
 		resp.HasMore = true
 	}
 	resp.Alerts = alerts
-	return resp
+	return resp, nil
 }
 
 func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {
@@ -229,6 +231,11 @@ func WithOrigin(alerter Alerter, origin string) Alerter {
 		alerter: alerter,
 		origin:  origin,
 	}
+}
+
+// Alerts implements the Alerter interface.
+func (a *originAlerter) Alerts(ctx context.Context, opts AlertsOpts) (resp AlertsResponse, err error) {
+	return a.alerter.Alerts(ctx, opts)
 }
 
 // RegisterAlert implements the Alerter interface.

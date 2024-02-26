@@ -44,6 +44,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, dbIdentifier, "00003_idx_objects_size", logger)
 			},
 		},
+		{
+			ID: "00004_prune_slabs_cascade",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00004_prune_slabs_cascade", logger)
+			},
+		},
 	}
 
 	// Create migrator.

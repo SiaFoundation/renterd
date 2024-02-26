@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	alertAccountRefillID = frand.Entropy256() // constant until restarted
-	alertLostSectorsID   = frand.Entropy256() // constant until restarted
-	alertLowBalanceID    = frand.Entropy256() // constant until restarted
-	alertMigrationID     = frand.Entropy256() // constant until restarted
-	alertPruningID       = frand.Entropy256() // constant until restarted
-	alertRenewalFailedID = frand.Entropy256() // constant until restarted
+	alertAccountRefillID = randomAlertID() // constant until restarted
+	alertChurnID         = randomAlertID() // constant until restarted
+	alertLostSectorsID   = randomAlertID() // constant until restarted
+	alertLowBalanceID    = randomAlertID() // constant until restarted
+	alertMigrationID     = randomAlertID() // constant until restarted
+	alertPruningID       = randomAlertID() // constant until restarted
+	alertRenewalFailedID = randomAlertID() // constant until restarted
 )
 
 func alertIDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
@@ -52,6 +53,20 @@ func (ap *Autopilot) DismissAlert(ctx context.Context, ids ...types.Hash256) {
 	if err := ap.alerts.DismissAlerts(ctx, ids...); err != nil {
 		ap.logger.Errorf("failed to dismiss alert: %v", err)
 	}
+}
+
+func (ap *Autopilot) HasAlert(ctx context.Context, id types.Hash256) bool {
+	ar, err := ap.alerts.Alerts(ctx, alerts.AlertsOpts{Offset: 0, Limit: -1})
+	if err != nil {
+		ap.logger.Errorf("failed to fetch alerts: %v", err)
+		return false
+	}
+	for _, alert := range ar.Alerts {
+		if alert.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func newAccountLowBalanceAlert(address types.Address, balance, allowance types.Currency, bh, renewWindow, endHeight uint64) alerts.Alert {
@@ -133,37 +148,6 @@ func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid type
 		Severity:  alerts.SeverityWarning,
 		Message:   "Contract pruning failed",
 		Data:      data,
-		Timestamp: time.Now(),
-	}
-}
-
-func newContractSetChangeAlert(name string, additions map[types.FileContractID]contractSetAddition, removals map[types.FileContractID]contractSetRemoval) alerts.Alert {
-	var hint string
-	if len(removals) > 0 {
-		hint = "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set."
-	}
-
-	removedReasons := make(map[string]string, len(removals))
-	for k, v := range removals {
-		removedReasons[k.String()] = v.Reason
-	}
-
-	return alerts.Alert{
-		ID:       randomAlertID(),
-		Severity: alerts.SeverityInfo,
-		Message:  "Contract set changed",
-		Data: map[string]any{
-			"name":          name,
-			"set_additions": additions,
-			"set_removals":  removals,
-			"hint":          hint,
-
-			// TODO: these fields can be removed on the next major release, they
-			// contain redundant information
-			"added":    len(additions),
-			"removed":  len(removals),
-			"removals": removedReasons,
-		},
 		Timestamp: time.Now(),
 	}
 }

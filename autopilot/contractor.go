@@ -85,6 +85,7 @@ const (
 type (
 	contractor struct {
 		ap       *Autopilot
+		churn    *accumulatedChurn
 		resolver *ipResolver
 		logger   *zap.SugaredLogger
 
@@ -122,15 +123,25 @@ type (
 		recoverable bool
 	}
 
+	contractSetAdditions struct {
+		HostKey   types.PublicKey       `json:"hostKey"`
+		Additions []contractSetAddition `json:"additions"`
+	}
+
 	contractSetAddition struct {
-		Size    uint64          `json:"size"`
-		HostKey types.PublicKey `json:"hostKey"`
+		Size uint64          `json:"size"`
+		Time api.TimeRFC3339 `json:"time"`
+	}
+
+	contractSetRemovals struct {
+		HostKey  types.PublicKey      `json:"hostKey"`
+		Removals []contractSetRemoval `json:"removals"`
 	}
 
 	contractSetRemoval struct {
-		Size    uint64          `json:"size"`
-		HostKey types.PublicKey `json:"hostKey"`
-		Reason  string          `json:"reason"`
+		Size   uint64          `json:"size"`
+		Reason string          `json:"reasons"`
+		Time   api.TimeRFC3339 `json:"time"`
 	}
 
 	renewal struct {
@@ -143,6 +154,7 @@ type (
 func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *contractor {
 	return &contractor{
 		ap:     ap,
+		churn:  newAccumulatedChurn(),
 		logger: ap.logger.Named("contractor"),
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
@@ -453,8 +465,9 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	}
 
 	// log added and removed contracts
-	setAdditions := make(map[types.FileContractID]contractSetAddition)
-	setRemovals := make(map[types.FileContractID]contractSetRemoval)
+	setAdditions := make(map[types.FileContractID]contractSetAdditions)
+	setRemovals := make(map[types.FileContractID]contractSetRemovals)
+	now := api.TimeNow()
 	for _, contract := range oldSet {
 		_, exists := inNewSet[contract.ID]
 		_, renewed := inNewSet[renewalsFromTo[contract.ID]]
@@ -464,11 +477,18 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 				reason = "unknown"
 			}
 
-			setRemovals[contract.ID] = contractSetRemoval{
-				Size:    contractData[contract.ID],
-				HostKey: contract.HostKey,
-				Reason:  reason,
+			if _, exists := setRemovals[contract.ID]; !exists {
+				setRemovals[contract.ID] = contractSetRemovals{
+					HostKey: contract.HostKey,
+				}
 			}
+			removals := setRemovals[contract.ID]
+			removals.Removals = append(removals.Removals, contractSetRemoval{
+				Size:   contractData[contract.ID],
+				Reason: reason,
+				Time:   now,
+			})
+			setRemovals[contract.ID] = removals
 			c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
 		}
 	}
@@ -476,10 +496,17 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 		_, existed := inOldSet[contract.ID]
 		_, renewed := renewalsToFrom[contract.ID]
 		if !existed && !renewed {
-			setAdditions[contract.ID] = contractSetAddition{
-				Size:    contractData[contract.ID],
-				HostKey: contract.HostKey,
+			if _, exists := setAdditions[contract.ID]; !exists {
+				setAdditions[contract.ID] = contractSetAdditions{
+					HostKey: contract.HostKey,
+				}
 			}
+			additions := setAdditions[contract.ID]
+			additions.Additions = append(additions.Additions, contractSetAddition{
+				Size: contractData[contract.ID],
+				Time: now,
+			})
+			setAdditions[contract.ID] = additions
 			c.logger.Debugf("contract %v was added to the contract set, size: %v", contract.ID, contractData[contract.ID])
 		}
 	}
@@ -499,7 +526,6 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	}
 
 	// record churn metrics
-	now := api.TimeNow()
 	var metrics []api.ContractSetChurnMetric
 	for fcid := range setAdditions {
 		metrics = append(metrics, api.ContractSetChurnMetric{
@@ -514,7 +540,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 			Name:       c.ap.state.cfg.Contracts.Set,
 			ContractID: fcid,
 			Direction:  api.ChurnDirRemoved,
-			Reason:     removal.Reason,
+			Reason:     removal.Removals[0].Reason,
 			Timestamp:  now,
 		})
 	}
@@ -536,7 +562,11 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	)
 	hasChanged := len(setAdditions)+len(setRemovals) > 0
 	if hasChanged {
-		c.ap.RegisterAlert(ctx, newContractSetChangeAlert(name, setAdditions, setRemovals))
+		if !c.ap.HasAlert(ctx, alertChurnID) {
+			c.churn.Reset()
+		}
+		c.churn.Apply(setAdditions, setRemovals)
+		c.ap.RegisterAlert(ctx, c.churn.Alert(name))
 	}
 	return hasChanged
 }
