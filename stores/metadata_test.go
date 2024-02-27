@@ -16,7 +16,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
@@ -219,12 +218,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(announcement{
-		hk: hk,
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: "address",
-		},
-	})
+	err = ss.insertTestAnnouncement(newTestAnnouncement(hk, "address"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,21 +509,11 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	err = ss.insertTestAnnouncement(announcement{
-		hk: hk,
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: "address",
-		},
-	})
+	err = ss.insertTestAnnouncement(newTestAnnouncement(hk, "address"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.insertTestAnnouncement(announcement{
-		hk: hk2,
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: "address2",
-		},
-	})
+	err = ss.insertTestAnnouncement(newTestAnnouncement(hk2, "address2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2279,12 +2263,7 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(announcement{
-		hk: hk,
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: "address",
-		},
-	})
+	err = ss.insertTestAnnouncement(newTestAnnouncement(hk, "address"))
 	if err != nil {
 		t.Fatal(err)
 	}
