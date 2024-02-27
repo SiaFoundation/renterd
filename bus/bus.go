@@ -1741,6 +1741,7 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 		return
 	}
 	offset, limit := 0, -1
+	var severity alerts.Severity
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	} else if jc.DecodeForm("limit", &limit) != nil {
@@ -1748,8 +1749,14 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 	} else if offset < 0 {
 		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
 		return
+	} else if jc.DecodeForm("severity", &severity) != nil {
+		return
 	}
-	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: offset, Limit: limit})
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
+		Offset:   offset,
+		Limit:    limit,
+		Severity: severity,
+	})
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}

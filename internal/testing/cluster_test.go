@@ -1974,6 +1974,44 @@ func TestAlerts(t *testing.T) {
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
 		t.Fatal("wrong alert")
 	}
+
+	// register more alerts
+	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
+		for j := 0; j < 3*int(severity); j++ {
+			tt.OK(b.RegisterAlert(context.Background(), alerts.Alert{
+				ID:       frand.Entropy256(),
+				Severity: severity,
+				Message:  "test",
+				Data: map[string]interface{}{
+					"origin": "test",
+				},
+				Timestamp: time.Now(),
+			}))
+		}
+	}
+	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
+		ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Severity: severity})
+		tt.OK(err)
+		if ar.Total() != 32 {
+			t.Fatal("expected 32 alerts", ar.Total())
+		} else if ar.Totals.Info != 3 {
+			t.Fatal("expected 3 info alerts", ar.Totals.Info)
+		} else if ar.Totals.Warning != 6 {
+			t.Fatal("expected 6 warning alerts", ar.Totals.Warning)
+		} else if ar.Totals.Error != 9 {
+			t.Fatal("expected 9 error alerts", ar.Totals.Error)
+		} else if ar.Totals.Critical != 14 {
+			t.Fatal("expected 14 critical alerts", ar.Totals.Critical)
+		} else if severity == alerts.SeverityInfo && len(ar.Alerts) != ar.Totals.Info {
+			t.Fatalf("expected %v info alerts, got %v", ar.Totals.Info, len(ar.Alerts))
+		} else if severity == alerts.SeverityWarning && len(ar.Alerts) != ar.Totals.Warning {
+			t.Fatalf("expected %v warning alerts, got %v", ar.Totals.Warning, len(ar.Alerts))
+		} else if severity == alerts.SeverityError && len(ar.Alerts) != ar.Totals.Error {
+			t.Fatalf("expected %v error alerts, got %v", ar.Totals.Error, len(ar.Alerts))
+		} else if severity == alerts.SeverityCritical && len(ar.Alerts) != ar.Totals.Critical {
+			t.Fatalf("expected %v critical alerts, got %v", ar.Totals.Critical, len(ar.Alerts))
+		}
+	}
 }
 
 func TestMultipartUploads(t *testing.T) {
