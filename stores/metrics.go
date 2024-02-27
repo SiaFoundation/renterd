@@ -522,43 +522,43 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 		return nil, api.ErrMaxIntervalsExceeded
 	}
 	end := start.Add(time.Duration(n) * interval)
-	var metricsWithPeriod []struct {
+
+	type metricWithPeriod struct {
 		Metric dbContractMetric `gorm:"embedded"`
 		Period int64
 	}
-	err := s.dbMetrics.Raw(`
-		WITH RECURSIVE periods AS (
-			SELECT ? AS period_start
-			UNION ALL
-			SELECT period_start + ?
-			FROM periods
-			WHERE period_start < ? - ?
-		)
-		SELECT contracts.*, i.Period FROM contracts
-		INNER JOIN (
-		SELECT
-			p.period_start as Period,
-			MIN(c.id) AS id
-		FROM
-			periods p
-		INNER JOIN
-			contracts c ON c.timestamp >= p.period_start AND c.timestamp < p.period_start + ?
-		GROUP BY
-			p.period_start, c.fcid
-		ORDER BY
-			p.period_start ASC
-		) i ON contracts.id = i.id
-	`, unixTimeMS(start),
-		interval.Milliseconds(),
-		unixTimeMS(end),
-		interval.Milliseconds(),
-		interval.Milliseconds(),
-	).
-		Scan(&metricsWithPeriod).
-		Error
+	var metricsWithPeriod []metricWithPeriod
+
+	err := s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		var fcids []fileContractID
+		if err := tx.Raw("SELECT DISTINCT fcid FROM contracts WHERE contracts.timestamp >= ? AND contracts.timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
+			Scan(&fcids).Error; err != nil {
+			return fmt.Errorf("failed to fetch distinct contract ids: %w", err)
+		}
+
+		for intervalStart := start; intervalStart.Before(end); intervalStart = intervalStart.Add(interval) {
+			intervalEnd := intervalStart.Add(interval)
+			for _, fcid := range fcids {
+				var metrics []dbContractMetric
+				err := tx.Raw("SELECT * FROM contracts WHERE contracts.timestamp >= ? AND contracts.timestamp < ? AND contracts.fcid = ? LIMIT 1", unixTimeMS(intervalStart), unixTimeMS(intervalEnd), fileContractID(fcid)).
+					Scan(&metrics).Error
+				if err != nil {
+					return fmt.Errorf("failed to fetch contract metrics: %w", err)
+				} else if len(metrics) == 0 {
+					continue
+				}
+				metricsWithPeriod = append(metricsWithPeriod, metricWithPeriod{
+					Metric: metrics[0],
+					Period: intervalStart.UnixMilli(),
+				})
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch aggregate metrics: %w", err)
+		return nil, err
 	}
+
 	currentPeriod := int64(math.MinInt64)
 	var metrics []dbContractMetric
 	for _, m := range metricsWithPeriod {
