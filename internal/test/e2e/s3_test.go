@@ -15,6 +15,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -30,7 +31,7 @@ func TestS3Basic(t *testing.T) {
 
 	start := time.Now()
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -176,7 +177,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 
 	// create cluster
 	opts := testClusterOptions{
-		hosts:  testRedundancySettings.TotalShards,
+		hosts:  test.RedundancySettings.TotalShards,
 		logger: zap.NewNop(),
 	}
 	cluster := newTestCluster(t, opts)
@@ -288,7 +289,7 @@ func TestS3Authentication(t *testing.T) {
 
 	// Create client with credentials and try again..
 	s3Authenticated, err := minio.NewCore(url, &minio.Options{
-		Creds: testS3Credentials,
+		Creds: test.S3Credentials,
 	})
 	tt.OK(err)
 
@@ -328,7 +329,7 @@ func TestS3Authentication(t *testing.T) {
 
 func TestS3List(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
@@ -463,7 +464,7 @@ func TestS3MultipartUploads(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
@@ -594,7 +595,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
@@ -623,7 +624,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 
 	// Upload 1 regular object. It will share the same packed slab, cause the
 	// packed slab to be complete and start a new one.
-	data = frand.Bytes(testRedundancySettings.MinShards*rhpv2.SectorSize - 1)
+	data = frand.Bytes(test.RedundancySettings.MinShards*rhpv2.SectorSize - 1)
 	tt.OKAll(s3.PutObject(context.Background(), bucket, "bar", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{}))
 
 	// Block until the buffer is uploaded.
@@ -648,7 +649,7 @@ func TestS3SpecialChars(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()

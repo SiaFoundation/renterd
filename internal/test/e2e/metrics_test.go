@@ -10,6 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
 
@@ -22,12 +23,12 @@ func TestMetrics(t *testing.T) {
 	start := time.Now()
 
 	// enable pruning
-	apCfg := testAutopilotConfig
+	apCfg := test.AutopilotConfig
 	apCfg.Contracts.Prune = true
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:             testRedundancySettings.TotalShards,
+		hosts:             test.RedundancySettings.TotalShards,
 		autopilotSettings: &apCfg,
 	})
 	defer cluster.Shutdown()

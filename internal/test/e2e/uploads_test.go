@@ -10,6 +10,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
 
@@ -49,12 +50,12 @@ func TestUploadingSectorsCache(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 	w := cluster.Worker
 	b := cluster.Bus
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// generate some random data

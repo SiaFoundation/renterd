@@ -10,6 +10,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
 
@@ -19,13 +20,13 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cfg := testAutopilotConfig
-	cfg.Contracts.Amount = uint64(testRedundancySettings.TotalShards) + 1
+	cfg := test.AutopilotConfig
+	cfg.Contracts.Amount = uint64(test.RedundancySettings.TotalShards) + 1
 	cluster := newTestCluster(t, testClusterOptions{
 		// configure the cluster to use 1 more host than the total shards in the
 		// redundancy settings.
 		autopilotSettings: &cfg,
-		hosts:             int(testRedundancySettings.TotalShards) + 1,
+		hosts:             int(test.RedundancySettings.TotalShards) + 1,
 	})
 	defer cluster.Shutdown()
 
@@ -60,8 +61,8 @@ func TestMigrations(t *testing.T) {
 
 	// assert amount of hosts used
 	used := usedHosts(path)
-	if len(used) != testRedundancySettings.TotalShards {
-		t.Fatal("unexpected amount of hosts used", len(used), testRedundancySettings.TotalShards)
+	if len(used) != test.RedundancySettings.TotalShards {
+		t.Fatal("unexpected amount of hosts used", len(used), test.RedundancySettings.TotalShards)
 	}
 
 	// select one host to remove

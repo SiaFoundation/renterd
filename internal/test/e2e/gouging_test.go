@@ -10,6 +10,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
@@ -21,12 +22,12 @@ func TestGouging(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  int(testAutopilotConfig.Contracts.Amount),
+		hosts:  int(test.AutopilotConfig.Contracts.Amount),
 		logger: newTestLoggerCustom(zapcore.ErrorLevel),
 	})
 	defer cluster.Shutdown()
 
-	cfg := testAutopilotConfig.Contracts
+	cfg := test.AutopilotConfig.Contracts
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
