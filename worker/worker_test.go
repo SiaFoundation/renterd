@@ -7,18 +7,15 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/testutils"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )
 
 type (
-	test interface {
-		Fatal(...any)
-	}
-
 	testWorker struct {
-		t test
+		tt testutils.TT
 		*worker
 
 		cs *contractStoreMock
@@ -32,7 +29,7 @@ type (
 	}
 )
 
-func newTestWorker(t test) *testWorker {
+func newTestWorker(t testutils.TestingCommon) *testWorker {
 	// create bus dependencies
 	cs := newContractStoreMock()
 	os := newObjectStoreMock(testBucket)
@@ -58,7 +55,7 @@ func newTestWorker(t test) *testWorker {
 	w.uploadManager.mm = ulmm
 
 	return &testWorker{
-		t,
+		testutils.New(t),
 		w,
 		cs,
 		os,
@@ -88,7 +85,7 @@ func (w *testWorker) blockUploads() func() {
 	select {
 	case <-w.ulmm.memBlockChan:
 	case <-time.After(time.Second):
-		w.t.Fatal("already blocking")
+		w.tt.Fatal("already blocking")
 	}
 
 	blockChan := make(chan struct{})
@@ -99,7 +96,7 @@ func (w *testWorker) blockUploads() func() {
 func (w *testWorker) contracts() []api.ContractMetadata {
 	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
 	if err != nil {
-		w.t.Fatal(err)
+		w.tt.Fatal(err)
 	}
 	return metadatas
 }
@@ -107,12 +104,12 @@ func (w *testWorker) contracts() []api.ContractMetadata {
 func (w *testWorker) renewContract(hk types.PublicKey) *contractMock {
 	h := w.hm.hosts[hk]
 	if h == nil {
-		w.t.Fatal("host not found")
+		w.tt.Fatal("host not found")
 	}
 
 	renewal, err := w.cs.renewContract(hk)
 	if err != nil {
-		w.t.Fatal(err)
+		w.tt.Fatal(err)
 	}
 	return renewal
 }

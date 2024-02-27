@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +26,7 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
@@ -98,47 +98,6 @@ var (
 	testS3Credentials     = credentials.NewStaticV4(testS3AccessKeyID, testS3SecretAccessKey, "")
 )
 
-type TT struct {
-	*testing.T
-}
-
-func (t TT) AssertContains(err error, target string) {
-	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), target) {
-		t.Fatalf("err: %v != target: %v", err, target)
-	}
-}
-
-func (t TT) AssertIs(err, target error) {
-	t.Helper()
-	t.AssertContains(err, target.Error())
-}
-
-func (t TT) OK(err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (t TT) OKAll(vs ...interface{}) {
-	t.Helper()
-	for _, v := range vs {
-		if err, ok := v.(error); ok && err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func (t TT) FailAll(vs ...interface{}) {
-	t.Helper()
-	for _, v := range vs {
-		if err, ok := v.(error); ok && err == nil {
-			t.Fatal("should've failed")
-		}
-	}
-}
-
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
@@ -161,7 +120,7 @@ type TestCluster struct {
 	dbName  string
 	dir     string
 	logger  *zap.Logger
-	tt      *TT
+	tt      testutils.TT
 	wk      types.PrivateKey
 	wg      sync.WaitGroup
 }
@@ -203,33 +162,17 @@ func randomPassword() string {
 	return hex.EncodeToString(frand.Bytes(32))
 }
 
-// Retry will call 'fn' 'tries' times, waiting 'durationBetweenAttempts'
-// between each attempt, returning 'nil' the first time that 'fn' returns nil.
-// If 'nil' is never returned, then the final error returned by 'fn' is
-// returned.
-func (tt *TT) Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) {
-	tt.Helper()
-	for i := 1; i < tries; i++ {
-		err := fn()
-		if err == nil {
-			return
-		}
-		time.Sleep(durationBetweenAttempts)
-	}
-	tt.OK(fn())
-}
-
 // Reboot simulates a reboot of the cluster by calling Shutdown and creating a
 // new cluster using the same settings as the previous one.
 // NOTE: Simulating a reboot means that the hosts stay active and are not
 // restarted.
-func (c *TestCluster) Reboot(ctx context.Context) *TestCluster {
+func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 	c.tt.Helper()
 	hosts := c.hosts
 	c.hosts = nil
 	c.Shutdown()
 
-	newCluster := newTestCluster(c.tt.T, testClusterOptions{
+	newCluster := newTestCluster(t, testClusterOptions{
 		dir:       c.dir,
 		dbName:    c.dbName,
 		logger:    c.logger,
@@ -302,7 +245,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	tt := &TT{t}
+	tt := testutils.New(t)
 
 	// Ensure we don't hang
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

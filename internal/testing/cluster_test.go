@@ -1052,7 +1052,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Reboot cluster.
-	cluster2 := cluster.Reboot(context.Background())
+	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
 	// Check that accounts were loaded from the bus.
@@ -1246,7 +1246,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// Restart cluster to have worker fetch the account from the bus again.
-	cluster2 := cluster.Reboot(context.Background())
+	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
 	// Account should need a sync.
