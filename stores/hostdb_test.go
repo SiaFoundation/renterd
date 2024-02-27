@@ -56,15 +56,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert an announcement for the host and another one for an unknown
 	// host.
-	a := announcement{
-		blockHeight: 42,
-		blockID:     types.BlockID{1, 2, 3},
-		hk:          hk,
-		timestamp:   time.Now().UTC().Round(time.Second),
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: "address",
-		},
-	}
+	a := newTestAnnouncement(hk, "address")
 	err = ss.insertTestAnnouncement(a)
 	if err != nil {
 		t.Fatal(err)
@@ -506,23 +498,9 @@ func TestInsertAnnouncements(t *testing.T) {
 	defer ss.Close()
 
 	// Create announcements for 3 hosts.
-	ann1 := announcement{
-		timestamp:   time.Now(),
-		blockHeight: 1,
-		blockID:     types.BlockID{1},
-		hk:          types.GeneratePrivateKey().PublicKey(),
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: "foo.bar:1000",
-		},
-	}
-	ann2 := announcement{
-		hk:               types.GeneratePrivateKey().PublicKey(),
-		HostAnnouncement: chain.HostAnnouncement{},
-	}
-	ann3 := announcement{
-		hk:               types.GeneratePrivateKey().PublicKey(),
-		HostAnnouncement: chain.HostAnnouncement{},
-	}
+	ann1 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "foo.bar:1000")
+	ann2 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
+	ann3 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
 
 	// Insert the first one and check that all fields are set.
 	if err := insertAnnouncements(ss.db, []announcement{ann1}); err != nil {
@@ -535,12 +513,12 @@ func TestInsertAnnouncements(t *testing.T) {
 	ann.Model = Model{} // ignore
 	expectedAnn := dbAnnouncement{
 		HostKey:     publicKey(ann1.hk),
-		BlockHeight: 1,
-		BlockID:     types.BlockID{1}.String(),
+		BlockHeight: ann1.blockHeight,
+		BlockID:     ann1.blockID.String(),
 		NetAddress:  "foo.bar:1000",
 	}
 	if ann != expectedAnn {
-		t.Fatal("mismatch")
+		t.Fatal("mismatch", cmp.Diff(ann, expectedAnn))
 	}
 	// Insert the first and second one.
 	if err := insertAnnouncements(ss.db, []announcement{ann1, ann2}); err != nil {
@@ -1095,12 +1073,7 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	s.unappliedHostKeys[hk] = struct{}{}
-	s.unappliedAnnouncements = append(s.unappliedAnnouncements, []announcement{{
-		hk: hk,
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: na,
-		},
-	}}...)
+	s.unappliedAnnouncements = append(s.unappliedAnnouncements, newTestAnnouncement(hk, na))
 	s.lastSave = time.Now().Add(s.persistInterval * -2)
 	return s.applyUpdates(false)
 }
@@ -1137,6 +1110,18 @@ func newTestPK() (types.PublicKey, types.PrivateKey) {
 	sk := types.GeneratePrivateKey()
 	pk := sk.PublicKey()
 	return pk, sk
+}
+
+func newTestAnnouncement(hk types.PublicKey, na string) announcement {
+	return announcement{
+		blockHeight: 42,
+		blockID:     types.BlockID{1, 2, 3},
+		hk:          hk,
+		timestamp:   time.Now().UTC().Round(time.Second),
+		HostAnnouncement: chain.HostAnnouncement{
+			NetAddress: na,
+		},
+	}
 }
 
 func newTestHostAnnouncement(na string) (chain.HostAnnouncement, types.PrivateKey) {
