@@ -47,7 +47,7 @@ type (
 	}
 )
 
-func NewTest(tc TestingCommon) TT {
+func NewTT(tc TestingCommon) TT {
 	return &impl{TestingCommon: tc}
 }
 

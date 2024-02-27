@@ -245,7 +245,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	tt := test.NewTest(t)
+	tt := test.NewTT(t)
 
 	// Ensure we don't hang
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

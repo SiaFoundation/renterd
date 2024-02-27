@@ -55,7 +55,7 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	w.uploadManager.mm = ulmm
 
 	return &testWorker{
-		test.NewTest(t),
+		test.NewTT(t),
 		w,
 		cs,
 		os,

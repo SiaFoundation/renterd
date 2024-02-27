@@ -34,7 +34,7 @@ type (
 )
 
 func newTestHostManager(t test.TestingCommon) *testHostManager {
-	return &testHostManager{tt: test.NewTest(t), hosts: make(map[types.PublicKey]*testHost)}
+	return &testHostManager{tt: test.NewTT(t), hosts: make(map[types.PublicKey]*testHost)}
 }
 
 func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
