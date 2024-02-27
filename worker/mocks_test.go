@@ -5,222 +5,404 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"math/big"
 	"sync"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
-	"go.uber.org/zap"
-	"lukechampine.com/frand"
+	"go.sia.tech/renterd/webhooks"
+)
+
+var _ AccountStore = (*accountsMock)(nil)
+
+type accountsMock struct{}
+
+func (*accountsMock) Accounts(context.Context) ([]api.Account, error) {
+	return nil, nil
+}
+
+func (*accountsMock) AddBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
+	return nil
+}
+
+func (*accountsMock) LockAccount(context.Context, rhpv3.Account, types.PublicKey, bool, time.Duration) (api.Account, uint64, error) {
+	return api.Account{}, 0, nil
+}
+
+func (*accountsMock) UnlockAccount(context.Context, rhpv3.Account, uint64) error {
+	return nil
+}
+
+func (*accountsMock) ResetDrift(context.Context, rhpv3.Account) error {
+	return nil
+}
+
+func (*accountsMock) SetBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
+	return nil
+}
+
+func (*accountsMock) ScheduleSync(context.Context, rhpv3.Account, types.PublicKey) error {
+	return nil
+}
+
+var _ alerts.Alerter = (*alerterMock)(nil)
+
+type alerterMock struct{}
+
+func (*alerterMock) Alerts(_ context.Context, opts alerts.AlertsOpts) (resp alerts.AlertsResponse, err error) {
+	return alerts.AlertsResponse{}, nil
+}
+func (*alerterMock) RegisterAlert(context.Context, alerts.Alert) error     { return nil }
+func (*alerterMock) DismissAlerts(context.Context, ...types.Hash256) error { return nil }
+
+var _ ConsensusState = (*chainMock)(nil)
+
+type chainMock struct{}
+
+func (c *chainMock) ConsensusState(ctx context.Context) (api.ConsensusState, error) {
+	return api.ConsensusState{}, nil
+}
+
+var _ Bus = (*busMock)(nil)
+
+type busMock struct {
+	*alerterMock
+	*accountsMock
+	*chainMock
+	*contractLockerMock
+	*contractStoreMock
+	*hostStoreMock
+	*objectStoreMock
+	*settingStoreMock
+	*syncerMock
+	*walletMock
+	*webhookBroadcasterMock
+}
+
+func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *busMock {
+	return &busMock{
+		alerterMock:            &alerterMock{},
+		accountsMock:           &accountsMock{},
+		chainMock:              &chainMock{},
+		contractLockerMock:     newContractLockerMock(),
+		contractStoreMock:      cs,
+		hostStoreMock:          hs,
+		objectStoreMock:        os,
+		settingStoreMock:       &settingStoreMock{},
+		syncerMock:             &syncerMock{},
+		walletMock:             &walletMock{},
+		webhookBroadcasterMock: &webhookBroadcasterMock{},
+	}
+}
+
+type contractMock struct {
+	rev      types.FileContractRevision
+	metadata api.ContractMetadata
+
+	mu      sync.Mutex
+	sectors map[types.Hash256]*[rhpv2.SectorSize]byte
+}
+
+func newContractMock(hk types.PublicKey, fcid types.FileContractID) *contractMock {
+	return &contractMock{
+		metadata: api.ContractMetadata{
+			ID:          fcid,
+			HostKey:     hk,
+			WindowStart: 0,
+			WindowEnd:   10,
+		},
+		rev:     types.FileContractRevision{ParentID: fcid},
+		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
+	}
+}
+
+func (c *contractMock) AddSector(sector *[rhpv2.SectorSize]byte) (root types.Hash256) {
+	root = rhpv2.SectorRoot(sector)
+	c.mu.Lock()
+	c.sectors[root] = sector
+	c.mu.Unlock()
+	return
+}
+
+func (c *contractMock) Sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
+	c.mu.Lock()
+	sector, found = c.sectors[root]
+	c.mu.Unlock()
+	return
+}
+
+var _ ContractLocker = (*contractLockerMock)(nil)
+
+type contractLockerMock struct {
+	mu    sync.Mutex
+	locks map[types.FileContractID]*sync.Mutex
+}
+
+func newContractLockerMock() *contractLockerMock {
+	return &contractLockerMock{
+		locks: make(map[types.FileContractID]*sync.Mutex),
+	}
+}
+
+func (cs *contractLockerMock) AcquireContract(_ context.Context, fcid types.FileContractID, _ int, _ time.Duration) (uint64, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	lock, exists := cs.locks[fcid]
+	if !exists {
+		cs.locks[fcid] = new(sync.Mutex)
+		lock = cs.locks[fcid]
+	}
+
+	lock.Lock()
+	return 0, nil
+}
+
+func (cs *contractLockerMock) ReleaseContract(_ context.Context, fcid types.FileContractID, _ uint64) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	cs.locks[fcid].Unlock()
+	delete(cs.locks, fcid)
+	return nil
+}
+
+func (*contractLockerMock) KeepaliveContract(context.Context, types.FileContractID, uint64, time.Duration) error {
+	return nil
+}
+
+var _ ContractStore = (*contractStoreMock)(nil)
+
+type contractStoreMock struct {
+	mu         sync.Mutex
+	contracts  map[types.FileContractID]*contractMock
+	hosts2fcid map[types.PublicKey]types.FileContractID
+	fcidCntr   uint
+}
+
+func newContractStoreMock() *contractStoreMock {
+	return &contractStoreMock{
+		contracts:  make(map[types.FileContractID]*contractMock),
+		hosts2fcid: make(map[types.PublicKey]types.FileContractID),
+	}
+}
+
+func (*contractStoreMock) RenewedContract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
+	return api.ContractMetadata{}, nil
+}
+
+func (*contractStoreMock) Contract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
+	return api.ContractMetadata{}, nil
+}
+
+func (*contractStoreMock) ContractSize(context.Context, types.FileContractID) (api.ContractSize, error) {
+	return api.ContractSize{}, nil
+}
+
+func (*contractStoreMock) ContractRoots(context.Context, types.FileContractID) ([]types.Hash256, []types.Hash256, error) {
+	return nil, nil, nil
+}
+
+func (cs *contractStoreMock) Contracts(context.Context, api.ContractsOpts) (metadatas []api.ContractMetadata, _ error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	for _, c := range cs.contracts {
+		metadatas = append(metadatas, c.metadata)
+	}
+	return
+}
+
+func (cs *contractStoreMock) addContract(hk types.PublicKey) *contractMock {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	fcid := cs.newFileContractID()
+	cs.contracts[fcid] = newContractMock(hk, fcid)
+	cs.hosts2fcid[hk] = fcid
+	return cs.contracts[fcid]
+}
+
+func (cs *contractStoreMock) renewContract(hk types.PublicKey) (*contractMock, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	curr := cs.hosts2fcid[hk]
+	c := cs.contracts[curr]
+	if c == nil {
+		return nil, errors.New("host does not have a contract to renew")
+	}
+	delete(cs.contracts, curr)
+
+	renewal := newContractMock(hk, cs.newFileContractID())
+	renewal.metadata.RenewedFrom = c.metadata.ID
+	renewal.metadata.WindowStart = c.metadata.WindowEnd
+	renewal.metadata.WindowEnd = renewal.metadata.WindowStart + (c.metadata.WindowEnd - c.metadata.WindowStart)
+	cs.contracts[renewal.metadata.ID] = renewal
+	cs.hosts2fcid[hk] = renewal.metadata.ID
+	return renewal, nil
+}
+
+func (cs *contractStoreMock) newFileContractID() types.FileContractID {
+	cs.fcidCntr++
+	return types.FileContractID{byte(cs.fcidCntr)}
+}
+
+var errSectorOutOfBounds = errors.New("sector out of bounds")
+
+type hostMock struct {
+	hk types.PublicKey
+	hi hostdb.HostInfo
+}
+
+func newHostMock(hk types.PublicKey) *hostMock {
+	return &hostMock{
+		hk: hk,
+		hi: hostdb.HostInfo{Host: hostdb.Host{PublicKey: hk, Scanned: true}},
+	}
+}
+
+var _ HostStore = (*hostStoreMock)(nil)
+
+type hostStoreMock struct {
+	mu     sync.Mutex
+	hosts  map[types.PublicKey]*hostMock
+	hkCntr uint
+}
+
+func newHostStoreMock() *hostStoreMock {
+	return &hostStoreMock{hosts: make(map[types.PublicKey]*hostMock)}
+}
+
+func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+
+	h, ok := hs.hosts[hostKey]
+	if !ok {
+		return hostdb.HostInfo{}, api.ErrHostNotFound
+	}
+	return h.hi, nil
+}
+
+func (hs *hostStoreMock) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error {
+	return nil
+}
+
+func (hs *hostStoreMock) RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+	return nil
+}
+
+func (hs *hostStoreMock) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
+	return nil
+}
+
+func (hs *hostStoreMock) addHost() *hostMock {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+
+	hs.hkCntr++
+	hk := types.PublicKey{byte(hs.hkCntr)}
+	hs.hosts[hk] = newHostMock(hk)
+	return hs.hosts[hk]
+}
+
+var (
+	_ MemoryManager = (*memoryManagerMock)(nil)
+	_ Memory        = (*memoryMock)(nil)
 )
 
 type (
-	mockContract struct {
-		rev      types.FileContractRevision
-		metadata api.ContractMetadata
+	memoryMock        struct{}
+	memoryManagerMock struct{ memBlockChan chan struct{} }
+)
 
-		mu      sync.Mutex
-		sectors map[types.Hash256]*[rhpv2.SectorSize]byte
-	}
+func newMemoryManagerMock() *memoryManagerMock {
+	mm := &memoryManagerMock{memBlockChan: make(chan struct{})}
+	close(mm.memBlockChan)
+	return mm
+}
 
-	mockContractStore struct {
-		mu    sync.Mutex
-		locks map[types.FileContractID]*sync.Mutex
-	}
+func (m *memoryMock) Release()           {}
+func (m *memoryMock) ReleaseSome(uint64) {}
 
-	mockHost struct {
-		hk types.PublicKey
+func (mm *memoryManagerMock) Limit(amt uint64) (MemoryManager, error) {
+	return mm, nil
+}
 
-		mu sync.Mutex
-		c  *mockContract
+func (mm *memoryManagerMock) Status() api.MemoryStatus { return api.MemoryStatus{} }
 
-		hpt          hostdb.HostPriceTable
-		hptBlockChan chan struct{}
-	}
+func (mm *memoryManagerMock) AcquireMemory(ctx context.Context, amt uint64) Memory {
+	<-mm.memBlockChan
+	return &memoryMock{}
+}
 
-	mockHostManager struct {
-		mu    sync.Mutex
-		hosts map[types.PublicKey]*mockHost
-	}
+var _ ObjectStore = (*objectStoreMock)(nil)
 
-	mockMemory        struct{}
-	mockMemoryManager struct {
-		memBlockChan chan struct{}
-	}
-
-	mockObjectStore struct {
+type (
+	objectStoreMock struct {
 		mu           sync.Mutex
 		objects      map[string]map[string]object.Object
-		partials     map[string]mockPackedSlab
+		partials     map[string]packedSlabMock
 		bufferIDCntr uint // allows marking packed slabs as uploaded
 	}
 
-	mockPackedSlab struct {
+	packedSlabMock struct {
 		parameterKey string // ([minshards]-[totalshards]-[contractset])
 		bufferID     uint
 		slabKey      object.EncryptionKey
 		data         []byte
 	}
-
-	mockWorker struct {
-		cs *mockContractStore
-		hm *mockHostManager
-		mm *mockMemoryManager
-		os *mockObjectStore
-
-		dl *downloadManager
-		ul *uploadManager
-
-		mu       sync.Mutex
-		hkCntr   uint
-		fcidCntr uint
-	}
 )
 
-var (
-	_ ContractStore = (*mockContractStore)(nil)
-	_ Host          = (*mockHost)(nil)
-	_ HostManager   = (*mockHostManager)(nil)
-	_ Memory        = (*mockMemory)(nil)
-	_ MemoryManager = (*mockMemoryManager)(nil)
-	_ ObjectStore   = (*mockObjectStore)(nil)
-)
-
-var (
-	errBucketNotFound    = errors.New("bucket not found")
-	errContractNotFound  = errors.New("contract not found")
-	errObjectNotFound    = errors.New("object not found")
-	errSlabNotFound      = errors.New("slab not found")
-	errSectorOutOfBounds = errors.New("sector out of bounds")
-)
-
-type (
-	mockHosts     []*mockHost
-	mockContracts []*mockContract
-)
-
-func (hosts mockHosts) contracts() mockContracts {
-	contracts := make([]*mockContract, len(hosts))
-	for i, host := range hosts {
-		contracts[i] = host.c
-	}
-	return contracts
-}
-
-func (contracts mockContracts) metadata() []api.ContractMetadata {
-	metadata := make([]api.ContractMetadata, len(contracts))
-	for i, contract := range contracts {
-		metadata[i] = contract.metadata
-	}
-	return metadata
-}
-
-func (m *mockMemory) Release()           {}
-func (m *mockMemory) ReleaseSome(uint64) {}
-
-func (mm *mockMemoryManager) Limit(amt uint64) (MemoryManager, error) {
-	return &mockMemoryManager{}, nil
-}
-func (mm *mockMemoryManager) Status() api.MemoryStatus { return api.MemoryStatus{} }
-func (mm *mockMemoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
-	if mm.memBlockChan != nil {
-		<-mm.memBlockChan
-	}
-	return &mockMemory{}
-}
-
-func newMockContractStore() *mockContractStore {
-	return &mockContractStore{
-		locks: make(map[types.FileContractID]*sync.Mutex),
-	}
-}
-
-func (cs *mockContractStore) AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	if lock, ok := cs.locks[fcid]; !ok {
-		return 0, errContractNotFound
-	} else {
-		lock.Lock()
-	}
-	return 0, nil
-}
-
-func (cs *mockContractStore) ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	if lock, ok := cs.locks[fcid]; !ok {
-		return errContractNotFound
-	} else {
-		lock.Unlock()
-	}
-	return nil
-}
-
-func (cs *mockContractStore) KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error) {
-	return nil
-}
-
-func (os *mockContractStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
-	return api.ContractMetadata{}, api.ErrContractNotFound
-}
-
-func newMockObjectStore() *mockObjectStore {
-	os := &mockObjectStore{
+func newObjectStoreMock(bucket string) *objectStoreMock {
+	os := &objectStoreMock{
 		objects:  make(map[string]map[string]object.Object),
-		partials: make(map[string]mockPackedSlab),
+		partials: make(map[string]packedSlabMock),
 	}
-	os.objects[testBucket] = make(map[string]object.Object)
+	os.objects[bucket] = make(map[string]object.Object)
 	return os
 }
 
-func (cs *mockContractStore) addContract(c *mockContract) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	cs.locks[c.metadata.ID] = new(sync.Mutex)
-}
-
-func (os *mockObjectStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (os *objectStoreMock) AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	return nil
 }
 
-func (os *mockObjectStore) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error {
+func (os *objectStoreMock) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error {
 	return nil
 }
 
-func (os *mockObjectStore) TrackUpload(ctx context.Context, uID api.UploadID) error { return nil }
+func (os *objectStoreMock) TrackUpload(ctx context.Context, uID api.UploadID) error { return nil }
 
-func (os *mockObjectStore) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
+func (os *objectStoreMock) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
 
-func (os *mockObjectStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+func (os *objectStoreMock) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
 	return nil
 }
 
-func (os *mockObjectStore) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error {
+func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error {
 	return nil
 }
 
-func (os *mockObjectStore) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error {
+func (os *objectStoreMock) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
 	// check if the bucket exists
 	if _, exists := os.objects[bucket]; !exists {
-		return errBucketNotFound
+		return api.ErrBucketNotFound
 	}
 
 	os.objects[bucket][path] = o
 	return nil
 }
 
-func (os *mockObjectStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
+func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -239,7 +421,7 @@ func (os *mockObjectStore) AddPartialSlab(ctx context.Context, data []byte, minS
 	}
 
 	// update store
-	os.partials[ec.String()] = mockPackedSlab{
+	os.partials[ec.String()] = packedSlabMock{
 		parameterKey: fmt.Sprintf("%d-%d-%v", minShards, totalShards, contractSet),
 		bufferID:     os.bufferIDCntr,
 		slabKey:      ec,
@@ -250,18 +432,18 @@ func (os *mockObjectStore) AddPartialSlab(ctx context.Context, data []byte, minS
 	return []object.SlabSlice{ss}, false, nil
 }
 
-func (os *mockObjectStore) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error) {
+func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
 	// check if the bucket exists
 	if _, exists := os.objects[bucket]; !exists {
-		return api.ObjectsResponse{}, errBucketNotFound
+		return api.ObjectsResponse{}, api.ErrBucketNotFound
 	}
 
 	// check if the object exists
 	if _, exists := os.objects[bucket][path]; !exists {
-		return api.ObjectsResponse{}, errObjectNotFound
+		return api.ObjectsResponse{}, api.ErrObjectNotFound
 	}
 
 	// clone to ensure the store isn't unwillingly modified
@@ -278,13 +460,13 @@ func (os *mockObjectStore) Object(ctx context.Context, bucket, path string, opts
 	}}, nil
 }
 
-func (os *mockObjectStore) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
+func (os *objectStoreMock) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
 	packedSlab, exists := os.partials[key.String()]
 	if !exists {
-		return nil, errSlabNotFound
+		return nil, api.ErrSlabNotFound
 	}
 	if offset+length > uint32(len(packedSlab.data)) {
 		return nil, errors.New("offset out of bounds")
@@ -293,7 +475,7 @@ func (os *mockObjectStore) FetchPartialSlab(ctx context.Context, key object.Encr
 	return packedSlab.data[offset : offset+length], nil
 }
 
-func (os *mockObjectStore) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
+func (os *objectStoreMock) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -304,12 +486,12 @@ func (os *mockObjectStore) Slab(ctx context.Context, key object.EncryptionKey) (
 				return
 			}
 		}
-		err = errSlabNotFound
+		err = api.ErrSlabNotFound
 	})
 	return
 }
 
-func (os *mockObjectStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
+func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -325,7 +507,7 @@ func (os *mockObjectStore) UpdateSlab(ctx context.Context, s object.Slab, contra
 	return nil
 }
 
-func (os *mockObjectStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (pss []api.PackedSlab, _ error) {
+func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (pss []api.PackedSlab, _ error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -342,7 +524,7 @@ func (os *mockObjectStore) PackedSlabsForUpload(ctx context.Context, lockingDura
 	return
 }
 
-func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
+func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -367,7 +549,15 @@ func (os *mockObjectStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	return nil
 }
 
-func (os *mockObjectStore) forEachObject(fn func(bucket, path string, o object.Object)) {
+func (os *objectStoreMock) Bucket(_ context.Context, bucket string) (api.Bucket, error) {
+	return api.Bucket{}, nil
+}
+
+func (os *objectStoreMock) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
+	return api.MultipartUpload{}, nil
+}
+
+func (os *objectStoreMock) forEachObject(fn func(bucket, path string, o object.Object)) {
 	for bucket, objects := range os.objects {
 		for path, object := range objects {
 			fn(bucket, path, object)
@@ -375,220 +565,58 @@ func (os *mockObjectStore) forEachObject(fn func(bucket, path string, o object.O
 	}
 }
 
-func newMockHost(hk types.PublicKey) *mockHost {
-	return &mockHost{
-		hk:  hk,
-		hpt: newTestHostPriceTable(time.Now().Add(time.Minute)),
-	}
+var _ SettingStore = (*settingStoreMock)(nil)
+
+type settingStoreMock struct{}
+
+func (*settingStoreMock) GougingParams(context.Context) (api.GougingParams, error) {
+	return api.GougingParams{}, nil
 }
 
-func (h *mockHost) PublicKey() types.PublicKey { return h.hk }
-
-func (h *mockHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
-	sector, exist := h.contract().sector(root)
-	if !exist {
-		return errSectorNotFound
-	}
-	if offset+length > rhpv2.SectorSize {
-		return errSectorOutOfBounds
-	}
-	_, err := w.Write(sector[offset : offset+length])
-	return err
+func (*settingStoreMock) UploadParams(context.Context) (api.UploadParams, error) {
+	return api.UploadParams{}, nil
 }
 
-func (h *mockHost) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error) {
-	return h.contract().addSector(sector), nil
-}
+var _ Syncer = (*syncerMock)(nil)
 
-func (h *mockHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (rev types.FileContractRevision, _ error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	rev = h.c.rev
-	return
-}
+type syncerMock struct{}
 
-func (h *mockHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hostdb.HostPriceTable, error) {
-	<-h.hptBlockChan
-	return h.hpt, nil
-}
-
-func (h *mockHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
+func (*syncerMock) BroadcastTransaction(context.Context, []types.Transaction) error {
 	return nil
 }
 
-func (h *mockHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
-	return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, nil
+func (*syncerMock) SyncerPeers(context.Context) ([]string, error) {
+	return nil, nil
 }
 
-func (h *mockHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
+var _ Wallet = (*walletMock)(nil)
+
+type walletMock struct{}
+
+func (*walletMock) WalletDiscard(context.Context, types.Transaction) error {
 	return nil
 }
 
-func (h *mockHost) contract() (c *mockContract) {
-	h.mu.Lock()
-	c = h.c
-	h.mu.Unlock()
-
-	if c == nil {
-		panic("host does not have a contract")
-	}
-	return
+func (*walletMock) WalletFund(context.Context, *types.Transaction, types.Currency, bool) ([]types.Hash256, []types.Transaction, error) {
+	return nil, nil, nil
 }
 
-func newMockContract(hk types.PublicKey, fcid types.FileContractID) *mockContract {
-	return &mockContract{
-		metadata: api.ContractMetadata{
-			ID:          fcid,
-			HostKey:     hk,
-			WindowStart: 0,
-			WindowEnd:   10,
-		},
-		rev:     types.FileContractRevision{ParentID: fcid},
-		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
-	}
+func (*walletMock) WalletPrepareForm(context.Context, types.Address, types.PublicKey, types.Currency, types.Currency, types.PublicKey, rhpv2.HostSettings, uint64) ([]types.Transaction, error) {
+	return nil, nil
 }
 
-func (c *mockContract) addSector(sector *[rhpv2.SectorSize]byte) (root types.Hash256) {
-	root = rhpv2.SectorRoot(sector)
-	c.mu.Lock()
-	c.sectors[root] = sector
-	c.mu.Unlock()
-	return
+func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
+	return api.WalletPrepareRenewResponse{}, nil
 }
 
-func (c *mockContract) sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
-	c.mu.Lock()
-	sector, found = c.sectors[root]
-	c.mu.Unlock()
-	return
+func (*walletMock) WalletSign(context.Context, *types.Transaction, []types.Hash256, types.CoveredFields) error {
+	return nil
 }
 
-func newMockHostManager() *mockHostManager {
-	return &mockHostManager{
-		hosts: make(map[types.PublicKey]*mockHost),
-	}
-}
+var _ webhooks.Broadcaster = (*webhookBroadcasterMock)(nil)
 
-func (hm *mockHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
+type webhookBroadcasterMock struct{}
 
-	if _, ok := hm.hosts[hk]; !ok {
-		panic("host not found")
-	}
-	return hm.hosts[hk]
-}
-
-func (hm *mockHostManager) newHost(hk types.PublicKey) *mockHost {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-
-	if _, ok := hm.hosts[hk]; ok {
-		panic("host already exists")
-	}
-
-	hm.hosts[hk] = newMockHost(hk)
-	return hm.hosts[hk]
-}
-
-func (hm *mockHostManager) host(hk types.PublicKey) *mockHost {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-	return hm.hosts[hk]
-}
-
-func newMockSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
-	var sector [rhpv2.SectorSize]byte
-	frand.Read(sector[:])
-	return &sector, rhpv2.SectorRoot(&sector)
-}
-
-func newMockWorker() *mockWorker {
-	cs := newMockContractStore()
-	hm := newMockHostManager()
-	os := newMockObjectStore()
-	mm := &mockMemoryManager{}
-
-	return &mockWorker{
-		cs: cs,
-		hm: hm,
-		mm: mm,
-		os: os,
-
-		dl: newDownloadManager(context.Background(), hm, mm, os, 0, 0, zap.NewNop().Sugar()),
-		ul: newUploadManager(context.Background(), hm, mm, os, cs, 0, 0, time.Minute, zap.NewNop().Sugar()),
-	}
-}
-
-func (w *mockWorker) addHosts(n int) {
-	for i := 0; i < n; i++ {
-		w.addHost()
-	}
-}
-
-func (w *mockWorker) addHost() *mockHost {
-	host := w.hm.newHost(w.newHostKey())
-	w.formContract(host)
-	return host
-}
-
-func (w *mockWorker) formContract(host *mockHost) *mockContract {
-	if host.c != nil {
-		panic("host already has contract, use renew")
-	}
-	host.c = newMockContract(host.hk, w.newFileContractID())
-	w.cs.addContract(host.c)
-	return host.c
-}
-
-func (w *mockWorker) renewContract(hk types.PublicKey) *mockContract {
-	host := w.hm.host(hk)
-	if host == nil {
-		panic("host not found")
-	} else if host.c == nil {
-		panic("host does not have a contract to renew")
-	}
-
-	curr := host.c.metadata
-	update := newMockContract(host.hk, w.newFileContractID())
-	update.metadata.RenewedFrom = curr.ID
-	update.metadata.WindowStart = curr.WindowEnd
-	update.metadata.WindowEnd = update.metadata.WindowStart + (curr.WindowEnd - curr.WindowStart)
-	host.c = update
-
-	w.cs.addContract(host.c)
-	return host.c
-}
-
-func (w *mockWorker) contracts() (metadatas []api.ContractMetadata) {
-	for _, h := range w.hm.hosts {
-		metadatas = append(metadatas, h.c.metadata)
-	}
-	return
-}
-
-func (w *mockWorker) newHostKey() (hk types.PublicKey) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.hkCntr++
-	hk = types.PublicKey{byte(w.hkCntr)}
-	return
-}
-
-func (w *mockWorker) newFileContractID() (fcid types.FileContractID) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.fcidCntr++
-	fcid = types.FileContractID{byte(w.fcidCntr)}
-	return
-}
-
-func newTestHostPriceTable(expiry time.Time) hostdb.HostPriceTable {
-	var uid rhpv3.SettingsID
-	frand.Read(uid[:])
-
-	return hostdb.HostPriceTable{
-		HostPriceTable: rhpv3.HostPriceTable{UID: uid, Validity: time.Minute},
-		Expiry:         expiry,
-	}
+func (*webhookBroadcasterMock) BroadcastAction(context.Context, webhooks.Event) error {
+	return nil
 }

@@ -151,7 +151,6 @@ func (lmm *limitMemoryManager) AcquireMemory(ctx context.Context, amt uint64) Me
 		childMem.Release()
 		return nil
 	}
-
 	return &limitAcquiredMemory{
 		child:  childMem,
 		parent: parentMem,
