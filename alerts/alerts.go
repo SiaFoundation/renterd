@@ -79,7 +79,7 @@ type (
 			Warning  int `json:"warning"`
 			Error    int `json:"error"`
 			Critical int `json:"critical"`
-		} `json:"total"`
+		} `json:"totals"`
 	}
 )
 
