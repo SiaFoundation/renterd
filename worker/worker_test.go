@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"testing"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -15,8 +14,12 @@ import (
 )
 
 type (
+	test interface {
+		Fatal(...any)
+	}
+
 	testWorker struct {
-		t *testing.T
+		t test
 		*worker
 
 		cs *contractStoreMock
@@ -30,7 +33,7 @@ type (
 	}
 )
 
-func newTestWorker(t *testing.T) *testWorker {
+func newTestWorker(t test) *testWorker {
 	// create bus dependencies
 	cs := newContractStoreMock()
 	os := newObjectStoreMock(testBucket)
