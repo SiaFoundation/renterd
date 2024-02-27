@@ -54,7 +54,7 @@ type (
 	Object struct {
 		Metadata ObjectUserMetadata `json:"metadata,omitempty"`
 		ObjectMetadata
-		*object.Object `json:"omitempty"`
+		*object.Object
 	}
 
 	// ObjectMetadata contains various metadata about an object.
