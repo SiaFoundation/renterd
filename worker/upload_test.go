@@ -34,7 +34,7 @@ func TestUpload(t *testing.T) {
 	ul := w.uploadManager
 
 	// create test data
-	data := testData(128)
+	data := frand.Bytes(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -144,7 +144,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	w.BlockAsyncPackedSlabUploads(params)
 
 	// create test data
-	data := testData(128)
+	data := frand.Bytes(128)
 
 	// upload data
 	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
@@ -213,12 +213,12 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// upload 2x64 bytes using the worker
 	params.path = t.Name() + "2"
-	_, err = w.upload(context.Background(), bytes.NewReader(testData(64)), w.Contracts(), params)
+	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(64)), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
 	params.path = t.Name() + "3"
-	_, err = w.upload(context.Background(), bytes.NewReader(testData(64)), w.Contracts(), params)
+	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(64)), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// upload one more byte (buffer limit reached)
 	params.path = t.Name() + "4"
-	_, err = w.upload(context.Background(), bytes.NewReader(testData(1)), w.Contracts(), params)
+	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(1)), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// upload 1 byte using the worker
 	params.path = t.Name() + "5"
-	_, err = w.upload(context.Background(), bytes.NewReader(testData(129)), w.Contracts(), params)
+	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(129)), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestUploadShards(t *testing.T) {
 	ul := w.uploadManager
 
 	// create test data
-	data := testData(128)
+	data := frand.Bytes(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -401,7 +401,7 @@ func TestRefreshUploaders(t *testing.T) {
 	hm := w.hm
 
 	// create test data
-	data := testData(128)
+	data := frand.Bytes(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -499,7 +499,7 @@ func TestUploadRegression(t *testing.T) {
 	dl := w.downloadManager
 
 	// create test data
-	data := testData(128)
+	data := frand.Bytes(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -551,12 +551,4 @@ func testParameters(path string) uploadParameters {
 		contractSet: testContractSet,
 		rs:          testRedundancySettings,
 	}
-}
-
-func testData(n int) []byte {
-	data := make([]byte, n)
-	if _, err := frand.Read(data); err != nil {
-		panic(err)
-	}
-	return data
 }
