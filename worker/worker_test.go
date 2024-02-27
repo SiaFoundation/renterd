@@ -7,7 +7,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/testutils"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -15,7 +15,7 @@ import (
 
 type (
 	testWorker struct {
-		tt testutils.TT
+		tt test.TT
 		*worker
 
 		cs *contractStoreMock
@@ -29,7 +29,7 @@ type (
 	}
 )
 
-func newTestWorker(t testutils.TestingCommon) *testWorker {
+func newTestWorker(t test.TestingCommon) *testWorker {
 	// create bus dependencies
 	cs := newContractStoreMock()
 	os := newObjectStoreMock(testBucket)
@@ -55,7 +55,7 @@ func newTestWorker(t testutils.TestingCommon) *testWorker {
 	w.uploadManager.mm = ulmm
 
 	return &testWorker{
-		testutils.New(t),
+		test.NewTest(t),
 		w,
 		cs,
 		os,

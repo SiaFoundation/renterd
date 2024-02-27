@@ -1,4 +1,4 @@
-package testutils
+package test
 
 import (
 	"strings"
@@ -47,7 +47,7 @@ type (
 	}
 )
 
-func New(tc TestingCommon) TT {
+func NewTest(tc TestingCommon) TT {
 	return &impl{TestingCommon: tc}
 }
 

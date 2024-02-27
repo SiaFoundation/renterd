@@ -14,7 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/testutils"
+	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
 
@@ -26,15 +26,15 @@ type (
 	}
 
 	testHostManager struct {
-		tt testutils.TT
+		tt test.TT
 
 		mu    sync.Mutex
 		hosts map[types.PublicKey]*testHost
 	}
 )
 
-func newTestHostManager(t testutils.TestingCommon) *testHostManager {
-	return &testHostManager{tt: testutils.New(t), hosts: make(map[types.PublicKey]*testHost)}
+func newTestHostManager(t test.TestingCommon) *testHostManager {
+	return &testHostManager{tt: test.NewTest(t), hosts: make(map[types.PublicKey]*testHost)}
 }
 
 func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {

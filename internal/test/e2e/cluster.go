@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"context"
@@ -24,9 +24,9 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
-	"go.sia.tech/renterd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
@@ -120,7 +120,7 @@ type TestCluster struct {
 	dbName  string
 	dir     string
 	logger  *zap.Logger
-	tt      testutils.TT
+	tt      test.TT
 	wk      types.PrivateKey
 	wg      sync.WaitGroup
 }
@@ -245,7 +245,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	tt := testutils.New(t)
+	tt := test.NewTest(t)
 
 	// Ensure we don't hang
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
