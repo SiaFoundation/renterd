@@ -764,17 +764,17 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	return
 }
 
-func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
+func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) (cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, types.ZeroCurrency, errMaxRevisionReached
+		return types.ZeroCurrency, errMaxRevisionReached
 	}
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 	defer s.Close()
 
@@ -804,7 +804,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	// compute expected collateral and refund
 	expectedCost, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 
 	// apply leeways.
@@ -815,13 +815,13 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 
 	// check if the cost, collateral and refund match our expectation.
 	if executeResp.TotalCost.Cmp(expectedCost) > 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v > %v", executeResp.TotalCost.String(), expectedCost.String())
+		return types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v > %v", executeResp.TotalCost.String(), expectedCost.String())
 	}
 	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
+		return types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
 	}
 	if executeResp.AdditionalCollateral.Cmp(expectedCollateral) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", executeResp.AdditionalCollateral.String(), expectedCollateral.String())
+		return types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", executeResp.AdditionalCollateral.String(), expectedCollateral.String())
 	}
 
 	// set the cost and refund
@@ -845,18 +845,17 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
 
 	// check proof
-	sectorRoot = rhpv2.SectorRoot(sector)
 	if rev.Filesize == 0 {
 		// For the first upload to a contract we don't get a proof. So we just
 		// assert that the new contract root matches the root of the sector.
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
-			return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
+			return types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
 	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
 		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
 		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
-			return types.Hash256{}, types.ZeroCurrency, errors.New("proof verification failed")
+			return types.ZeroCurrency, errors.New("proof verification failed")
 		}
 	}
 
@@ -864,7 +863,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	newRevision := *rev
 	newValid, newMissed, err := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 	newRevision.Filesize += rhpv2.SectorSize
 	newRevision.RevisionNumber++
