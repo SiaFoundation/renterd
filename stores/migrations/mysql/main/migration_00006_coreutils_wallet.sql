@@ -18,7 +18,7 @@ CREATE TABLE `wallet_events` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `event_id` (`event_id`),
   KEY `idx_wallet_events_maturity_height` (`maturity_height`),
-  KEY `idx_wallet_events_source` (`source`),
+  KEY `idx_wallet_events_source` (`source`(191)), -- 191 is the max length for utf8mb4
   KEY `idx_wallet_events_timestamp` (`timestamp`),
   KEY `idx_wallet_events_height` (`height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
