@@ -25,14 +25,14 @@ type (
 	}
 
 	testHostManager struct {
-		t *testing.T
+		t test
 
 		mu    sync.Mutex
 		hosts map[types.PublicKey]*testHost
 	}
 )
 
-func newTestHostManager(t *testing.T) *testHostManager {
+func newTestHostManager(t test) *testHostManager {
 	return &testHostManager{t: t, hosts: make(map[types.PublicKey]*testHost)}
 }
 
@@ -90,8 +90,9 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 	return err
 }
 
-func (h *testHost) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error) {
-	return h.AddSector(sector), nil
+func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
+	h.AddSector(sector)
+	return nil
 }
 
 func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (rev types.FileContractRevision, _ error) {
@@ -126,11 +127,9 @@ func TestHost(t *testing.T) {
 
 	// upload the sector
 	sector, root := newTestSector()
-	uploaded, err := h.UploadSector(context.Background(), sector, types.FileContractRevision{})
+	err := h.UploadSector(context.Background(), root, sector, types.FileContractRevision{})
 	if err != nil {
 		t.Fatal(err)
-	} else if uploaded != root {
-		t.Fatal("root mismatch")
 	}
 
 	// download entire sector

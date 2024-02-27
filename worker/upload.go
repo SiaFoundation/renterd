@@ -138,9 +138,8 @@ type (
 	}
 
 	sectorUploadResp struct {
-		req  *sectorUploadReq
-		root types.Hash256
-		err  error
+		req *sectorUploadReq
+		err error
 	}
 )
 
@@ -403,11 +402,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the object
 	o := object.NewObject(up.ec)
 
-	// create the hash reader
-	hr := newHashReader(r)
-
 	// create the cipher reader
-	cr, err := o.Encrypt(hr, up.encryptionOffset)
+	cr, err := o.Encrypt(r, up.encryptionOffset)
 	if err != nil {
 		return false, "", err
 	}
@@ -535,8 +531,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
 
-	// calculate the eTag
-	eTag = hr.Hash()
+	// compute etag
+	eTag = o.ComputeETag()
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
@@ -768,20 +764,32 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	responseChan := make(chan sectorUploadResp)
 
 	// prepare sectors
+	var wg sync.WaitGroup
 	sectors := make([]*sectorUpload, len(shards))
-	for sI, shard := range shards {
-		// create the ctx
-		sCtx, sCancel := context.WithCancel(ctx)
+	for sI := range shards {
+		wg.Add(1)
+		go func(idx int) {
+			// create the ctx
+			sCtx, sCancel := context.WithCancel(ctx)
 
-		// create the sector
-		sectors[sI] = &sectorUpload{
-			data:   (*[rhpv2.SectorSize]byte)(shard),
-			index:  sI,
-			root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shard)),
-			ctx:    sCtx,
-			cancel: sCancel,
-		}
+			// create the sector
+			// NOTE: we are computing the sector root here and pass it all the
+			// way down to the RPC to avoid having to recompute it for the proof
+			// verification. This is necessary because we need it ahead of time
+			// for the call to AddUploadingSector in uploader.go
+			// Once we upload to temp storage we don't need AddUploadingSector
+			// anymore and can move it back to the RPC.
+			sectors[idx] = &sectorUpload{
+				data:   (*[rhpv2.SectorSize]byte)(shards[idx]),
+				index:  idx,
+				root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shards[idx])),
+				ctx:    sCtx,
+				cancel: sCancel,
+			}
+			wg.Done()
+		}(sI)
 	}
+	wg.Wait()
 
 	// prepare candidates
 	candidates := make([]*candidate, len(uploaders))
@@ -836,8 +844,6 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 }
 
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
-	start := time.Now()
-
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -873,6 +879,10 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 
 	// create a request buffer
 	var buffer []*sectorUploadReq
+
+	// start the timer after the upload has started
+	// newSlabUpload is quite slow due to computing the sector roots
+	start := time.Now()
 
 	// collect responses
 	var used bool
@@ -933,6 +943,9 @@ loop:
 	// calculate the upload speed
 	bytes := slab.numUploaded * rhpv2.SectorSize
 	ms := time.Since(start).Milliseconds()
+	if ms == 0 {
+		ms = 1
+	}
 	uploadSpeed = int64(bytes) / ms
 
 	// calculate overdrive pct
@@ -1060,12 +1073,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 		return false, false
 	}
 
-	// sanity check we receive the expected root
-	if resp.root != req.sector.root {
-		s.errs[req.hk] = fmt.Errorf("root mismatch, %v != %v", resp.root, req.sector.root)
-		return false, false
-	}
-
 	// redundant sectors can't complete the upload
 	if sector.uploaded.Root != (types.Hash256{}) {
 		return false, false
@@ -1075,7 +1082,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	sector.finish(object.Sector{
 		Contracts:  map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
 		LatestHost: req.hk,
-		Root:       resp.root,
+		Root:       req.sector.root,
 	})
 
 	// update uploaded sectors
@@ -1122,22 +1129,12 @@ func (req *sectorUploadReq) done() bool {
 	}
 }
 
-func (req *sectorUploadReq) fail(err error) {
+func (req *sectorUploadReq) finish(err error) {
 	select {
 	case <-req.sector.ctx.Done():
 	case req.responseChan <- sectorUploadResp{
 		req: req,
 		err: err,
-	}:
-	}
-}
-
-func (req *sectorUploadReq) succeed(root types.Hash256) {
-	select {
-	case <-req.sector.ctx.Done():
-	case req.responseChan <- sectorUploadResp{
-		req:  req,
-		root: root,
 	}:
 	}
 }
