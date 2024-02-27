@@ -72,15 +72,20 @@ type (
 	}
 
 	AlertsResponse struct {
-		Alerts        []Alert `json:"alerts"`
-		HasMore       bool    `json:"hasMore"`
-		Total         int     `json:"total"`
-		TotalInfo     int     `json:"totalInfo"`
-		TotalWarning  int     `json:"totalWarning"`
-		TotalError    int     `json:"totalError"`
-		TotalCritical int     `json:"totalCritical"`
+		Alerts  []Alert `json:"alerts"`
+		HasMore bool    `json:"hasMore"`
+		Totals  struct {
+			Info     int `json:"info"`
+			Warning  int `json:"warning"`
+			Error    int `json:"error"`
+			Critical int `json:"critical"`
+		} `json:"total"`
 	}
 )
+
+func (ar AlertsResponse) Total() int {
+	return ar.Totals.Info + ar.Totals.Warning + ar.Totals.Error + ar.Totals.Critical
+}
 
 // String implements the fmt.Stringer interface.
 func (s Severity) String() string {
@@ -194,15 +199,14 @@ func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, er
 
 	alerts := make([]Alert, 0, len(m.alerts))
 	for _, a := range m.alerts {
-		resp.Total++
 		if a.Severity == SeverityInfo {
-			resp.TotalInfo++
+			resp.Totals.Info++
 		} else if a.Severity == SeverityWarning {
-			resp.TotalWarning++
+			resp.Totals.Warning++
 		} else if a.Severity == SeverityError {
-			resp.TotalError++
+			resp.Totals.Error++
 		} else if a.Severity == SeverityCritical {
-			resp.TotalCritical++
+			resp.Totals.Critical++
 		}
 		if opts.Severity != 0 && a.Severity != opts.Severity {
 			continue // filter by severity

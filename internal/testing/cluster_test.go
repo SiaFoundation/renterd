@@ -1992,24 +1992,24 @@ func TestAlerts(t *testing.T) {
 	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
 		ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Severity: severity})
 		tt.OK(err)
-		if ar.Total != 32 {
-			t.Fatal("expected 32 alerts", ar.Total)
-		} else if ar.TotalInfo != 3 {
-			t.Fatal("expected 3 info alerts", ar.TotalInfo)
-		} else if ar.TotalWarning != 6 {
-			t.Fatal("expected 6 warning alerts", ar.TotalWarning)
-		} else if ar.TotalError != 9 {
-			t.Fatal("expected 9 error alerts", ar.TotalError)
-		} else if ar.TotalCritical != 14 {
-			t.Fatal("expected 14 critical alerts", ar.TotalCritical)
-		} else if severity == alerts.SeverityInfo && len(ar.Alerts) != ar.TotalInfo {
-			t.Fatalf("expected %v info alerts, got %v", ar.TotalInfo, len(ar.Alerts))
-		} else if severity == alerts.SeverityWarning && len(ar.Alerts) != ar.TotalWarning {
-			t.Fatalf("expected %v warning alerts, got %v", ar.TotalWarning, len(ar.Alerts))
-		} else if severity == alerts.SeverityError && len(ar.Alerts) != ar.TotalError {
-			t.Fatalf("expected %v error alerts, got %v", ar.TotalError, len(ar.Alerts))
-		} else if severity == alerts.SeverityCritical && len(ar.Alerts) != ar.TotalCritical {
-			t.Fatalf("expected %v critical alerts, got %v", ar.TotalCritical, len(ar.Alerts))
+		if ar.Total() != 32 {
+			t.Fatal("expected 32 alerts", ar.Total())
+		} else if ar.Totals.Info != 3 {
+			t.Fatal("expected 3 info alerts", ar.Totals.Info)
+		} else if ar.Totals.Warning != 6 {
+			t.Fatal("expected 6 warning alerts", ar.Totals.Warning)
+		} else if ar.Totals.Error != 9 {
+			t.Fatal("expected 9 error alerts", ar.Totals.Error)
+		} else if ar.Totals.Critical != 14 {
+			t.Fatal("expected 14 critical alerts", ar.Totals.Critical)
+		} else if severity == alerts.SeverityInfo && len(ar.Alerts) != ar.Totals.Info {
+			t.Fatalf("expected %v info alerts, got %v", ar.Totals.Info, len(ar.Alerts))
+		} else if severity == alerts.SeverityWarning && len(ar.Alerts) != ar.Totals.Warning {
+			t.Fatalf("expected %v warning alerts, got %v", ar.Totals.Warning, len(ar.Alerts))
+		} else if severity == alerts.SeverityError && len(ar.Alerts) != ar.Totals.Error {
+			t.Fatalf("expected %v error alerts, got %v", ar.Totals.Error, len(ar.Alerts))
+		} else if severity == alerts.SeverityCritical && len(ar.Alerts) != ar.Totals.Critical {
+			t.Fatalf("expected %v critical alerts, got %v", ar.Totals.Critical, len(ar.Alerts))
 		}
 	}
 }
