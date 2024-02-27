@@ -66,14 +66,14 @@ func newTestWorker(t testutils.TestingCommon) *testWorker {
 	}
 }
 
-func (w *testWorker) addHosts(n int) (added []*testHost) {
+func (w *testWorker) AddHosts(n int) (added []*testHost) {
 	for i := 0; i < n; i++ {
-		added = append(added, w.addHost())
+		added = append(added, w.AddHost())
 	}
 	return
 }
 
-func (w *testWorker) addHost() *testHost {
+func (w *testWorker) AddHost() *testHost {
 	h := w.hs.addHost()
 	c := w.cs.addContract(h.hk)
 	host := newTestHost(h, c)
@@ -81,7 +81,7 @@ func (w *testWorker) addHost() *testHost {
 	return host
 }
 
-func (w *testWorker) blockUploads() func() {
+func (w *testWorker) BlockUploads() func() {
 	select {
 	case <-w.ulmm.memBlockChan:
 	case <-time.After(time.Second):
@@ -93,7 +93,7 @@ func (w *testWorker) blockUploads() func() {
 	return func() { close(blockChan) }
 }
 
-func (w *testWorker) contracts() []api.ContractMetadata {
+func (w *testWorker) Contracts() []api.ContractMetadata {
 	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
 	if err != nil {
 		w.tt.Fatal(err)
@@ -101,7 +101,7 @@ func (w *testWorker) contracts() []api.ContractMetadata {
 	return metadatas
 }
 
-func (w *testWorker) renewContract(hk types.PublicKey) *contractMock {
+func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
 	h := w.hm.hosts[hk]
 	if h == nil {
 		w.tt.Fatal("host not found")
