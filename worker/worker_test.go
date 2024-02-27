@@ -8,18 +8,15 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )
 
 type (
-	test interface {
-		Fatal(...any)
-	}
-
 	testWorker struct {
-		t test
+		tt test.TT
 		*worker
 
 		cs *contractStoreMock
@@ -33,7 +30,7 @@ type (
 	}
 )
 
-func newTestWorker(t test) *testWorker {
+func newTestWorker(t test.TestingCommon) *testWorker {
 	// create bus dependencies
 	cs := newContractStoreMock()
 	os := newObjectStoreMock(testBucket)
@@ -59,7 +56,7 @@ func newTestWorker(t test) *testWorker {
 	w.uploadManager.mm = ulmm
 
 	return &testWorker{
-		t,
+		test.NewTT(t),
 		w,
 		cs,
 		os,
@@ -70,14 +67,14 @@ func newTestWorker(t test) *testWorker {
 	}
 }
 
-func (w *testWorker) addHosts(n int) (added []*testHost) {
+func (w *testWorker) AddHosts(n int) (added []*testHost) {
 	for i := 0; i < n; i++ {
-		added = append(added, w.addHost())
+		added = append(added, w.AddHost())
 	}
 	return
 }
 
-func (w *testWorker) addHost() *testHost {
+func (w *testWorker) AddHost() *testHost {
 	h := w.hs.addHost()
 	c := w.cs.addContract(h.hk)
 	host := newTestHost(h, c)
@@ -85,11 +82,11 @@ func (w *testWorker) addHost() *testHost {
 	return host
 }
 
-func (w *testWorker) blockUploads() func() {
+func (w *testWorker) BlockUploads() func() {
 	select {
 	case <-w.ulmm.memBlockChan:
 	case <-time.After(time.Second):
-		w.t.Fatal("already blocking")
+		w.tt.Fatal("already blocking")
 	}
 
 	blockChan := make(chan struct{})
@@ -97,37 +94,37 @@ func (w *testWorker) blockUploads() func() {
 	return func() { close(blockChan) }
 }
 
-func (w *testWorker) blockAsyncPackedSlabUploads(up uploadParameters) {
+func (w *testWorker) BlockAsyncPackedSlabUploads(up uploadParameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
 	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
 	w.uploadingPackedSlabs[key] = struct{}{}
 }
 
-func (w *testWorker) unblockAsyncPackedSlabUploads(up uploadParameters) {
+func (w *testWorker) UnblockAsyncPackedSlabUploads(up uploadParameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
 	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
 	delete(w.uploadingPackedSlabs, key)
 }
 
-func (w *testWorker) contracts() []api.ContractMetadata {
+func (w *testWorker) Contracts() []api.ContractMetadata {
 	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
 	if err != nil {
-		w.t.Fatal(err)
+		w.tt.Fatal(err)
 	}
 	return metadatas
 }
 
-func (w *testWorker) renewContract(hk types.PublicKey) *contractMock {
+func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
 	h := w.hm.hosts[hk]
 	if h == nil {
-		w.t.Fatal("host not found")
+		w.tt.Fatal("host not found")
 	}
 
 	renewal, err := w.cs.renewContract(hk)
 	if err != nil {
-		w.t.Fatal(err)
+		w.tt.Fatal(err)
 	}
 	return renewal
 }

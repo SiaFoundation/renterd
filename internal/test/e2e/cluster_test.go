@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"bytes"
@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
@@ -264,7 +265,7 @@ func TestObjectEntries(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -435,7 +436,7 @@ func TestObjectsRename(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -491,7 +492,7 @@ func TestUploadDownloadEmpty(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -519,13 +520,13 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -546,8 +547,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 	for _, slab := range resp.Object.Slabs {
 		hosts := make(map[types.PublicKey]struct{})
 		roots := make(map[types.Hash256]struct{})
-		if len(slab.Shards) != testRedundancySettings.TotalShards {
-			t.Fatal("wrong amount of shards", len(slab.Shards), testRedundancySettings.TotalShards)
+		if len(slab.Shards) != test.RedundancySettings.TotalShards {
+			t.Fatal("wrong amount of shards", len(slab.Shards), test.RedundancySettings.TotalShards)
 		}
 		for _, shard := range slab.Shards {
 			if shard.LatestHost == (types.PublicKey{}) {
@@ -631,13 +632,13 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -771,18 +772,18 @@ func TestUploadDownloadExtended(t *testing.T) {
 // and download spending metrics are tracked properly.
 func TestUploadDownloadSpending(t *testing.T) {
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// check that the funding was recorded
@@ -891,7 +892,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		// fetch contract set contracts
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		currentSet := make(map[types.FileContractID]struct{})
 		for _, c := range contracts {
@@ -1052,7 +1053,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Reboot cluster.
-	cluster2 := cluster.Reboot(context.Background())
+	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
 	// Check that accounts were loaded from the bus.
@@ -1090,7 +1091,7 @@ func TestParallelUpload(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1168,7 +1169,7 @@ func TestParallelDownload(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1246,7 +1247,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// Restart cluster to have worker fetch the account from the bus again.
-	cluster2 := cluster.Reboot(context.Background())
+	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
 	// Account should need a sync.
@@ -1285,7 +1286,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -1316,7 +1317,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
-	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", testContractSet, *res.Object.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "frankenstein", api.DownloadObjectOptions{}))
@@ -1524,20 +1525,20 @@ func TestUploadPacking(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// prepare 3 files which are all smaller than a slab but together make up
@@ -1772,7 +1773,7 @@ func TestSlabBufferStats(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
@@ -1782,14 +1783,14 @@ func TestSlabBufferStats(t *testing.T) {
 	busCfg.SlabBufferCompletionThreshold = int64(threshold)
 	cluster := newTestCluster(t, testClusterOptions{
 		busCfg:        &busCfg,
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// prepare 3 files which are all smaller than a slab but together make up
@@ -1838,8 +1839,8 @@ func TestSlabBufferStats(t *testing.T) {
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 slab buffer, got", len(buffers))
 	}
-	if buffers[0].ContractSet != testContractSet {
-		t.Fatalf("expected slab buffer contract set of %v, got %v", testContractSet, buffers[0].ContractSet)
+	if buffers[0].ContractSet != test.ContractSet {
+		t.Fatalf("expected slab buffer contract set of %v, got %v", test.ContractSet, buffers[0].ContractSet)
 	}
 	if buffers[0].Size != int64(len(data1)) {
 		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), buffers[0].Size)
@@ -1974,6 +1975,44 @@ func TestAlerts(t *testing.T) {
 	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
 		t.Fatal("wrong alert")
 	}
+
+	// register more alerts
+	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
+		for j := 0; j < 3*int(severity); j++ {
+			tt.OK(b.RegisterAlert(context.Background(), alerts.Alert{
+				ID:       frand.Entropy256(),
+				Severity: severity,
+				Message:  "test",
+				Data: map[string]interface{}{
+					"origin": "test",
+				},
+				Timestamp: time.Now(),
+			}))
+		}
+	}
+	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
+		ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Severity: severity})
+		tt.OK(err)
+		if ar.Total() != 32 {
+			t.Fatal("expected 32 alerts", ar.Total())
+		} else if ar.Totals.Info != 3 {
+			t.Fatal("expected 3 info alerts", ar.Totals.Info)
+		} else if ar.Totals.Warning != 6 {
+			t.Fatal("expected 6 warning alerts", ar.Totals.Warning)
+		} else if ar.Totals.Error != 9 {
+			t.Fatal("expected 9 error alerts", ar.Totals.Error)
+		} else if ar.Totals.Critical != 14 {
+			t.Fatal("expected 14 critical alerts", ar.Totals.Critical)
+		} else if severity == alerts.SeverityInfo && len(ar.Alerts) != ar.Totals.Info {
+			t.Fatalf("expected %v info alerts, got %v", ar.Totals.Info, len(ar.Alerts))
+		} else if severity == alerts.SeverityWarning && len(ar.Alerts) != ar.Totals.Warning {
+			t.Fatalf("expected %v warning alerts, got %v", ar.Totals.Warning, len(ar.Alerts))
+		} else if severity == alerts.SeverityError && len(ar.Alerts) != ar.Totals.Error {
+			t.Fatalf("expected %v error alerts, got %v", ar.Totals.Error, len(ar.Alerts))
+		} else if severity == alerts.SeverityCritical && len(ar.Alerts) != ar.Totals.Critical {
+			t.Fatalf("expected %v critical alerts, got %v", ar.Totals.Critical, len(ar.Alerts))
+		}
+	}
 }
 
 func TestMultipartUploads(t *testing.T) {
@@ -1982,7 +2021,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
@@ -2228,7 +2267,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// Enable autopilot by setting it.
-	cluster.UpdateAutopilotConfig(context.Background(), testAutopilotConfig)
+	cluster.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig)
 
 	// Wait for a contract to form.
 	contractsFormed := cluster.WaitForContracts()
@@ -2262,8 +2301,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 	for _, m := range csMetrics {
 		if m.Contracts != 1 {
 			t.Fatalf("expected 1 contract, got %v", m.Contracts)
-		} else if m.Name != testContractSet {
-			t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+		} else if m.Name != test.ContractSet {
+			t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
 		} else if m.Timestamp.Std().Before(startTime) {
 			t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 		}
@@ -2279,8 +2318,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected added churn, got %v", m.Direction)
 	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
-	} else if m.Name != testContractSet {
-		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+	} else if m.Name != test.ContractSet {
+		t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
 	} else if m.Timestamp.Std().Before(startTime) {
 		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}
@@ -2339,14 +2378,14 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
-	slabSize := testRedundancySettings.SlabSizeNoRedundancy()
+	slabSize := test.RedundancySettings.SlabSizeNoRedundancy()
 	tt := cluster.tt
 
 	// start a new multipart upload. We upload the parts in reverse order

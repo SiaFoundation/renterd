@@ -16,6 +16,9 @@ func (c *Client) Alerts(ctx context.Context, opts alerts.AlertsOpts) (resp alert
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
+	if opts.Severity != 0 {
+		values.Set("severity", opts.Severity.String())
+	}
 	err = c.c.WithContext(ctx).GET("/alerts?"+values.Encode(), &resp)
 	return
 }

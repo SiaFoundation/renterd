@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/test"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -135,8 +136,8 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// convenience variables
-	cfg := testAutopilotConfig
-	rs := testRedundancySettings
+	cfg := test.AutopilotConfig
+	rs := test.RedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
 	tt := cluster.tt

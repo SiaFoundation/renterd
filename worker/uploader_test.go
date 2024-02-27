@@ -9,10 +9,10 @@ import (
 
 func TestUploaderStopped(t *testing.T) {
 	w := newTestWorker(t)
-	w.addHosts(1)
+	w.AddHosts(1)
 
 	um := w.uploadManager
-	um.refreshUploaders(w.contracts(), 1)
+	um.refreshUploaders(w.Contracts(), 1)
 
 	ul := um.uploaders[0]
 	ul.Stop(errors.New("test"))

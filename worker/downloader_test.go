@@ -8,13 +8,13 @@ import (
 
 func TestDownloaderStopped(t *testing.T) {
 	w := newTestWorker(t)
-	hosts := w.addHosts(1)
+	hosts := w.AddHosts(1)
 
 	// convenience variables
 	dm := w.downloadManager
 	h := hosts[0]
 
-	dm.refreshDownloaders(w.contracts())
+	dm.refreshDownloaders(w.Contracts())
 	dl := w.downloadManager.downloaders[h.PublicKey()]
 	dl.Stop()
 
