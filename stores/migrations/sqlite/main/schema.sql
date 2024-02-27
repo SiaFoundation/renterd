@@ -50,6 +50,7 @@ CREATE INDEX `idx_objects_db_bucket_id` ON `objects`(`db_bucket_id`);
 CREATE INDEX `idx_objects_etag` ON `objects`(`etag`);
 CREATE INDEX `idx_objects_health` ON `objects`(`health`);
 CREATE INDEX `idx_objects_object_id` ON `objects`(`object_id`);
+CREATE INDEX `idx_objects_size` ON `objects`(`size`);
 CREATE UNIQUE INDEX `idx_object_bucket` ON `objects`(`db_bucket_id`,`object_id`);
 
 -- dbMultipartUpload
@@ -84,13 +85,13 @@ CREATE INDEX `idx_contract_sectors_db_contract_id` ON `contract_sectors`(`db_con
 CREATE INDEX `idx_contract_sectors_db_sector_id` ON `contract_sectors`(`db_sector_id`);
 
 -- dbMultipartPart
-CREATE TABLE `multipart_parts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`etag` text,`part_number` integer,`size` integer,`db_multipart_upload_id` integer NOT NULL,CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads`(`id`));
+CREATE TABLE `multipart_parts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`etag` text,`part_number` integer,`size` integer,`db_multipart_upload_id` integer NOT NULL,CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads`(`id`) ON DELETE CASCADE);
 CREATE INDEX `idx_multipart_parts_db_multipart_upload_id` ON `multipart_parts`(`db_multipart_upload_id`);
 CREATE INDEX `idx_multipart_parts_part_number` ON `multipart_parts`(`part_number`);
 CREATE INDEX `idx_multipart_parts_etag` ON `multipart_parts`(`etag`);
 
 -- dbSlice
-CREATE TABLE `slices` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer,`object_index` integer,`db_multipart_part_id` integer,`db_slab_id` integer,`offset` integer,`length` integer,CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects`(`id`),CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts`(`id`),CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`));
+CREATE TABLE `slices` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_object_id` integer,`object_index` integer,`db_multipart_part_id` integer,`db_slab_id` integer,`offset` integer,`length` integer,CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`));
 CREATE INDEX `idx_slices_object_index` ON `slices`(`object_index`);
 CREATE INDEX `idx_slices_db_object_id` ON `slices`(`db_object_id`);
 CREATE INDEX `idx_slices_db_slab_id` ON `slices`(`db_slab_id`);
@@ -197,3 +198,6 @@ CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_a
 CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
 CREATE INDEX `idx_wallet_outputs_height` ON `wallet_outputs`(`height`);
+
+-- create default bucket
+INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

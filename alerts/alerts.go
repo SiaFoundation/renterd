@@ -35,6 +35,7 @@ const (
 
 type (
 	Alerter interface {
+		Alerts(_ context.Context, opts AlertsOpts) (resp AlertsResponse, err error)
 		RegisterAlert(_ context.Context, a Alert) error
 		DismissAlerts(_ context.Context, ids ...types.Hash256) error
 	}
@@ -62,6 +63,17 @@ type (
 		// alerts is a map of alert IDs to their current alert.
 		alerts             map[types.Hash256]Alert
 		webhookBroadcaster webhooks.Broadcaster
+	}
+
+	AlertsOpts struct {
+		Offset int
+		Limit  int
+	}
+
+	AlertsResponse struct {
+		Alerts  []Alert `json:"alerts"`
+		HasMore bool    `json:"hasMore"`
+		Total   int     `json:"total"`
 	}
 )
 
@@ -158,10 +170,21 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	})
 }
 
-// Active returns the host's active alerts.
-func (m *Manager) Active() []Alert {
+// Alerts returns the host's active alerts.
+func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	offset, limit := opts.Offset, opts.Limit
+	resp := AlertsResponse{
+		Total: len(m.alerts),
+	}
+
+	if offset >= len(m.alerts) {
+		return resp, nil
+	} else if limit == -1 {
+		limit = len(m.alerts)
+	}
 
 	alerts := make([]Alert, 0, len(m.alerts))
 	for _, a := range m.alerts {
@@ -170,7 +193,13 @@ func (m *Manager) Active() []Alert {
 	sort.Slice(alerts, func(i, j int) bool {
 		return alerts[i].Timestamp.After(alerts[j].Timestamp)
 	})
-	return alerts
+	alerts = alerts[offset:]
+	if limit < len(alerts) {
+		alerts = alerts[:limit]
+		resp.HasMore = true
+	}
+	resp.Alerts = alerts
+	return resp, nil
 }
 
 func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {
@@ -202,6 +231,11 @@ func WithOrigin(alerter Alerter, origin string) Alerter {
 		alerter: alerter,
 		origin:  origin,
 	}
+}
+
+// Alerts implements the Alerter interface.
+func (a *originAlerter) Alerts(ctx context.Context, opts AlertsOpts) (resp AlertsResponse, err error) {
+	return a.alerter.Alerts(ctx, opts)
 }
 
 // RegisterAlert implements the Alerter interface.

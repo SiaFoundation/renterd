@@ -409,14 +409,14 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 }
 
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
-	return api.ObjectMetadata{
-		ETag:     raw.ETag,
-		Health:   raw.Health,
-		MimeType: raw.MimeType,
-		ModTime:  api.TimeRFC3339(time.Time(raw.ModTime).UTC()),
-		Name:     raw.Name,
-		Size:     raw.Size,
-	}
+	return newObjectMetadata(
+		raw.Name,
+		raw.ETag,
+		raw.MimeType,
+		raw.Health,
+		time.Time(raw.ModTime),
+		raw.Size,
+	)
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -581,70 +581,85 @@ func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
 // ObjectsStats returns some info related to the objects stored in the store. To
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
-func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, error) {
+func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	// fetch bucket id if a bucket was specified
+	var bucketID uint
+	if opts.Bucket != "" {
+		err := s.db.Model(&dbBucket{}).Select("id").Where("name = ?", opts.Bucket).Take(&bucketID).Error
+		if err != nil {
+			return api.ObjectsStatsResponse{}, err
+		}
+	}
+
 	// number of objects
 	var objInfo struct {
 		NumObjects       uint64
 		MinHealth        float64
 		TotalObjectsSize uint64
 	}
-	err := s.db.
+	objInfoQuery := s.db.
 		Model(&dbObject{}).
-		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize").
-		Scan(&objInfo).
-		Error
+		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize")
+	if opts.Bucket != "" {
+		objInfoQuery = objInfoQuery.Where("db_bucket_id", bucketID)
+	}
+	err := objInfoQuery.Scan(&objInfo).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
 	// number of unfinished objects
 	var unfinishedObjects uint64
-	err = s.db.
+	unfinishedObjectsQuery := s.db.
 		Model(&dbMultipartUpload{}).
-		Select("COUNT(*)").
-		Scan(&unfinishedObjects).
-		Error
+		Select("COUNT(*)")
+	if opts.Bucket != "" {
+		unfinishedObjectsQuery = unfinishedObjectsQuery.Where("db_bucket_id", bucketID)
+	}
+	err = unfinishedObjectsQuery.Scan(&unfinishedObjects).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
 	// size of unfinished objects
 	var totalUnfinishedObjectsSize uint64
-	err = s.db.
+	totalUnfinishedObjectsSizeQuery := s.db.
 		Model(&dbMultipartPart{}).
-		Select("COALESCE(SUM(size), 0)").
-		Scan(&totalUnfinishedObjectsSize).
-		Error
+		Joins("INNER JOIN multipart_uploads mu ON multipart_parts.db_multipart_upload_id = mu.id").
+		Select("COALESCE(SUM(size), 0)")
+	if opts.Bucket != "" {
+		totalUnfinishedObjectsSizeQuery = totalUnfinishedObjectsSizeQuery.Where("db_bucket_id", bucketID)
+	}
+	err = totalUnfinishedObjectsSizeQuery.Scan(&totalUnfinishedObjectsSize).Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
 	}
 
-	var totalSectors uint64
+	var totalSectors int64
+	totalSectorsQuery := s.db.
+		Table("slabs sla").
+		Select("COALESCE(SUM(total_shards), 0)").
+		Where("db_buffered_slab_id IS NULL")
 
-	batchSize := 500000
-	marker := uint64(0)
-	for offset := 0; ; offset += batchSize {
-		var result struct {
-			Sectors uint64
-			Marker  uint64
-		}
-		res := s.db.
-			Model(&dbSector{}).
-			Raw("SELECT COUNT(*) as Sectors, MAX(sectors.db_sector_id) as Marker FROM (SELECT cs.db_sector_id FROM contract_sectors cs WHERE cs.db_sector_id > ? GROUP BY cs.db_sector_id LIMIT ?) sectors", marker, batchSize).
-			Scan(&result)
-		if err := res.Error; err != nil {
-			return api.ObjectsStatsResponse{}, err
-		} else if result.Sectors == 0 {
-			break // done
-		}
-		totalSectors += result.Sectors
-		marker = result.Marker
+	if opts.Bucket != "" {
+		totalSectorsQuery = totalSectorsQuery.Where(`
+			EXISTS (
+				SELECT 1 FROM slices sli
+				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
+				WHERE sli.db_slab_id = sla.id
+			)
+		`, bucketID)
+	}
+	err = totalSectorsQuery.Scan(&totalSectors).Error
+	if err != nil {
+		return api.ObjectsStatsResponse{}, err
 	}
 
 	var totalUploaded int64
 	err = s.db.
-		Model(&dbContractSector{}).
-		Count(&totalUploaded).
+		Model(&dbContract{}).
+		Select("COALESCE(SUM(size), 0)").
+		Scan(&totalUploaded).
 		Error
 	if err != nil {
 		return api.ObjectsStatsResponse{}, err
@@ -656,8 +671,8 @@ func (s *SQLStore) ObjectsStats(ctx context.Context) (api.ObjectsStatsResponse, 
 		NumUnfinishedObjects:       unfinishedObjects,
 		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
 		TotalObjectsSize:           objInfo.TotalObjectsSize,
-		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
-		TotalUploadedSize:          uint64(totalUploaded) * rhpv2.SectorSize,
+		TotalSectorsSize:           uint64(totalSectors) * rhpv2.SectorSize,
+		TotalUploadedSize:          uint64(totalUploaded),
 	}, nil
 }
 
@@ -1470,6 +1485,10 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")), prefixNew,
 				utf8.RuneCountInString(prefixOld)+1, prefixOld+"%",
 				utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+
+			if !isSQLite(tx) {
+				inner = tx.Raw("SELECT * FROM (?) as i", inner)
+			}
 			resp := tx.Model(&dbObject{}).
 				Where("object_id IN (?)", inner).
 				Delete(&dbObject{})
@@ -1519,13 +1538,14 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			// No copying is happening. We just update the metadata on the src
 			// object.
 			srcObj.MimeType = mimeType
-			om = api.ObjectMetadata{
-				Health:   srcObj.Health,
-				MimeType: srcObj.MimeType,
-				ModTime:  api.TimeRFC3339(srcObj.CreatedAt.UTC()),
-				Name:     srcObj.ObjectID,
-				Size:     srcObj.Size,
-			}
+			om = newObjectMetadata(
+				srcObj.ObjectID,
+				srcObj.Etag,
+				srcObj.MimeType,
+				srcObj.Health,
+				srcObj.CreatedAt,
+				srcObj.Size,
+			)
 			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
 				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
@@ -1573,21 +1593,22 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create object metadata: %w", err)
 		}
 
-		om = api.ObjectMetadata{
-			MimeType: dstObj.MimeType,
-			ETag:     dstObj.Etag,
-			Health:   srcObj.Health,
-			ModTime:  api.TimeRFC3339(dstObj.CreatedAt.UTC()),
-			Name:     dstObj.ObjectID,
-			Size:     dstObj.Size,
-		}
+		om = newObjectMetadata(
+			dstObj.ObjectID,
+			dstObj.Etag,
+			dstObj.MimeType,
+			dstObj.Health,
+			dstObj.CreatedAt,
+			dstObj.Size,
+		)
 		return nil
 	})
 	return
 }
 
-func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
+	var deletedSectors int
+	err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract_sectors to delete.
 		var sectors []dbContractSector
 		err := tx.Raw(`
@@ -1626,6 +1647,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 			} else if res.RowsAffected != int64(len(sectors)) {
 				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
 			}
+			deletedSectors = len(sectors)
 
 			// Increment the host's lostSectors by the number of lost sectors.
 			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
@@ -1653,6 +1675,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 		}
 		return nil
 	})
+	return deletedSectors, err
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
@@ -1872,7 +1895,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 
 		// ensure the sectors exists
-		sectors, err = upsertSectors(tx, sectors)
+		sectorIDs, err := upsertSectors(tx, sectors)
 		if err != nil {
 			return fmt.Errorf("failed to create sector: %w", err)
 		}
@@ -1880,14 +1903,14 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		// build contract <-> sector links
 		var contractSectors []dbContractSector
 		for i, shard := range s.Shards {
-			sector := sectors[i]
+			sectorID := sectorIDs[i]
 
 			// ensure the associations are updated
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sector.ID,
+							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
 					}
@@ -2165,7 +2188,7 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	}
 
 	// create sector that don't exist yet
-	sectors, err = upsertSectors(tx, sectors)
+	sectorIDs, err := upsertSectors(tx, sectors)
 	if err != nil {
 		return fmt.Errorf("failed to create sectors: %w", err)
 	}
@@ -2175,12 +2198,12 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 	var contractSectors []dbContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
-			sector := sectors[sectorIdx]
+			sectorID := sectorIDs[sectorIdx]
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := contracts[fcid]; ok {
 						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sector.ID,
+							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
 					}
@@ -2283,19 +2306,55 @@ func (s *SQLStore) objectHydrate(ctx context.Context, tx *gorm.DB, bucket, path 
 	// return object
 	return api.Object{
 		Metadata: metadata,
-		ObjectMetadata: api.ObjectMetadata{
-			ETag:     obj[0].ObjectETag,
-			Health:   obj[0].ObjectHealth,
-			MimeType: obj[0].ObjectMimeType,
-			ModTime:  api.TimeRFC3339(obj[0].ObjectModTime.UTC()),
-			Name:     obj[0].ObjectName,
-			Size:     obj[0].ObjectSize,
-		},
-		Object: object.Object{
+		ObjectMetadata: newObjectMetadata(
+			obj[0].ObjectName,
+			obj[0].ObjectETag,
+			obj[0].ObjectMimeType,
+			obj[0].ObjectHealth,
+			obj[0].ObjectModTime,
+			obj[0].ObjectSize,
+		),
+		Object: &object.Object{
 			Key:   key,
 			Slabs: slabs,
 		},
 	}, nil
+}
+
+// ObjectMetadata returns an object's metadata
+func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
+	var resp api.Object
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var obj dbObject
+		err := tx.Model(&dbObject{}).
+			Joins("INNER JOIN buckets b ON objects.db_bucket_id = b.id").
+			Where("b.name", bucket).
+			Where("object_id", path).
+			Take(&obj).
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrObjectNotFound
+		} else if err != nil {
+			return err
+		}
+		oum, err := s.objectMetadata(ctx, tx, bucket, path)
+		if err != nil {
+			return err
+		}
+		resp = api.Object{
+			ObjectMetadata: newObjectMetadata(
+				obj.ObjectID,
+				obj.Etag,
+				obj.MimeType,
+				obj.Health,
+				obj.CreatedAt,
+				obj.Size,
+			),
+			Metadata: oum,
+		}
+		return nil
+	})
+	return resp, err
 }
 
 func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {
@@ -2316,6 +2375,17 @@ func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path
 		metadata[row.Key] = row.Value
 	}
 	return metadata, nil
+}
+
+func newObjectMetadata(name, etag, mimeType string, health float64, modTime time.Time, size int64) api.ObjectMetadata {
+	return api.ObjectMetadata{
+		ETag:     etag,
+		Health:   health,
+		ModTime:  api.TimeRFC3339(modTime.UTC()),
+		Name:     name,
+		Size:     size,
+		MimeType: mimeType,
+	}
 }
 
 func (s *SQLStore) objectRaw(ctx context.Context, txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {
@@ -2648,20 +2718,32 @@ func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, 
 	return nil
 }
 
+func pruneSlabs(tx *gorm.DB) error {
+	// delete slabs without any associated slices or buffers
+	return tx.Exec(`
+DELETE
+FROM slabs
+WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
+AND slabs.db_buffered_slab_id IS NULL
+`).Error
+}
+
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
+func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64, error) {
 	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
 		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
-	numDeleted = tx.RowsAffected
+	numDeleted := tx.RowsAffected
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
+	} else if err := pruneSlabs(tx); err != nil {
+		return numDeleted, err
 	}
-	return
+	return numDeleted, nil
 }
 
 // deleteObjects deletes a batch of objects from the database. The order of
@@ -2690,8 +2772,12 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 			if err := res.Error; err != nil {
 				return res.Error
 			}
-			duration = time.Since(start)
+			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
+			if rowsAffected > 0 {
+				return pruneSlabs(tx)
+			}
+			duration = time.Since(start)
 			return nil
 		}); err != nil {
 			return 0, fmt.Errorf("failed to delete objects: %w", err)
@@ -2962,7 +3048,7 @@ func validateSort(sortBy, sortDir string) error {
 
 // upsertSectors creates a sector or updates it if it exists already. The
 // resulting ID is set on the input sector.
-func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
+func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]uint, error) {
 	if len(sectors) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -2976,19 +3062,16 @@ func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]dbSector, error) {
 	if err != nil {
 		return nil, err
 	}
-	// fetch the upserted sectors
-	roots := make([][]byte, len(sectors))
-	for i, sector := range sectors {
-		roots[i] = sector.Root[:]
-	}
-	sectors = sectors[:0]
 
-	var batch []dbSector
-	if err := tx.Where("root IN (?)", roots).FindInBatches(&batch, sectorQueryBatchSize, func(tx *gorm.DB, _ int) error {
-		sectors = append(sectors, batch...)
-		return nil
-	}).Error; err != nil {
-		return nil, err
+	sectorIDs := make([]uint, len(sectors))
+	for i := range sectors {
+		var id uint
+		if err := tx.Model(dbSector{}).
+			Where("root", sectors[i].Root).
+			Select("id").Take(&id).Error; err != nil {
+			return nil, err
+		}
+		sectorIDs[i] = id
 	}
-	return sectors, nil
+	return sectorIDs, nil
 }

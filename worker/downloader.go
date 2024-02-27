@@ -9,12 +9,17 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/stats"
 )
 
 const (
 	downloadOverheadB           = 284
 	maxConcurrentSectorsPerHost = 3
+)
+
+var (
+	errDownloaderStopped = errors.New("downloader was stopped")
 )
 
 type (
@@ -31,6 +36,7 @@ type (
 		consecutiveFailures uint64
 		numDownloads        uint64
 		queue               []*sectorDownloadReq
+		stopped             bool
 	}
 )
 
@@ -48,14 +54,22 @@ func newDownloader(ctx context.Context, host Host) *downloader {
 	}
 }
 
+func (d *downloader) PublicKey() types.PublicKey {
+	return d.host.PublicKey()
+}
+
 func (d *downloader) Stop() {
+	d.mu.Lock()
+	d.stopped = true
+	d.mu.Unlock()
+
 	for {
 		download := d.pop()
 		if download == nil {
 			break
 		}
 		if !download.done() {
-			download.fail(errors.New("downloader stopped"))
+			download.fail(errDownloaderStopped)
 		}
 	}
 }
@@ -74,8 +88,15 @@ func (d *downloader) fillBatch() (batch []*sectorDownloadReq) {
 }
 
 func (d *downloader) enqueue(download *sectorDownloadReq) {
-	// enqueue the job
 	d.mu.Lock()
+	// check for stopped
+	if d.stopped {
+		d.mu.Unlock()
+		go download.fail(errDownloaderStopped) // don't block the caller
+		return
+	}
+
+	// enqueue the job
 	d.queue = append(d.queue, download)
 	d.mu.Unlock()
 

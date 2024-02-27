@@ -239,20 +239,19 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	return err
 }
 
-// FetchRevision tries to fetch a contract revision from the host. We pass in
-// the blockHeight instead of using the blockHeight from the pricetable since we
-// might not have a price table.
-func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, blockHeight uint64) (types.FileContractRevision, error) {
+// FetchRevision tries to fetch a contract revision from the host.
+func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
 	timeoutCtx := func() (context.Context, context.CancelFunc) {
 		if fetchTimeout > 0 {
 			return context.WithTimeout(ctx, fetchTimeout)
 		}
 		return ctx, func() {}
 	}
+
 	// Try to fetch the revision with an account first.
 	ctx, cancel := timeoutCtx()
 	defer cancel()
-	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, blockHeight, h.fcid)
+	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, h.fcid)
 	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
@@ -279,18 +278,17 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, bl
 	return rev, nil
 }
 
-func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, bh uint64, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fcid types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		var cost types.Currency
 		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-				// Fetch pt.
+			rev, err = RPCLatestRevision(ctx, t, fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
 				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's better to stay pessimistic
-				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, bh+defaultWithdrawalExpiryBlocks, h.accountKey)
+				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
 			if err != nil {
@@ -339,19 +337,17 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		as          AccountStore
-		key         types.PrivateKey
-		shutdownCtx context.Context
+		as  AccountStore
+		key types.PrivateKey
 	}
 
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		as          AccountStore
-		id          rhpv3.Account
-		key         types.PrivateKey
-		host        types.PublicKey
-		shutdownCtx context.Context
+		as   AccountStore
+		id   rhpv3.Account
+		key  types.PrivateKey
+		host types.PublicKey
 	}
 )
 
@@ -360,9 +356,8 @@ func (w *worker) initAccounts(as AccountStore) {
 		panic("accounts already initialized") // developer error
 	}
 	w.accounts = &accounts{
-		as:          as,
-		key:         w.deriveSubKey("accountkey"),
-		shutdownCtx: w.shutdownCtx,
+		as:  as,
+		key: w.deriveSubKey("accountkey"),
 	}
 }
 
@@ -378,117 +373,95 @@ func (w *worker) initTransportPool() {
 func (a *accounts) ForHost(hk types.PublicKey) *account {
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 	return &account{
-		as:          a.as,
-		id:          accountID,
-		key:         a.key,
-		host:        hk,
-		shutdownCtx: a.shutdownCtx,
+		as:   a.as,
+		id:   accountID,
+		key:  a.key,
+		host: hk,
 	}
+}
+
+func withAccountLock(ctx context.Context, as AccountStore, id rhpv3.Account, hk types.PublicKey, exclusive bool, fn func(a api.Account) error) error {
+	acc, lockID, err := as.LockAccount(ctx, id, hk, exclusive, accountLockingDuration)
+	if err != nil {
+		return err
+	}
+	err = fn(acc)
+
+	// unlock account
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	_ = as.UnlockAccount(ctx, acc.ID, lockID) // ignore error
+	cancel()
+
+	return err
+}
+
+// Balance returns the account balance.
+func (a *account) Balance(ctx context.Context) (balance types.Currency, err error) {
+	err = withAccountLock(ctx, a.as, a.id, a.host, false, func(account api.Account) error {
+		balance = types.NewCurrency(account.Balance.Uint64(), new(big.Int).Rsh(account.Balance, 64).Uint64())
+		return nil
+	})
+	return
 }
 
 // WithDeposit increases the balance of an account by the amount returned by
 // amtFn if amtFn doesn't return an error.
 func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency, error)) error {
-	_, lockID, err := a.as.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		unlockCtx, cancel := context.WithTimeout(a.shutdownCtx, 10*time.Second)
-		a.as.UnlockAccount(unlockCtx, a.id, lockID)
-		cancel()
-	}()
-
-	amt, err := amtFn()
-	if err != nil {
-		return err
-	}
-	return a.as.AddBalance(ctx, a.id, a.host, amt.Big())
+	return withAccountLock(ctx, a.as, a.id, a.host, false, func(_ api.Account) error {
+		amt, err := amtFn()
+		if err != nil {
+			return err
+		}
+		return a.as.AddBalance(ctx, a.id, a.host, amt.Big())
+	})
 }
 
-func (a *account) Balance(ctx context.Context) (types.Currency, error) {
-	account, lockID, err := a.as.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
-	if err != nil {
-		return types.Currency{}, err
-	}
-	defer func() {
-		unlockCtx, cancel := context.WithTimeout(a.shutdownCtx, 10*time.Second)
-		a.as.UnlockAccount(unlockCtx, a.id, lockID)
-		cancel()
-	}()
-
-	return types.NewCurrency(account.Balance.Uint64(), new(big.Int).Rsh(account.Balance, 64).Uint64()), nil
+// WithSync syncs an accounts balance with the bus. To do so, the account is
+// locked while the balance is fetched through balanceFn.
+func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
+	return withAccountLock(ctx, a.as, a.id, a.host, true, func(_ api.Account) error {
+		balance, err := balanceFn()
+		if err != nil {
+			return err
+		}
+		return a.as.SetBalance(ctx, a.id, a.host, balance.Big())
+	})
 }
 
 // WithWithdrawal decreases the balance of an account by the amount returned by
 // amtFn. The amount is still withdrawn if amtFn returns an error since some
 // costs are non-refundable.
 func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
-	account, lockID, err := a.as.LockAccount(ctx, a.id, a.host, false, accountLockingDuration)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		unlockCtx, cancel := context.WithTimeout(a.shutdownCtx, 10*time.Second)
-		a.as.UnlockAccount(unlockCtx, a.id, lockID)
-		cancel()
-	}()
-
-	// return early if the account needs to sync
-	if account.RequiresSync {
-		return fmt.Errorf("%w; account requires resync", errBalanceInsufficient)
-	}
-
-	// return early if our account is not funded
-	if account.Balance.Cmp(big.NewInt(0)) <= 0 {
-		return errBalanceInsufficient
-	}
-
-	// execute amtFn
-	amt, err := amtFn()
-	if isBalanceInsufficient(err) {
-		// in case of an insufficient balance, we schedule a sync
-		scheduleCtx, cancel := context.WithTimeout(a.shutdownCtx, 10*time.Second)
-		defer cancel()
-		err2 := a.as.ScheduleSync(scheduleCtx, a.id, a.host)
-		if err2 != nil {
-			err = fmt.Errorf("%w; failed to set requiresSync flag on bus, error: %v", err, err2)
+	return withAccountLock(ctx, a.as, a.id, a.host, false, func(account api.Account) error {
+		// return early if the account needs to sync
+		if account.RequiresSync {
+			return fmt.Errorf("%w; account requires resync", errBalanceInsufficient)
 		}
-	}
 
-	// if the amount is zero, we are done
-	if amt.IsZero() {
+		// return early if our account is not funded
+		if account.Balance.Cmp(big.NewInt(0)) <= 0 {
+			return errBalanceInsufficient
+		}
+
+		// execute amtFn
+		amt, err := amtFn()
+
+		// in case of an insufficient balance, we schedule a sync
+		if isBalanceInsufficient(err) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			err = errors.Join(err, a.as.ScheduleSync(ctx, a.id, a.host))
+			cancel()
+		}
+
+		// if an amount was returned, we withdraw it
+		if !amt.IsZero() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			err = errors.Join(err, a.as.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big())))
+			cancel()
+		}
+
 		return err
-	}
-
-	// if an amount was returned, we withdraw it.
-	addCtx, cancel := context.WithTimeout(a.shutdownCtx, 10*time.Second)
-	defer cancel()
-	errAdd := a.as.AddBalance(addCtx, a.id, a.host, new(big.Int).Neg(amt.Big()))
-	if errAdd != nil {
-		err = fmt.Errorf("%w; failed to add balance to account, error: %v", err, errAdd)
-	}
-	return err
-}
-
-// WithSync syncs an accounts balance with the bus. To do so, the account is
-// locked while the balance is fetched through balanceFn.
-func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency, error)) error {
-	_, lockID, err := a.as.LockAccount(ctx, a.id, a.host, true, accountLockingDuration)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		unlockCtx, cancel := context.WithTimeout(a.shutdownCtx, 10*time.Second)
-		a.as.UnlockAccount(unlockCtx, a.id, lockID)
-		cancel()
-	}()
-
-	balance, err := balanceFn()
-	if err != nil {
-		return err
-	}
-	return a.as.SetBalance(ctx, a.id, a.host, balance.Big())
+	})
 }
 
 // deriveAccountKey derives an account plus key for a given host and worker.
@@ -791,17 +764,17 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	return
 }
 
-func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sector *[rhpv2.SectorSize]byte) (sectorRoot types.Hash256, cost types.Currency, err error) {
+func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) (cost types.Currency, err error) {
 	defer wrapErr(&err, "AppendSector")
 
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, types.ZeroCurrency, errMaxRevisionReached
+		return types.ZeroCurrency, errMaxRevisionReached
 	}
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 	defer s.Close()
 
@@ -831,7 +804,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	// compute expected collateral and refund
 	expectedCost, expectedCollateral, expectedRefund, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 
 	// apply leeways.
@@ -842,13 +815,13 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 
 	// check if the cost, collateral and refund match our expectation.
 	if executeResp.TotalCost.Cmp(expectedCost) > 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v > %v", executeResp.TotalCost.String(), expectedCost.String())
+		return types.ZeroCurrency, fmt.Errorf("cost exceeds expectation: %v > %v", executeResp.TotalCost.String(), expectedCost.String())
 	}
 	if executeResp.FailureRefund.Cmp(expectedRefund) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
+		return types.ZeroCurrency, fmt.Errorf("insufficient refund: %v < %v", executeResp.FailureRefund.String(), expectedRefund.String())
 	}
 	if executeResp.AdditionalCollateral.Cmp(expectedCollateral) < 0 {
-		return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", executeResp.AdditionalCollateral.String(), expectedCollateral.String())
+		return types.ZeroCurrency, fmt.Errorf("insufficient collateral: %v < %v", executeResp.AdditionalCollateral.String(), expectedCollateral.String())
 	}
 
 	// set the cost and refund
@@ -872,18 +845,17 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	collateral := executeResp.AdditionalCollateral.Add(executeResp.FailureRefund)
 
 	// check proof
-	sectorRoot = rhpv2.SectorRoot(sector)
 	if rev.Filesize == 0 {
 		// For the first upload to a contract we don't get a proof. So we just
 		// assert that the new contract root matches the root of the sector.
 		if rev.Filesize == 0 && executeResp.NewMerkleRoot != sectorRoot {
-			return types.Hash256{}, types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
+			return types.ZeroCurrency, fmt.Errorf("merkle root doesn't match the sector root upon first upload to contract: %v != %v", executeResp.NewMerkleRoot, sectorRoot)
 		}
 	} else {
 		// Otherwise we make sure the proof was transmitted and verify it.
 		actions := []rhpv2.RPCWriteAction{{Type: rhpv2.RPCWriteActionAppend}} // TODO: change once rhpv3 support is available
 		if !rhpv2.VerifyDiffProof(actions, rev.Filesize/rhpv2.SectorSize, executeResp.Proof, []types.Hash256{}, rev.FileMerkleRoot, executeResp.NewMerkleRoot, []types.Hash256{sectorRoot}) {
-			return types.Hash256{}, types.ZeroCurrency, errors.New("proof verification failed")
+			return types.ZeroCurrency, errors.New("proof verification failed")
 		}
 	}
 
@@ -891,7 +863,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	newRevision := *rev
 	newValid, newMissed, err := updateRevisionOutputs(&newRevision, types.ZeroCurrency, collateral)
 	if err != nil {
-		return types.Hash256{}, types.ZeroCurrency, err
+		return types.ZeroCurrency, err
 	}
 	newRevision.Filesize += rhpv2.SectorSize
 	newRevision.RevisionNumber++

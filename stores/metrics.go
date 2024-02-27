@@ -155,7 +155,7 @@ func (s *SQLStore) ContractPruneMetrics(ctx context.Context, start time.Time, n 
 	resp := make([]api.ContractPruneMetric, len(metrics))
 	for i := range resp {
 		resp[i] = api.ContractPruneMetric{
-			Timestamp: time.Time(metrics[i].Timestamp).UTC(),
+			Timestamp: api.TimeRFC3339(metrics[i].Timestamp),
 
 			ContractID:  types.FileContractID(metrics[i].FCID),
 			HostKey:     types.PublicKey(metrics[i].Host),
@@ -605,9 +605,7 @@ func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n
 		WHERE ?
 		GROUP BY
 			p.period_start
-		ORDER BY
-			p.period_start ASC
-		) i ON %s.id = i.id
+		) i ON %s.id = i.id ORDER BY Period ASC
 	`, table, table, table, table),
 		unixTimeMS(start),
 		interval.Milliseconds(),

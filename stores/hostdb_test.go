@@ -480,7 +480,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create announcements for 2 hosts.
+	// Create announcements for 3 hosts.
 	ann1 := announcement{
 		timestamp:   time.Now(),
 		blockHeight: 1,
@@ -490,6 +490,7 @@ func TestInsertAnnouncements(t *testing.T) {
 			NetAddress: "foo.bar:1000",
 		},
 	}
+
 	ann2 := announcement{
 		hk:               types.GeneratePrivateKey().PublicKey(),
 		HostAnnouncement: chain.HostAnnouncement{},
@@ -1088,14 +1089,6 @@ func newTestPK() (types.PublicKey, types.PrivateKey) {
 	sk := types.GeneratePrivateKey()
 	pk := sk.PublicKey()
 	return pk, sk
-}
-
-func newTestHostAnnouncement(na string) (chain.HostAnnouncement, types.PrivateKey) {
-	_, sk := newTestPK()
-	a := chain.HostAnnouncement{
-		NetAddress: na,
-	}
-	return a, sk
 }
 
 func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) stypes.Transaction {

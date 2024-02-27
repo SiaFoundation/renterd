@@ -697,25 +697,33 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// check objects stats.
-	info, err := cluster.Bus.ObjectsStats()
-	tt.OK(err)
-	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
-	if info.TotalObjectsSize != objectsSize {
-		t.Error("wrong size", info.TotalObjectsSize, objectsSize)
-	}
-	sectorsSize := 15 * rhpv2.SectorSize
-	if info.TotalSectorsSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
-	}
-	if info.TotalUploadedSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
-	}
-	if info.NumObjects != 4 {
-		t.Error("wrong number of objects", info.NumObjects, 4)
-	}
-	if info.MinHealth != 1 {
-		t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
-	}
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		for _, opts := range []api.ObjectsStatsOpts{
+			{},                              // any bucket
+			{Bucket: api.DefaultBucketName}, // specific bucket
+		} {
+			info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+			tt.OK(err)
+			objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+			if info.TotalObjectsSize != objectsSize {
+				return fmt.Errorf("wrong size %v %v", info.TotalObjectsSize, objectsSize)
+			}
+			sectorsSize := 15 * rhpv2.SectorSize
+			if info.TotalSectorsSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalSectorsSize, sectorsSize)
+			}
+			if info.TotalUploadedSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalUploadedSize, sectorsSize)
+			}
+			if info.NumObjects != 4 {
+				return fmt.Errorf("wrong number of objects %v %v", info.NumObjects, 4)
+			}
+			if info.MinHealth != 1 {
+				return fmt.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+			}
+		}
+		return nil
+	})
 
 	// download the data
 	for _, data := range [][]byte{small, large} {
@@ -1308,7 +1316,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
-	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", testContractSet, res.Object.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", testContractSet, *res.Object.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "frankenstein", api.DownloadObjectOptions{}))
@@ -1633,7 +1641,7 @@ func TestUploadPacking(t *testing.T) {
 	download("file4", data4, 0, int64(len(data4)))
 
 	// assert number of objects
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 5 {
 		t.Fatalf("expected 5 objects, got %v", os.NumObjects)
@@ -1642,7 +1650,7 @@ func TestUploadPacking(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1798,7 +1806,7 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data1), api.DefaultBucketName, "1", api.UploadObjectOptions{}))
 
 	// assert number of objects
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 1 {
 		t.Fatalf("expected 1 object, got %d", os.NumObjects)
@@ -1807,7 +1815,7 @@ func TestSlabBufferStats(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1855,7 +1863,7 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data2), api.DefaultBucketName, "2", api.UploadObjectOptions{}))
 
 	// assert number of objects
-	os, err = b.ObjectsStats()
+	os, err = b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 2 {
 		t.Fatalf("expected 1 object, got %d", os.NumObjects)
@@ -1864,7 +1872,7 @@ func TestSlabBufferStats(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		tt.OK(err)
 		if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
 			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1)+len(data2), os.TotalObjectsSize)
@@ -1917,9 +1925,9 @@ func TestAlerts(t *testing.T) {
 	tt.OK(b.RegisterAlert(context.Background(), alert))
 	findAlert := func(id types.Hash256) *alerts.Alert {
 		t.Helper()
-		alerts, err := b.Alerts()
+		ar, err := b.Alerts(context.Background(), alerts.AlertsOpts{})
 		tt.OK(err)
-		for _, alert := range alerts {
+		for _, alert := range ar.Alerts {
 			if alert.ID == id {
 				return &alert
 			}
@@ -1940,6 +1948,34 @@ func TestAlerts(t *testing.T) {
 	if foundAlert != nil {
 		t.Fatal("alert found")
 	}
+
+	// register 2 alerts
+	alert2 := alert
+	alert2.ID = frand.Entropy256()
+	alert2.Timestamp = time.Now().Add(time.Second)
+	tt.OK(b.RegisterAlert(context.Background(), alert))
+	tt.OK(b.RegisterAlert(context.Background(), alert2))
+	if foundAlert := findAlert(alert.ID); foundAlert == nil {
+		t.Fatal("alert not found")
+	} else if foundAlert := findAlert(alert2.ID); foundAlert == nil {
+		t.Fatal("alert not found")
+	}
+
+	// try to find with offset = 1
+	ar, err := b.Alerts(context.Background(), alerts.AlertsOpts{Offset: 1})
+	foundAlerts := ar.Alerts
+	tt.OK(err)
+	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert.ID {
+		t.Fatal("wrong alert")
+	}
+
+	// try to find with limit = 1
+	ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Limit: 1})
+	foundAlerts = ar.Alerts
+	tt.OK(err)
+	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
+		t.Fatal("wrong alert")
+	}
 }
 
 func TestMultipartUploads(t *testing.T) {
@@ -1959,7 +1995,7 @@ func TestMultipartUploads(t *testing.T) {
 
 	// Start a new multipart upload.
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{GenerateKey: true})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -1978,7 +2014,7 @@ func TestMultipartUploads(t *testing.T) {
 	// correctly.
 	putPart := func(partNum int, offset int, data []byte) string {
 		t.Helper()
-		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: offset})
+		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: &offset})
 		tt.OK(err)
 		if res.ETag == "" {
 			t.Fatal("expected non-empty ETag")
@@ -2008,7 +2044,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Check objects stats.
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 0 {
 		t.Fatalf("expected 0 object, got %v", os.NumObjects)
@@ -2067,7 +2103,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Check objects stats.
-	os, err = b.ObjectsStats()
+	os, err = b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 1 {
 		t.Fatalf("expected 1 object, got %v", os.NumObjects)
@@ -2317,7 +2353,8 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// start a new multipart upload. We upload the parts in reverse order
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	key := object.GenerateEncryptionKey()
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: &key})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -2325,22 +2362,25 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// upload a part that is a partial slab
 	part3Data := bytes.Repeat([]byte{3}, int(slabSize)/4)
+	offset := int(slabSize + slabSize/4)
 	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize + slabSize/4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload a part that is exactly a full slab
 	part2Data := bytes.Repeat([]byte{2}, int(slabSize))
+	offset = int(slabSize / 4)
 	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize / 4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload another part the same size as the first one
 	part1Data := bytes.Repeat([]byte{1}, int(slabSize)/4)
+	offset = 0
 	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: 0,
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 

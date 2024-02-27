@@ -112,6 +112,11 @@ func (gs GougingSettings) Validate() error {
 	if gs.MinPriceTableValidity < 10*time.Second {
 		return errors.New("MinPriceTableValidity must be at least 10 seconds")
 	}
+	_, overflow := gs.MaxDownloadPrice.Mul64WithOverflow(gs.MigrationSurchargeMultiplier)
+	if overflow {
+		maxMultiplier := types.MaxCurrency.Div(gs.MaxDownloadPrice).Big().Uint64()
+		return fmt.Errorf("MigrationSurchargeMultiplier must be less than %v, otherwise applying it to MaxDownloadPrice overflows the currency type", maxMultiplier)
+	}
 	return nil
 }
 

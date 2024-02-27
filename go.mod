@@ -9,8 +9,8 @@ require (
 	github.com/go-gormigrate/gormigrate/v2 v2.1.1
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.19.0
-	github.com/klauspost/reedsolomon v1.12.0
-	github.com/minio/minio-go/v7 v7.0.65
+	github.com/klauspost/reedsolomon v1.12.1
+	github.com/minio/minio-go/v7 v7.0.67
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.1
@@ -20,14 +20,14 @@ require (
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.43.0
-	go.uber.org/zap v1.26.0
+	go.sia.tech/web/renterd v0.46.0
+	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.19.0
 	golang.org/x/term v0.17.0
 	gopkg.in/yaml.v3 v3.0.1
-	gorm.io/driver/mysql v1.5.2
-	gorm.io/driver/sqlite v1.5.4
-	gorm.io/gorm v1.25.5
+	gorm.io/driver/mysql v1.5.4
+	gorm.io/driver/sqlite v1.5.5
+	gorm.io/gorm v1.25.7
 	lukechampine.com/frand v1.4.2
 )
 

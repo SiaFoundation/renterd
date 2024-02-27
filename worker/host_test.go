@@ -5,23 +5,20 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
 
 func TestHost(t *testing.T) {
-	c := newMockContract(types.FileContractID{1})
-	h := newMockHost(types.PublicKey{1}, newTestHostPriceTable(time.Now()), c)
+	h := newMockHost(types.PublicKey{1})
+	h.c = newMockContract(h.hk, types.FileContractID{1})
 	sector, root := newMockSector()
 
 	// upload the sector
-	uploaded, err := h.UploadSector(context.Background(), sector, types.FileContractRevision{})
+	err := h.UploadSector(context.Background(), rhpv2.SectorRoot(sector), sector, types.FileContractRevision{})
 	if err != nil {
 		t.Fatal(err)
-	} else if uploaded != root {
-		t.Fatal("root mismatch")
 	}
 
 	// download entire sector

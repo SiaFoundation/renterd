@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -87,7 +88,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
@@ -118,7 +119,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got2.Object, want2) {
+	if !reflect.DeepEqual(*got2.Object, want2) {
 		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
 	}
 }
@@ -175,7 +176,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert it matches
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
@@ -1021,7 +1022,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	one := uint(1)
 	expectedObj := dbObject{
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 		ObjectID:   objID,
 		Key:        obj1Key,
@@ -1084,7 +1085,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
@@ -1198,7 +1199,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
@@ -2227,10 +2228,9 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	var s dbSlab
-	if err := ss.db.Model(&dbSlab{}).
+	if err := ss.db.Where(&dbSlab{Key: key}).
 		Joins("DBContractSet").
 		Preload("Shards").
-		Where("key = ?", key).
 		Take(&s).
 		Error; err != nil {
 		t.Fatal(err)
@@ -2456,7 +2456,7 @@ func TestObjectsStats(t *testing.T) {
 	defer ss.Close()
 
 	// Fetch stats on clean database.
-	info, err := ss.ObjectsStats(context.Background())
+	info, err := ss.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2467,6 +2467,7 @@ func TestObjectsStats(t *testing.T) {
 	// Create a few objects of different size.
 	var objectsSize uint64
 	var sectorsSize uint64
+	var totalUploadedSize uint64
 	for i := 0; i < 2; i++ {
 		obj := newTestObject(1)
 		objectsSize += uint64(obj.TotalSize())
@@ -2479,10 +2480,11 @@ func TestObjectsStats(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, fcid := range fcids {
-						_, err := ss.addTestContract(fcid, hpk)
+						c, err := ss.addTestContract(fcid, hpk)
 						if err != nil {
 							t.Fatal(err)
 						}
+						totalUploadedSize += c.Size
 					}
 				}
 			}
@@ -2503,10 +2505,11 @@ func TestObjectsStats(t *testing.T) {
 	}
 	var newContractID types.FileContractID
 	frand.Read(newContractID[:])
-	_, err = ss.addTestContract(newContractID, types.PublicKey{})
+	c, err := ss.addTestContract(newContractID, types.PublicKey{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	totalUploadedSize += c.Size
 	newContract, err := ss.contract(context.Background(), fileContractID(newContractID))
 	if err != nil {
 		t.Fatal(err)
@@ -2520,21 +2523,37 @@ func TestObjectsStats(t *testing.T) {
 	}
 
 	// Check sizes.
-	info, err = ss.ObjectsStats(context.Background())
-	if err != nil {
+	for _, opts := range []api.ObjectsStatsOpts{
+		{},                              // any bucket
+		{Bucket: api.DefaultBucketName}, // specific bucket
+	} {
+		info, err = ss.ObjectsStats(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		} else if info.TotalObjectsSize != objectsSize {
+			t.Fatal("wrong size", info.TotalObjectsSize, objectsSize)
+		} else if info.TotalSectorsSize != sectorsSize {
+			t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
+		} else if info.TotalUploadedSize != totalUploadedSize {
+			t.Fatal("wrong size", info.TotalUploadedSize, totalUploadedSize)
+		} else if info.NumObjects != 2 {
+			t.Fatal("wrong number of objects", info.NumObjects, 2)
+		}
+	}
+
+	// Check other bucket.
+	if err := ss.CreateBucket(context.Background(), "other", api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	}
-	if info.TotalObjectsSize != objectsSize {
-		t.Fatal("wrong size", info.TotalObjectsSize, objectsSize)
-	}
-	if info.TotalSectorsSize != sectorsSize {
-		t.Fatal("wrong size", info.TotalSectorsSize, sectorsSize)
-	}
-	if info.TotalUploadedSize != sectorsSize*2 {
-		t.Fatal("wrong size", info.TotalUploadedSize, sectorsSize*2)
-	}
-	if info.NumObjects != 2 {
-		t.Fatal("wrong number of objects", info.NumObjects, 2)
+	} else if info, err := ss.ObjectsStats(context.Background(), api.ObjectsStatsOpts{Bucket: "other"}); err != nil {
+		t.Fatal(err)
+	} else if info.TotalObjectsSize != 0 {
+		t.Fatal("wrong size", info.TotalObjectsSize)
+	} else if info.TotalSectorsSize != 0 {
+		t.Fatal("wrong size", info.TotalSectorsSize, 0)
+	} else if info.TotalUploadedSize != totalUploadedSize {
+		t.Fatal("wrong size", info.TotalUploadedSize, totalUploadedSize)
+	} else if info.NumObjects != 0 {
+		t.Fatal("wrong number of objects", info.NumObjects)
 	}
 }
 
@@ -2664,7 +2683,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj, fetched.Object) {
+	if !reflect.DeepEqual(obj, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
@@ -2700,7 +2719,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj2, fetched.Object) {
+	if !reflect.DeepEqual(obj2, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj2, fetched.Object))
 	}
 
@@ -2748,7 +2767,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj3, fetched.Object) {
+	if !reflect.DeepEqual(obj3, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj3, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
@@ -2929,7 +2948,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// assert there's two objects
-	s, err := ss.ObjectsStats(context.Background())
+	s, err := ss.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3584,8 +3603,10 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Prune the sector from hk1.
-	if err := ss.DeleteHostSector(context.Background(), hk1, root); err != nil {
+	if n, err := ss.DeleteHostSector(context.Background(), hk1, root); err != nil {
 		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal("no sectors were pruned", n)
 	}
 
 	// Make sure 2 contractSector entries exist.
@@ -3900,7 +3921,7 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	// create objects
 	obj1 := dbObject{
 		ObjectID:   "1",
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 	}
 	if err := ss.db.Create(&obj1).Error; err != nil {
@@ -3908,7 +3929,7 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 	obj2 := dbObject{
 		ObjectID:   "2",
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 	}
 	if err := ss.db.Create(&obj2).Error; err != nil {
@@ -3944,7 +3965,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete the object
-	if err := ss.db.Delete(&obj1).Error; err != nil {
+	err := ss.RemoveObject(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -3957,7 +3979,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete second object
-	if err := ss.db.Delete(&obj2).Error; err != nil {
+	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -3981,7 +4004,7 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 	obj3 := dbObject{
 		ObjectID:   "3",
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 	}
 	if err := ss.db.Create(&obj3).Error; err != nil {
@@ -4001,12 +4024,404 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete third object
-	if err := ss.db.Delete(&obj3).Error; err != nil {
+	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj3.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
 	} else if slabCntr != 1 {
 		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
+}
+
+func TestUpsertSectors(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	err := ss.db.Create(&dbSlab{
+		DBContractSetID: 1,
+		Key:             []byte{1},
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = ss.db.Create(&dbSector{
+		DBSlabID:  1,
+		SlabIndex: 2,
+		Root:      []byte{2},
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sectors := []dbSector{
+		{
+			DBSlabID:  1,
+			SlabIndex: 1,
+			Root:      []byte{1},
+		},
+		{
+			DBSlabID:  1,
+			SlabIndex: 2,
+			Root:      []byte{2},
+		},
+		{
+			DBSlabID:  1,
+			SlabIndex: 3,
+			Root:      []byte{3},
+		},
+	}
+	sectorIDs, err := upsertSectors(ss.db, sectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, id := range sectorIDs {
+		var sector dbSector
+		if err := ss.db.Where("id", id).Take(&sector).Error; err != nil {
+			t.Fatal(err)
+		} else if sector.SlabIndex != i+1 {
+			t.Fatal("unexpected slab index", sector.SlabIndex)
+		}
+	}
+}
+
+func TestUpdateObjectReuseSlab(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	minShards, totalShards := 10, 30
+
+	// create 90 hosts, enough for 3 slabs with 30 each
+	hks, err := ss.addTestHosts(3 * totalShards)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create one contract each
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+	}
+	// add 2 slabs
+	for i := 0; i < 2; i++ {
+		obj.Slabs = append(obj.Slabs, object.SlabSlice{
+			Offset: 0,
+			Length: uint32(minShards) * rhpv2.SectorSize,
+			Slab: object.Slab{
+				Key:       object.GenerateEncryptionKey(),
+				MinShards: uint8(minShards),
+			},
+		})
+	}
+	// 30 shards each
+	for i := 0; i < len(obj.Slabs); i++ {
+		for j := 0; j < totalShards; j++ {
+			obj.Slabs[i].Shards = append(obj.Slabs[i].Shards, object.Sector{
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hks[i*totalShards+j]: {
+						fcids[i*totalShards+j],
+					},
+				},
+				LatestHost: hks[i*totalShards+j],
+				Root:       frand.Entropy256(),
+			})
+		}
+	}
+
+	// add the object
+	_, err = ss.addTestObject("1", obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the object
+	var dbObj dbObject
+	if err := ss.db.Where("db_bucket_id", ss.DefaultBucketID()).Take(&dbObj).Error; err != nil {
+		t.Fatal(err)
+	} else if dbObj.ID != 1 {
+		t.Fatal("unexpected id", dbObj.ID)
+	} else if dbObj.DBBucketID != ss.DefaultBucketID() {
+		t.Fatal("bucket id mismatch", dbObj.DBBucketID)
+	} else if dbObj.ObjectID != "1" {
+		t.Fatal("object id mismatch", dbObj.ObjectID)
+	} else if dbObj.Health != 1 {
+		t.Fatal("health mismatch", dbObj.Health)
+	} else if dbObj.Size != obj.TotalSize() {
+		t.Fatal("size mismatch", dbObj.Size)
+	}
+
+	// fetch its slices
+	var dbSlices []dbSlice
+	if err := ss.db.Where("db_object_id", dbObj.ID).Find(&dbSlices).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbSlices) != 2 {
+		t.Fatal("invalid number of slices", len(dbSlices))
+	}
+	for i, dbSlice := range dbSlices {
+		if dbSlice.ID != uint(i+1) {
+			t.Fatal("unexpected id", dbSlice.ID)
+		} else if dbSlice.ObjectIndex != uint(i+1) {
+			t.Fatal("unexpected object index", dbSlice.ObjectIndex)
+		} else if dbSlice.Offset != 0 || dbSlice.Length != uint32(minShards)*rhpv2.SectorSize {
+			t.Fatal("invalid offset/length", dbSlice.Offset, dbSlice.Length)
+		}
+
+		// fetch the slab
+		var dbSlab dbSlab
+		key, _ := obj.Slabs[i].Key.MarshalBinary()
+		if err := ss.db.Where("id", dbSlice.DBSlabID).Take(&dbSlab).Error; err != nil {
+			t.Fatal(err)
+		} else if dbSlab.ID != uint(i+1) {
+			t.Fatal("unexpected id", dbSlab.ID)
+		} else if dbSlab.DBContractSetID != 1 {
+			t.Fatal("invalid contract set id", dbSlab.DBContractSetID)
+		} else if dbSlab.Health != 1 {
+			t.Fatal("invalid health", dbSlab.Health)
+		} else if dbSlab.HealthValidUntil != 0 {
+			t.Fatal("invalid health validity", dbSlab.HealthValidUntil)
+		} else if dbSlab.MinShards != uint8(minShards) {
+			t.Fatal("invalid minShards", dbSlab.MinShards)
+		} else if dbSlab.TotalShards != uint8(totalShards) {
+			t.Fatal("invalid totalShards", dbSlab.TotalShards)
+		} else if !bytes.Equal(dbSlab.Key, key) {
+			t.Fatal("wrong key")
+		}
+
+		// fetch the sectors
+		var dbSectors []dbSector
+		if err := ss.db.Where("db_slab_id", dbSlab.ID).Find(&dbSectors).Error; err != nil {
+			t.Fatal(err)
+		} else if len(dbSectors) != totalShards {
+			t.Fatal("invalid number of sectors", len(dbSectors))
+		}
+		for j, dbSector := range dbSectors {
+			if dbSector.ID != uint(i*totalShards+j+1) {
+				t.Fatal("invalid id", dbSector.ID)
+			} else if dbSector.DBSlabID != dbSlab.ID {
+				t.Fatal("invalid slab id", dbSector.DBSlabID)
+			} else if dbSector.LatestHost != publicKey(hks[i*totalShards+j]) {
+				t.Fatal("invalid host")
+			} else if !bytes.Equal(dbSector.Root, obj.Slabs[i].Shards[j].Root[:]) {
+				t.Fatal("invalid root")
+			}
+		}
+	}
+
+	obj2 := object.Object{
+		Key: object.GenerateEncryptionKey(),
+	}
+	// add 1 slab with 30 shards
+	obj2.Slabs = append(obj2.Slabs, object.SlabSlice{
+		Offset: 0,
+		Length: uint32(minShards) * rhpv2.SectorSize,
+		Slab: object.Slab{
+			Key:       object.GenerateEncryptionKey(),
+			MinShards: uint8(minShards),
+		},
+	})
+	// 30 shards each
+	for i := 0; i < totalShards; i++ {
+		obj2.Slabs[0].Shards = append(obj2.Slabs[0].Shards, object.Sector{
+			Contracts: map[types.PublicKey][]types.FileContractID{
+				hks[len(obj.Slabs)*totalShards+i]: {
+					fcids[len(obj.Slabs)*totalShards+i],
+				},
+			},
+			LatestHost: hks[len(obj.Slabs)*totalShards+i],
+			Root:       frand.Entropy256(),
+		})
+	}
+	// add the second slab of the first object too
+	obj2.Slabs = append(obj2.Slabs, obj.Slabs[1])
+
+	// add the object
+	_, err = ss.addTestObject("2", obj2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch the object
+	var dbObj2 dbObject
+	if err := ss.db.Where("db_bucket_id", ss.DefaultBucketID()).
+		Where("object_id", "2").
+		Take(&dbObj2).Error; err != nil {
+		t.Fatal(err)
+	} else if dbObj2.ID != 2 {
+		t.Fatal("unexpected id", dbObj2.ID)
+	} else if dbObj.Size != obj2.TotalSize() {
+		t.Fatal("size mismatch", dbObj2.Size)
+	}
+
+	// fetch its slices
+	var dbSlices2 []dbSlice
+	if err := ss.db.Where("db_object_id", dbObj2.ID).Find(&dbSlices2).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbSlices2) != 2 {
+		t.Fatal("invalid number of slices", len(dbSlices))
+	}
+
+	// check the first one
+	dbSlice2 := dbSlices2[0]
+	if dbSlice2.ID != uint(len(dbSlices)+1) {
+		t.Fatal("unexpected id", dbSlice2.ID)
+	} else if dbSlice2.ObjectIndex != uint(1) {
+		t.Fatal("unexpected object index", dbSlice2.ObjectIndex)
+	} else if dbSlice2.Offset != 0 || dbSlice2.Length != uint32(minShards)*rhpv2.SectorSize {
+		t.Fatal("invalid offset/length", dbSlice2.Offset, dbSlice2.Length)
+	}
+
+	// fetch the slab
+	var dbSlab2 dbSlab
+	key, _ := obj2.Slabs[0].Key.MarshalBinary()
+	if err := ss.db.Where("id", dbSlice2.DBSlabID).Take(&dbSlab2).Error; err != nil {
+		t.Fatal(err)
+	} else if dbSlab2.ID != uint(len(dbSlices)+1) {
+		t.Fatal("unexpected id", dbSlab2.ID)
+	} else if dbSlab2.DBContractSetID != 1 {
+		t.Fatal("invalid contract set id", dbSlab2.DBContractSetID)
+	} else if !bytes.Equal(dbSlab2.Key, key) {
+		t.Fatal("wrong key")
+	}
+
+	// fetch the sectors
+	var dbSectors2 []dbSector
+	if err := ss.db.Where("db_slab_id", dbSlab2.ID).Find(&dbSectors2).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbSectors2) != totalShards {
+		t.Fatal("invalid number of sectors", len(dbSectors2))
+	}
+	for j, dbSector := range dbSectors2 {
+		if dbSector.ID != uint((len(obj.Slabs))*totalShards+j+1) {
+			t.Fatal("invalid id", dbSector.ID)
+		} else if dbSector.DBSlabID != dbSlab2.ID {
+			t.Fatal("invalid slab id", dbSector.DBSlabID)
+		} else if dbSector.LatestHost != publicKey(hks[(len(obj.Slabs))*totalShards+j]) {
+			t.Fatal("invalid host")
+		} else if !bytes.Equal(dbSector.Root, obj2.Slabs[0].Shards[j].Root[:]) {
+			t.Fatal("invalid root")
+		}
+	}
+
+	// the second slab of obj2 should be the same as the first in obj
+	if dbSlices2[1].DBSlabID != 2 {
+		t.Fatal("wrong slab")
+	}
+
+	var contractSectors []dbContractSector
+	if err := ss.db.Find(&contractSectors).Error; err != nil {
+		t.Fatal(err)
+	} else if len(contractSectors) != 3*totalShards {
+		t.Fatal("invalid number of contract sectors", len(contractSectors))
+	}
+	for i, cs := range contractSectors {
+		if cs.DBContractID != uint(i+1) {
+			t.Fatal("invalid contract id")
+		} else if cs.DBSectorID != uint(i+1) {
+			t.Fatal("invalid sector id")
+		}
+	}
+}
+
+func TestTypeCurrency(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// prepare the table
+	if isSQLite(ss.db) {
+		if err := ss.db.Exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);").Error; err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := ss.db.Exec("CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);").Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// insert currencies in random order
+	if err := ss.db.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch currencies and assert they're sorted
+	var currencies []bCurrency
+	if err := ss.db.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
+		t.Fatal(err)
+	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
+		return types.Currency(currencies[i]).Cmp(types.Currency(currencies[j])) < 0
+	}) {
+		t.Fatal("currencies not sorted", currencies)
+	}
+
+	// convenience variables
+	c0 := currencies[0]
+	c1 := currencies[1]
+	cM := currencies[2]
+
+	tests := []struct {
+		a   bCurrency
+		b   bCurrency
+		cmp string
+	}{
+		{
+			a:   c0,
+			b:   c1,
+			cmp: "<",
+		},
+		{
+			a:   c1,
+			b:   c0,
+			cmp: ">",
+		},
+		{
+			a:   c0,
+			b:   c1,
+			cmp: "!=",
+		},
+		{
+			a:   c1,
+			b:   c1,
+			cmp: "=",
+		},
+		{
+			a:   c0,
+			b:   cM,
+			cmp: "<",
+		},
+		{
+			a:   cM,
+			b:   c0,
+			cmp: ">",
+		},
+		{
+			a:   cM,
+			b:   cM,
+			cmp: "=",
+		},
+	}
+	for i, test := range tests {
+		var result bool
+		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
+		if !isSQLite(ss.db) {
+			query = strings.Replace(query, "?", "HEX(?)", -1)
+		}
+		if err := ss.db.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
+			t.Fatal(err)
+		} else if !result {
+			t.Errorf("unexpected result in case %d/%d: expected %v %s %v to be true", i+1, len(tests), types.Currency(test.a).String(), test.cmp, types.Currency(test.b).String())
+		} else if test.cmp == "<" && types.Currency(test.a).Cmp(types.Currency(test.b)) >= 0 {
+			t.Fatal("invalid result")
+		} else if test.cmp == ">" && types.Currency(test.a).Cmp(types.Currency(test.b)) <= 0 {
+			t.Fatal("invalid result")
+		} else if test.cmp == "=" && types.Currency(test.a).Cmp(types.Currency(test.b)) != 0 {
+			t.Fatal("invalid result")
+		}
 	}
 }
