@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -711,11 +710,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 }
 
 func TestSQLHostBlocklist(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
-	cfg.dir = "/Users/peterjan/testing"
-	os.RemoveAll(cfg.dir)
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	ctx := context.Background()

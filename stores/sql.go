@@ -160,7 +160,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	}
 
 	if err := os.MkdirAll(cfg.PartialSlabDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create partial slab dir: %v", err)
+		return nil, fmt.Errorf("failed to create partial slab dir '%s': %v", cfg.PartialSlabDir, err)
 	}
 	db, err := gorm.Open(cfg.Conn, &gorm.Config{
 		Logger:                   cfg.GormLogger, // custom logger

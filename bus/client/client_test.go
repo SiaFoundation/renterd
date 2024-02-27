@@ -69,6 +69,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 	}
 
 	// create bus
+	network, genesis := build.Network()
 	b, cleanup, _, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
@@ -77,6 +78,8 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
+		Network:             network,
+		Genesis:             genesis,
 		SlabPruningInterval: time.Minute,
 		SlabPruningCooldown: time.Minute,
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
