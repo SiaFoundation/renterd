@@ -26,6 +26,7 @@ const (
 
 var (
 	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
+	errDownloadCancelled      = errors.New("download was cancelled")
 )
 
 type (
@@ -194,12 +195,13 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		hosts[c.HostKey] = struct{}{}
 	}
 
-	// buffer the writer
-	bw := bufio.NewWriter(w)
-	defer bw.Flush()
-
 	// create the cipher writer
-	cw := o.Key.Decrypt(bw, offset)
+	cw := o.Key.Decrypt(w, offset)
+
+	// buffer the writer we recover to making sure that we don't hammer the
+	// response writer with tiny writes
+	bw := bufio.NewWriter(cw)
+	defer bw.Flush()
 
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
@@ -290,7 +292,7 @@ outer:
 		case <-mgr.shutdownCtx.Done():
 			return ErrShuttingDown
 		case <-ctx.Done():
-			return errors.New("download timed out")
+			return errDownloadCancelled
 		case resp = <-responseChan:
 		}
 
@@ -313,7 +315,7 @@ outer:
 					s := slabs[respIndex]
 					if s.PartialSlab {
 						// Partial slab.
-						_, err = cw.Write(s.Data)
+						_, err = bw.Write(s.Data)
 						if err != nil {
 							mgr.logger.Errorf("failed to send partial slab", respIndex, err)
 							return err
@@ -321,7 +323,7 @@ outer:
 					} else {
 						// Regular slab.
 						slabs[respIndex].Decrypt(next.shards)
-						err := slabs[respIndex].Recover(cw, next.shards)
+						err := slabs[respIndex].Recover(bw, next.shards)
 						if err != nil {
 							mgr.logger.Errorf("failed to recover slab %v: %v", respIndex, err)
 							return err
@@ -760,8 +762,6 @@ loop:
 				if isSectorNotFound(resp.err) {
 					if err := s.mgr.os.DeleteHostSector(ctx, resp.req.host.PublicKey(), resp.req.root); err != nil {
 						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root, zap.Error(err))
-					} else {
-						s.mgr.logger.Infow("successfully marked sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root)
 					}
 				} else if isPriceTableGouging(resp.err) && s.overpay && !resp.req.overpay {
 					resp.req.overpay = true // ensures we don't retry the same request over and over again

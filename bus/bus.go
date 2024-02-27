@@ -126,7 +126,7 @@ type (
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
-		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
 		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
@@ -137,6 +137,7 @@ type (
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
 		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
+		ObjectMetadata(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
@@ -1226,13 +1227,22 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
+	var onlymetadata bool
+	if jc.DecodeForm("onlymetadata", &onlymetadata) != nil {
+		return
+	}
 
-	o, err := b.ms.Object(jc.Request.Context(), bucket, path)
+	var o api.Object
+	var err error
+	if onlymetadata {
+		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, path)
+	} else {
+		o, err = b.ms.Object(jc.Request.Context(), bucket, path)
+	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	}
-	if jc.Check("couldn't load object", err) != nil {
+	} else if jc.Check("couldn't load object", err) != nil {
 		return
 	}
 	jc.Encode(api.ObjectsResponse{Object: &o})
@@ -1434,9 +1444,11 @@ func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	} else if jc.DecodeParam("root", &root) != nil {
 		return
 	}
-	err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
+	n, err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
 	if jc.Check("failed to mark sector as lost", err) != nil {
 		return
+	} else if n > 0 {
+		b.logger.Infow("successfully marked sector as lost", "hk", hk, "root", root)
 	}
 }
 
@@ -1750,8 +1762,21 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
+	if jc.Check("failed to fetch alerts", err) != nil {
+		return
+	}
+	jc.Encode(ar.Alerts)
+}
+
 func (b *bus) handleGETAlerts(jc jape.Context) {
+	if jc.Request.FormValue("offset") == "" && jc.Request.FormValue("limit") == "" {
+		b.handleGETAlertsDeprecated(jc)
+		return
+	}
 	offset, limit := 0, -1
+	var severity alerts.Severity
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	} else if jc.DecodeForm("limit", &limit) != nil {
@@ -1759,18 +1784,21 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 	} else if offset < 0 {
 		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
 		return
+	} else if jc.DecodeForm("severity", &severity) != nil {
+		return
 	}
-	jc.Encode(b.alertMgr.Active(offset, limit))
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
+		Offset:   offset,
+		Limit:    limit,
+		Severity: severity,
+	})
+	if jc.Check("failed to fetch alerts", err) != nil {
+		return
+	}
+	jc.Encode(ar)
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
-	var all bool
-	if jc.DecodeForm("all", &all) != nil {
-		return
-	} else if all {
-		jc.Check("failed to dismiss all alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
-		return
-	}
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return

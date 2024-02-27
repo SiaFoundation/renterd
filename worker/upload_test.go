@@ -64,7 +64,7 @@ func TestUpload(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -90,7 +90,7 @@ func TestUpload(t *testing.T) {
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), filtered)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), filtered)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -107,7 +107,7 @@ func TestUpload(t *testing.T) {
 
 	// download the data again and assert it fails
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), filtered)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), filtered)
 	if !errors.Is(err, errDownloadNotEnoughHosts) {
 		t.Fatal("expected not enough hosts error", err)
 	}
@@ -170,7 +170,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -206,7 +206,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -325,7 +325,7 @@ func TestUploadShards(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), contracts)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), contracts)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -485,7 +485,7 @@ func TestUploadRegression(t *testing.T) {
 
 	// download data for good measure
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {

@@ -310,7 +310,7 @@ CREATE TABLE `multipart_parts` (
   KEY `idx_multipart_parts_etag` (`etag`),
   KEY `idx_multipart_parts_part_number` (`part_number`),
   KEY `idx_multipart_parts_db_multipart_upload_id` (`db_multipart_upload_id`),
-  CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`)
+  CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbObject
@@ -374,8 +374,8 @@ CREATE TABLE `slices` (
   KEY `idx_slices_object_index` (`object_index`),
   KEY `idx_slices_db_multipart_part_id` (`db_multipart_part_id`),
   KEY `idx_slices_db_slab_id` (`db_slab_id`),
-  CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`),
-  CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`),
+  CONSTRAINT `fk_multipart_parts_slabs` FOREIGN KEY (`db_multipart_part_id`) REFERENCES `multipart_parts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_objects_slabs` FOREIGN KEY (`db_object_id`) REFERENCES `objects` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_slabs_slices` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

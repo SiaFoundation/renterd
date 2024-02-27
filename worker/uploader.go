@@ -114,7 +114,7 @@ outer:
 			}
 
 			// execute it
-			root, elapsed, err := u.execute(req)
+			elapsed, err := u.execute(req)
 
 			// the uploader's contract got renewed, requeue the request
 			if errors.Is(err, errMaxRevisionReached) {
@@ -125,10 +125,12 @@ outer:
 			}
 
 			// send the response
-			if err != nil {
-				req.fail(err)
-			} else {
-				req.succeed(root)
+			select {
+			case <-req.sector.ctx.Done():
+			case req.responseChan <- sectorUploadResp{
+				req: req,
+				err: err,
+			}:
 			}
 
 			// track the error, ignore gracefully closed streams and canceled overdrives
@@ -151,7 +153,7 @@ func (u *uploader) Stop(err error) {
 			break
 		}
 		if !upload.done() {
-			upload.fail(err)
+			upload.finish(err)
 		}
 	}
 }
@@ -161,7 +163,7 @@ func (u *uploader) enqueue(req *sectorUploadReq) {
 	// check for stopped
 	if u.stopped {
 		u.mu.Unlock()
-		go req.fail(errUploaderStopped) // don't block the caller
+		go req.finish(errUploaderStopped) // don't block the caller
 		return
 	}
 
@@ -192,7 +194,7 @@ func (u *uploader) estimate() float64 {
 	return numSectors * estimateP90
 }
 
-func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, error) {
+func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
 	// grab fields
 	u.mu.Lock()
 	host := u.host
@@ -202,7 +204,7 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	// acquire contract lock
 	lockID, err := u.cs.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
 	if err != nil {
-		return types.Hash256{}, 0, err
+		return 0, err
 	}
 
 	// defer the release
@@ -220,26 +222,26 @@ func (u *uploader) execute(req *sectorUploadReq) (types.Hash256, time.Duration, 
 	// fetch the revision
 	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout)
 	if err != nil {
-		return types.Hash256{}, 0, err
+		return 0, err
 	} else if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, 0, errMaxRevisionReached
+		return 0, errMaxRevisionReached
 	}
 
 	// update the bus
 	if err := u.os.AddUploadingSector(ctx, req.uploadID, fcid, req.sector.root); err != nil {
-		return types.Hash256{}, 0, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
+		return 0, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
 	}
 
 	// upload the sector
 	start := time.Now()
-	root, err := host.UploadSector(ctx, req.sector.sectorData(), rev)
+	err = host.UploadSector(ctx, req.sector.root, req.sector.sectorData(), rev)
 	if err != nil {
-		return types.Hash256{}, 0, fmt.Errorf("failed to upload sector to contract %v, err: %v", fcid, err)
+		return 0, fmt.Errorf("failed to upload sector to contract %v, err: %v", fcid, err)
 	}
 
 	// calculate elapsed time
 	elapsed := time.Since(start)
-	return root, elapsed, nil
+	return elapsed, nil
 }
 
 func (u *uploader) pop() *sectorUploadReq {

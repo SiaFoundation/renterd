@@ -16,11 +16,9 @@ func TestHost(t *testing.T) {
 	sector, root := newMockSector()
 
 	// upload the sector
-	uploaded, err := h.UploadSector(context.Background(), sector, types.FileContractRevision{})
+	err := h.UploadSector(context.Background(), rhpv2.SectorRoot(sector), sector, types.FileContractRevision{})
 	if err != nil {
 		t.Fatal(err)
-	} else if uploaded != root {
-		t.Fatal("root mismatch")
 	}
 
 	// download entire sector

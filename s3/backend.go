@@ -287,7 +287,10 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{IgnoreDelim: true})
+	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{
+		IgnoreDelim:  true,
+		OnlyMetadata: true,
+	})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
