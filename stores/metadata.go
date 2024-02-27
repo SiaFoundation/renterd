@@ -2729,20 +2729,32 @@ func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, 
 	return nil
 }
 
+func pruneSlabs(tx *gorm.DB) error {
+	// delete slabs without any associated slices or buffers
+	return tx.Exec(`
+DELETE
+FROM slabs
+WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
+AND slabs.db_buffered_slab_id IS NULL
+`).Error
+}
+
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
+func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64, error) {
 	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
 		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
-	numDeleted = tx.RowsAffected
+	numDeleted := tx.RowsAffected
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
+	} else if err := pruneSlabs(tx); err != nil {
+		return numDeleted, err
 	}
-	return
+	return numDeleted, nil
 }
 
 // deleteObjects deletes a batch of objects from the database. The order of
@@ -2771,8 +2783,12 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 			if err := res.Error; err != nil {
 				return res.Error
 			}
-			duration = time.Since(start)
+			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
+			if rowsAffected > 0 {
+				return pruneSlabs(tx)
+			}
+			duration = time.Since(start)
 			return nil
 		}); err != nil {
 			return 0, fmt.Errorf("failed to delete objects: %w", err)

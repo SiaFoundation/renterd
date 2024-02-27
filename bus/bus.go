@@ -1725,7 +1725,19 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
+func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
+	if jc.Check("failed to fetch alerts", err) != nil {
+		return
+	}
+	jc.Encode(ar.Alerts)
+}
+
 func (b *bus) handleGETAlerts(jc jape.Context) {
+	if jc.Request.FormValue("offset") == "" && jc.Request.FormValue("limit") == "" {
+		b.handleGETAlertsDeprecated(jc)
+		return
+	}
 	offset, limit := 0, -1
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
@@ -1735,17 +1747,14 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
 		return
 	}
-	jc.Encode(b.alertMgr.Active(offset, limit))
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: offset, Limit: limit})
+	if jc.Check("failed to fetch alerts", err) != nil {
+		return
+	}
+	jc.Encode(ar)
 }
 
 func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
-	var all bool
-	if jc.DecodeForm("all", &all) != nil {
-		return
-	} else if all {
-		jc.Check("failed to dismiss all alerts", b.alertMgr.DismissAllAlerts(jc.Request.Context()))
-		return
-	}
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return

@@ -10,26 +10,19 @@ import (
 )
 
 // Alerts fetches the active alerts from the bus.
-func (c *Client) Alerts(opts alerts.AlertsOpts) (alerts []alerts.Alert, err error) {
+func (c *Client) Alerts(ctx context.Context, opts alerts.AlertsOpts) (resp alerts.AlertsResponse, err error) {
 	values := url.Values{}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
+	values.Set("offset", fmt.Sprint(opts.Offset))
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
-	err = c.c.GET("/alerts?"+values.Encode(), &alerts)
+	err = c.c.WithContext(ctx).GET("/alerts?"+values.Encode(), &resp)
 	return
 }
 
 // DismissAlerts dimisses the alerts with the given IDs.
 func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) error {
 	return c.dismissAlerts(ctx, false, ids...)
-}
-
-// DismissAllAlerts dimisses all registered alerts.
-func (c *Client) DismissAllAlerts(ctx context.Context) error {
-	return c.dismissAlerts(ctx, true)
 }
 
 func (c *Client) dismissAlerts(ctx context.Context, all bool, ids ...types.Hash256) error {
