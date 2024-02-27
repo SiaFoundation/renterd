@@ -60,7 +60,7 @@ jobs:
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
-          package: "./internal/testing/..."
+          package: "./internal/test/..."
           args: "-failfast;-race;-tags=testing;-timeout=30m"
       - name: Test Integration - MySQL
         if: matrix.os == 'ubuntu-latest'
@@ -70,7 +70,7 @@ jobs:
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
-          package: "./internal/testing/..."
+          package: "./internal/test/..."
           args: "-failfast;-race;-tags=testing;-timeout=30m"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
