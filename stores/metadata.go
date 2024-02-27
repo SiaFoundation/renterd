@@ -410,14 +410,14 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 }
 
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
-	return api.ObjectMetadata{
-		ETag:     raw.ETag,
-		Health:   raw.Health,
-		MimeType: raw.MimeType,
-		ModTime:  api.TimeRFC3339(time.Time(raw.ModTime).UTC()),
-		Name:     raw.Name,
-		Size:     raw.Size,
-	}
+	return newObjectMetadata(
+		raw.Name,
+		raw.ETag,
+		raw.MimeType,
+		raw.Health,
+		time.Time(raw.ModTime),
+		raw.Size,
+	)
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -1499,6 +1499,10 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")), prefixNew,
 				utf8.RuneCountInString(prefixOld)+1, prefixOld+"%",
 				utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+
+			if !isSQLite(tx) {
+				inner = tx.Raw("SELECT * FROM (?) as i", inner)
+			}
 			resp := tx.Model(&dbObject{}).
 				Where("object_id IN (?)", inner).
 				Delete(&dbObject{})
@@ -1548,13 +1552,14 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			// No copying is happening. We just update the metadata on the src
 			// object.
 			srcObj.MimeType = mimeType
-			om = api.ObjectMetadata{
-				Health:   srcObj.Health,
-				MimeType: srcObj.MimeType,
-				ModTime:  api.TimeRFC3339(srcObj.CreatedAt.UTC()),
-				Name:     srcObj.ObjectID,
-				Size:     srcObj.Size,
-			}
+			om = newObjectMetadata(
+				srcObj.ObjectID,
+				srcObj.Etag,
+				srcObj.MimeType,
+				srcObj.Health,
+				srcObj.CreatedAt,
+				srcObj.Size,
+			)
 			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
 				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
@@ -1602,21 +1607,22 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 			return fmt.Errorf("failed to create object metadata: %w", err)
 		}
 
-		om = api.ObjectMetadata{
-			MimeType: dstObj.MimeType,
-			ETag:     dstObj.Etag,
-			Health:   srcObj.Health,
-			ModTime:  api.TimeRFC3339(dstObj.CreatedAt.UTC()),
-			Name:     dstObj.ObjectID,
-			Size:     dstObj.Size,
-		}
+		om = newObjectMetadata(
+			dstObj.ObjectID,
+			dstObj.Etag,
+			dstObj.MimeType,
+			dstObj.Health,
+			dstObj.CreatedAt,
+			dstObj.Size,
+		)
 		return nil
 	})
 	return
 }
 
-func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
+	var deletedSectors int
+	err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Fetch contract_sectors to delete.
 		var sectors []dbContractSector
 		err := tx.Raw(`
@@ -1655,6 +1661,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 			} else if res.RowsAffected != int64(len(sectors)) {
 				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
 			}
+			deletedSectors = len(sectors)
 
 			// Increment the host's lostSectors by the number of lost sectors.
 			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
@@ -1682,6 +1689,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 		}
 		return nil
 	})
+	return deletedSectors, err
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
@@ -2312,19 +2320,55 @@ func (s *SQLStore) objectHydrate(ctx context.Context, tx *gorm.DB, bucket, path 
 	// return object
 	return api.Object{
 		Metadata: metadata,
-		ObjectMetadata: api.ObjectMetadata{
-			ETag:     obj[0].ObjectETag,
-			Health:   obj[0].ObjectHealth,
-			MimeType: obj[0].ObjectMimeType,
-			ModTime:  api.TimeRFC3339(obj[0].ObjectModTime.UTC()),
-			Name:     obj[0].ObjectName,
-			Size:     obj[0].ObjectSize,
-		},
-		Object: object.Object{
+		ObjectMetadata: newObjectMetadata(
+			obj[0].ObjectName,
+			obj[0].ObjectETag,
+			obj[0].ObjectMimeType,
+			obj[0].ObjectHealth,
+			obj[0].ObjectModTime,
+			obj[0].ObjectSize,
+		),
+		Object: &object.Object{
 			Key:   key,
 			Slabs: slabs,
 		},
 	}, nil
+}
+
+// ObjectMetadata returns an object's metadata
+func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
+	var resp api.Object
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var obj dbObject
+		err := tx.Model(&dbObject{}).
+			Joins("INNER JOIN buckets b ON objects.db_bucket_id = b.id").
+			Where("b.name", bucket).
+			Where("object_id", path).
+			Take(&obj).
+			Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrObjectNotFound
+		} else if err != nil {
+			return err
+		}
+		oum, err := s.objectMetadata(ctx, tx, bucket, path)
+		if err != nil {
+			return err
+		}
+		resp = api.Object{
+			ObjectMetadata: newObjectMetadata(
+				obj.ObjectID,
+				obj.Etag,
+				obj.MimeType,
+				obj.Health,
+				obj.CreatedAt,
+				obj.Size,
+			),
+			Metadata: oum,
+		}
+		return nil
+	})
+	return resp, err
 }
 
 func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {
@@ -2345,6 +2389,17 @@ func (s *SQLStore) objectMetadata(ctx context.Context, tx *gorm.DB, bucket, path
 		metadata[row.Key] = row.Value
 	}
 	return metadata, nil
+}
+
+func newObjectMetadata(name, etag, mimeType string, health float64, modTime time.Time, size int64) api.ObjectMetadata {
+	return api.ObjectMetadata{
+		ETag:     etag,
+		Health:   health,
+		ModTime:  api.TimeRFC3339(modTime.UTC()),
+		Name:     name,
+		Size:     size,
+		MimeType: mimeType,
+	}
 }
 
 func (s *SQLStore) objectRaw(ctx context.Context, txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {
@@ -2677,20 +2732,32 @@ func archiveContracts(ctx context.Context, tx *gorm.DB, contracts []dbContract, 
 	return nil
 }
 
+func pruneSlabs(tx *gorm.DB) error {
+	// delete slabs without any associated slices or buffers
+	return tx.Exec(`
+DELETE
+FROM slabs
+WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
+AND slabs.db_buffered_slab_id IS NULL
+`).Error
+}
+
 // deleteObject deletes an object from the store and prunes all slabs which are
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
-func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (numDeleted int64, _ error) {
+func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64, error) {
 	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
 		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
-	numDeleted = tx.RowsAffected
+	numDeleted := tx.RowsAffected
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
+	} else if err := pruneSlabs(tx); err != nil {
+		return numDeleted, err
 	}
-	return
+	return numDeleted, nil
 }
 
 // deleteObjects deletes a batch of objects from the database. The order of
@@ -2719,8 +2786,12 @@ func (s *SQLStore) deleteObjects(bucket string, path string) (numDeleted int64, 
 			if err := res.Error; err != nil {
 				return res.Error
 			}
-			duration = time.Since(start)
+			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
+			if rowsAffected > 0 {
+				return pruneSlabs(tx)
+			}
+			duration = time.Since(start)
 			return nil
 		}); err != nil {
 			return 0, fmt.Errorf("failed to delete objects: %w", err)

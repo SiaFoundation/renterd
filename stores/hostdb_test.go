@@ -119,7 +119,7 @@ func TestSQLHostDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h3.NetAddress != a.NetAddress {
+	if h3.NetAddress != unknownKeyAnn.NetAddress {
 		t.Fatal("wrong net address")
 	}
 	if h3.KnownSince.IsZero() {
@@ -505,7 +505,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create announcements for 2 hosts.
+	// Create announcements for 3 hosts.
 	ann1 := announcement{
 		timestamp:   time.Now(),
 		blockHeight: 1,

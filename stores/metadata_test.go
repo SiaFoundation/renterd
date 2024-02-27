@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"reflect"
 	"sort"
@@ -89,7 +88,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
@@ -120,7 +119,7 @@ func TestObjectBasic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got2.Object, want2) {
+	if !reflect.DeepEqual(*got2.Object, want2) {
 		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
 	}
 }
@@ -177,7 +176,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert it matches
-	if !reflect.DeepEqual(got.Object, want) {
+	if !reflect.DeepEqual(*got.Object, want) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
@@ -1023,7 +1022,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	one := uint(1)
 	expectedObj := dbObject{
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 		ObjectID:   objID,
 		Key:        obj1Key,
@@ -1086,7 +1085,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
@@ -1184,6 +1183,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		slabs[i].Shards[0].Model = Model{}
 		slabs[i].Shards[0].Contracts[0].Model = Model{}
 		slabs[i].Shards[0].Contracts[0].Host.Model = Model{}
+		slabs[i].Shards[0].Contracts[0].Host.LastAnnouncement = time.Time{}
 		slabs[i].HealthValidUntil = 0
 	}
 	if !reflect.DeepEqual(slab1, expectedObjSlab1) {
@@ -1199,7 +1199,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fullObj.Object, obj1) {
+	if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
@@ -2228,10 +2228,9 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	var s dbSlab
-	if err := ss.db.Model(&dbSlab{}).
+	if err := ss.db.Where(&dbSlab{Key: key}).
 		Joins("DBContractSet").
 		Preload("Shards").
-		Where("key = ?", key).
 		Take(&s).
 		Error; err != nil {
 		t.Fatal(err)
@@ -2684,7 +2683,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj, fetched.Object) {
+	if !reflect.DeepEqual(obj, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
@@ -2720,7 +2719,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj2, fetched.Object) {
+	if !reflect.DeepEqual(obj2, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj2, fetched.Object))
 	}
 
@@ -2768,7 +2767,7 @@ func TestPartialSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(obj3, fetched.Object) {
+	if !reflect.DeepEqual(obj3, *fetched.Object) {
 		t.Fatal("mismatch", cmp.Diff(obj3, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
@@ -3604,8 +3603,10 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Prune the sector from hk1.
-	if err := ss.DeleteHostSector(context.Background(), hk1, root); err != nil {
+	if n, err := ss.DeleteHostSector(context.Background(), hk1, root); err != nil {
 		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal("no sectors were pruned", n)
 	}
 
 	// Make sure 2 contractSector entries exist.
@@ -3920,7 +3921,7 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	// create objects
 	obj1 := dbObject{
 		ObjectID:   "1",
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 	}
 	if err := ss.db.Create(&obj1).Error; err != nil {
@@ -3928,7 +3929,7 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 	obj2 := dbObject{
 		ObjectID:   "2",
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 	}
 	if err := ss.db.Create(&obj2).Error; err != nil {
@@ -3964,7 +3965,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete the object
-	if err := ss.db.Delete(&obj1).Error; err != nil {
+	err := ss.RemoveObject(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -3977,7 +3979,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete second object
-	if err := ss.db.Delete(&obj2).Error; err != nil {
+	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -4001,7 +4004,7 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 	obj3 := dbObject{
 		ObjectID:   "3",
-		DBBucketID: 1,
+		DBBucketID: ss.DefaultBucketID(),
 		Health:     1,
 	}
 	if err := ss.db.Create(&obj3).Error; err != nil {
@@ -4021,7 +4024,8 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	}
 
 	// delete third object
-	if err := ss.db.Delete(&obj3).Error; err != nil {
+	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj3.ObjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
@@ -4140,11 +4144,11 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch the object
 	var dbObj dbObject
-	if err := ss.db.Where("db_bucket_id", 1).Take(&dbObj).Error; err != nil {
+	if err := ss.db.Where("db_bucket_id", ss.DefaultBucketID()).Take(&dbObj).Error; err != nil {
 		t.Fatal(err)
 	} else if dbObj.ID != 1 {
 		t.Fatal("unexpected id", dbObj.ID)
-	} else if dbObj.DBBucketID != 1 {
+	} else if dbObj.DBBucketID != ss.DefaultBucketID() {
 		t.Fatal("bucket id mismatch", dbObj.DBBucketID)
 	} else if dbObj.ObjectID != "1" {
 		t.Fatal("object id mismatch", dbObj.ObjectID)
@@ -4246,7 +4250,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch the object
 	var dbObj2 dbObject
-	if err := ss.db.Where("db_bucket_id", 1).
+	if err := ss.db.Where("db_bucket_id", ss.DefaultBucketID()).
 		Where("object_id", "2").
 		Take(&dbObj2).Error; err != nil {
 		t.Fatal(err)
@@ -4330,63 +4334,94 @@ func TestTypeCurrency(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	tests := []struct {
-		a   types.Currency
-		b   types.Currency
-		cmp string
-	}{
-		{
-			a:   types.ZeroCurrency,
-			b:   types.NewCurrency64(1),
-			cmp: "<",
-		},
-		{
-			a:   types.NewCurrency64(1),
-			b:   types.NewCurrency64(1),
-			cmp: "=",
-		},
-		{
-			a:   types.NewCurrency(math.MaxUint64, 0),
-			b:   types.NewCurrency(0, math.MaxUint64),
-			cmp: "<",
-		},
-		{
-			a:   types.NewCurrency(0, math.MaxUint64),
-			b:   types.NewCurrency(math.MaxUint64, 0),
-			cmp: ">",
-		},
-	}
-	for _, test := range tests {
-		var result bool
-		err := ss.db.Raw("SELECT ? "+test.cmp+" ?", bCurrency(test.a), bCurrency(test.b)).Scan(&result).Error
-		if err != nil {
+	// prepare the table
+	if isSQLite(ss.db) {
+		if err := ss.db.Exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);").Error; err != nil {
 			t.Fatal(err)
-		} else if !result {
-			t.Fatalf("unexpected result %v for %v %v %v", result, test.a, test.cmp, test.b)
-		} else if test.cmp == "<" && test.a.Cmp(test.b) >= 0 {
-			t.Fatal("invalid result")
-		} else if test.cmp == ">" && test.a.Cmp(test.b) <= 0 {
-			t.Fatal("invalid result")
-		} else if test.cmp == "=" && test.a.Cmp(test.b) != 0 {
-			t.Fatal("invalid result")
+		}
+	} else {
+		if err := ss.db.Exec("CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);").Error; err != nil {
+			t.Fatal(err)
 		}
 	}
 
-	c := func(c uint64) bCurrency {
-		return bCurrency(types.NewCurrency64(c))
+	// insert currencies in random order
+	if err := ss.db.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
+		t.Fatal(err)
 	}
 
+	// fetch currencies and assert they're sorted
 	var currencies []bCurrency
-	err := ss.db.Raw(`
-WITH input(col) as
-(values (?),(?),(?))
-SELECT * FROM input ORDER BY col ASC
-`, c(3), c(1), c(2)).Scan(&currencies).Error
-	if err != nil {
+	if err := ss.db.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
 		t.Fatal(err)
 	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
 		return types.Currency(currencies[i]).Cmp(types.Currency(currencies[j])) < 0
 	}) {
 		t.Fatal("currencies not sorted", currencies)
+	}
+
+	// convenience variables
+	c0 := currencies[0]
+	c1 := currencies[1]
+	cM := currencies[2]
+
+	tests := []struct {
+		a   bCurrency
+		b   bCurrency
+		cmp string
+	}{
+		{
+			a:   c0,
+			b:   c1,
+			cmp: "<",
+		},
+		{
+			a:   c1,
+			b:   c0,
+			cmp: ">",
+		},
+		{
+			a:   c0,
+			b:   c1,
+			cmp: "!=",
+		},
+		{
+			a:   c1,
+			b:   c1,
+			cmp: "=",
+		},
+		{
+			a:   c0,
+			b:   cM,
+			cmp: "<",
+		},
+		{
+			a:   cM,
+			b:   c0,
+			cmp: ">",
+		},
+		{
+			a:   cM,
+			b:   cM,
+			cmp: "=",
+		},
+	}
+	for i, test := range tests {
+		var result bool
+		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
+		if !isSQLite(ss.db) {
+			query = strings.Replace(query, "?", "HEX(?)", -1)
+		}
+		if err := ss.db.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
+			t.Fatal(err)
+		} else if !result {
+			t.Errorf("unexpected result in case %d/%d: expected %v %s %v to be true", i+1, len(tests), types.Currency(test.a).String(), test.cmp, types.Currency(test.b).String())
+		} else if test.cmp == "<" && types.Currency(test.a).Cmp(types.Currency(test.b)) >= 0 {
+			t.Fatal("invalid result")
+		} else if test.cmp == ">" && types.Currency(test.a).Cmp(types.Currency(test.b)) <= 0 {
+			t.Fatal("invalid result")
+		} else if test.cmp == "=" && types.Currency(test.a).Cmp(types.Currency(test.b)) != 0 {
+			t.Fatal("invalid result")
+		}
 	}
 }

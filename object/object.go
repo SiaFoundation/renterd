@@ -3,6 +3,7 @@ package object
 import (
 	"bytes"
 	"crypto/cipher"
+	"crypto/md5"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -43,6 +44,9 @@ func (k *EncryptionKey) UnmarshalBinary(b []byte) error {
 
 // String implements fmt.Stringer.
 func (k EncryptionKey) String() string {
+	if k.entropy == nil {
+		return ""
+	}
 	return "key:" + hex.EncodeToString(k.entropy[:])
 }
 
@@ -137,6 +141,22 @@ func (o Object) Contracts() map[types.PublicKey]map[types.FileContractID]struct{
 		}
 	}
 	return usedContracts
+}
+
+func (o *Object) ComputeETag() string {
+	// calculate the eTag using the precomputed sector roots to avoid having to
+	// hash the entire object again.
+	h := md5.New()
+	b := make([]byte, 8)
+	for _, slab := range o.Slabs {
+		binary.LittleEndian.PutUint32(b[:4], slab.Offset)
+		binary.LittleEndian.PutUint32(b[4:], slab.Length)
+		h.Write(b)
+		for _, shard := range slab.Shards {
+			h.Write(shard.Root[:])
+		}
+	}
+	return string(hex.EncodeToString(h.Sum(nil)))
 }
 
 // TotalSize returns the total size of the object.

@@ -45,9 +45,15 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			},
 		},
 		{
-			ID: "00004_peer_store",
+			ID: "00004_prune_slabs_cascade",
 			Migrate: func(tx *gorm.DB) error {
-				return performMigration(tx, dbIdentifier, "00004_peer_store", logger)
+				return performMigration(tx, dbIdentifier, "00004_prune_slabs_cascade", logger)
+			},
+		},
+		{
+			ID: "00005_peer_store",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00005_peer_store", logger)
 			},
 		},
 	}

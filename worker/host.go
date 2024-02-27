@@ -21,7 +21,7 @@ type (
 		PublicKey() types.PublicKey
 
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
-		UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (types.Hash256, error)
+		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
 		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
 		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
@@ -52,7 +52,6 @@ type (
 		acc                      *account
 		bus                      Bus
 		contractSpendingRecorder ContractSpendingRecorder
-		interactionRecorder      HostInteractionRecorder
 		logger                   *zap.SugaredLogger
 		transportPool            *transportPoolV3
 		priceTables              *priceTables
@@ -70,7 +69,6 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		acc:                      w.accounts.ForHost(hk),
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
-		interactionRecorder:      w.hostInteractionRecorder,
 		logger:                   w.logger.Named(hk.String()[:4]),
 		fcid:                     fcid,
 		siamuxAddr:               siamuxAddr,
@@ -123,11 +121,11 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	})
 }
 
-func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (root types.Hash256, err error) {
+func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (err error) {
 	// fetch price table
 	pt, err := h.priceTable(ctx, nil)
 	if err != nil {
-		return types.Hash256{}, err
+		return err
 	}
 
 	// prepare payment
@@ -136,28 +134,28 @@ func (h *host) UploadSector(ctx context.Context, sector *[rhpv2.SectorSize]byte,
 	// insufficient balance error
 	expectedCost, _, _, err := uploadSectorCost(pt, rev.WindowEnd)
 	if err != nil {
-		return types.Hash256{}, err
+		return err
 	}
 	if rev.RevisionNumber == math.MaxUint64 {
-		return types.Hash256{}, fmt.Errorf("revision number has reached max, fcid %v", rev.ParentID)
+		return fmt.Errorf("revision number has reached max, fcid %v", rev.ParentID)
 	}
 	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
 	if !ok {
-		return types.Hash256{}, errors.New("failed to create payment")
+		return errors.New("failed to create payment")
 	}
 
 	var cost types.Currency
 	err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		root, cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, &rev, &payment, sector)
+		cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, &rev, &payment, sectorRoot, sector)
 		return err
 	})
 	if err != nil {
-		return types.Hash256{}, err
+		return err
 	}
 
 	// record spending
 	h.contractSpendingRecorder.Record(rev, api.ContractSpending{Uploads: cost})
-	return root, nil
+	return nil
 }
 
 func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
@@ -198,11 +196,13 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			h.interactionRecorder.RecordPriceTableUpdate(hostdb.PriceTableUpdate{
-				HostKey:    h.hk,
-				Success:    isSuccessfulInteraction(err),
-				Timestamp:  time.Now(),
-				PriceTable: hpt,
+			h.bus.RecordPriceTables(ctx, []hostdb.PriceTableUpdate{
+				{
+					HostKey:    h.hk,
+					Success:    isSuccessfulInteraction(err),
+					Timestamp:  time.Now(),
+					PriceTable: hpt,
+				},
 			})
 			return
 		})
