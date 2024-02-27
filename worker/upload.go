@@ -203,29 +203,28 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 				}
 			}
 		}
-	}
 
-	// make sure there's a goroutine uploading the remainder of the packed slabs
-	go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
+		// make sure there's a goroutine uploading the remainder of the packed slabs
+		go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
+	}
 
 	return eTag, nil
 }
 
 func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string, lockPriority int) {
 	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
-
 	w.uploadsMu.Lock()
-	if w.uploadingPackedSlabs[key] {
+	if _, ok := w.uploadingPackedSlabs[key]; ok {
 		w.uploadsMu.Unlock()
 		return
 	}
-	w.uploadingPackedSlabs[key] = true
+	w.uploadingPackedSlabs[key] = struct{}{}
 	w.uploadsMu.Unlock()
 
 	// make sure we mark uploading packed slabs as false when we're done
 	defer func() {
 		w.uploadsMu.Lock()
-		w.uploadingPackedSlabs[key] = false
+		delete(w.uploadingPackedSlabs, key)
 		w.uploadsMu.Unlock()
 	}()
 

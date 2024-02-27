@@ -211,7 +211,7 @@ type worker struct {
 	transportPoolV3 *transportPoolV3
 
 	uploadsMu            sync.Mutex
-	uploadingPackedSlabs map[string]bool
+	uploadingPackedSlabs map[string]struct{}
 
 	contractSpendingRecorder ContractSpendingRecorder
 	contractLockingDuration  time.Duration
@@ -1327,7 +1327,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
 		startTime:               time.Now(),
-		uploadingPackedSlabs:    make(map[string]bool),
+		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             ctx,
 		shutdownCtxCancel:       cancel,
 	}

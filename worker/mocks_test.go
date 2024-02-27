@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"sync"
 	"time"
@@ -346,10 +347,11 @@ var _ ObjectStore = (*objectStoreMock)(nil)
 
 type (
 	objectStoreMock struct {
-		mu           sync.Mutex
-		objects      map[string]map[string]object.Object
-		partials     map[string]packedSlabMock
-		bufferIDCntr uint // allows marking packed slabs as uploaded
+		mu                    sync.Mutex
+		objects               map[string]map[string]object.Object
+		partials              map[string]*packedSlabMock
+		slabBufferMaxSizeSoft int
+		bufferIDCntr          uint // allows marking packed slabs as uploaded
 	}
 
 	packedSlabMock struct {
@@ -357,13 +359,15 @@ type (
 		bufferID     uint
 		slabKey      object.EncryptionKey
 		data         []byte
+		lockedUntil  time.Time
 	}
 )
 
 func newObjectStoreMock(bucket string) *objectStoreMock {
 	os := &objectStoreMock{
-		objects:  make(map[string]map[string]object.Object),
-		partials: make(map[string]packedSlabMock),
+		objects:               make(map[string]map[string]object.Object),
+		partials:              make(map[string]*packedSlabMock),
+		slabBufferMaxSizeSoft: math.MaxInt64,
 	}
 	os.objects[bucket] = make(map[string]object.Object)
 	return os
@@ -421,7 +425,7 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 	}
 
 	// update store
-	os.partials[ec.String()] = packedSlabMock{
+	os.partials[ec.String()] = &packedSlabMock{
 		parameterKey: fmt.Sprintf("%d-%d-%v", minShards, totalShards, contractSet),
 		bufferID:     os.bufferIDCntr,
 		slabKey:      ec,
@@ -429,7 +433,7 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 	}
 	os.bufferIDCntr++
 
-	return []object.SlabSlice{ss}, false, nil
+	return []object.SlabSlice{ss}, os.totalSlabBufferSize() > os.slabBufferMaxSizeSoft, nil
 }
 
 func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error) {
@@ -511,14 +515,22 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
+	if limit == -1 {
+		limit = math.MaxInt
+	}
+
 	parameterKey := fmt.Sprintf("%d-%d-%v", minShards, totalShards, set)
 	for _, ps := range os.partials {
-		if ps.parameterKey == parameterKey {
+		if ps.parameterKey == parameterKey && time.Now().After(ps.lockedUntil) {
+			ps.lockedUntil = time.Now().Add(lockingDuration)
 			pss = append(pss, api.PackedSlab{
 				BufferID: ps.bufferID,
 				Data:     ps.data,
 				Key:      ps.slabKey,
 			})
+			if len(pss) == limit {
+				break
+			}
 		}
 	}
 	return
@@ -555,6 +567,21 @@ func (os *objectStoreMock) Bucket(_ context.Context, bucket string) (api.Bucket,
 
 func (os *objectStoreMock) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
 	return api.MultipartUpload{}, nil
+}
+
+func (os *objectStoreMock) totalSlabBufferSize() (total int) {
+	for _, p := range os.partials {
+		if time.Now().After(p.lockedUntil) {
+			total += len(p.data)
+		}
+	}
+	return
+}
+
+func (os *objectStoreMock) setSlabBufferMaxSizeSoft(n int) {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+	os.slabBufferMaxSizeSoft = n
 }
 
 func (os *objectStoreMock) forEachObject(fn func(bucket, path string, o object.Object)) {

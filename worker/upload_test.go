@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -33,10 +34,7 @@ func TestUpload(t *testing.T) {
 	ul := w.uploadManager
 
 	// create test data
-	data := make([]byte, 128)
-	if _, err := frand.Read(data); err != nil {
-		t.Fatal(err)
-	}
+	data := testData(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -130,7 +128,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	w := newTestWorker(t)
 
 	// add hosts to worker
-	w.addHosts(testRedundancySettings.TotalShards * 2)
+	w.addHosts(testRedundancySettings.TotalShards)
 
 	// convenience variables
 	os := w.os
@@ -138,15 +136,15 @@ func TestUploadPackedSlab(t *testing.T) {
 	dl := w.downloadManager
 	ul := w.uploadManager
 
-	// create test data
-	data := make([]byte, 128)
-	if _, err := frand.Read(data); err != nil {
-		t.Fatal(err)
-	}
-
 	// create upload params
 	params := testParameters(t.Name())
 	params.packing = true
+
+	// block aysnc packed slab uploads
+	w.blockAsyncPackedSlabUploads(params)
+
+	// create test data
+	data := testData(128)
 
 	// upload data
 	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.contracts(), params, lockingPriorityUpload)
@@ -182,9 +180,9 @@ func TestUploadPackedSlab(t *testing.T) {
 		t.Fatal("expected 1 packed slab")
 	}
 	ps := pss[0]
-	mem := mm.AcquireMemory(context.Background(), params.rs.SlabSize())
 
 	// upload the packed slab
+	mem := mm.AcquireMemory(context.Background(), params.rs.SlabSize())
 	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.contracts(), 0, lockingPriorityUpload)
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +207,69 @@ func TestUploadPackedSlab(t *testing.T) {
 	} else if !bytes.Equal(data, buf.Bytes()) {
 		t.Fatal("data mismatch")
 	}
+
+	// configure max buffer size
+	os.setSlabBufferMaxSizeSoft(128)
+
+	// upload 2x64 bytes using the worker
+	params.path = t.Name() + "2"
+	_, err = w.upload(context.Background(), bytes.NewReader(testData(64)), w.contracts(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params.path = t.Name() + "3"
+	_, err = w.upload(context.Background(), bytes.NewReader(testData(64)), w.contracts(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we still have two packed slabs (buffer limit not reached)
+	pss, err = os.PackedSlabsForUpload(context.Background(), 0, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pss) != 2 {
+		t.Fatal("expected 2 packed slab")
+	}
+
+	// upload one more byte (buffer limit reached)
+	params.path = t.Name() + "4"
+	_, err = w.upload(context.Background(), bytes.NewReader(testData(1)), w.contracts(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we still have two packed slabs (one got uploaded synchronously)
+	pss, err = os.PackedSlabsForUpload(context.Background(), 0, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pss) != 2 {
+		t.Fatal("expected 2 packed slab")
+	}
+
+	// allow some time for the background thread to realise we blocked async
+	// packed slab uploads
+	time.Sleep(time.Second)
+
+	// unblock asynchronous uploads
+	w.unblockAsyncPackedSlabUploads(params)
+
+	// upload 1 byte using the worker
+	params.path = t.Name() + "5"
+	_, err = w.upload(context.Background(), bytes.NewReader(testData(129)), w.contracts(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// allow some time for the thread to pick up the packed slabs
+	time.Sleep(time.Second)
+
+	// assert we uploaded all packed slabs
+	pss, err = os.PackedSlabsForUpload(context.Background(), 0, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pss) != 0 {
+		t.Fatal("expected 0 packed slab")
+	}
 }
 
 func TestUploadShards(t *testing.T) {
@@ -225,10 +286,7 @@ func TestUploadShards(t *testing.T) {
 	ul := w.uploadManager
 
 	// create test data
-	data := make([]byte, 128)
-	if _, err := frand.Read(data); err != nil {
-		t.Fatal(err)
-	}
+	data := testData(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -343,10 +401,7 @@ func TestRefreshUploaders(t *testing.T) {
 	hm := w.hm
 
 	// create test data
-	data := make([]byte, 128)
-	if _, err := frand.Read(data); err != nil {
-		t.Fatal(err)
-	}
+	data := testData(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -444,10 +499,7 @@ func TestUploadRegression(t *testing.T) {
 	dl := w.downloadManager
 
 	// create test data
-	data := make([]byte, 128)
-	if _, err := frand.Read(data); err != nil {
-		t.Fatal(err)
-	}
+	data := testData(128)
 
 	// create upload params
 	params := testParameters(t.Name())
@@ -499,4 +551,12 @@ func testParameters(path string) uploadParameters {
 		contractSet: testContractSet,
 		rs:          testRedundancySettings,
 	}
+}
+
+func testData(n int) []byte {
+	data := make([]byte, n)
+	if _, err := frand.Read(data); err != nil {
+		panic(err)
+	}
+	return data
 }

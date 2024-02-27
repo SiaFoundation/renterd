@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -91,6 +92,20 @@ func (w *testWorker) blockUploads() func() {
 	blockChan := make(chan struct{})
 	w.ulmm.memBlockChan = blockChan
 	return func() { close(blockChan) }
+}
+
+func (w *testWorker) blockAsyncPackedSlabUploads(up uploadParameters) {
+	w.uploadsMu.Lock()
+	defer w.uploadsMu.Unlock()
+	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
+	w.uploadingPackedSlabs[key] = struct{}{}
+}
+
+func (w *testWorker) unblockAsyncPackedSlabUploads(up uploadParameters) {
+	w.uploadsMu.Lock()
+	defer w.uploadsMu.Unlock()
+	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
+	delete(w.uploadingPackedSlabs, key)
 }
 
 func (w *testWorker) contracts() []api.ContractMetadata {
