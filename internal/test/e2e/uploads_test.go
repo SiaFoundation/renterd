@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,20 +18,28 @@ import (
 type blockedReader struct {
 	remaining int
 	data      *bytes.Buffer
-	readChan  chan struct{}
-	blockChan chan struct{}
+
+	blockChan   chan struct{}
+	readChan    chan struct{}
+	readingChan chan struct{}
+
+	once sync.Once
 }
 
 func newBlockedReader(data []byte) *blockedReader {
 	return &blockedReader{
 		remaining: len(data),
 		data:      bytes.NewBuffer(data),
-		blockChan: make(chan struct{}),
-		readChan:  make(chan struct{}),
+
+		blockChan:   make(chan struct{}),
+		readChan:    make(chan struct{}),
+		readingChan: make(chan struct{}),
 	}
 }
 
 func (r *blockedReader) Read(buf []byte) (n int, err error) {
+	r.once.Do(func() { close(r.readingChan) })
+
 	select {
 	case <-r.readChan:
 		<-r.blockChan
@@ -42,6 +51,14 @@ func (r *blockedReader) Read(buf []byte) (n int, err error) {
 		close(r.readChan)
 	}
 	return
+}
+
+func (r *blockedReader) waitForReadStart() {
+	<-r.readingChan
+}
+
+func (r *blockedReader) unblock() {
+	close(r.blockChan)
 }
 
 func TestUploadingSectorsCache(t *testing.T) {

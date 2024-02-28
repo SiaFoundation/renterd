@@ -51,10 +51,14 @@ type (
 		statsOverdrivePct              *stats.DataPoints
 		statsSlabUploadSpeedBytesPerMS *stats.DataPoints
 
+		// NOTE: this context is being cancelled immediately upon worker
+		// shutdown, misuse might prevent graceful shutdown of uploads
 		shutdownCtx context.Context
+		wg          sync.WaitGroup
 
 		mu        sync.Mutex
 		uploaders []*uploader
+		stopped   bool
 	}
 
 	// TODO: should become a metric
@@ -73,8 +77,6 @@ type (
 
 		contractLockPriority int
 		contractLockDuration time.Duration
-
-		shutdownCtx context.Context
 	}
 
 	slabUpload struct {
@@ -152,7 +154,7 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
+func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (string, error) {
 	// apply the options
 	for _, opt := range opts {
 		opt(&up)
@@ -164,9 +166,10 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 
 		// if mime type is still not known, wrap the reader with a mime reader
 		if up.mimeType == "" {
+			var err error
 			up.mimeType, r, err = newMimeReader(r)
 			if err != nil {
-				return
+				return "", err
 			}
 		}
 	}
@@ -362,6 +365,12 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs Cont
 	}
 }
 
+func (mgr *uploadManager) isStopped() bool {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	return mgr.stopped
+}
+
 func (mgr *uploadManager) Stats() uploadManagerStats {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -385,15 +394,35 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 	}
 }
 
-func (mgr *uploadManager) Stop() {
+func (mgr *uploadManager) Stop(ctx context.Context) {
+	// wait on all ongoing uploads to finish
+	doneChan := make(chan struct{})
+	go func() {
+		mgr.wg.Wait()
+		close(doneChan)
+	}()
+
+	// allow the context to interrupt the wait
+	select {
+	case <-ctx.Done():
+	case <-doneChan:
+	}
+
+	// stop uploaders
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, u := range mgr.uploaders {
-		u.Stop(ErrShuttingDown)
+		u.Stop(context.Cause(ctx))
 	}
+	mgr.uploaders = nil
+	mgr.stopped = true
 }
 
 func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, lockPriority int) (bufferSizeLimitReached bool, eTag string, err error) {
+	// register the upload
+	mgr.wg.Add(1)
+	defer mgr.wg.Done()
+
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -417,15 +446,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return false, "", fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
-
-	// defer a function that finishes the upload
-	defer func() {
-		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
-			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
-		}
-		cancel()
-	}()
+	defer mgr.finishUpload(upload.id)
 
 	// create the response channel
 	respChan := make(chan slabUploadResponse)
@@ -443,16 +464,30 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		var slabIndex int
 		for {
 			select {
-			case <-mgr.shutdownCtx.Done():
-				return // interrupted
 			case <-ctx.Done():
 				return // interrupted
 			default:
 			}
+
 			// acquire memory
 			mem := mgr.mm.AcquireMemory(ctx, slabSize)
 			if mem == nil {
 				return // interrupted
+			}
+
+			// check again if we need to abort
+			select {
+			case <-ctx.Done():
+				mem.Release() // release memory if we're interrupted
+				return
+			case <-mgr.shutdownCtx.Done():
+				// if, on worker shutdown, we have yet to initiate the first
+				// slab upload we don't bother finishing the upload and return
+				if slabIndex == 0 {
+					mem.Release()
+					return
+				}
+			default:
 			}
 
 			// read next slab's data
@@ -507,8 +542,6 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	numSlabs := math.MaxInt32
 	for len(responses) < numSlabs {
 		select {
-		case <-mgr.shutdownCtx.Done():
-			return false, "", ErrShuttingDown
 		case <-ctx.Done():
 			return false, "", errUploadInterrupted
 		case numSlabs = <-numSlabsChan:
@@ -561,6 +594,10 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 }
 
 func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem Memory, contracts []api.ContractMetadata, bh uint64, lockPriority int) (err error) {
+	// register the upload
+	mgr.wg.Add(1)
+	defer mgr.wg.Done()
+
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -578,15 +615,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
-
-	// defer a function that finishes the upload
-	defer func() {
-		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
-			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
-		}
-		cancel()
-	}()
+	defer mgr.finishUpload(upload.id)
 
 	// upload the shards
 	sectors, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
@@ -609,6 +638,10 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 }
 
 func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+	// register the upload
+	mgr.wg.Add(1)
+	defer mgr.wg.Done()
+
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -623,15 +656,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
-
-	// defer a function that finishes the upload
-	defer func() {
-		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
-			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
-		}
-		cancel()
-	}()
+	defer mgr.finishUpload(upload.id)
 
 	// upload the shards
 	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
@@ -686,6 +711,24 @@ func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (cand
 	return
 }
 
+func (mgr *uploadManager) finishUpload(uID api.UploadID) error {
+	// if the manager is stopped, meaning we are passed the graceful shutdown
+	// window, we don't finish the upload
+	if mgr.isStopped() {
+		return nil
+	}
+
+	// use a sane context to finish uploads
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	err := mgr.os.FinishUpload(ctx, uID)
+	if err != nil {
+		mgr.logger.Errorf("failed to mark upload %v as finished: %v", uID, err)
+	}
+	return err
+}
+
 func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -710,7 +753,6 @@ func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contra
 		allowed:              allowed,
 		contractLockDuration: mgr.contractLockDuration,
 		contractLockPriority: lockPriority,
-		shutdownCtx:          mgr.shutdownCtx,
 	}, nil
 }
 
@@ -889,8 +931,6 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 loop:
 	for slab.numInflight > 0 && !done {
 		select {
-		case <-u.shutdownCtx.Done():
-			return nil, 0, 0, errors.New("upload stopped")
 		case <-ctx.Done():
 			return nil, 0, 0, ctx.Err()
 		case resp := <-respChan:

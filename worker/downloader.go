@@ -2,8 +2,6 @@ package worker
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,10 +16,6 @@ const (
 	maxConcurrentSectorsPerHost = 3
 )
 
-var (
-	errDownloaderStopped = errors.New("downloader was stopped")
-)
-
 type (
 	downloader struct {
 		host Host
@@ -30,7 +24,6 @@ type (
 		statsSectorDownloadEstimateInMS *stats.DataPoints
 
 		signalWorkChan chan struct{}
-		shutdownCtx    context.Context
 
 		mu                  sync.Mutex
 		consecutiveFailures uint64
@@ -40,7 +33,7 @@ type (
 	}
 )
 
-func newDownloader(ctx context.Context, host Host) *downloader {
+func newDownloader(host Host) *downloader {
 	return &downloader{
 		host: host,
 
@@ -48,7 +41,6 @@ func newDownloader(ctx context.Context, host Host) *downloader {
 		statsDownloadSpeedBytesPerMS:    stats.NoDecay(),
 
 		signalWorkChan: make(chan struct{}, 1),
-		shutdownCtx:    ctx,
 
 		queue: make([]*sectorDownloadReq, 0),
 	}
@@ -58,7 +50,7 @@ func (d *downloader) PublicKey() types.PublicKey {
 	return d.host.PublicKey()
 }
 
-func (d *downloader) Stop() {
+func (d *downloader) Stop(err error) {
 	d.mu.Lock()
 	d.stopped = true
 	d.mu.Unlock()
@@ -69,7 +61,7 @@ func (d *downloader) Stop() {
 			break
 		}
 		if !download.done() {
-			download.fail(errDownloaderStopped)
+			download.fail(err)
 		}
 	}
 }
@@ -179,13 +171,6 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 	reqsChan := make(chan *sectorDownloadReq)
 	workerFn := func() {
 		for req := range reqsChan {
-			// check if we need to abort
-			select {
-			case <-d.shutdownCtx.Done():
-				return
-			default:
-			}
-
 			// update state
 			mu.Lock()
 			if start.IsZero() {
@@ -249,11 +234,7 @@ func (d *downloader) processQueue(hp HostManager) {
 outer:
 	for {
 		// wait for work
-		select {
-		case <-d.signalWorkChan:
-		case <-d.shutdownCtx.Done():
-			return
-		}
+		<-d.signalWorkChan
 
 		for {
 			// try fill a batch of requests
@@ -264,14 +245,8 @@ outer:
 
 			// process the batch
 			doneChan := d.processBatch(batch)
-			for {
-				select {
-				case <-d.shutdownCtx.Done():
-					return
-				case <-doneChan:
-					continue outer
-				}
-			}
+			<-doneChan
+			continue outer
 		}
 	}
 }

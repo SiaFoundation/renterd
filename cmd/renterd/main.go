@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -626,25 +627,48 @@ func main() {
 		logger.Fatal("Fatal autopilot error: " + err.Error())
 	}
 
-	// Give each service a fraction of the total shutdown timeout. One service
-	// timing out shouldn't prevent the others from attempting a shutdown.
-	timeout := cfg.ShutdownTimeout / time.Duration(len(shutdownFns))
-	shutdown := func(fn func(ctx context.Context) error) error {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		return fn(ctx)
-	}
-
-	// Shut down the autopilot first, then the rest of the services in reverse order and then
+	// Define a shutdown function that updates the exit code after shutting down
+	// a service and logs the outcome
 	exitCode := 0
-	for i := len(shutdownFns) - 1; i >= 0; i-- {
-		if err := shutdown(shutdownFns[i].fn); err != nil {
-			logger.Sugar().Errorf("Failed to shut down %v: %v", shutdownFns[i].name, err)
+	shutdown := func(ctx context.Context, fn shutdownFn) {
+		logger.Sugar().Infof("Shutting down %v...", fn.name)
+		start := time.Now()
+		if err := fn.fn(ctx); errors.Is(err, worker.ErrShutdownTimedOut) {
+			logger.Sugar().Errorf("%v shutdown timed out after %v", fn.name, time.Since(start))
+			exitCode = 1
+		} else if err != nil {
+			logger.Sugar().Errorf("%v shutdown failed after %v with err: %v", fn.name, time.Since(start), err)
 			exitCode = 1
 		} else {
-			logger.Sugar().Infof("%v shut down successfully", shutdownFns[i].name)
+			logger.Sugar().Infof("%v shutdown successful after %v", fn.name, time.Since(start))
 		}
 	}
+
+	// Reserve a portion of the shutdown timeout to allow graceful shutdown of
+	// services after a potential timeout from a prior service that took too
+	// long to shut down. This way we allow all services to shut down
+	// gracefully.
+	reserved := (cfg.ShutdownTimeout / 5).Round(5 * time.Second)
+	ctx, cancel := context.WithTimeoutCause(context.Background(), cfg.ShutdownTimeout-reserved, worker.ErrShuttingDown)
+	defer cancel()
+
+	// Shut down the services in reverse order
+	for i := len(shutdownFns) - 1; i >= 0; i-- {
+		// use reserve context if necessary
+		select {
+		case <-ctx.Done():
+			if reserved == 0 {
+				logger.Sugar().Errorf("%v shutdown skipped, node shutdown exceeded %v", shutdownFns[i].name, cfg.ShutdownTimeout)
+				exitCode = 1
+				continue
+			}
+			ctx, _ = context.WithTimeoutCause(context.Background(), reserved, worker.ErrShuttingDown)
+			reserved = 0
+		default:
+		}
+		shutdown(ctx, shutdownFns[i])
+	}
+
 	logger.Info("Shutdown complete")
 	os.Exit(exitCode)
 }

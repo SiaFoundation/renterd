@@ -31,10 +31,14 @@ type (
 		hm     HostManager
 		logger *zap.SugaredLogger
 
-		hk              types.PublicKey
-		siamuxAddr      string
+		hk         types.PublicKey
+		siamuxAddr string
+
 		signalNewUpload chan struct{}
-		shutdownCtx     context.Context
+
+		// NOTE: this context is being cancelled immediately upon worker
+		// shutdown, misuse might prevent graceful shutdown of uploads
+		shutdownCtx context.Context
 
 		mu        sync.Mutex
 		endHeight uint64
@@ -84,20 +88,9 @@ func (u *uploader) Start() {
 outer:
 	for {
 		// wait for work
-		select {
-		case <-u.signalNewUpload:
-		case <-u.shutdownCtx.Done():
-			return
-		}
+		<-u.signalNewUpload
 
 		for {
-			// check if we are stopped
-			select {
-			case <-u.shutdownCtx.Done():
-				return
-			default:
-			}
-
 			// pop the next upload req
 			req := u.pop()
 			if req == nil {
@@ -211,7 +204,8 @@ func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
 	// defer the release
 	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
 	defer func() {
-		ctx, cancel := context.WithTimeout(u.shutdownCtx, 10*time.Second)
+		// use a sane context to release contract locks
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		lock.Release(ctx)
 		cancel()
 	}()

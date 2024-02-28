@@ -123,5 +123,6 @@ func (r *contractSpendingRecorder) flush() {
 			r.contractSpendings = make(map[types.FileContractID]api.ContractSpendingRecord)
 		}
 	}
+
 	r.flushTimer = nil
 }

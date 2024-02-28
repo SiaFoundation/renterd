@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
+	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -2362,6 +2363,11 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero ListSpending")
 	}
 
+	// Shut down everything but the bus to avoid an NDF in the following assertion.
+	cluster.ShutdownS3(context.Background())
+	cluster.ShutdownWorker(context.Background())
+	cluster.ShutdownAutopilot(context.Background())
+
 	// Prune one of the metrics
 	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
 		t.Fatal(err)
@@ -2446,5 +2452,147 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))
 	} else if !bytes.Equal(receivedData, expectedData) {
 		t.Fatal("unexpected data")
+	}
+}
+
+type blockedWriter struct {
+	blockChan   chan struct{}
+	writingChan chan struct{}
+
+	once sync.Once
+
+	mu     sync.Mutex
+	buffer *bytes.Buffer
+}
+
+func newBlockedWriter() *blockedWriter {
+	return &blockedWriter{
+		buffer:      new(bytes.Buffer),
+		blockChan:   make(chan struct{}),
+		writingChan: make(chan struct{}),
+	}
+}
+
+func (r *blockedWriter) Bytes() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.buffer.Bytes()
+}
+
+func (r *blockedWriter) Write(p []byte) (n int, err error) {
+	r.once.Do(func() { close(r.writingChan) })
+
+	<-r.blockChan
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.buffer.Write(p)
+}
+
+func (r *blockedWriter) waitForWriteStart() {
+	<-r.writingChan
+}
+
+func (r *blockedWriter) unblock() {
+	close(r.blockChan)
+}
+
+func TestGracefulShutdown(t *testing.T) {
+	// create cluster
+	cluster := newTestCluster(t, testClusterOptions{hosts: test.RedundancySettings.TotalShards})
+	defer cluster.Shutdown()
+
+	// convenience variables
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// shut down the autopilot, we don't need it
+	cluster.ShutdownAutopilot(context.Background())
+
+	// prepare an object to download
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), api.DefaultBucketName, t.Name(), api.UploadObjectOptions{}))
+
+	// prepare both a reader and a writer that blocks until we unblock them
+	data := make([]byte, 128)
+	frand.Read(data)
+	br := newBlockedReader(data)
+	bw := newBlockedWriter()
+
+	// upload in separate thread
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := w.UploadObject(context.Background(), br, api.DefaultBucketName, t.Name()+"blocked", api.UploadObjectOptions{}); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	// download in separate thread
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := w.DownloadObject(context.Background(), bw, api.DefaultBucketName, t.Name(), api.DownloadObjectOptions{}); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	// wait until we are sure both requests are blocked
+	br.waitForReadStart()
+	bw.waitForWriteStart()
+
+	// shut the worker down
+	shutdownDone := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cluster.ShutdownWorker(ctx)
+		close(shutdownDone)
+		cancel()
+	}()
+
+	// assert shutdown is blocked
+	select {
+	case <-shutdownDone:
+		tt.Fatal("shut down")
+	case <-time.After(time.Second):
+	}
+
+	// unblock the download and upload separately, this allows us to check
+	// for ErrShuttingDown explicitly, unblocking both at the same time
+	// would shut the worker down along with the server resulting in a race
+	// between either ErrShuttingDown or 'connection refused' errors
+	br.unblock()
+
+	// assert uploads after shutdown fail
+	_, err := w.UploadObject(context.Background(), br, api.DefaultBucketName, t.Name()+"blocked", api.UploadObjectOptions{})
+	if err != nil && strings.Contains(err.Error(), worker.ErrShuttingDown.Error()) {
+		t.Error("new uploads should fail, err:", err)
+	}
+
+	// assert downloads after shutdown fail
+	var buf bytes.Buffer
+	err = w.DownloadObject(context.Background(), &buf, api.DefaultBucketName, t.Name(), api.DownloadObjectOptions{})
+	if err != nil && strings.Contains(err.Error(), worker.ErrShuttingDown.Error()) {
+		t.Error("new downloads should fail, err:", err)
+	}
+
+	// unblock the upload
+	bw.unblock()
+
+	// wait for all goroutines to finish
+	wg.Wait()
+
+	// check the download succeeded
+	if string(bw.Bytes()) != t.Name() {
+		t.Fatal("data mismatch")
+	}
+
+	// check the upload succeeded, we can use the bus for that
+	_, err = b.Object(context.Background(), api.DefaultBucketName, t.Name()+"blocked", api.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

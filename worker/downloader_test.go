@@ -12,11 +12,10 @@ func TestDownloaderStopped(t *testing.T) {
 
 	// convenience variables
 	dm := w.downloadManager
-	h := hosts[0]
 
 	dm.refreshDownloaders(w.Contracts())
-	dl := w.downloadManager.downloaders[h.PublicKey()]
-	dl.Stop()
+	dl := dm.downloaders[hosts[0].PublicKey()]
+	dl.Stop(ErrShuttingDown)
 
 	req := sectorDownloadReq{
 		resps: &sectorResponses{

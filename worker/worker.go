@@ -52,7 +52,8 @@ const (
 )
 
 var (
-	ErrShuttingDown = errors.New("worker is shutting down")
+	ErrShutdownTimedOut = errors.New("worker shutdown timed out")
+	ErrShuttingDown     = errors.New("worker is shutting down")
 )
 
 // re-export the client
@@ -217,7 +218,7 @@ type worker struct {
 	contractLockingDuration  time.Duration
 
 	shutdownCtx       context.Context
-	shutdownCtxCancel context.CancelFunc
+	shutdownCtxCancel context.CancelCauseFunc
 
 	logger *zap.SugaredLogger
 }
@@ -243,11 +244,14 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, f
 }
 
 func (w *worker) registerAlert(a alerts.Alert) {
-	ctx, cancel := context.WithTimeout(w.shutdownCtx, time.Minute)
-	if err := w.alerts.RegisterAlert(ctx, a); err != nil {
+	// apply a sane timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	err := w.alerts.RegisterAlert(ctx, a)
+	if err != nil {
 		w.logger.Errorf("failed to register alert, err: %v", err)
 	}
-	cancel()
 }
 
 func (w *worker) rhpScanHandler(jc jape.Context) {
@@ -1317,7 +1321,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	l = l.Named("worker").Named(id)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
@@ -1345,7 +1349,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *worker) Handler() http.Handler {
-	return jape.Mux(map[string]jape.Handler{
+	return jape.Mux(shutdownMiddleware(w.shutdownCtx, map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
@@ -1373,21 +1377,28 @@ func (w *worker) Handler() http.Handler {
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
-	})
+	}))
 }
 
 // Shutdown shuts down the worker.
 func (w *worker) Shutdown(ctx context.Context) error {
 	// cancel shutdown context
-	w.shutdownCtxCancel()
+	w.shutdownCtxCancel(ErrShuttingDown)
 
 	// stop uploads and downloads
-	w.downloadManager.Stop()
-	w.uploadManager.Stop()
+	w.downloadManager.Stop(ctx)
+	w.uploadManager.Stop(ctx)
 
 	// stop recorders
 	w.contractSpendingRecorder.Stop(ctx)
-	return nil
+
+	// return error on timeout
+	select {
+	case <-ctx.Done():
+		return ErrShutdownTimedOut
+	default:
+		return nil
+	}
 }
 
 func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
@@ -1480,6 +1491,26 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		w.logger.Errorf("failed to record host scan: %v", scanErr)
 	}
 	return settings, pt, duration, err
+}
+
+func shutdownMiddleware(shutdownCtx context.Context, routes map[string]jape.Handler) map[string]jape.Handler {
+	for route, handler := range routes {
+		routes[route] = jape.Adapt(func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// if the shutdown context has been cancelled, return a 503 to
+				// ensure we don't process any new incoming request during
+				// graceful shutdown
+				select {
+				case <-shutdownCtx.Done():
+					http.Error(w, ErrShuttingDown.Error(), http.StatusServiceUnavailable)
+					return
+				default:
+					h.ServeHTTP(w, r)
+				}
+			})
+		})(handler)
+	}
+	return routes
 }
 
 func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {

@@ -25,8 +25,9 @@ const (
 )
 
 var (
-	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
 	errDownloadCancelled      = errors.New("download was cancelled")
+	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
+	errDownloaderStopped      = errors.New("downloader was stopped")
 )
 
 type (
@@ -42,11 +43,20 @@ type (
 		statsOverdrivePct                *stats.DataPoints
 		statsSlabDownloadSpeedBytesPerMS *stats.DataPoints
 
+		// NOTE: this context is being cancelled immediately upon worker
+		// shutdown, misuse might prevent graceful shutdown of downloads
 		shutdownCtx context.Context
+		wg          sync.WaitGroup
 
 		mu            sync.Mutex
 		downloaders   map[types.PublicKey]*downloader
 		lastRecompute time.Time
+	}
+
+	downloadManagerStats struct {
+		avgDownloadSpeedMBPS float64
+		avgOverdrivePct      float64
+		downloaders          map[types.PublicKey]downloaderStats
 	}
 
 	downloaderStats struct {
@@ -88,6 +98,12 @@ type (
 		err              error
 	}
 
+	slabSlice struct {
+		object.SlabSlice
+		PartialSlab bool
+		Data        []byte
+	}
+
 	sectorDownloadReq struct {
 		ctx context.Context
 
@@ -118,12 +134,6 @@ type (
 	sectorInfo struct {
 		object.Sector
 		index int
-	}
-
-	downloadManagerStats struct {
-		avgDownloadSpeedMBPS float64
-		avgOverdrivePct      float64
-		downloaders          map[types.PublicKey]downloaderStats
 	}
 )
 
@@ -156,6 +166,10 @@ func newDownloadManager(ctx context.Context, hm HostManager, mm MemoryManager, o
 }
 
 func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, contracts []api.ContractMetadata) (err error) {
+	// register the download in the waitgroup
+	mgr.wg.Add(1)
+	defer mgr.wg.Done()
+
 	// calculate what slabs we need
 	var ss []slabSlice
 	for _, s := range o.Slabs {
@@ -232,8 +246,6 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 			select {
 			case <-ctx.Done():
 				return
-			case <-mgr.shutdownCtx.Done():
-				return
 			default:
 			}
 
@@ -261,6 +273,23 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				return // interrupted
 			}
 
+			// check again if we need to abort
+			select {
+			case <-ctx.Done():
+				mem.Release() // release memory if we're interrupted
+				return
+			case <-mgr.shutdownCtx.Done():
+				// if we are in the middle of a download while shutting down we
+				// attempt to gracefully shut down and complete the download
+				// first, if we have yet to start the download we want to avoid
+				// filling up the queues with jobs
+				if slabIndex == 0 {
+					mem.Release() // relase memory if we're shutting down
+					return
+				}
+			default:
+			}
+
 			// launch the download
 			wg.Add(1)
 			go func(index int) {
@@ -275,7 +304,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 					err:              err,
 				}:
 				case <-ctx.Done():
-					mem.Release() // relase memory if we're interrupted
+					mem.Release() // release memory if we're interrupted
 				}
 			}(slabIndex)
 		}
@@ -289,8 +318,6 @@ outer:
 	for {
 		var resp *slabDownloadResponse
 		select {
-		case <-mgr.shutdownCtx.Done():
-			return ErrShuttingDown
 		case <-ctx.Done():
 			return errDownloadCancelled
 		case resp = <-responseChan:
@@ -355,6 +382,10 @@ outer:
 }
 
 func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, bool, error) {
+	// register the download in the waitgroup
+	mgr.wg.Add(1)
+	defer mgr.wg.Done()
+
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
 
@@ -421,12 +452,27 @@ func (mgr *downloadManager) Stats() downloadManagerStats {
 	}
 }
 
-func (mgr *downloadManager) Stop() {
+func (mgr *downloadManager) Stop(ctx context.Context) {
+	// wait on all ongoing downloads to finish
+	doneChan := make(chan struct{})
+	go func() {
+		mgr.wg.Wait()
+		close(doneChan)
+	}()
+
+	// allow the context to interrupt the wait
+	select {
+	case <-ctx.Done():
+	case <-doneChan:
+	}
+
+	// stop all downloaders
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, d := range mgr.downloaders {
-		d.Stop()
+		d.Stop(context.Cause(ctx))
 	}
+	mgr.downloaders = nil
 }
 
 func (mgr *downloadManager) tryRecomputeStats() {
@@ -481,7 +527,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	for hk := range mgr.downloaders {
 		_, wanted := want[hk]
 		if !wanted {
-			mgr.downloaders[hk].Stop()
+			mgr.downloaders[hk].Stop(errDownloaderStopped)
 			delete(mgr.downloaders, hk)
 			continue
 		}
@@ -491,11 +537,8 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 
 	// update downloaders
 	for _, c := range want {
-		// create a host
-		host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
-		downloader := newDownloader(mgr.shutdownCtx, host)
-		mgr.downloaders[c.HostKey] = downloader
-		go downloader.processQueue(mgr.hm)
+		mgr.downloaders[c.HostKey] = newDownloader(mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr))
+		go mgr.downloaders[c.HostKey].processQueue(mgr.hm)
 	}
 }
 
@@ -728,8 +771,6 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 loop:
 	for s.inflight() > 0 && !done {
 		select {
-		case <-s.mgr.shutdownCtx.Done():
-			return nil, false, errors.New("download stopped")
 		case <-ctx.Done():
 			return nil, false, ctx.Err()
 		case <-resps.c:
@@ -897,12 +938,6 @@ func (mgr *downloadManager) fastest(hosts []types.PublicKey) (fastest *downloade
 		}
 	}
 	return
-}
-
-type slabSlice struct {
-	object.SlabSlice
-	PartialSlab bool
-	Data        []byte
 }
 
 func slabsForDownload(slabs []slabSlice, offset, length uint64) []slabSlice {

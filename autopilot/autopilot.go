@@ -202,6 +202,13 @@ func (ap *Autopilot) Run() error {
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
 	for {
+		// check for shutdown right before starting a new iteration
+		select {
+		case <-ap.shutdownCtx.Done():
+			return nil
+		default:
+		}
+
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
@@ -220,7 +227,7 @@ func (ap *Autopilot) Run() error {
 					close(tickerFired)
 					return
 				}
-				ap.logger.Error("autopilot stopped before consensus was synced")
+				ap.logger.Info("autopilot stopped before consensus was synced")
 				return
 			} else if blocked {
 				if scanning, _ := ap.s.Status(); !scanning {
@@ -234,7 +241,7 @@ func (ap *Autopilot) Run() error {
 					close(tickerFired)
 					return
 				}
-				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+				ap.logger.Info("autopilot stopped before it was able to confirm it was configured in the bus")
 				return
 			}
 
