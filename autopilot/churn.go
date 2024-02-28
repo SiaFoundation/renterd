@@ -32,10 +32,10 @@ func (c *accumulatedChurn) Alert(name string) alerts.Alert {
 		Severity: alerts.SeverityInfo,
 		Message:  "Contract set changed",
 		Data: map[string]any{
-			"name":          name,
-			"set_additions": c.additions,
-			"set_removals":  c.removals,
-			"hint":          hint,
+			"name":         name,
+			"setAdditions": c.additions,
+			"setRemovals":  c.removals,
+			"hint":         hint,
 		},
 		Timestamp: time.Now(),
 	}
