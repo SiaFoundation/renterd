@@ -69,44 +69,21 @@ func NewClient(address, password string) *Client {
 type (
 	Bus interface {
 		alerts.Alerter
-		consensusState
+		ConsensusState
 		webhooks.Broadcaster
 
 		AccountStore
+		ContractLocker
 		ContractStore
+		HostStore
 		ObjectStore
+		SettingStore
 
-		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
-		SyncerPeers(ctx context.Context) (resp []string, err error)
-
-		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
-		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
-		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-
-		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
-		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-
-		GougingParams(ctx context.Context) (api.GougingParams, error)
-		UploadParams(ctx context.Context) (api.UploadParams, error)
-
-		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
-		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
-		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
-		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
-
-		WalletDiscard(ctx context.Context, txn types.Transaction) error
-		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
-		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-
-		Bucket(_ context.Context, bucket string) (api.Bucket, error)
+		Syncer
+		Wallet
 	}
 
+	// An AccountStore manages ephemaral accounts state.
 	AccountStore interface {
 		Accounts(ctx context.Context) ([]api.Account, error)
 		AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
@@ -120,9 +97,19 @@ type (
 	}
 
 	ContractStore interface {
-		ContractLocker
-
+		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+	}
+
+	HostStore interface {
+		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
+		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
+		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
+
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	}
 
 	ObjectStore interface {
@@ -140,9 +127,34 @@ type (
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+
+		// NOTE: used by worker
+		Bucket(_ context.Context, bucket string) (api.Bucket, error)
+		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
+		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
+		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 	}
 
-	consensusState interface {
+	SettingStore interface {
+		GougingParams(ctx context.Context) (api.GougingParams, error)
+		UploadParams(ctx context.Context) (api.UploadParams, error)
+	}
+
+	Syncer interface {
+		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
+		SyncerPeers(ctx context.Context) (resp []string, err error)
+	}
+
+	Wallet interface {
+		WalletDiscard(ctx context.Context, txn types.Transaction) error
+		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
+		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
+		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+	}
+
+	ConsensusState interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
 )
@@ -183,7 +195,8 @@ func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
-	alerts          alerts.Alerter
+	alerts alerts.Alerter
+
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -1274,7 +1287,7 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, downloadMaxMemory, uploadMaxMemory, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1294,6 +1307,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
+	l = l.Named("worker").Named(id)
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
@@ -1302,7 +1316,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
-		logger:                  l.Sugar().Named("worker").Named(id),
+		logger:                  l.Sugar(),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]bool),
 		shutdownCtx:             ctx,
@@ -1313,8 +1327,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initPriceTables()
 	w.initTransportPool()
 
-	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
-	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
+	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Named("downloadmanager").Sugar())
+	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
 
 	w.initContractSpendingRecorder(busFlushInterval)
 	return w, nil

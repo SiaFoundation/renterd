@@ -132,7 +132,7 @@ func (w *worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTi
 		panic("download manager already initialized") // developer error
 	}
 
-	mm := newMemoryManager(logger, maxMemory)
+	mm := newMemoryManager(logger.Named("memorymanager"), maxMemory)
 	w.downloadManager = newDownloadManager(w.shutdownCtx, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
 }
 
