@@ -1041,7 +1041,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if err := jc.Check("couldn't upload object", err); err != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 			}
 		}
@@ -1179,7 +1179,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't upload object", err) != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
 			}
 		}
