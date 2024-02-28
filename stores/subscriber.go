@@ -24,7 +24,9 @@ type (
 		logger             *zap.SugaredLogger
 		persistInterval    time.Duration
 		retryIntervals     []time.Duration
-		walletAddress      types.Address
+
+		// WalletDB related fields.
+		walletAddress types.Address
 
 		// buffered state
 		mu             sync.Mutex
@@ -45,7 +47,7 @@ type (
 	}
 )
 
-func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address, ancmtMaxAge time.Duration) (*chainSubscriber, error) {
+func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, walletAddress types.Address, ancmtMaxAge time.Duration) (*chainSubscriber, error) {
 	var activeFCIDs, archivedFCIDs []fileContractID
 	if err := db.Model(&dbContract{}).
 		Select("fcid").
@@ -68,9 +70,10 @@ func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Du
 		db:                 db,
 		logger:             logger,
 		retryIntervals:     intvls,
-		walletAddress:      addr,
-		lastSave:           time.Now(),
-		persistInterval:    persistInterval,
+
+		walletAddress:   walletAddress,
+		lastSave:        time.Now(),
+		persistInterval: persistInterval,
 
 		contractState:  make(map[types.Hash256]contractState),
 		outputs:        make(map[types.Hash256]outputChange),

@@ -73,19 +73,12 @@ type (
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
 
-		// HostDB related fields
-		announcementMaxAge time.Duration
-
 		// ObjectDB related fields
-		slabBufferMgr    *SlabBufferManager
-		slabPruneSigChan chan struct{}
+		slabBufferMgr *SlabBufferManager
 
 		// SettingsDB related fields
 		settingsMu sync.Mutex
 		settings   map[string]string
-
-		// WalletDB related fields.
-		walletAddress types.Address
 
 		retryTransactionIntervals []time.Duration
 
@@ -221,18 +214,14 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		alerts:           cfg.Alerts,
-		cs:               cs,
-		db:               db,
-		dbMetrics:        dbMetrics,
-		logger:           l,
-		hasAllowlist:     allowlistCnt > 0,
-		hasBlocklist:     blocklistCnt > 0,
-		settings:         make(map[string]string),
-		slabPruneSigChan: make(chan struct{}, 1),
-		walletAddress:    cfg.WalletAddress,
-
-		announcementMaxAge: cfg.AnnouncementMaxAge,
+		alerts:       cfg.Alerts,
+		cs:           cs,
+		db:           db,
+		dbMetrics:    dbMetrics,
+		logger:       l,
+		hasAllowlist: allowlistCnt > 0,
+		hasBlocklist: blocklistCnt > 0,
+		settings:     make(map[string]string),
 
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
