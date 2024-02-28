@@ -123,7 +123,7 @@ func (s *SQLStore) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	}
 
 	var dbEvents []dbWalletEvent
-	err := s.db.Raw("SELECT * FROM events ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+	err := s.db.Raw("SELECT * FROM wallet_events ORDER BY timestamp DESC LIMIT ? OFFSET ?",
 		limit, offset).Scan(&dbEvents).
 		Error
 	if err != nil {
