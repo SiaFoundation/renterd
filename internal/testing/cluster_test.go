@@ -2239,46 +2239,51 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 }
 
 func TestWalletFormUnconfirmed(t *testing.T) {
-	// New cluster with autopilot disabled
+	// create cluster without autopilot
 	cfg := clusterOptsDefault
 	cfg.skipSettingAutopilot = true
 	cluster := newTestCluster(t, cfg)
 	defer cluster.Shutdown()
+
+	// convenience variables
 	b := cluster.Bus
 	tt := cluster.tt
 
-	// Add a host.
+	// add a host (non-blocking)
 	cluster.AddHosts(1)
 
-	// Send the full balance back to the wallet to make sure it's all
-	// unconfirmed.
+	// send all money to ourselves, making sure it's unconfirmed
+	feeReserve := types.Siacoins(1).Div64(100)
 	wr, err := b.Wallet(context.Background())
 	tt.OK(err)
 	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
 		{
 			Address: wr.Address,
-			Value:   wr.Confirmed.Sub(types.Siacoins(1).Div64(100)), // leave some for the fee
+			Value:   wr.Confirmed.Sub(feeReserve), // leave some for the fee
 		},
 	}, false))
 
-	// There should be hardly any money in the wallet.
+	// check wallet only has the reserve in the confirmed balance
 	wr, err = b.Wallet(context.Background())
 	tt.OK(err)
-	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(types.Siacoins(1).Div64(100)) > 0 {
+	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(feeReserve) > 0 {
 		t.Fatal("wallet should have hardly any confirmed balance")
 	}
+	t.Logf("%+v", wr)
+	t.Log("Confirmed", wr.Confirmed)
+	t.Log("Unconfirmed", wr.Unconfirmed)
 
-	// There shouldn't be any contracts at this point.
+	// there shouldn't be any contracts yet
 	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 0 {
 		t.Fatal("expected 0 contracts", len(contracts))
 	}
 
-	// Enable autopilot by setting it.
+	// enable the autopilot by configuring it
 	cluster.UpdateAutopilotConfig(context.Background(), testAutopilotConfig)
 
-	// Wait for a contract to form.
+	// wait for a contract to form
 	contractsFormed := cluster.WaitForContracts()
 	if len(contractsFormed) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))

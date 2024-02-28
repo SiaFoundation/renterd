@@ -122,7 +122,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	cm := chain.NewManager(store, state)
 
 	// create wallet
-	w, err := NewSingleAddressWallet(seed, cm, sqlStore, sqlStore, logger.Named("wallet").Sugar(), cwallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	w, err := NewSingleAddressWallet(seed, cm.TipState().BlockInterval(), cm, sqlStore, sqlStore, logger.Named("wallet").Sugar(), cwallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, err
 	}
