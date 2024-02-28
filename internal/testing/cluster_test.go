@@ -594,16 +594,28 @@ func TestUploadDownloadBasic(t *testing.T) {
 	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 
-	// broadcast the revision for each contract and assert the revision height
-	// is 0.
+	// assert contracts haven't been revised
 	for _, c := range contracts {
 		if c.RevisionHeight != 0 {
-			t.Fatal("revision height should be 0")
+			t.Fatalf("contract %v 's revision height should be 0 but is %d", c.ID, c.RevisionHeight)
 		}
-		tt.OK(w.RHPBroadcast(context.Background(), c.ID))
 	}
 
-	// mine a block to get the revisions mined.
+	// broadcast the revision for each contract, we empty the pool first to
+	// ensure the revision aren't mined together with contract formations, this
+	// would not be considered a revision and the revision height would not be
+	// updated.
+	tt.Retry(10, 100*time.Millisecond, func() error {
+		txns := cluster.cm.PoolTransactions()
+		if len(txns) > 0 {
+			cluster.MineBlocks(1)
+			return errors.New("pool not empty")
+		}
+		return nil
+	})
+	for _, c := range contracts {
+		tt.OK(w.RHPBroadcast(context.Background(), c.ID))
+	}
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.
@@ -616,7 +628,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 		// assert the revision height was updated.
 		for _, c := range contracts {
 			if c.RevisionHeight == 0 {
-				return errors.New("revision height should be > 0")
+				return fmt.Errorf("%v should have been revised", c.ID)
 			}
 		}
 		return nil

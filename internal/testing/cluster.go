@@ -535,21 +535,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		// TODO: latest hardforkheight is wrong here, and we should be able to
-		// mine 144 passed that height but if we don't mine more we get
-		// "invalid: siacoin input 25 has immature parent"
-		cluster.MineBlocks(latestHardforkHeight + 200)
+		// TODO: should need the *2 leeway
+		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + 144*2)
 		tt.Retry(1000, 100*time.Millisecond, func() error {
-			resp, err := busClient.ConsensusState(ctx)
-			if err != nil {
+			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
+			} else if !cs.Synced {
+				return fmt.Errorf("chain not synced: %v", cs.Synced)
 			}
 
-			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
-				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
-			}
-			res, err := cluster.Bus.Wallet(ctx)
-			if err != nil {
+			if res, err := cluster.Bus.Wallet(ctx); err != nil {
 				return err
 			} else if res.Confirmed.IsZero() {
 				tt.Fatal("wallet not funded")
@@ -562,7 +557,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(testContractSet, nHosts)
-		_ = cluster.WaitForAccounts()
+		cluster.WaitForAccounts()
 	}
 
 	return cluster
@@ -697,6 +692,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 
 func (c *TestCluster) WaitForContracts() []api.Contract {
 	c.tt.Helper()
+
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {

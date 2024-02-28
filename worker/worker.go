@@ -469,6 +469,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("could not fetch revision", err) != nil {
 		return
 	}
+
 	// Create txn with revision.
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{rev.Revision},
