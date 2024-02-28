@@ -1845,13 +1845,19 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 
 	// Update slab.
 	return ss.retryTransaction(func(tx *gorm.DB) (err error) {
-		// fetch contract set
-		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
+		// update slab
+		if err := tx.Model(&dbSlab{}).
+			Where("key", key).
+			Updates(map[string]interface{}{
+				"db_contract_set_id": gorm.Expr("(SELECT id FROM contract_sets WHERE name = ?)", contractSet),
+				"health_valid_until": time.Now().Unix(),
+				"health":             1,
+			}).
+			Error; err != nil {
 			return err
 		}
 
-		// find all contracts of that shard
+		// find all used contracts
 		contracts, err := fetchUsedContracts(tx, usedContracts)
 		if err != nil {
 			return err
@@ -1883,18 +1889,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			if shard.Root != types.Hash256(slab.Shards[i].Root) {
 				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root[:])
 			}
-		}
-
-		// update fields
-		if err := tx.Model(&slab).
-			Where(&slab).
-			Updates(map[string]interface{}{
-				"db_contract_set_id": cs.ID,
-				"health_valid_until": time.Now().Unix(),
-				"health":             1,
-			}).
-			Error; err != nil {
-			return err
 		}
 
 		// prepare sectors to update
