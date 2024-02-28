@@ -14,6 +14,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	contractMetricGranularity = 5 * time.Minute
+)
+
 type (
 	// dbContractMetric tracks information about a contract's funds.  It is
 	// supposed to be reported by a worker every time a contract is revised.
@@ -246,6 +250,21 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 		}
 	}
 	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+		// delete any existing metric for the same contract that has happened
+		// within the same 30 seconds window by diving the timestamp by 30 seconds and use integer division.
+		for _, metric := range metrics {
+			intervalStart := metric.Timestamp.Std().Truncate(contractMetricGranularity)
+			intervalEnd := intervalStart.Add(contractMetricGranularity)
+			err := tx.
+				Where("timestamp >= ?", unixTimeMS(intervalStart)).
+				Where("timestamp < ?", unixTimeMS(intervalEnd)).
+				Where("fcid", fileContractID(metric.ContractID)).
+				Delete(&dbContractMetric{}).
+				Error
+			if err != nil {
+				return err
+			}
+		}
 		return tx.Create(&dbMetrics).Error
 	})
 }
