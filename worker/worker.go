@@ -211,7 +211,7 @@ type worker struct {
 	transportPoolV3 *transportPoolV3
 
 	uploadsMu            sync.Mutex
-	uploadingPackedSlabs map[string]bool
+	uploadingPackedSlabs map[string]struct{}
 
 	contractSpendingRecorder ContractSpendingRecorder
 	contractLockingDuration  time.Duration
@@ -220,6 +220,15 @@ type worker struct {
 	shutdownCtxCancel context.CancelFunc
 
 	logger *zap.SugaredLogger
+}
+
+func (w *worker) isStopped() bool {
+	select {
+	case <-w.shutdownCtx.Done():
+		return true
+	default:
+	}
+	return false
 }
 
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
@@ -1318,7 +1327,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
 		startTime:               time.Now(),
-		uploadingPackedSlabs:    make(map[string]bool),
+		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             ctx,
 		shutdownCtxCancel:       cancel,
 	}
