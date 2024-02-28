@@ -219,7 +219,7 @@ func (cs *chainSubscriber) commit() error {
 				err = applyUnappliedEventRemovals(tx, tc.event.EventID)
 			}
 			if err != nil {
-				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
+				return fmt.Errorf("%w; failed to apply unapplied event change", err)
 			}
 		}
 		for fcid, cs := range cs.contractState {
@@ -267,6 +267,7 @@ func (cs *chainSubscriber) tryCommit() error {
 		return nil
 	} else if err := cs.commit(); err != nil {
 		cs.logger.Errorw("failed to commit chain update", zap.Error(err))
+		return err
 	}
 
 	// force a persist if no block has been received for some time

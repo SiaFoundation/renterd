@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type (
@@ -168,7 +169,11 @@ func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
 }
 
 func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbWalletOutput) error {
-	return tx.Create(&sco).Error
+	return tx.
+		Clauses(clause.OnConflict{
+			DoNothing: true,
+			Columns:   []clause.Column{{Name: "output_id"}},
+		}).Create(&sco).Error
 }
 
 func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
@@ -178,7 +183,11 @@ func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
 }
 
 func applyUnappliedEventAdditions(tx *gorm.DB, event dbWalletEvent) error {
-	return tx.Create(&event).Error
+	return tx.
+		Clauses(clause.OnConflict{
+			DoNothing: true,
+			Columns:   []clause.Column{{Name: "event_id"}},
+		}).Create(&event).Error
 }
 
 func applyUnappliedEventRemovals(tx *gorm.DB, eventID hash256) error {

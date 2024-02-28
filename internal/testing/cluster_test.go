@@ -960,11 +960,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	dir := t.TempDir()
-	cluster := newTestCluster(t, testClusterOptions{
-		dir:    dir,
-		logger: zap.NewNop(),
-	})
+	cluster := newTestCluster(t, testClusterOptions{})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 

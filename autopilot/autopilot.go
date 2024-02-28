@@ -462,11 +462,17 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-	wallet, err := ap.bus.Wallet(ctx)
-	cancel()
+	// no need to schedule a trigger if we're stopped
+	if ap.isStopped() {
+		return nil
+	}
+
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
+	defer cancel()
 
 	// no need to schedule a trigger if the wallet is already funded
+	wallet, err := ap.bus.Wallet(ctx)
 	if err != nil {
 		return err
 	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
