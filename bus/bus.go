@@ -371,8 +371,6 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 		return
 	}
 
-	// TODO: should we extend the API with a way to accept multiple blocks at once?
-	// TODO: should we deprecate this route in favor of /addblocks
 	if jc.Check("failed to accept block", b.cm.AddBlocks([]types.Block{block})) != nil {
 		return
 	}
@@ -388,7 +386,6 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 }
 
 func (b *bus) syncerAddrHandler(jc jape.Context) {
-	// TODO: have syncer accept contexts
 	jc.Encode(b.s.Addr())
 }
 
@@ -419,7 +416,6 @@ func (b *bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
-	// TODO: have chain manager accept contexts
 	jc.Encode(b.cm.RecommendedFee())
 }
 
@@ -433,7 +429,6 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	// TODO: should we handle 'known' return value
 	_, err := b.cm.AddPoolTransactions(txnSet)
 	if jc.Check("couldn't broadcast transaction set", err) != nil {
 		return
@@ -596,8 +591,6 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		return
 	}
 
-	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)
-
 	jc.Encode(api.WalletFundResponse{
 		Transaction: txn,
 		ToSign:      toSign,
@@ -635,7 +628,6 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		ids = append(ids, txns[i].ID())
 	}
 
-	// TODO: should we handle 'known' return parameter here
 	_, err = b.cm.AddPoolTransactions(txns)
 	if jc.Check("couldn't broadcast the transaction", err) != nil {
 		b.w.ReleaseInputs(txns...)
@@ -680,7 +672,6 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 
 	b.w.SignTransaction(&txn, toSign, ExplicitCoveredFields(txn))
 
-	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)
 	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
 
@@ -726,8 +717,6 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
-
-	// TODO: UnconfirmedParents needs a ctx (be sure to release inputs on err)
 
 	jc.Encode(api.WalletPrepareRenewResponse{
 		ToSign:         toSign,
@@ -2322,8 +2311,6 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 
 // ExplicitCoveredFields returns a CoveredFields that covers all elements
 // present in txn.
-//
-// TODO: where should this live
 func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
 	for i := range txn.SiacoinInputs {
 		cf.SiacoinInputs = append(cf.SiacoinInputs, uint64(i))

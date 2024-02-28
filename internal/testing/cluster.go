@@ -414,7 +414,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bStopFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -424,7 +424,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	var busShutdownFns []func(context.Context) error
 	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
-	busShutdownFns = append(busShutdownFns, bStopFn)
+	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
 	w, wShutdownFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
@@ -535,7 +535,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		// TODO: should need the *2 leeway
+		// TODO: should not need the *2 leeway
 		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + 144*2)
 		tt.Retry(1000, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {

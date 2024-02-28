@@ -70,7 +70,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 
 	// create bus
 	network, genesis := build.Network()
-	b, cleanup, _, err := node.NewBus(node.BusConfig{
+	b, shutdown, _, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
@@ -103,7 +103,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 
 	shutdownFn := func(ctx context.Context) error {
 		server.Shutdown(ctx)
-		return cleanup(ctx)
+		return shutdown(ctx)
 	}
 	return client, serveFn, shutdownFn, nil
 }

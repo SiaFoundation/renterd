@@ -2,6 +2,9 @@
 DROP TABLE IF EXISTS `siacoin_elements`;
 DROP TABLE IF EXISTS `transactions`;
 
+-- drop column
+ALTER TABLE `consensus_infos` DROP COLUMN `cc_id`;
+
 -- dbWalletEvent
 CREATE TABLE `wallet_events` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

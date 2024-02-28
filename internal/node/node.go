@@ -30,9 +30,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// RHP4 TODOs:
-// - get rid of dbConsensusInfo
-// - get rid of returned chain manager in bus constructor
+// TODOs:
 // - pass last tip to AddSubscriber
 // - all wallet metrics support
 // - add UPNP support

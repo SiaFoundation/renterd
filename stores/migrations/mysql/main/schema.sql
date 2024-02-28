@@ -70,7 +70,6 @@ CREATE TABLE `buffered_slabs` (
 CREATE TABLE `consensus_infos` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `cc_id` longblob,
   `height` bigint unsigned DEFAULT NULL,
   `block_id` longblob,
   PRIMARY KEY (`id`)

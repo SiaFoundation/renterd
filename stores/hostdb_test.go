@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -992,7 +991,37 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 
 // TestAnnouncementMaxAge verifies old announcements are ignored.
 func TestAnnouncementMaxAge(t *testing.T) {
-	t.Skip("TODO: rewrite")
+	db := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer db.Close()
+
+	// assert we don't have any announcements
+	if len(db.cs.announcements) != 0 {
+		t.Fatal("expected 0 announcements")
+	}
+
+	// fabricate two blocks with announcements, one before the cutoff and one after
+	b1 := types.Block{
+		Transactions: []types.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1000"))},
+		Timestamp:    time.Now().Add(-db.cs.announcementMaxAge).Add(-time.Second),
+	}
+	b2 := types.Block{
+		Transactions: []types.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1001"))},
+		Timestamp:    time.Now().Add(-db.cs.announcementMaxAge).Add(time.Second),
+	}
+
+	// process b1, expect no announcements
+	db.cs.processChainApplyUpdateHostDB(&chain.ApplyUpdate{Block: b1})
+	if len(db.cs.announcements) != 0 {
+		t.Fatal("expected 0 announcements")
+	}
+
+	// process b2, expect 1 announcement
+	db.cs.processChainApplyUpdateHostDB(&chain.ApplyUpdate{Block: b2})
+	if len(db.cs.announcements) != 1 {
+		t.Fatal("expected 1 announcement")
+	} else if db.cs.announcements[0].HostAnnouncement.NetAddress != "foo.com:1001" {
+		t.Fatal("unexpected announcement")
+	}
 }
 
 // addTestHosts adds 'n' hosts to the db and returns their keys.
@@ -1083,6 +1112,6 @@ func newTestHostAnnouncement(na string) (chain.HostAnnouncement, types.PrivateKe
 	return a, sk
 }
 
-func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) stypes.Transaction {
-	return stypes.Transaction{ArbitraryData: [][]byte{ha.ToArbitraryData(sk)}}
+func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) types.Transaction {
+	return types.Transaction{ArbitraryData: [][]byte{ha.ToArbitraryData(sk)}}
 }

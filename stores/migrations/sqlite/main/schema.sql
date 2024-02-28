@@ -101,7 +101,7 @@ CREATE INDEX `idx_slices_db_multipart_part_id` ON `slices`(`db_multipart_part_id
 CREATE TABLE `host_announcements` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`host_key` blob NOT NULL,`block_height` integer,`block_id` text,`net_address` text);
 
 -- dbConsensusInfo
-CREATE TABLE `consensus_infos` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`cc_id` blob,`height` integer,`block_id` blob);
+CREATE TABLE `consensus_infos` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`height` integer,`block_id` blob);
 
 -- dbBlocklistEntry
 CREATE TABLE `host_blocklist_entries` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`entry` text NOT NULL UNIQUE);

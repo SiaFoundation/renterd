@@ -2,6 +2,9 @@
 DROP TABLE IF EXISTS `siacoin_elements`;
 DROP TABLE IF EXISTS `transactions`;
 
+-- drop column
+ALTER TABLE `consensus_infos` DROP COLUMN `cc_id`;
+
 -- dbWalletEvent
 CREATE TABLE `wallet_events` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`event_id` blob NOT NULL,`inflow` text,`outflow` text,`transaction` text,`maturity_height` integer,`source` text,`timestamp` integer,`height` integer, `block_id` blob);
 CREATE UNIQUE INDEX `idx_wallet_events_event_id` ON `wallet_events`(`event_id`);

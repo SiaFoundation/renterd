@@ -476,13 +476,13 @@ func main() {
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, _, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, shutdown, _, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
 		shutdownFns = append(shutdownFns, shutdownFn{
 			name: "Bus",
-			fn:   fn,
+			fn:   shutdown,
 		})
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}
