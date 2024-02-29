@@ -251,7 +251,7 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 	}
 	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
 		// delete any existing metric for the same contract that has happened
-		// within the same 30 seconds window by diving the timestamp by 30 seconds and use integer division.
+		// within the same 5' window by diving the timestamp by 5' and use integer division.
 		for _, metric := range metrics {
 			intervalStart := metric.Timestamp.Std().Truncate(contractMetricGranularity)
 			intervalEnd := intervalStart.Add(contractMetricGranularity)
