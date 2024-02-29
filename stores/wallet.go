@@ -32,16 +32,55 @@ type (
 		Timestamp     int64 `gorm:"index:idx_transactions_timestamp"`
 	}
 
-	outputChange struct {
-		addition bool
-		oid      hash256
-		sco      dbSiacoinElement
+	dbWalletEvent struct {
+		Model
+
+		// event
+		EventID        hash256 `gorm:"unique;index;NOT NULL;size:32"`
+		Inflow         currency
+		Outflow        currency
+		Transaction    types.Transaction `gorm:"serializer:json"`
+		MaturityHeight uint64            `gorm:"index"`
+		Source         string            `gorm:"index:idx_events_source"`
+		Timestamp      int64             `gorm:"index:idx_events_timestamp"`
+
+		// chain index
+		Height  uint64  `gorm:"index"`
+		BlockID hash256 `gorm:"size:32"`
 	}
 
 	txnChange struct {
 		addition bool
 		txnID    hash256
 		txn      dbTransaction
+	}
+
+	dbWalletOutput struct {
+		Model
+
+		// siacoin element
+		OutputID       hash256 `gorm:"unique;index;NOT NULL;size:32"`
+		LeafIndex      uint64
+		MerkleProof    merkleProof
+		Value          currency
+		Address        hash256 `gorm:"size:32"`
+		MaturityHeight uint64  `gorm:"index"`
+
+		// chain index
+		Height  uint64  `gorm:"index"`
+		BlockID hash256 `gorm:"size:32"`
+	}
+
+	outputChange struct {
+		addition bool
+		oid      hash256
+		sco      dbSiacoinElement
+		se       dbWalletOutput
+	}
+
+	eventChange struct {
+		addition bool
+		event    dbWalletEvent
 	}
 )
 
@@ -50,6 +89,26 @@ func (dbSiacoinElement) TableName() string { return "siacoin_elements" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbTransaction) TableName() string { return "transactions" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbWalletEvent) TableName() string { return "wallet_events" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbWalletOutput) TableName() string { return "wallet_outputs" }
+
+func (e dbWalletEvent) Index() types.ChainIndex {
+	return types.ChainIndex{
+		Height: e.Height,
+		ID:     types.BlockID(e.BlockID),
+	}
+}
+
+func (se dbWalletOutput) Index() types.ChainIndex {
+	return types.ChainIndex{
+		Height: se.Height,
+		ID:     types.BlockID(se.BlockID),
+	}
+}
 
 func (s *SQLStore) Height() uint64 {
 	s.persistMu.Lock()
