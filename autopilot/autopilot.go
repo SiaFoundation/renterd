@@ -200,14 +200,7 @@ func (ap *Autopilot) Run() error {
 
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
-	for {
-		// check for shutdown right before starting a new iteration
-		select {
-		case <-ap.shutdownCtx.Done():
-			return nil
-		default:
-		}
-
+	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
@@ -314,6 +307,7 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
+	return nil
 }
 
 // Shutdown shuts down the autopilot.

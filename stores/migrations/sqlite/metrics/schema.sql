@@ -11,6 +11,7 @@ CREATE INDEX `idx_download_spending` ON `contracts`(`download_spending_lo`,`down
 CREATE INDEX `idx_upload_spending` ON `contracts`(`upload_spending_lo`,`upload_spending_hi`);
 CREATE INDEX `idx_contracts_revision_number` ON `contracts`(`revision_number`);
 CREATE INDEX `idx_remaining_funds` ON `contracts`(`remaining_funds_lo`,`remaining_funds_hi`);
+CREATE INDEX `idx_contracts_fcid_timestamp` ON `contracts`(`fcid`,`timestamp`);
 
 -- dbContractPruneMetric
 CREATE TABLE `contract_prunes` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`fcid` blob NOT NULL,`host` blob NOT NULL,`host_version` text,`pruned` BIGINT NOT NULL,`remaining` BIGINT NOT NULL,`duration` integer NOT NULL);

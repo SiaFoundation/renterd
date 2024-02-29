@@ -63,7 +63,7 @@ func GougingCheckerFromContext(ctx context.Context, criticalMigration bool) (Gou
 	return gc(criticalMigration)
 }
 
-func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
+func WithGougingChecker(ctx context.Context, cs ConsensusState, gp api.GougingParams) context.Context {
 	return context.WithValue(ctx, keyGougingChecker, func(criticalMigration bool) (GougingChecker, error) {
 		consensusState, err := cs.ConsensusState(ctx)
 		if err != nil {

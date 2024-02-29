@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"bytes"
@@ -10,16 +10,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
@@ -29,6 +26,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
 	"go.uber.org/zap"
@@ -41,108 +39,15 @@ import (
 )
 
 const (
-	testBusFlushInterval = 100 * time.Millisecond
-	testContractSet      = "testset"
-	testPersistInterval  = 2 * time.Second
-	latestHardforkHeight = 50 // foundation hardfork height in testing
+	testBusFlushInterval   = 100 * time.Millisecond
+	testBusPersistInterval = 2 * time.Second
+	latestHardforkHeight   = 50 // foundation hardfork height in testing
 )
 
 var (
 	clusterOptsDefault  = testClusterOptions{}
 	clusterOptNoFunding = false
-
-	// testAutopilotConfig is the autopilot used for testing unless a different
-	// one is explicitly set.
-	testAutopilotConfig = api.AutopilotConfig{
-		Contracts: api.ContractsConfig{
-			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Amount:      3,
-			Period:      144,
-			RenewWindow: 72,
-
-			Download: rhpv2.SectorSize * 500,
-			Upload:   rhpv2.SectorSize * 500,
-			Storage:  rhpv2.SectorSize * 5e3,
-
-			Set:   testContractSet,
-			Prune: false,
-		},
-		Hosts: api.HostsConfig{
-			MaxDowntimeHours:      10,
-			MinRecentScanFailures: 10,
-			AllowRedundantIPs:     true, // allow for integration tests by default
-		},
-	}
-
-	testContractSetSettings = api.ContractSetSetting{
-		Default: testContractSet,
-	}
-
-	testGougingSettings = api.GougingSettings{
-		MinMaxCollateral: types.Siacoins(10),                   // at least up to 10 SC per contract
-		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
-		MaxContractPrice: types.Siacoins(10),                   // 10 SC per contract
-		MaxDownloadPrice: types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
-		MaxUploadPrice:   types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
-		MaxStoragePrice:  types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
-
-		HostBlockHeightLeeway: 240, // amount of leeway given to host block height
-
-		MinPriceTableValidity:         10 * time.Second,  // minimum value for price table validity
-		MinAccountExpiry:              time.Hour,         // minimum value for account expiry
-		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
-	}
-
-	testRedundancySettings = api.RedundancySettings{
-		MinShards:   2,
-		TotalShards: 3,
-	}
-
-	testS3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"
-	testS3SecretAccessKey = "Rh30BNyj+qNI4ftYRteoZbHJ3X4Ln71QtZkRXzJ9"
-	testS3Credentials     = credentials.NewStaticV4(testS3AccessKeyID, testS3SecretAccessKey, "")
 )
-
-type TT struct {
-	*testing.T
-}
-
-func (t TT) AssertContains(err error, target string) {
-	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), target) {
-		t.Fatalf("err: %v != target: %v", err, target)
-	}
-}
-
-func (t TT) AssertIs(err, target error) {
-	t.Helper()
-	t.AssertContains(err, target.Error())
-}
-
-func (t TT) OK(err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (t TT) OKAll(vs ...interface{}) {
-	t.Helper()
-	for _, v := range vs {
-		if err, ok := v.(error); ok && err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func (t TT) FailAll(vs ...interface{}) {
-	t.Helper()
-	for _, v := range vs {
-		if err, ok := v.(error); ok && err == nil {
-			t.Fatal("should've failed")
-		}
-	}
-}
 
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
@@ -166,7 +71,7 @@ type TestCluster struct {
 	dbName  string
 	dir     string
 	logger  *zap.Logger
-	tt      *TT
+	tt      test.TT
 	wk      types.PrivateKey
 	wg      sync.WaitGroup
 }
@@ -208,33 +113,17 @@ func randomPassword() string {
 	return hex.EncodeToString(frand.Bytes(32))
 }
 
-// Retry will call 'fn' 'tries' times, waiting 'durationBetweenAttempts'
-// between each attempt, returning 'nil' the first time that 'fn' returns nil.
-// If 'nil' is never returned, then the final error returned by 'fn' is
-// returned.
-func (tt *TT) Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) {
-	tt.Helper()
-	for i := 1; i < tries; i++ {
-		err := fn()
-		if err == nil {
-			return
-		}
-		time.Sleep(durationBetweenAttempts)
-	}
-	tt.OK(fn())
-}
-
 // Reboot simulates a reboot of the cluster by calling Shutdown and creating a
 // new cluster using the same settings as the previous one.
 // NOTE: Simulating a reboot means that the hosts stay active and are not
 // restarted.
-func (c *TestCluster) Reboot(ctx context.Context) *TestCluster {
+func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 	c.tt.Helper()
 	hosts := c.hosts
 	c.hosts = nil
 	c.Shutdown()
 
-	newCluster := newTestCluster(c.tt.T, testClusterOptions{
+	newCluster := newTestCluster(t, testClusterOptions{
 		dir:       c.dir,
 		dbName:    c.dbName,
 		logger:    c.logger,
@@ -307,7 +196,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	tt := &TT{t}
+	tt := test.NewTT(t)
 
 	// Ensure we don't hang
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -349,7 +238,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.uploadPacking {
 		enableUploadPacking = opts.uploadPacking
 	}
-	apSettings := testAutopilotConfig
+	apSettings := test.AutopilotConfig
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
 	}
@@ -402,14 +291,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
 	s3Client, err := minio.New(s3Addr, &minio.Options{
-		Creds:  testS3Credentials,
+		Creds:  test.S3Credentials,
 		Secure: false,
 	})
 	tt.OK(err)
 
 	url := s3Client.EndpointURL()
 	s3Core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
-		Creds: testS3Credentials,
+		Creds: test.S3Credentials,
 	})
 	tt.OK(err)
 
@@ -514,7 +403,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
-	tt.OK(busClient.SetContractSet(ctx, testContractSet, []types.FileContractID{}))
+	tt.OK(busClient.SetContractSet(ctx, test.ContractSet, []types.FileContractID{}))
 
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
@@ -525,11 +414,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	// Update the bus settings.
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, testGougingSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, testRedundancySettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, testContractSetSettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, test.GougingSettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, test.ContractSetSettings))
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
-		V4Keypairs: map[string]string{testS3AccessKeyID: testS3SecretAccessKey},
+		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
 	}))
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
 
@@ -556,7 +445,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForContracts()
-		cluster.WaitForContractSet(testContractSet, nHosts)
+		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
 	}
 
@@ -1005,7 +894,7 @@ func testBusCfg() node.BusConfig {
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
 			GatewayAddr:                   "127.0.0.1:0",
-			PersistInterval:               testPersistInterval,
+			PersistInterval:               testBusPersistInterval,
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},

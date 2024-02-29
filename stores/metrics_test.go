@@ -488,6 +488,30 @@ func TestContractMetrics(t *testing.T) {
 	} else if len(metrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(metrics))
 	}
+
+	// Drop all metrics.
+	if err := ss.dbMetrics.Where("TRUE").Delete(&dbContractMetric{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Record multiple metrics for the same contract - one per second over 10 minutes
+	for i := int64(0); i < 600; i++ {
+		err := ss.RecordContractMetric(context.Background(), api.ContractMetric{
+			ContractID: types.FileContractID{1},
+			Timestamp:  api.TimeRFC3339(time.Unix(i, 0)),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Check how many metrics were recorded.
+	var n int64
+	if err := ss.dbMetrics.Model(&dbContractMetric{}).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatalf("expected 2 metrics, got %v", n)
+	}
 }
 
 func TestWalletMetrics(t *testing.T) {

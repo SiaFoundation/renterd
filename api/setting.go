@@ -126,7 +126,12 @@ func (rs RedundancySettings) Redundancy() float64 {
 	return float64(rs.TotalShards) / float64(rs.MinShards)
 }
 
-// SlabSizeNoRedundancy returns the size of a slab without added redundancy.
+// SlabSize returns the size of a slab.
+func (rs RedundancySettings) SlabSize() uint64 {
+	return uint64(rs.TotalShards) * rhpv2.SectorSize
+}
+
+// SlabSizeNoRedundancy returns the size of a slab without redundancy.
 func (rs RedundancySettings) SlabSizeNoRedundancy() uint64 {
 	return uint64(rs.MinShards) * rhpv2.SectorSize
 }
