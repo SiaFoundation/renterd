@@ -175,6 +175,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
+			store.Close(),
 			bdb.Close(),
 		)
 	}
