@@ -78,12 +78,7 @@ func TestMetrics(t *testing.T) {
 			return errors.New("no contract set churn metrics")
 		}
 
-		// check wallet metrics
-		wm, err := b.WalletMetrics(context.Background(), start, 10, time.Minute, api.WalletMetricsQueryOpts{})
-		tt.OK(err)
-		if len(wm) == 0 {
-			return errors.New("no wallet metrics")
-		}
+		// TODO: check wallet metrics
 
 		return nil
 	})

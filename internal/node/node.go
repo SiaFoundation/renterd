@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
-	cwallet "go.sia.tech/coreutils/wallet"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
@@ -32,7 +32,7 @@ import (
 
 // TODOs:
 // - pass last tip to AddSubscriber
-// - extend wallet metric with immature
+// - add wallet metrics
 // - add UPNP support
 
 type BusConfig struct {
@@ -122,7 +122,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	cm := chain.NewManager(store, state)
 
 	// create wallet
-	w, err := NewSingleAddressWallet(seed, cm.TipState().BlockInterval(), cm, sqlStore, sqlStore, logger.Named("wallet").Sugar(), cwallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -147,7 +147,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithSyncInterval(100*time.Millisecond), syncer.WithLogger(logger.Named("syncer")))
 
-	b, err := bus.New(alertsMgr, wh, cm, s, w.SingleAddressWallet, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -169,14 +169,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, err
 	}
 
-	err = cm.AddSubscriber(w, types.ChainIndex{})
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
 			l.Close(),
+			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
 			bdb.Close(),

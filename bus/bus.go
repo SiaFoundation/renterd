@@ -2448,5 +2448,6 @@ func New(am *alerts.Manager, hm *webhooks.Manager, cm *chain.Manager, s *syncer.
 	if err := eas.SetUncleanShutdown(); err != nil {
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
+
 	return b, nil
 }
