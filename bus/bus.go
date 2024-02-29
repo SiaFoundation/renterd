@@ -1687,14 +1687,16 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 }
 
 func (b *bus) consensusState() api.ConsensusState {
+	cs := b.cm.TipState()
+
 	var synced bool
-	if block, ok := b.cm.Block(b.cm.Tip().ID); ok && time.Since(block.Timestamp) < 2*b.cm.TipState().BlockInterval() {
+	if block, ok := b.cm.Block(cs.Index.ID); ok && time.Since(block.Timestamp) < 2*cs.BlockInterval() {
 		synced = true
 	}
 
 	return api.ConsensusState{
-		BlockHeight:   b.cm.TipState().Index.Height,
-		LastBlockTime: api.TimeRFC3339(b.cm.TipState().PrevTimestamps[0]),
+		BlockHeight:   cs.Index.Height,
+		LastBlockTime: api.TimeRFC3339(cs.PrevTimestamps[0]),
 		Synced:        synced,
 	}
 }

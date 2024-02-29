@@ -24,9 +24,7 @@ type (
 		logger             *zap.SugaredLogger
 		persistInterval    time.Duration
 		retryIntervals     []time.Duration
-
-		// WalletDB related fields.
-		walletAddress types.Address
+		walletAddress      types.Address
 
 		// buffered state
 		mu             sync.Mutex
@@ -252,16 +250,14 @@ func (cs *chainSubscriber) commit() error {
 
 // shouldCommit returns whether the subscriber should commit its buffered state.
 func (cs *chainSubscriber) shouldCommit() bool {
-	mayCommit := cs.mayCommit
-	persistIntervalPassed := time.Since(cs.lastSave) > cs.persistInterval
-	hasAnnouncements := len(cs.announcements) > 0
-	hasRevisions := len(cs.revisions) > 0
-	hasProofs := len(cs.proofs) > 0
-	hasOutputChanges := len(cs.outputs) > 0
-	hasTxnChanges := len(cs.events) > 0
-	hasContractState := len(cs.contractState) > 0
-	return mayCommit || persistIntervalPassed || hasAnnouncements || hasRevisions ||
-		hasProofs || hasOutputChanges || hasTxnChanges || hasContractState
+	return cs.mayCommit ||
+		time.Since(cs.lastSave) > cs.persistInterval ||
+		len(cs.announcements) > 0 ||
+		len(cs.revisions) > 0 ||
+		len(cs.proofs) > 0 ||
+		len(cs.outputs) > 0 ||
+		len(cs.events) > 0 ||
+		len(cs.contractState) > 0
 }
 
 func (cs *chainSubscriber) tryCommit() error {
@@ -540,7 +536,7 @@ func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
 func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) error {
 	for _, el := range elements {
 		if _, ok := cs.outputs[el.ID]; ok {
-			return fmt.Errorf("siacoin element %q already exists", el.ID)
+			return fmt.Errorf("output %q already exists", el.ID)
 		}
 		cs.outputs[el.ID] = outputChange{
 			addition: true,
@@ -564,13 +560,10 @@ func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) 
 // spent in the update.
 func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
 	for _, id := range ids {
-		// TODO: not sure if we need to check whether there's already an output
-		// change for this id
 		if _, ok := cs.outputs[types.Hash256(id)]; ok {
-			return fmt.Errorf("siacoin element %q conflicts", id)
+			return fmt.Errorf("output %q not found", id)
 		}
 
-		// TODO: don't we need index info to revert this output change?
 		cs.outputs[types.Hash256(id)] = outputChange{
 			addition: false,
 			se: dbWalletOutput{
@@ -584,7 +577,6 @@ func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) er
 // WalletStateElements returns all state elements in the database. It is used
 // to update the proofs of all state elements affected by the update.
 func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement, _ error) {
-	// TODO: should we keep all siacoin elements in memory at all times?
 	for id, el := range cs.outputs {
 		elements = append(elements, types.StateElement{
 			ID:          id,
