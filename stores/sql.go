@@ -13,6 +13,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -351,7 +352,7 @@ func retryTransaction(db *gorm.DB, logger *zap.SugaredLogger, fc func(tx *gorm.D
 			strings.Contains(err.Error(), "Duplicate entry") ||
 			errors.Is(err, api.ErrPartNotFound) ||
 			errors.Is(err, api.ErrSlabNotFound) ||
-			errors.Is(err, ErrPeerNotFound) {
+			errors.Is(err, syncer.ErrPeerNotFound) {
 			return true
 		}
 		return false

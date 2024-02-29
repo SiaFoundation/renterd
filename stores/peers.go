@@ -34,11 +34,6 @@ type (
 )
 
 var (
-	// TODO: use syncer.ErrPeerNotFound when added
-	ErrPeerNotFound = errors.New("peer not found")
-)
-
-var (
 	_ syncer.PeerStore = (*SQLStore)(nil)
 )
 
@@ -98,7 +93,7 @@ func (s *SQLStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error 
 			Take(&peer).
 			Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrPeerNotFound
+			return syncer.ErrPeerNotFound
 		} else if err != nil {
 			return err
 		}
