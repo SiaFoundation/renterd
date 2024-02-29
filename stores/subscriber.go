@@ -45,19 +45,20 @@ type (
 	}
 )
 
-func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, walletAddress types.Address, ancmtMaxAge time.Duration) (*chainSubscriber, error) {
-	var activeFCIDs, archivedFCIDs []fileContractID
-	if err := db.Model(&dbContract{}).
+func newChainSubscriber(sqlStore *SQLStore, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, walletAddress types.Address, ancmtMaxAge time.Duration) (*chainSubscriber, error) {
+	// load known contracts
+	var activeFCIDs []fileContractID
+	if err := sqlStore.db.Model(&dbContract{}).
 		Select("fcid").
 		Find(&activeFCIDs).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Model(&dbArchivedContract{}).
+	var archivedFCIDs []fileContractID
+	if err := sqlStore.db.Model(&dbArchivedContract{}).
 		Select("fcid").
 		Find(&archivedFCIDs).Error; err != nil {
 		return nil, err
 	}
-
 	knownContracts := make(map[types.FileContractID]struct{})
 	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
 		knownContracts[types.FileContractID(fcid)] = struct{}{}
@@ -65,7 +66,7 @@ func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Du
 
 	return &chainSubscriber{
 		announcementMaxAge: ancmtMaxAge,
-		db:                 db,
+		db:                 sqlStore.db,
 		logger:             logger,
 		retryIntervals:     intvls,
 

@@ -207,16 +207,9 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		return nil, err
 	}
 
-	// Create chain subscriber
-	cs, err := NewChainSubscriber(db, cfg.Logger, cfg.RetryTransactionIntervals, cfg.PersistInterval, cfg.WalletAddress, cfg.AnnouncementMaxAge)
-	if err != nil {
-		return nil, err
-	}
-
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:       cfg.Alerts,
-		cs:           cs,
 		db:           db,
 		dbMetrics:    dbMetrics,
 		logger:       l,
@@ -228,6 +221,11 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
+	}
+
+	ss.cs, err = newChainSubscriber(ss, cfg.Logger, cfg.RetryTransactionIntervals, cfg.PersistInterval, cfg.WalletAddress, cfg.AnnouncementMaxAge)
+	if err != nil {
+		return nil, err
 	}
 
 	ss.slabBufferMgr, err = newSlabBufferManager(ss, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)

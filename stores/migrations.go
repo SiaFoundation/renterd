@@ -62,7 +62,6 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, dbIdentifier, "00006_coreutils_wallet", logger)
 			},
 		},
-		// TODO: add migration to remove CCID from consensus_infos
 	}
 
 	// Create migrator.

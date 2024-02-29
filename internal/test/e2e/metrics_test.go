@@ -79,8 +79,6 @@ func TestMetrics(t *testing.T) {
 			return errors.New("no contract set churn metrics")
 		}
 
-		// TODO: check wallet metrics
-
 		return nil
 	})
 }
