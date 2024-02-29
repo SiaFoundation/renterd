@@ -194,21 +194,14 @@ func (ap *Autopilot) Run() error {
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
-	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
+	if err := ap.tryScheduleTriggerWhenFunded(); err != nil && !isErr(err, context.Canceled) {
 		ap.logger.Error(err)
 		return nil
 	}
 
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
-	for {
-		// check for shutdown right before starting a new iteration
-		select {
-		case <-ap.shutdownCtx.Done():
-			return nil
-		default:
-		}
-
+	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
@@ -315,6 +308,7 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
+	return nil
 }
 
 // Shutdown shuts down the autopilot.
@@ -470,11 +464,6 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	// no need to schedule a trigger if we're stopped
-	if ap.isStopped() {
-		return nil
-	}
-
 	// apply sane timeout
 	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
 	defer cancel()
