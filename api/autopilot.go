@@ -110,9 +110,10 @@ type (
 			Pruning  uint64 `json:"pruning"`
 			Upload   uint64 `json:"upload"`
 		}
-		NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
-		NotScanned            uint64 `json:"notScanned"`
-		Other                 uint64 `json:"other"`
+		NotAcceptingContracts uint64           `json:"notAcceptingContracts"`
+		NotScanned            uint64           `json:"notScanned"`
+		Other                 uint64           `json:"other"`
+		Recommendation        *AutopilotConfig `json:"recommendation,omitempty"`
 	}
 
 	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.

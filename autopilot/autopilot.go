@@ -175,34 +175,10 @@ func (ap *Autopilot) Handler() http.Handler {
 	})
 }
 
-func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode request
-	var req api.ConfigEvaluationRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	// fetch necessary information
-	apCfg := req.AutopilotConfig
-	gs := req.GougingSettings
-	rs := req.RedundancySettings
-	cs, err := ap.bus.ConsensusState(ctx)
-	if jc.Check("failed to get consensus state", err) != nil {
-		return
-	}
-	gc := worker.NewGougingChecker(gs, cs, ap.State().fee, ap.State().period, apCfg.Contracts.RenewWindow)
-
-	// fetch hosts
-	hosts, err := ap.bus.Hosts(ctx, api.GetHostsOptions{})
-	if jc.Check("failed to get hosts", err) != nil {
-		return
-	}
-
-	var resp api.ConfigEvaluationResponse
+func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (resp api.ConfigEvaluationResponse) {
+	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		usable, usableBreakdown := isUsableHost(apCfg, rs, gc, host, 0, 0)
+		usable, usableBreakdown := isUsableHost(cfg, rs, gc, host, 0, 0)
 		if usable {
 			resp.Usable++
 			continue
@@ -236,7 +212,109 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 			resp.Gouging.Upload++
 		}
 	}
-	jc.Encode(resp)
+
+	if resp.Usable >= cfg.Contracts.Amount {
+		return // no recommendation needed
+	}
+
+	// optimise gouging settings
+	//recGS := gs
+
+	//gsForOptimisation := func() api.GougingSettings {
+	//	return api.GougingSettings{
+	//		MinMaxCollateral: types.ZeroCurrency,
+	//		MaxRPCPrice:      types.MaxCurrency,
+	//	}
+	//}
+
+	// optimise upload price
+	//	if optimiseGougingSetting(&gs, cfg, &gs.MaxUploadPrice, cs, fee, currentPeriod, rs, hosts){
+	//
+	//	}
+	//	MinMaxCollateral types.Currency
+	//	MaxRPCPrice types.Currency
+	//	MaxContractPrice types.Currency
+	//	MaxDownloadPrice types.Currency
+	//	MaxUploadPrice types.Currency
+	//	MaxStoragePrice types.Currency
+
+	return
+}
+
+func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (usables uint64) {
+	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+	for _, host := range hosts {
+		usable, _ := isUsableHost(cfg, rs, gc, host, 0, 0)
+		if usable {
+			usables++
+		}
+	}
+	return
+}
+
+func optimiseGougingSetting(gs *api.GougingSettings, cfg api.AutopilotConfig, field *types.Currency, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.Host) bool {
+	if cfg.Contracts.Amount == 0 {
+		return true // nothing to do
+	}
+	stepSize := []uint64{200, 150, 125, 110, 105}
+	maxSteps := 12
+
+	stepIdx := 0
+	nSteps := 1
+	prevVal := *field // to keep accurate value
+	for {
+		nUsable := countUsableHosts(cfg, cs, fee, currentPeriod, rs, *gs, hosts)
+		targetHit := nUsable >= cfg.Contracts.Amount
+
+		if targetHit && stepIdx == len(stepSize)-1 {
+			return true
+		} else if targetHit {
+			// move one step back and decrease step size
+			stepIdx++
+			nSteps--
+			*field = prevVal
+		} else if nSteps >= maxSteps {
+			return false
+		}
+
+		prevVal = *field
+		newValue, overflow := prevVal.Mul64WithOverflow(stepSize[stepIdx])
+		if overflow {
+			return false
+		}
+		newValue = newValue.Div64(100)
+		*field = newValue
+		nSteps++
+	}
+}
+
+func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode request
+	var req api.ConfigEvaluationRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// fetch necessary information
+	cfg := req.AutopilotConfig
+	gs := req.GougingSettings
+	rs := req.RedundancySettings
+	cs, err := ap.bus.ConsensusState(ctx)
+	if jc.Check("failed to get consensus state", err) != nil {
+		return
+	}
+	state := ap.State()
+
+	// fetch hosts
+	hosts, err := ap.bus.Hosts(ctx, api.GetHostsOptions{})
+	if jc.Check("failed to get hosts", err) != nil {
+		return
+	}
+
+	// evaluate the config
+	jc.Encode(evaluateConfig(cfg, cs, state.fee, state.period, rs, gs, hosts))
 }
 
 func (ap *Autopilot) Run() error {
