@@ -35,10 +35,6 @@ type (
 	HostManager interface {
 		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
 	}
-
-	HostStore interface {
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	}
 )
 
 type (

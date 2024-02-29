@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +18,7 @@ func TestObjectMetadata(t *testing.T) {
 
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  testRedundancySettings.TotalShards,
+		hosts:  test.RedundancySettings.TotalShards,
 		logger: zap.NewNop(),
 	})
 	defer cluster.Shutdown()

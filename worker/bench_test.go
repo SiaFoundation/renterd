@@ -24,16 +24,16 @@ func (z *zeroReader) Read(p []byte) (n int, err error) {
 // object.
 // 1036.74 MB/s | M2 Pro | c9dc1b6
 func BenchmarkDownloaderSingleObject(b *testing.B) {
-	w := newMockWorker()
+	w := newTestWorker(b)
 
 	up := testParameters(b.TempDir())
 	up.rs.MinShards = 10
 	up.rs.TotalShards = 30
 	up.packing = false
-	w.addHosts(up.rs.TotalShards)
+	w.AddHosts(up.rs.TotalShards)
 
 	data := bytes.NewReader(frand.Bytes(int(up.rs.SlabSizeNoRedundancy())))
-	_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
+	_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up, lockingPriorityUpload)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func BenchmarkDownloaderSingleObject(b *testing.B) {
 	b.SetBytes(o.Object.Size)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = w.dl.DownloadObject(context.Background(), io.Discard, *o.Object.Object, 0, uint64(o.Object.Size), w.contracts())
+		err = w.downloadManager.DownloadObject(context.Background(), io.Discard, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -57,19 +57,19 @@ func BenchmarkDownloaderSingleObject(b *testing.B) {
 // Speed       | CPU    | Commit
 // 433.86 MB/s | M2 Pro | bae6e77
 func BenchmarkUploaderSingleObject(b *testing.B) {
-	w := newMockWorker()
+	w := newTestWorker(b)
 
 	up := testParameters(b.TempDir())
 	up.rs.MinShards = 10
 	up.rs.TotalShards = 30
 	up.packing = false
-	w.addHosts(up.rs.TotalShards)
+	w.AddHosts(up.rs.TotalShards)
 
 	data := io.LimitReader(&zeroReader{}, int64(b.N*rhpv2.SectorSize*up.rs.MinShards))
 	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
 	b.ResetTimer()
 
-	_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
+	_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up, lockingPriorityUpload)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -80,20 +80,20 @@ func BenchmarkUploaderSingleObject(b *testing.B) {
 // Speed       | CPU    | Commit
 // 282.47 MB/s | M2 Pro | bae6e77
 func BenchmarkUploaderMultiObject(b *testing.B) {
-	w := newMockWorker()
+	w := newTestWorker(b)
 
 	up := testParameters(b.TempDir())
 	up.rs.MinShards = 10
 	up.rs.TotalShards = 30
 	up.packing = false
-	w.addHosts(up.rs.TotalShards)
+	w.AddHosts(up.rs.TotalShards)
 
 	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		data := io.LimitReader(&zeroReader{}, int64(rhpv2.SectorSize*up.rs.MinShards))
-		_, _, err := w.ul.Upload(context.Background(), data, w.contracts(), up, lockingPriorityUpload)
+		_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up, lockingPriorityUpload)
 		if err != nil {
 			b.Fatal(err)
 		}
