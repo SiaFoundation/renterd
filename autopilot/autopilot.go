@@ -194,7 +194,9 @@ func (ap *Autopilot) Run() error {
 
 	// schedule a trigger when the wallet receives its first deposit
 	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
-		ap.logger.Error(err)
+		if !errors.Is(err, context.Canceled) {
+			ap.logger.Error(err)
+		}
 		return nil
 	}
 
@@ -463,11 +465,6 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	// no need to schedule a trigger if we're stopped
-	if ap.isStopped() {
-		return nil
-	}
-
 	// apply sane timeout
 	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
 	defer cancel()
