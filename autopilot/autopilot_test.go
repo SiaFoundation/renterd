@@ -76,7 +76,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 		hosts[i].Settings.StoragePrice = types.Siacoins(uint32(i + 1))
 	}
 	assertUsable(1)
-	if !optimiseGougingSetting(&gs, cfg, &gs.MaxStoragePrice, cs, fee, 0, rs, hosts) {
+	if !optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, fee, 0, rs, hosts) {
 		t.Fatal("optimising failed")
 	}
 	assertUsable(len(hosts))
@@ -86,12 +86,12 @@ func TestOptimiseGougingSetting(t *testing.T) {
 
 	// Case2: test optimising a field where we can't get back to a full set of
 	// hosts
-	hosts[0].Settings.StoragePrice = types.Siacoins(10000)
+	hosts[0].Settings.StoragePrice = types.Siacoins(100000)
 	assertUsable(9)
-	if optimiseGougingSetting(&gs, cfg, &gs.MaxStoragePrice, cs, fee, 0, rs, hosts) {
+	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, fee, 0, rs, hosts) {
 		t.Fatal("optimising succeeded")
 	}
-	if gs.MaxStoragePrice.ExactString() != "9757440000000000000000000000" { // ~9.757 KS
+	if gs.MaxStoragePrice.ExactString() != "41631744000000000000000000000" { // ~41.63 KS
 		t.Fatal("unexpected storage price", gs.MaxStoragePrice.ExactString())
 	}
 
@@ -101,7 +101,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	}
 	gs.MaxStoragePrice = types.MaxCurrency.Sub(types.Siacoins(1))
 	assertUsable(0)
-	if optimiseGougingSetting(&gs, cfg, &gs.MaxStoragePrice, cs, fee, 0, rs, hosts) {
+	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, fee, 0, rs, hosts) {
 		t.Fatal("optimising succeeded")
 	}
 	if gs.MaxStoragePrice.ExactString() != "340282366920937463463374607431768211455" { // ~340.3 TS

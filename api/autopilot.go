@@ -98,6 +98,10 @@ type (
 		RedundancySettings RedundancySettings `json:"redundancySettings"`
 	}
 
+	ConfigRecommendation struct {
+		GougingSettings GougingSettings `json:"gougingSettings,omitempty"`
+	}
+
 	// ConfigEvaluationResponse is the response type for /evaluate
 	ConfigEvaluationResponse struct {
 		Usable  uint64 `json:"usable"`
@@ -110,10 +114,10 @@ type (
 			Pruning  uint64 `json:"pruning"`
 			Upload   uint64 `json:"upload"`
 		}
-		NotAcceptingContracts uint64           `json:"notAcceptingContracts"`
-		NotScanned            uint64           `json:"notScanned"`
-		Other                 uint64           `json:"other"`
-		Recommendation        *AutopilotConfig `json:"recommendation,omitempty"`
+		NotAcceptingContracts uint64                `json:"notAcceptingContracts"`
+		NotScanned            uint64                `json:"notScanned"`
+		Other                 uint64                `json:"other"`
+		Recommendation        *ConfigRecommendation `json:"recommendation,omitempty"`
 	}
 
 	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
