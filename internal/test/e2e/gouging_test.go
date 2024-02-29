@@ -91,4 +91,19 @@ func TestGouging(t *testing.T) {
 	if err := w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil {
 		t.Fatal("expected download to fail", err)
 	}
+
+	// try optimising gouging settings
+	resp, err := cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, test.GougingSettings, test.RedundancySettings)
+	tt.OK(err)
+	if resp.Recommendation == nil {
+		t.Fatal("expected recommendation")
+	}
+
+	// set optimised settings
+	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
+
+	// renter should recover and be able to upload again
+
+	// upload some data - should fail
+	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 }
