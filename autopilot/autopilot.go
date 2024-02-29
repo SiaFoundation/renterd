@@ -194,8 +194,10 @@ func (ap *Autopilot) Run() error {
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
-	if err := ap.tryScheduleTriggerWhenFunded(); err != nil && !isErr(err, context.Canceled) {
-		ap.logger.Error(err)
+	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			ap.logger.Error(err)
+		}
 		return nil
 	}
 
