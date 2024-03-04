@@ -70,7 +70,7 @@ func newTestHostPriceTable() hostdb.HostPriceTable {
 	frand.Read(uid[:])
 
 	return hostdb.HostPriceTable{
-		HostPriceTable: rhpv3.HostPriceTable{UID: uid, Validity: time.Minute},
+		HostPriceTable: rhpv3.HostPriceTable{UID: uid, HostBlockHeight: 100, Validity: time.Minute},
 		Expiry:         time.Now().Add(time.Minute),
 	}
 }

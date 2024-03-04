@@ -19,6 +19,11 @@ const (
 	// for use, we essentially add 30 seconds to the current time when checking
 	// whether we are still before a pricetable's expiry time
 	priceTableValidityLeeway = 30 * time.Second
+
+	// priceTableBlockHeightLeeway is the amount of blocks before a price table
+	// is considered gouging on the block height when we renew it even if it is
+	// still valid
+	priceTableBlockHeightLeeway = 2
 )
 
 var (
@@ -106,10 +111,19 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	hpt = p.hpt
 	p.mu.Unlock()
 
+	// get gouging checker to figure out how many blocks we have left before the
+	// current price table is considered to gouge on the block height
+	gc, err := GougingCheckerFromContext(ctx, false)
+	if err != nil {
+		return hostdb.HostPriceTable{}, err
+	}
+
 	// figure out whether we should update the price table, if not we can return
 	if hpt.UID != (rhpv3.SettingsID{}) {
 		randomUpdateLeeway := frand.Intn(int(math.Floor(hpt.HostPriceTable.Validity.Seconds() * 0.1)))
-		if time.Now().Add(priceTableValidityLeeway).Add(time.Duration(randomUpdateLeeway) * time.Second).Before(hpt.Expiry) {
+		closeToGouging := gc.BlocksUntilBlockHeightGouging(hpt.HostBlockHeight) <= priceTableBlockHeightLeeway
+		closeToExpiring := time.Now().Add(priceTableValidityLeeway).Add(time.Duration(randomUpdateLeeway) * time.Second).After(hpt.Expiry)
+		if !closeToExpiring && !closeToGouging {
 			return
 		}
 	}
