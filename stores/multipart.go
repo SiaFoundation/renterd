@@ -187,17 +187,18 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 		limit++
 	}
 
+	// both markers must be used together
+	if (keyMarker == "" && uploadIDMarker != "") || (keyMarker != "" && uploadIDMarker == "") {
+		return api.MultipartListUploadsResponse{}, errors.New("both keyMarker and uploadIDMarker must be set or neither")
+	}
+	markerExpr := exprTRUE
+	if keyMarker != "" {
+		markerExpr = gorm.Expr("object_id > ? OR (object_id = ? AND upload_id > ?)", keyMarker, keyMarker, uploadIDMarker)
+	}
+
 	prefixExpr := exprTRUE
 	if prefix != "" {
 		prefixExpr = gorm.Expr("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
-	}
-	keyMarkerExpr := exprTRUE
-	if keyMarker != "" {
-		keyMarkerExpr = gorm.Expr("object_id > ?", keyMarker)
-	}
-	uploadIDMarkerExpr := exprTRUE
-	if uploadIDMarker != "" {
-		uploadIDMarkerExpr = gorm.Expr("upload_id > ?", keyMarker)
 	}
 
 	err = s.retryTransaction(func(tx *gorm.DB) error {
@@ -205,7 +206,10 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 		err := tx.
 			Model(&dbMultipartUpload{}).
 			Joins("DBBucket").
-			Where("? AND ? AND ? AND DBBucket.name = ?", prefixExpr, keyMarkerExpr, uploadIDMarkerExpr, bucket).
+			Where("DBBucket.name", bucket).
+			Where("?", markerExpr).
+			Where("?", prefixExpr).
+			Order("object_id ASC, upload_id ASC").
 			Limit(limit).
 			Find(&dbUploads).
 			Error
