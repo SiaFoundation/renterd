@@ -65,7 +65,7 @@ func (c *Client) Trigger(forceScan bool) (_ bool, err error) {
 	return resp.Triggered, err
 }
 
-// EvalutateConfig evaluates a autopilot config using the given gouging and
+// EvalutateConfig evaluates an autopilot config using the given gouging and
 // redundancy settings.
 func (c *Client) EvaluateConfig(ctx context.Context, cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings) (resp api.ConfigEvaluationResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/config", api.ConfigEvaluationRequest{

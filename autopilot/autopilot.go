@@ -746,39 +746,40 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // a recommendation on how to loosen it.
 func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (resp api.ConfigEvaluationResponse) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+
+	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
 		usable, usableBreakdown := isUsableHost(cfg, rs, gc, host, 0, 0)
 		if usable {
 			resp.Usable++
 			continue
 		}
-		resp.Total++
 		if usableBreakdown.blocked > 0 {
-			resp.Blocked++
+			resp.Unusable.Blocked++
 		}
 		if usableBreakdown.notacceptingcontracts > 0 {
-			resp.NotAcceptingContracts++
+			resp.Unusable.NotAcceptingContracts++
 		}
 		if usableBreakdown.notcompletingscan > 0 {
-			resp.NotScanned++
+			resp.Unusable.NotScanned++
 		}
 		if usableBreakdown.unknown > 0 {
-			resp.Other++
+			resp.Unusable.Unknown++
 		}
 		if usableBreakdown.gougingBreakdown.ContractErr != "" {
-			resp.Gouging.Contract++
+			resp.Unusable.Gouging.Contract++
 		}
 		if usableBreakdown.gougingBreakdown.DownloadErr != "" {
-			resp.Gouging.Download++
+			resp.Unusable.Gouging.Download++
 		}
 		if usableBreakdown.gougingBreakdown.GougingErr != "" {
-			resp.Gouging.Gouging++
+			resp.Unusable.Gouging.Gouging++
 		}
 		if usableBreakdown.gougingBreakdown.PruneErr != "" {
-			resp.Gouging.Pruning++
+			resp.Unusable.Gouging.Pruning++
 		}
 		if usableBreakdown.gougingBreakdown.UploadErr != "" {
-			resp.Gouging.Upload++
+			resp.Unusable.Gouging.Upload++
 		}
 	}
 

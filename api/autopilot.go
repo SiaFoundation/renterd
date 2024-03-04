@@ -99,25 +99,27 @@ type (
 	}
 
 	ConfigRecommendation struct {
-		GougingSettings GougingSettings `json:"gougingSettings,omitempty"`
+		GougingSettings GougingSettings `json:"gougingSettings"`
 	}
 
 	// ConfigEvaluationResponse is the response type for /evaluate
 	ConfigEvaluationResponse struct {
-		Usable  uint64 `json:"usable"`
-		Total   uint64 `json:"total"`
-		Blocked uint64 `json:"blocked"`
-		Gouging struct {
-			Contract uint64 `json:"contract"`
-			Download uint64 `json:"download"`
-			Gouging  uint64 `json:"gouging"`
-			Pruning  uint64 `json:"pruning"`
-			Upload   uint64 `json:"upload"`
+		Hosts    uint64 `json:"hosts"`
+		Usable   uint64 `json:"usable"`
+		Unusable struct {
+			Blocked uint64 `json:"blocked"`
+			Gouging struct {
+				Contract uint64 `json:"contract"`
+				Download uint64 `json:"download"`
+				Gouging  uint64 `json:"gouging"`
+				Pruning  uint64 `json:"pruning"`
+				Upload   uint64 `json:"upload"`
+			} `json:"gouging"`
+			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
+			NotScanned            uint64 `json:"notScanned"`
+			Unknown               uint64 `json:"unknown"`
 		}
-		NotAcceptingContracts uint64                `json:"notAcceptingContracts"`
-		NotScanned            uint64                `json:"notScanned"`
-		Other                 uint64                `json:"other"`
-		Recommendation        *ConfigRecommendation `json:"recommendation,omitempty"`
+		Recommendation *ConfigRecommendation `json:"recommendation,omitempty"`
 	}
 
 	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
