@@ -3879,6 +3879,123 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 }
 
+func TestRefreshHealth(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// define a helper function to return an object's health
+	health := func(name string) float64 {
+		t.Helper()
+		o, err := ss.Object(context.Background(), api.DefaultBucketName, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o.Health
+	}
+
+	// add test hosts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add test contract & set it as contract set
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.SetContractSet(context.Background(), testContractSet, fcids)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add two test objects
+	o1 := t.Name() + "1"
+	s1 := object.GenerateEncryptionKey()
+	if added, err := ss.addTestObject(o1, object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{{Slab: object.Slab{
+			Key: s1,
+			Shards: []object.Sector{
+				newTestShard(hks[0], fcids[0], types.Hash256{0}),
+				newTestShard(hks[1], fcids[1], types.Hash256{1}),
+			},
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	} else if added.Health != 1 {
+		t.Fatal("expected health to be 1, got", added.Health)
+	}
+
+	o2 := t.Name() + "2"
+	s2 := object.GenerateEncryptionKey()
+	if added, err := ss.addTestObject(o2, object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{{Slab: object.Slab{
+			Key: s2,
+			Shards: []object.Sector{
+				newTestShard(hks[0], fcids[0], types.Hash256{2}),
+				newTestShard(hks[1], fcids[1], types.Hash256{3}),
+			},
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	} else if added.Health != 1 {
+		t.Fatal("expected health to be 1, got", added.Health)
+	}
+
+	// update contract set and refresh health, assert health is .5
+	err = ss.SetContractSet(context.Background(), testContractSet, fcids[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.RefreshHealth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health(o1) != .5 {
+		t.Fatal("expected health to be .5, got", health(o1))
+	} else if health(o2) != .5 {
+		t.Fatal("expected health to be .5, got", health(o2))
+	}
+
+	// set the health of s1 to be lower than .5
+	s1b, _ := s1.MarshalBinary()
+	err = ss.db.Exec("UPDATE slabs SET health = 0.4 WHERE key = ?", secretKey(s1b)).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// refresh health and assert only object 1's health got updated
+	err = ss.RefreshHealth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health(o1) != .4 {
+		t.Fatal("expected health to be .4, got", health(o1))
+	} else if health(o2) != .5 {
+		t.Fatal("expected health to be .5, got", health(o2))
+	}
+
+	// set the health of s2 to be higher than .5
+	s2b, _ := s2.MarshalBinary()
+	err = ss.db.Exec("UPDATE slabs SET health = 0.6 WHERE key = ?", secretKey(s2b)).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// refresh health and assert only object 2's health got updated
+	err = ss.RefreshHealth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health(o1) != .4 {
+		t.Fatal("expected health to be .4, got", health(o1))
+	} else if health(o2) != .6 {
+		t.Fatal("expected health to be .6, got", health(o2))
+	}
+}
+
 func TestSlabCleanupTrigger(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
