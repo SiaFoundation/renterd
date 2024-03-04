@@ -36,16 +36,16 @@ type (
 		Model
 
 		// event
-		EventID        hash256 `gorm:"unique;index;NOT NULL;size:32"`
+		EventID        hash256 `gorm:"unique;index:idx_events_event_id;NOT NULL;size:32"`
 		Inflow         currency
 		Outflow        currency
 		Transaction    types.Transaction `gorm:"serializer:json"`
-		MaturityHeight uint64            `gorm:"index"`
-		Source         string            `gorm:"index:idx_events_source"`
-		Timestamp      int64             `gorm:"index:idx_events_timestamp"`
+		MaturityHeight uint64            `gorm:"index:idx_wallet_events_maturity_height"`
+		Source         string            `gorm:"index:idx_wallet_events_source"`
+		Timestamp      int64             `gorm:"index:idx_wallet_events_timestamp"`
 
 		// chain index
-		Height  uint64  `gorm:"index"`
+		Height  uint64  `gorm:"index:idx_wallet_events_height"`
 		BlockID hash256 `gorm:"size:32"`
 	}
 
@@ -59,15 +59,15 @@ type (
 		Model
 
 		// siacoin element
-		OutputID       hash256 `gorm:"unique;index;NOT NULL;size:32"`
+		OutputID       hash256 `gorm:"unique;index:idx_wallet_outputs_output_id;NOT NULL;size:32"`
 		LeafIndex      uint64
 		MerkleProof    merkleProof
 		Value          currency
 		Address        hash256 `gorm:"size:32"`
-		MaturityHeight uint64  `gorm:"index"`
+		MaturityHeight uint64  `gorm:"index:idx_wallet_outputs_maturity_height"`
 
 		// chain index
-		Height  uint64  `gorm:"index"`
+		Height  uint64  `gorm:"index:idx_wallet_outputs_height"`
 		BlockID hash256 `gorm:"size:32"`
 	}
 
