@@ -275,10 +275,10 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
 	return s.retryTransaction(func(tx *gorm.DB) error {
 		// delete multipart upload optimistically
-		res := tx.Where("upload_id", uploadID).
+		res := tx.
+			Where("upload_id", uploadID).
 			Where("object_id", path).
-			Where("DBBucket.name", bucket).
-			Joins("DBBucket").
+			Where("db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", bucket).
 			Delete(&dbMultipartUpload{})
 		if res.Error != nil {
 			return fmt.Errorf("failed to fetch multipart upload: %w", res.Error)
