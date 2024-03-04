@@ -3911,11 +3911,10 @@ func TestRefreshHealth(t *testing.T) {
 
 	// add two test objects
 	o1 := t.Name() + "1"
-	s1 := object.GenerateEncryptionKey()
 	if added, err := ss.addTestObject(o1, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s1,
+			Key: object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -3928,11 +3927,10 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	o2 := t.Name() + "2"
-	s2 := object.GenerateEncryptionKey()
 	if added, err := ss.addTestObject(o2, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s2,
+			Key: object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{2}),
 				newTestShard(hks[1], fcids[1], types.Hash256{3}),
@@ -3960,8 +3958,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// set the health of s1 to be lower than .5
-	s1b, _ := s1.MarshalBinary()
-	err = ss.db.Exec("UPDATE slabs SET health = 0.4 WHERE key = ?", secretKey(s1b)).Error
+	err = ss.overrideSlabHealth(o1, 0.4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3978,8 +3975,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// set the health of s2 to be higher than .5
-	s2b, _ := s2.MarshalBinary()
-	err = ss.db.Exec("UPDATE slabs SET health = 0.6 WHERE key = ?", secretKey(s2b)).Error
+	err = ss.overrideSlabHealth(o2, 0.6)
 	if err != nil {
 		t.Fatal(err)
 	}
