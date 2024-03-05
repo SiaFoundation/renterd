@@ -64,10 +64,12 @@ func (*alerterMock) DismissAlerts(context.Context, ...types.Hash256) error { ret
 
 var _ ConsensusState = (*chainMock)(nil)
 
-type chainMock struct{}
+type chainMock struct {
+	cs api.ConsensusState
+}
 
 func (c *chainMock) ConsensusState(ctx context.Context) (api.ConsensusState, error) {
-	return api.ConsensusState{}, nil
+	return c.cs, nil
 }
 
 var _ Bus = (*busMock)(nil)

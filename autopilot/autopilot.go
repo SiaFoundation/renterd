@@ -195,13 +195,15 @@ func (ap *Autopilot) Run() error {
 
 	// schedule a trigger when the wallet receives its first deposit
 	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
-		ap.logger.Error(err)
+		if !errors.Is(err, context.Canceled) {
+			ap.logger.Error(err)
+		}
 		return nil
 	}
 
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
-	for {
+	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
@@ -220,7 +222,7 @@ func (ap *Autopilot) Run() error {
 					close(tickerFired)
 					return
 				}
-				ap.logger.Error("autopilot stopped before consensus was synced")
+				ap.logger.Info("autopilot stopped before consensus was synced")
 				return
 			} else if blocked {
 				if scanning, _ := ap.s.Status(); !scanning {
@@ -234,7 +236,7 @@ func (ap *Autopilot) Run() error {
 					close(tickerFired)
 					return
 				}
-				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+				ap.logger.Info("autopilot stopped before it was able to confirm it was configured in the bus")
 				return
 			}
 
@@ -308,6 +310,7 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
+	return nil
 }
 
 // Shutdown shuts down the autopilot.
@@ -463,11 +466,12 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-	wallet, err := ap.bus.Wallet(ctx)
-	cancel()
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
+	defer cancel()
 
 	// no need to schedule a trigger if the wallet is already funded
+	wallet, err := ap.bus.Wallet(ctx)
 	if err != nil {
 		return err
 	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
