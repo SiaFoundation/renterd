@@ -860,6 +860,46 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
+func (w *worker) objectsHandlerHEAD(jc jape.Context) {
+	// parse bucket
+	bucket := api.DefaultBucketName
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+
+	// parse path
+	path := jc.PathParam("path")
+	if path == "" || strings.HasSuffix(path, "/") {
+		jc.Error(fmt.Errorf("directories are not accepted"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch object metadata
+	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+		OnlyMetadata: true,
+	})
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	} else if res.Object == nil {
+		jc.Error(api.ErrObjectNotFound, http.StatusInternalServerError) // should never happen but checking because we deref. later
+		return
+	}
+
+	// serve the content
+	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, func(io.Writer, int64, int64) error { return nil })
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+	} else if err != nil {
+		jc.Error(err, status)
+	}
+}
+
 func (w *worker) objectsHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []api.ObjectMetadata{})
 
@@ -1366,6 +1406,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
+		"HEAD   /objects/*path": w.objectsHandlerHEAD,
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
