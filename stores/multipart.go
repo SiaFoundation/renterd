@@ -278,26 +278,32 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 
 func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
 	return s.retryTransaction(func(tx *gorm.DB) error {
-		// Find multipart upload.
-		var mu dbMultipartUpload
-		err := tx.Where("upload_id = ?", uploadID).
-			Preload("Parts").
-			Joins("DBBucket").
-			Take(&mu).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch multipart upload: %w", err)
+		// delete multipart upload optimistically
+		res := tx.
+			Where("upload_id", uploadID).
+			Where("object_id", path).
+			Where("db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", bucket).
+			Delete(&dbMultipartUpload{})
+		if res.Error != nil {
+			return fmt.Errorf("failed to fetch multipart upload: %w", res.Error)
 		}
-		if mu.ObjectID != path {
-			// Check object id.
-			return fmt.Errorf("object id mismatch: %v != %v: %w", mu.ObjectID, path, api.ErrObjectNotFound)
-		} else if mu.DBBucket.Name != bucket {
-			// Check bucket name.
-			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
-		}
-		err = tx.Delete(&mu).Error
-		if err != nil {
-			return fmt.Errorf("failed to delete multipart upload: %w", err)
+		// if the upload wasn't found, find out why
+		if res.RowsAffected == 0 {
+			var mu dbMultipartUpload
+			err := tx.Where("upload_id = ?", uploadID).
+				Joins("DBBucket").
+				Take(&mu).
+				Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return api.ErrMultipartUploadNotFound
+			} else if err != nil {
+				return fmt.Errorf("failed to fetch multipart upload: %w", err)
+			} else if mu.ObjectID != path {
+				return fmt.Errorf("object id mismatch: %v != %v: %w", mu.ObjectID, path, api.ErrObjectNotFound)
+			} else if mu.DBBucket.Name != bucket {
+				return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
+			}
+			return errors.New("failed to delete multipart upload for unknown reason")
 		}
 		// Prune the slabs.
 		if err := pruneSlabs(tx); err != nil {
