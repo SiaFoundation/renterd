@@ -93,13 +93,14 @@ func (t impl) Retry(tries int, durationBetweenAttempts time.Duration, fn func() 
 	t.OK(Retry(tries, durationBetweenAttempts, fn))
 }
 
-func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) (err error) {
+func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) error {
+	var err error
 	for i := 0; i < tries; i++ {
 		err = fn()
 		if err == nil {
-			return nil
+			break
 		}
 		time.Sleep(durationBetweenAttempts)
 	}
-	return
+	return err
 }
