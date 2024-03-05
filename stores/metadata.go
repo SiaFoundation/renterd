@@ -1977,42 +1977,16 @@ LIMIT ?
 			rowsAffected = res.RowsAffected
 
 			// Update the health of objects with outdated health.
-			var err error
-			if isSQLite(tx) {
-				err = tx.Exec(`
-			UPDATE objects
-			SET health = (
-				SELECT MIN(slabs.health)
-				FROM slabs
-				INNER JOIN slices ON slices.db_slab_id = slabs.id
-				INNER JOIN objects ON slices.db_object_id = objects.id
-			)
-			WHERE EXISTS (
-				SELECT 1 FROM slabs
-				INNER JOIN slices ON slices.db_slab_id = slabs.id
-				INNER JOIN objects ON slices.db_object_id = objects.id
-				WHERE slabs.health < objects.health
-			)	
-			`).Error
-			} else {
-				err = tx.Exec(`
-			UPDATE objects
-			JOIN (
-				SELECT slices.db_object_id, MIN(slabs.health) AS min_health
-				FROM slabs
-				INNER JOIN slices ON slices.db_slab_id = slabs.id
-				GROUP BY slices.db_object_id
-			) AS min_healths ON objects.id = min_healths.db_object_id
-			SET objects.health = min_healths.min_health
-			WHERE objects.health > (
-				SELECT MIN(slabs.health)
-				FROM slabs
-				INNER JOIN slices ON slices.db_slab_id = slabs.id
-				WHERE slices.db_object_id = objects.id
-			);
-				`).Error
-			}
-			return err
+			return tx.Exec(`
+UPDATE objects SET health = (
+	SELECT MIN(slabs.health)
+	FROM slabs
+	INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
+) WHERE health != (
+	SELECT MIN(slabs.health)
+	FROM slabs
+	INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
+)`).Error
 		})
 		if err != nil {
 			return err
