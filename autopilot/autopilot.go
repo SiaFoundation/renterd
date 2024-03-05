@@ -815,30 +815,35 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 	// MaxRPCPrice
 	tmpGS := maxGS()
+	tmpGS.MaxRPCPrice = gs.MaxRPCPrice
 	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxRPCPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
 		optimisedGS.MaxRPCPrice = tmpGS.MaxRPCPrice
 		success = true
 	}
 	// MaxContractPrice
 	tmpGS = maxGS()
+	tmpGS.MaxContractPrice = gs.MaxContractPrice
 	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxContractPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
 		optimisedGS.MaxContractPrice = tmpGS.MaxContractPrice
 		success = true
 	}
 	// MaxDownloadPrice
 	tmpGS = maxGS()
+	tmpGS.MaxDownloadPrice = gs.MaxDownloadPrice
 	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxDownloadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
 		optimisedGS.MaxDownloadPrice = tmpGS.MaxDownloadPrice
 		success = true
 	}
 	// MaxUploadPrice
 	tmpGS = maxGS()
+	tmpGS.MaxUploadPrice = gs.MaxUploadPrice
 	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxUploadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
 		optimisedGS.MaxUploadPrice = tmpGS.MaxUploadPrice
 		success = true
 	}
 	// MaxStoragePrice
 	tmpGS = maxGS()
+	tmpGS.MaxStoragePrice = gs.MaxStoragePrice
 	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxStoragePrice, cfg, cs, fee, currentPeriod, rs, hosts) {
 		optimisedGS.MaxStoragePrice = tmpGS.MaxStoragePrice
 		success = true
