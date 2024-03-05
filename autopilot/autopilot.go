@@ -733,7 +733,7 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		usable, _ := isUsableHost(cfg, rs, gc, host, 0, 0)
+		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
 		if usable {
 			usables++
 		}
