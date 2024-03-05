@@ -15,7 +15,11 @@ import (
 	"gorm.io/gorm"
 )
 
-var _ chain.Subscriber = (*chainSubscriber)(nil)
+var (
+	_ chain.Subscriber = (*chainSubscriber)(nil)
+	_ wallet.ApplyTx   = (*chainSubscriber)(nil)
+	_ wallet.RevertTx  = (*chainSubscriber)(nil)
+)
 
 type (
 	chainSubscriber struct {
@@ -544,7 +548,7 @@ func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) 
 			se: dbWalletOutput{
 				OutputID:       hash256(el.ID),
 				LeafIndex:      el.StateElement.LeafIndex,
-				MerkleProof:    el.StateElement.MerkleProof,
+				MerkleProof:    merkleProof{proof: el.StateElement.MerkleProof},
 				Value:          currency(el.SiacoinOutput.Value),
 				Address:        hash256(el.SiacoinOutput.Address),
 				MaturityHeight: el.MaturityHeight,
@@ -582,7 +586,7 @@ func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement,
 		elements = append(elements, types.StateElement{
 			ID:          id,
 			LeafIndex:   el.se.LeafIndex,
-			MerkleProof: el.se.MerkleProof,
+			MerkleProof: el.se.MerkleProof.proof,
 		})
 	}
 	return
@@ -593,7 +597,7 @@ func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement,
 func (cs *chainSubscriber) UpdateStateElements(elements []types.StateElement) error {
 	for _, se := range elements {
 		curr := cs.outputs[se.ID]
-		curr.se.MerkleProof = se.MerkleProof
+		curr.se.MerkleProof = merkleProof{proof: se.MerkleProof}
 		curr.se.LeafIndex = se.LeafIndex
 		cs.outputs[se.ID] = curr
 	}

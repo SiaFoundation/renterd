@@ -105,7 +105,6 @@ func TestTypeCurrency(t *testing.T) {
 	}
 }
 
-// TODO: can't .Take() a single merkleProof
 func TestTypeMerkleProof(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -123,26 +122,33 @@ func TestTypeMerkleProof(t *testing.T) {
 	}
 
 	// insert merkle proof
-	if err := ss.db.Exec("INSERT INTO merkle_proofs (id, merkle_proof) VALUES (1,?),(2,?);", merkleProof([]types.Hash256{}), merkleProof([]types.Hash256{{2}, {1}, {3}})).Error; err != nil {
+	mp1 := merkleProof{proof: []types.Hash256{{3}, {1}, {2}}}
+	mp2 := merkleProof{proof: []types.Hash256{{4}}}
+	if err := ss.db.Exec("INSERT INTO merkle_proofs (merkle_proof) VALUES (?), (?);", mp1, mp2).Error; err != nil {
 		t.Fatal(err)
 	}
 
-	// fetch invalid proof
-	var proofs []merkleProof
+	// fetch first proof
+	var first merkleProof
 	if err := ss.db.
-		Raw(`SELECT merkle_proof FROM merkle_proofs WHERE id=1`).
-		Take(&proofs).
-		Error; err == nil || !strings.Contains(err.Error(), "no bytes found") {
-		t.Fatalf("expected error 'no bytes found', got '%v'", err)
+		Raw(`SELECT merkle_proof FROM merkle_proofs`).
+		Take(&first).
+		Error; err != nil {
+		t.Fatal(err)
+	} else if first.proof[0] != (types.Hash256{3}) || first.proof[1] != (types.Hash256{1}) || first.proof[2] != (types.Hash256{2}) {
+		t.Fatalf("unexpected proof %+v", first)
 	}
 
-	// fetch valid proof
+	// fetch both proofs
+	var both []merkleProof
 	if err := ss.db.
-		Raw(`SELECT merkle_proof FROM merkle_proofs WHERE id=2`).
-		Take(&proofs).
+		Raw(`SELECT merkle_proof FROM merkle_proofs`).
+		Scan(&both).
 		Error; err != nil {
-		t.Fatalf("unexpected error '%v'", err)
-	} else if proofs[0][0] != (types.Hash256{2}) || proofs[0][1] != (types.Hash256{1}) || proofs[0][2] != (types.Hash256{3}) {
-		t.Fatalf("unexpected proof %+v", proofs[0])
+		t.Fatal(err)
+	} else if len(both) != 2 {
+		t.Fatalf("unexpected number of proofs: %d", len(both))
+	} else if both[1].proof[0] != (types.Hash256{4}) {
+		t.Fatalf("unexpected proof %+v", both)
 	}
 }
