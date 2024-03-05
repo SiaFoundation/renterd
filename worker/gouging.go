@@ -39,6 +39,7 @@ var (
 type (
 	GougingChecker interface {
 		Check(_ *rhpv2.HostSettings, _ *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		BlocksUntilBlockHeightGouging(hostHeight uint64) int64
 	}
 
 	gougingChecker struct {
@@ -105,6 +106,16 @@ func NewGougingChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee typ
 		period:      &period,
 		renewWindow: &renewWindow,
 	}
+}
+
+func (gc gougingChecker) BlocksUntilBlockHeightGouging(hostHeight uint64) int64 {
+	blockHeight := gc.consensusState.BlockHeight
+	leeway := gc.settings.HostBlockHeightLeeway
+	var min uint64
+	if blockHeight >= uint64(leeway) {
+		min = blockHeight - uint64(leeway)
+	}
+	return int64(hostHeight) - int64(min)
 }
 
 func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.HostGougingBreakdown {
