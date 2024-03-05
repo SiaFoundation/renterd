@@ -10,11 +10,16 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
-var _ chain.Subscriber = (*chainSubscriber)(nil)
+var (
+	_ chain.Subscriber = (*chainSubscriber)(nil)
+	_ wallet.ApplyTx   = (*chainSubscriber)(nil)
+	_ wallet.RevertTx  = (*chainSubscriber)(nil)
+)
 
 type (
 	chainSubscriber struct {
@@ -34,10 +39,12 @@ type (
 		persistTimer   *time.Timer
 
 		announcements []announcement
+		events        []eventChange
+
 		contractState map[types.Hash256]contractState
 		hosts         map[types.PublicKey]struct{}
 		mayCommit     bool
-		outputs       []outputChange
+		outputs       map[types.Hash256]outputChange
 		proofs        map[types.Hash256]uint64
 		revisions     map[types.Hash256]revisionUpdate
 		transactions  []txnChange
@@ -55,6 +62,7 @@ func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Du
 		persistInterval:    persistInterval,
 
 		contractState: make(map[types.Hash256]contractState),
+		outputs:       make(map[types.Hash256]outputChange),
 		hosts:         make(map[types.PublicKey]struct{}),
 		proofs:        make(map[types.Hash256]uint64),
 		revisions:     make(map[types.Hash256]revisionUpdate),
@@ -461,4 +469,115 @@ func (cs *chainSubscriber) processChainRevertUpdateContracts(cru *chain.RevertUp
 
 func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	return retryTransaction(cs.db, cs.logger, fc, cs.retryIntervals, opts...)
+}
+
+// AddEvents is called with all relevant events added in the update.
+func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
+	for _, event := range events {
+		cs.events = append(cs.events, eventChange{
+			addition: true,
+			event: dbWalletEvent{
+				EventID:        hash256(event.ID),
+				Inflow:         currency(event.Inflow),
+				Outflow:        currency(event.Outflow),
+				Transaction:    event.Transaction,
+				MaturityHeight: event.MaturityHeight,
+				Source:         string(event.Source),
+				Timestamp:      event.Timestamp.Unix(),
+				Height:         event.Index.Height,
+				BlockID:        hash256(event.Index.ID),
+			},
+		})
+	}
+	return nil
+}
+
+// AddSiacoinElements is called with all new siacoin elements in the
+// update. Ephemeral siacoin elements are not included.
+func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) error {
+	for _, el := range elements {
+		if _, ok := cs.outputs[el.ID]; ok {
+			return fmt.Errorf("output %q already exists", el.ID)
+		}
+		cs.outputs[el.ID] = outputChange{
+			addition: true,
+			se: dbWalletOutput{
+				OutputID:       hash256(el.ID),
+				LeafIndex:      el.StateElement.LeafIndex,
+				MerkleProof:    merkleProof{proof: el.StateElement.MerkleProof},
+				Value:          currency(el.SiacoinOutput.Value),
+				Address:        hash256(el.SiacoinOutput.Address),
+				MaturityHeight: el.MaturityHeight,
+				Height:         el.Index.Height,
+				BlockID:        hash256(el.Index.ID),
+			},
+		}
+	}
+
+	return nil
+}
+
+// RemoveSiacoinElements is called with all siacoin elements that were
+// spent in the update.
+func (cs *chainSubscriber) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
+	for _, id := range ids {
+		if _, ok := cs.outputs[types.Hash256(id)]; ok {
+			return fmt.Errorf("output %q not found", id)
+		}
+
+		cs.outputs[types.Hash256(id)] = outputChange{
+			addition: false,
+			se: dbWalletOutput{
+				OutputID: hash256(id),
+			},
+		}
+	}
+	return nil
+}
+
+// WalletStateElements returns all state elements in the database. It is used
+// to update the proofs of all state elements affected by the update.
+func (cs *chainSubscriber) WalletStateElements() (elements []types.StateElement, _ error) {
+	for id, el := range cs.outputs {
+		elements = append(elements, types.StateElement{
+			ID:          id,
+			LeafIndex:   el.se.LeafIndex,
+			MerkleProof: el.se.MerkleProof.proof,
+		})
+	}
+	return
+}
+
+// UpdateStateElements updates the proofs of all state elements affected by the
+// update.
+func (cs *chainSubscriber) UpdateStateElements(elements []types.StateElement) error {
+	for _, se := range elements {
+		curr := cs.outputs[se.ID]
+		curr.se.MerkleProof = merkleProof{proof: se.MerkleProof}
+		curr.se.LeafIndex = se.LeafIndex
+		cs.outputs[se.ID] = curr
+	}
+	return nil
+}
+
+// RevertIndex is called with the chain index that is being reverted. Any events
+// and siacoin elements that were created by the index should be removed.
+func (cs *chainSubscriber) RevertIndex(index types.ChainIndex) error {
+	// remove any events that were added in the reverted block
+	filtered := cs.events[:0]
+	for i := range cs.events {
+		if cs.events[i].event.Index() != index {
+			filtered = append(filtered, cs.events[i])
+		}
+	}
+	cs.events = filtered
+
+	// remove any siacoin elements that were added in the reverted block
+	for id, el := range cs.outputs {
+		if el.se.Index() == index {
+			delete(cs.outputs, id)
+		}
+	}
+
+	return nil
 }
