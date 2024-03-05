@@ -870,7 +870,7 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	// parse path
 	path := jc.PathParam("path")
 	if path == "" || strings.HasSuffix(path, "/") {
-		jc.Error(fmt.Errorf("directories are not accepted"), http.StatusBadRequest)
+		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
 		return
 	}
 
