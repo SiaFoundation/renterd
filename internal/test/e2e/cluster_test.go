@@ -2382,7 +2382,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
-	defer cluster.Shutdown()
+
 	b := cluster.Bus
 	w := cluster.Worker
 	slabSize := test.RedundancySettings.SlabSizeNoRedundancy()
@@ -2446,5 +2446,47 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))
 	} else if !bytes.Equal(receivedData, expectedData) {
 		t.Fatal("unexpected data")
+	}
+}
+
+func TestWalletRedistribute(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
+	defer cluster.Shutdown()
+
+	// redistribute into 5 outputs
+	_, err := cluster.Bus.WalletRedistribute(context.Background(), 5, types.Siacoins(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster.MineBlocks(1)
+
+	// assert we have 5 outputs with 10 SC
+	outputs, err := cluster.Bus.WalletOutputs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cnt int
+	for _, output := range outputs {
+		if output.Value.Cmp(types.Siacoins(10)) == 0 {
+			cnt++
+		}
+	}
+	if cnt != 5 {
+		t.Fatalf("expected 5 outputs with 10 SC, got %v", cnt)
+	}
+
+	// assert redistributing into 3 outputs succeeds, used to fail because we
+	// were broadcasting an empty transaction set
+	_, err = cluster.Bus.WalletRedistribute(context.Background(), 3, types.Siacoins(10))
+	if err != nil {
+		t.Fatal(err)
 	}
 }

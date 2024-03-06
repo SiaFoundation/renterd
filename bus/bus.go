@@ -606,6 +606,11 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 	}
 
 	var ids []types.TransactionID
+	if len(txns) == 0 {
+		jc.Encode(ids)
+		return
+	}
+
 	for i := 0; i < len(txns); i++ {
 		err = b.w.SignTransaction(cs, &txns[i], toSign, types.CoveredFields{WholeTransaction: true})
 		if jc.Check("couldn't sign the transaction", err) != nil {
