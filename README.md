@@ -214,14 +214,14 @@ setting does not have a default value, it can be updated using the settings API:
 
 In most cases the default set should match the set from your autopilot
 configuration in order for migrations to work properly. The contract set can be
-overriden by passing it as a query string parameter to the worker's upload and
+overridden by passing it as a query string parameter to the worker's upload and
 migrate endpoints.
 
 - `PUT /api/worker/objects/foo?contractset=foo`
 
 ### Redundancy
 
-The default redundancy on mainnet is 30-10, on testnet it is 6-2. The redunancy
+The default redundancy on mainnet is 30-10, on testnet it is 6-2. The redundancy
 can be updated using the settings API:
 
 - `GET /api/bus/setting/redundancy`
