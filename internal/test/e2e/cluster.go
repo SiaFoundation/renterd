@@ -424,8 +424,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		// TODO: should not need the *2 leeway
-		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + 144*2)
+		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + 144)
 		tt.Retry(1000, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
