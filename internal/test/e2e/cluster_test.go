@@ -2460,7 +2460,8 @@ func TestHostScan(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	// Add a host.
+	// add 2 hosts to the cluster, 1 to scan and 1 to make sure we always have 1
+	// peer and consider ourselves connected to the internet
 	hosts := cluster.AddHosts(2)
 	host := hosts[0]
 
