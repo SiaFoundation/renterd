@@ -1390,9 +1390,10 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// prepare a helper for scanning
 	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 		// apply timeout
+		scanCtx := ctx
 		var cancel context.CancelFunc
 		if timeout > 0 {
-			ctx, cancel = context.WithTimeout(ctx, timeout)
+			scanCtx, cancel = context.WithTimeout(scanCtx, timeout)
 			defer cancel()
 		}
 		// resolve hostIP. We don't want to scan hosts on private networks.
@@ -1401,7 +1402,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 			if err != nil {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 			}
-			addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+			addrs, err := (&net.Resolver{}).LookupIPAddr(scanCtx, host)
 			if err != nil {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 			}
@@ -1415,9 +1416,9 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		// fetch the host settings
 		start := time.Now()
 		var settings rhpv2.HostSettings
-		err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 			var err error
-			if settings, err = RPCSettings(ctx, t); err != nil {
+			if settings, err = RPCSettings(scanCtx, t); err != nil {
 				return fmt.Errorf("failed to fetch host settings: %w", err)
 			}
 			// NOTE: we overwrite the NetAddress with the host address here
@@ -1432,7 +1433,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 
 		// fetch the host pricetable
 		var pt rhpv3.HostPriceTable
-		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
+		err = w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
 			if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
 				return fmt.Errorf("failed to fetch host price table: %w", err)
 			} else {
