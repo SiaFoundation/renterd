@@ -889,7 +889,8 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 		return
 	}
 
-	// serve the content
+	// serve the content to ensure we're setting the exact same headers as we
+	// would for a GET request
 	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, func(io.Writer, int64, int64) error { return nil })
 	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
 		jc.Error(err, http.StatusBadRequest)

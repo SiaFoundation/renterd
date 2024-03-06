@@ -85,13 +85,8 @@ type (
 
 	// GetObjectResponse is the response type for the GET /worker/object endpoint.
 	GetObjectResponse struct {
-		Content      io.ReadCloser      `json:"content"`
-		ContentType  string             `json:"contentType"`
-		LastModified string             `json:"lastModified"`
-		Range        *DownloadRange     `json:"range,omitempty"`
-		Size         int64              `json:"size"`
-		Metadata     ObjectUserMetadata `json:"metadata"`
-		// NOTE: keep HeadObjectResponse in sync with this type
+		Content io.ReadCloser `json:"content"`
+		HeadObjectResponse
 	}
 
 	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
@@ -144,46 +139,6 @@ type (
 		TotalUploadedSize          uint64  `json:"totalUploadedSize"`          // uploaded size of all objects including redundant sectors
 	}
 )
-
-func ParseObjectHeadResponseFrom(header http.Header) (HeadObjectResponse, error) {
-	// parse size
-	var size int64
-	_, err := fmt.Sscan(header.Get("Content-Length"), &size)
-	if err != nil {
-		return HeadObjectResponse{}, err
-	}
-
-	// parse range
-	var r *DownloadRange
-	if cr := header.Get("Content-Range"); cr != "" {
-		dr, err := ParseDownloadRange(cr)
-		if err != nil {
-			return HeadObjectResponse{}, err
-		}
-		r = &dr
-
-		// if a range is set, the size is the size extracted from the range
-		// since Content-Length will then only be the length of the returned
-		// range.
-		size = dr.Size
-	}
-
-	// parse headers
-	headers := make(map[string]string)
-	for k, v := range header {
-		if len(v) > 0 {
-			headers[k] = v[0]
-		}
-	}
-
-	return HeadObjectResponse{
-		ContentType:  header.Get("Content-Type"),
-		LastModified: header.Get("Last-Modified"),
-		Range:        r,
-		Size:         size,
-		Metadata:     ExtractObjectUserMetadataFrom(headers),
-	}, nil
-}
 
 func ExtractObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadata {
 	oum := make(map[string]string)
