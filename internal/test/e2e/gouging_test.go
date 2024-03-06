@@ -106,8 +106,9 @@ func TestGouging(t *testing.T) {
 	// set optimised settings
 	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
 
-	// renter should recover and be able to upload again
-
-	// upload some data - should fail
-	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
+	// upload some data - should work now once contract maintenance is done
+	tt.Retry(30, time.Second, func() error {
+		_, err := w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{})
+		return err
+	})
 }
