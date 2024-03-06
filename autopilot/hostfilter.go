@@ -204,7 +204,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 		gougingBreakdown = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
 		if gougingBreakdown.Gouging() {
 			errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown))
-		} else {
+		} else if minScore > 0 {
 			// perform scoring checks
 			//
 			// NOTE: only perform these scoring checks if we know the host is
