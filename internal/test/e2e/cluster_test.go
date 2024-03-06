@@ -2491,6 +2491,10 @@ func TestHostScan(t *testing.T) {
 	}
 
 	scanHost := func() error {
+		// timing on the CI can be weird, wait a bit to make sure time passes
+		// between scans
+		time.Sleep(time.Millisecond)
+
 		resp, err := w.RHPScan(context.Background(), hk, hostIP, 10*time.Second)
 		tt.OK(err)
 		if resp.ScanError != "" {
