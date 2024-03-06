@@ -198,7 +198,7 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 			// upload packed slab
 			if len(packedSlabs) > 0 {
 				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
-					w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
+					w.logger.Error(err)
 				}
 			}
 		}
@@ -227,10 +227,6 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 		w.uploadsMu.Unlock()
 	}()
 
-	// upload packed slabs
-	var mu sync.Mutex
-	var errs error
-
 	// derive a context that we can use as an interrupt in case of an error or shutdown.
 	interruptCtx, interruptCancel := context.WithCancel(w.shutdownCtx)
 	defer interruptCancel()
@@ -246,9 +242,9 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 		// fetch packed slab to upload
 		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
 		if err != nil {
-			mu.Lock()
-			errs = errors.Join(errs, fmt.Errorf("couldn't fetch packed slabs from bus: %v", err))
-			mu.Unlock()
+			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
+			mem.Release()
+			break
 		}
 
 		// no more packed slabs to upload
@@ -270,9 +266,7 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 
 			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
 			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
-				mu.Lock()
-				errs = errors.Join(errs, err)
-				mu.Unlock()
+				w.logger.Error(err)
 				interruptCancel() // prevent new uploads from being launched
 			}
 		}(packedSlabs[0])
@@ -280,11 +274,6 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 
 	// wait for all threads to finish
 	wg.Wait()
-
-	// log errors
-	if err := errors.Join(errs); err != nil {
-		w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
-	}
 	return
 }
 
@@ -890,7 +879,7 @@ loop:
 	for slab.numInflight > 0 && !done {
 		select {
 		case <-u.shutdownCtx.Done():
-			return nil, 0, 0, errors.New("upload stopped")
+			return nil, 0, 0, ErrShuttingDown
 		case <-ctx.Done():
 			return nil, 0, 0, ctx.Err()
 		case resp := <-respChan:

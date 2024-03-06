@@ -90,12 +90,17 @@ func (t impl) OKAll(vs ...interface{}) {
 
 func (t impl) Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) {
 	t.Helper()
-	for i := 1; i < tries; i++ {
-		err := fn()
+	t.OK(Retry(tries, durationBetweenAttempts, fn))
+}
+
+func Retry(tries int, durationBetweenAttempts time.Duration, fn func() error) error {
+	var err error
+	for i := 0; i < tries; i++ {
+		err = fn()
 		if err == nil {
-			return
+			break
 		}
 		time.Sleep(durationBetweenAttempts)
 	}
-	t.OK(fn())
+	return err
 }
