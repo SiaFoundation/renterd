@@ -2448,3 +2448,99 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		t.Fatal("unexpected data")
 	}
 }
+
+func TestHostScan(t *testing.T) {
+	// New cluster with autopilot disabled
+	cfg := clusterOptsDefault
+	cfg.skipRunningAutopilot = true
+	cluster := newTestCluster(t, cfg)
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// Add a host.
+	hosts := cluster.AddHosts(2)
+	host := hosts[0]
+
+	settings, err := host.RHPv2Settings()
+	tt.OK(err)
+
+	hk := host.PublicKey()
+	hostIP := settings.NetAddress
+
+	assertHost := func(ls time.Time, lss, slss bool, ts uint64) {
+		t.Helper()
+
+		hi, err := b.Host(context.Background(), host.PublicKey())
+		tt.OK(err)
+
+		if ls.IsZero() && !hi.Interactions.LastScan.IsZero() {
+			t.Fatal("expected last scan to be zero")
+		} else if !ls.IsZero() && !hi.Interactions.LastScan.After(ls) {
+			t.Fatal("expected last scan to be after", ls)
+		} else if hi.Interactions.LastScanSuccess != lss {
+			t.Fatalf("expected last scan success to be %v, got %v", lss, hi.Interactions.LastScanSuccess)
+		} else if hi.Interactions.SecondToLastScanSuccess != slss {
+			t.Fatalf("expected second to last scan success to be %v, got %v", slss, hi.Interactions.SecondToLastScanSuccess)
+		} else if hi.Interactions.TotalScans != ts {
+			t.Fatalf("expected total scans to be %v, got %v", ts, hi.Interactions.TotalScans)
+		}
+	}
+
+	scanHost := func() error {
+		resp, err := w.RHPScan(context.Background(), hk, hostIP, 10*time.Second)
+		tt.OK(err)
+		if resp.ScanError != "" {
+			return errors.New(resp.ScanError)
+		}
+		return nil
+	}
+
+	assertHost(time.Time{}, false, false, 0)
+
+	// scan the host the first time
+	ls := time.Now()
+	if err := scanHost(); err != nil {
+		t.Fatal(err)
+	}
+	assertHost(ls, true, false, 1)
+
+	// scan the host the second time
+	ls = time.Now()
+	if err := scanHost(); err != nil {
+		t.Fatal(err)
+	}
+	assertHost(ls, true, true, 2)
+
+	// close the host to make scans fail
+	tt.OK(host.Close())
+
+	// scan the host a third time
+	ls = time.Now()
+	if err := scanHost(); err == nil {
+		t.Fatal("expected scan error")
+	}
+	assertHost(ls, false, true, 3)
+
+	// fetch hosts for scanning with maxLastScan set to now which should return
+	// all hosts
+	toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+		MaxLastScan: api.TimeRFC3339(time.Now()),
+	})
+	tt.OK(err)
+	if len(toScan) != 2 {
+		t.Fatalf("expected 2 hosts, got %v", len(toScan))
+	}
+
+	// fetch hosts again with the unix epoch timestamp which should only return
+	// 1 host since that one hasn't been scanned yet
+	toScan, err = b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+		MaxLastScan: api.TimeRFC3339(time.Unix(0, 1)),
+	})
+	tt.OK(err)
+	if len(toScan) != 1 {
+		t.Fatalf("expected 1 hosts, got %v", len(toScan))
+	}
+}
