@@ -154,6 +154,7 @@ type testClusterOptions struct {
 	logger               *zap.Logger
 	uploadPacking        bool
 	skipSettingAutopilot bool
+	skipRunningAutopilot bool
 	walletKey            *types.PrivateKey
 
 	autopilotCfg      *node.AutopilotConfig
@@ -393,11 +394,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		_ = autopilotServer.Serve(autopilotListener)
 		cluster.wg.Done()
 	}()
-	cluster.wg.Add(1)
-	go func() {
-		_ = aStartFn()
-		cluster.wg.Done()
-	}()
+	if !opts.skipRunningAutopilot {
+		cluster.wg.Add(1)
+		go func() {
+			_ = aStartFn()
+			cluster.wg.Done()
+		}()
+	}
 
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
