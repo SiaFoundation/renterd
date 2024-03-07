@@ -105,7 +105,7 @@ func TestHostPruning(t *testing.T) {
 		if len(hostss) != 0 {
 			triggered, err := a.Trigger(false) // trigger autopilot
 			if err != nil {
-				t.Log("failed to trigger autopilot, attempt %d", err, cnt)
+				t.Logf("failed to trigger autopilot, attempt %d", err, cnt)
 			} else {
 				t.Logf("triggered autopilot %t, attempt %d", triggered, cnt)
 			}
