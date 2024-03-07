@@ -76,9 +76,6 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 		}
 	}()
 
-	// create a content reader
-	rs := newContentReader(pr, obj, offset)
-
 	// fetch the content type, if not set and we can't infer it from object's
 	// name we default to application/octet-stream, that is important because we
 	// have to avoid http.ServeContent to sniff the content type as it would
@@ -87,16 +84,19 @@ func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, dow
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	rw.Header().Set("Content-Type", contentType)
 
 	// set the response headers, no need to set Last-Modified header as
 	// serveContent does that for us
 	rw.Header().Set("ETag", api.FormatETag(obj.ETag))
-	rw.Header().Set("Content-Type", contentType)
 
 	// set the user metadata headers
 	for k, v := range obj.Metadata {
 		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectMetadataPrefix, k), v)
 	}
+
+	// create a content reader
+	rs := newContentReader(pr, obj, offset)
 
 	http.ServeContent(rw, req, obj.Name, obj.ModTime.Std(), rs)
 	return http.StatusOK, nil
