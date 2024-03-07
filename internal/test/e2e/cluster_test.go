@@ -2488,7 +2488,7 @@ func TestWalletRedistribute(t *testing.T) {
 	_, err = cluster.Bus.WalletRedistribute(context.Background(), 3, types.Siacoins(10))
 	if err != nil {
 		t.Fatal(err)
-  }
+	}
 }
 
 func TestHostScan(t *testing.T) {
