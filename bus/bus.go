@@ -400,7 +400,7 @@ func (b *bus) syncerPeersHandler(jc jape.Context) {
 func (b *bus) syncerConnectHandler(jc jape.Context) {
 	var addr string
 	if jc.Decode(&addr) == nil {
-		_, err := b.s.Connect(addr)
+		_, err := b.s.Connect(jc.Request.Context(), addr)
 		jc.Check("couldn't connect to peer", err)
 	}
 }
