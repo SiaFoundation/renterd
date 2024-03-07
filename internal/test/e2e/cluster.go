@@ -190,8 +190,6 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
-	t.Helper()
-
 	// Skip any test that requires a cluster when running short tests.
 	if testing.Short() {
 		t.SkipNow()
@@ -424,7 +422,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay)
+		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay + 1)
 		tt.Retry(1000, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
