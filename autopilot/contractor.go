@@ -1422,7 +1422,8 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) &&
+			!worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1505,7 +1506,8 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 			return api.ContractMetadata{}, true, err
 		}
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) &&
+			!worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
