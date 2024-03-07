@@ -19,6 +19,10 @@ var (
 	// ErrContractSetNotSpecified is returned by the worker API by endpoints that
 	// need a contract set to be able to upload data.
 	ErrContractSetNotSpecified = errors.New("contract set is not specified")
+
+	// ErrHostOnPrivateNetwork is returned by the worker API when a host can't
+	// be scanned since it is on a private network.
+	ErrHostOnPrivateNetwork = errors.New("host is on a private network")
 )
 
 type (
