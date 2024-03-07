@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -21,7 +22,9 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	opts := clusterOptsDefault
+	opts.logger = newTestLoggerCustom(zapcore.DebugLevel)
+	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
@@ -95,11 +98,18 @@ func TestHostPruning(t *testing.T) {
 	recordFailedInteractions(1, h1.PublicKey())
 
 	// assert the host was pruned
+	var cnt int
 	tt.Retry(10, time.Second, func() error {
 		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
-			a.Trigger(false) // trigger autopilot
+			triggered, err := a.Trigger(false) // trigger autopilot
+			if err != nil {
+				t.Log("failed to trigger autopilot, attempt %d", err, cnt)
+			} else {
+				t.Logf("triggered autopilot %t, attempt %d", triggered, cnt)
+			}
+			cnt++
 			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)
 		}
 		return nil
