@@ -32,7 +32,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const blocksPerMonth = 144 * 30
+const (
+	blocksPerDay   = 144
+	blocksPerMonth = blocksPerDay * 30
+)
 
 type stubMetricReporter struct{}
 

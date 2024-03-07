@@ -2238,8 +2238,6 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 }
 
 func TestWalletFormUnconfirmed(t *testing.T) {
-	t.Skip("TODO: fix me")
-
 	// create cluster without autopilot
 	cfg := clusterOptsDefault
 	cfg.skipSettingAutopilot = true
@@ -2270,9 +2268,6 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(feeReserve) > 0 {
 		t.Fatal("wallet should have hardly any confirmed balance")
 	}
-	t.Logf("%+v", wr)
-	t.Log("Confirmed", wr.Confirmed)
-	t.Log("Unconfirmed", wr.Unconfirmed)
 
 	// there shouldn't be any contracts yet
 	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
