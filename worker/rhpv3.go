@@ -47,6 +47,12 @@ const (
 )
 
 var (
+	// errHost is used to wrap rpc errors returned by the host.
+	errHost = errors.New("host responded with error")
+
+	// errTransport is used to wrap rpc errors caused by the transport.
+	errTransport = errors.New("transport error")
+
 	// errBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
@@ -83,6 +89,14 @@ var (
 	errWithdrawalExpired = errors.New("withdrawal request expired")
 )
 
+// IsErrHost indicates whether an error was returned by a host as part of an RPC.
+func IsErrHost(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, errHost) || strings.Contains(err.Error(), errHost.Error())
+}
+
 func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
 func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
 func isClosedStream(err error) bool {
@@ -110,6 +124,24 @@ func isError(err error, target error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
 }
 
+// wrapRPCErr extracts the innermost error, wraps it in either a errHost or
+// errTransport and finally wraps it using the provided fnName.
+func wrapRPCErr(err *error, fnName string) {
+	if *err == nil {
+		return
+	}
+	innerErr := *err
+	for errors.Unwrap(innerErr) != nil {
+		innerErr = errors.Unwrap(innerErr)
+	}
+	if errors.As(*err, new(*rhpv3.RPCError)) {
+		*err = fmt.Errorf("%w: '%w'", errHost, innerErr)
+	} else {
+		*err = fmt.Errorf("%w: '%w'", errTransport, innerErr)
+	}
+	*err = fmt.Errorf("%s: %w", fnName, *err)
+}
+
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
 	refCount uint64 // locked by pool
@@ -123,6 +155,27 @@ type transportV3 struct {
 type streamV3 struct {
 	cancel context.CancelFunc
 	*rhpv3.Stream
+}
+
+func (s *streamV3) ReadResponse(resp rhpv3.ProtocolObject, maxLen uint64) (err error) {
+	defer wrapRPCErr(&err, "ReadResponse")
+	return s.Stream.ReadResponse(resp, maxLen)
+}
+
+func (s *streamV3) WriteResponse(resp rhpv3.ProtocolObject) (err error) {
+	defer wrapRPCErr(&err, "WriteResponse")
+	return s.Stream.WriteResponse(resp)
+}
+
+// ReadRequest reads an RPC request using the new loop protocol.
+func (s *streamV3) ReadRequest(req rhpv3.ProtocolObject, maxLen uint64) (err error) {
+	defer wrapRPCErr(&err, "ReadRequest")
+	return s.Stream.ReadRequest(req, maxLen)
+}
+
+func (s *streamV3) WriteRequest(rpcID types.Specifier, req rhpv3.ProtocolObject) (err error) {
+	defer wrapRPCErr(&err, "WriteRequest")
+	return s.Stream.WriteRequest(rpcID, req)
 }
 
 // Close closes the stream and cancels the goroutine launched by DialStream.
