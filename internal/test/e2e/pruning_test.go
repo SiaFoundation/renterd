@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -22,9 +21,7 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// create a new test cluster
-	opts := clusterOptsDefault
-	opts.logger = newTestLoggerCustom(zapcore.DebugLevel)
-	cluster := newTestCluster(t, opts)
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	w := cluster.Worker
@@ -103,7 +100,7 @@ func TestHostPruning(t *testing.T) {
 		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
-			triggered, err := a.Trigger(false) // trigger autopilot
+			triggered, err := a.Trigger(true) // trigger autopilot
 			if err != nil {
 				t.Logf("failed to trigger autopilot err %v, attempt %d", err, cnt)
 			} else {

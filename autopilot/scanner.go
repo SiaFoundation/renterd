@@ -196,10 +196,8 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	go func(st string) {
 		defer s.wg.Done()
 
-		var interrupted bool
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.isInterrupted() || s.ap.isStopped() {
-				interrupted = true
 				break
 			}
 			if resp.err != nil && !strings.Contains(resp.err.Error(), "connection refused") {
@@ -212,8 +210,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		hostCfg := s.ap.State().cfg.Hosts
 		maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
 		minRecentScanFailures := hostCfg.MinRecentScanFailures
-
-		if !interrupted && maxDowntime > 0 {
+		if !s.ap.isStopped() && maxDowntime > 0 {
 			s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
 			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
 			if err != nil {
