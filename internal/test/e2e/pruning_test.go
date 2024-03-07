@@ -99,6 +99,7 @@ func TestHostPruning(t *testing.T) {
 		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
+			a.Trigger(false) // trigger autopilot
 			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)
 		}
 		return nil
