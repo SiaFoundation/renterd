@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -137,7 +138,7 @@ func (r *ipResolver) lookup(hostIP string) ([]string, error) {
 	addrs, err := r.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		// check the cache if it's an i/o timeout or server misbehaving error
-		if isErr(err, errIOTimeout) || isErr(err, errServerMisbehaving) {
+		if utils.IsErr(err, errIOTimeout) || utils.IsErr(err, errServerMisbehaving) {
 			if entry, found := r.cache[hostIP]; found && time.Since(entry.created) < ipCacheEntryValidity {
 				r.logger.Debugf("using cached IP addresses for %v, err: %v", hostIP, err)
 				return entry.subnets, nil
@@ -187,11 +188,4 @@ func parseSubnets(addresses []net.IPAddr) []string {
 	}
 
 	return subnets
-}
-
-func isErr(err error, target error) bool {
-	if errors.Is(err, target) {
-		return true
-	}
-	return err != nil && target != nil && strings.Contains(err.Error(), target.Error())
 }

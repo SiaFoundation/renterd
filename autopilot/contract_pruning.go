@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/build"
 )
 
@@ -65,14 +66,14 @@ func (pm pruneMetrics) String() string {
 func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 	id = alertIDForContract(alertPruningID, pr.fcid)
 
-	if shouldTrigger := pr.err != nil && !((isErr(pr.err, errInvalidMerkleProof) && build.VersionCmp(pr.version, "1.6.0") < 0) ||
-		isErr(pr.err, api.ErrContractNotFound) || // contract got archived
-		isErr(pr.err, errConnectionRefused) ||
-		isErr(pr.err, errConnectionTimedOut) ||
-		isErr(pr.err, errConnectionResetByPeer) ||
-		isErr(pr.err, errInvalidHandshakeSignature) ||
-		isErr(pr.err, errNoRouteToHost) ||
-		isErr(pr.err, errNoSuchHost)); shouldTrigger {
+	if shouldTrigger := pr.err != nil && !((utils.IsErr(pr.err, errInvalidMerkleProof) && build.VersionCmp(pr.version, "1.6.0") < 0) ||
+		utils.IsErr(pr.err, api.ErrContractNotFound) || // contract got archived
+		utils.IsErr(pr.err, errConnectionRefused) ||
+		utils.IsErr(pr.err, errConnectionTimedOut) ||
+		utils.IsErr(pr.err, errConnectionResetByPeer) ||
+		utils.IsErr(pr.err, errInvalidHandshakeSignature) ||
+		utils.IsErr(pr.err, errNoRouteToHost) ||
+		utils.IsErr(pr.err, errNoSuchHost)); shouldTrigger {
 		alert = newContractPruningFailedAlert(pr.hk, pr.version, pr.fcid, pr.err)
 	}
 	return
@@ -196,7 +197,7 @@ func (c *contractor) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 	pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil && pruned == 0 {
 		return pruneResult{fcid: fcid, hk: host.PublicKey, version: host.Settings.Version, err: err}
-	} else if err != nil && isErr(err, context.DeadlineExceeded) {
+	} else if err != nil && utils.IsErr(err, context.DeadlineExceeded) {
 		err = nil
 	}
 
