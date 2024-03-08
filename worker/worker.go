@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
@@ -1197,7 +1198,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// fetch upload from bus
 	upload, err := w.bus.MultipartUpload(ctx, uploadID)
-	if isError(err, api.ErrMultipartUploadNotFound) {
+	if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to fetch multipart upload", err) != nil {

@@ -10,7 +10,6 @@ import (
 	"math"
 	"math/big"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 )
@@ -91,38 +91,23 @@ var (
 
 // IsErrHost indicates whether an error was returned by a host as part of an RPC.
 func IsErrHost(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, errHost) || strings.Contains(err.Error(), errHost.Error())
+	return utils.IsErr(err, errHost)
 }
 
-func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
-func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
+func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceInsufficient) }
+func isBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
 func isClosedStream(err error) bool {
-	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
+	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
-func isInsufficientFunds(err error) bool  { return isError(err, ErrInsufficientFunds) }
-func isPriceTableExpired(err error) bool  { return isError(err, errPriceTableExpired) }
-func isPriceTableGouging(err error) bool  { return isError(err, errPriceTableGouging) }
-func isPriceTableNotFound(err error) bool { return isError(err, errPriceTableNotFound) }
+func isInsufficientFunds(err error) bool  { return utils.IsErr(err, ErrInsufficientFunds) }
+func isPriceTableExpired(err error) bool  { return utils.IsErr(err, errPriceTableExpired) }
+func isPriceTableGouging(err error) bool  { return utils.IsErr(err, errPriceTableGouging) }
+func isPriceTableNotFound(err error) bool { return utils.IsErr(err, errPriceTableNotFound) }
 func isSectorNotFound(err error) bool {
-	return isError(err, errSectorNotFound) || isError(err, errSectorNotFoundOld)
+	return utils.IsErr(err, errSectorNotFound) || utils.IsErr(err, errSectorNotFoundOld)
 }
-func isWithdrawalsInactive(err error) bool { return isError(err, errWithdrawalsInactive) }
-func isWithdrawalExpired(err error) bool   { return isError(err, errWithdrawalExpired) }
-
-func isError(err error, target error) bool {
-	if err == nil {
-		return err == target
-	}
-	// compare error first
-	if errors.Is(err, target) {
-		return true
-	}
-	// then compare the string in case the error was returned by a host
-	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
-}
+func isWithdrawalsInactive(err error) bool { return utils.IsErr(err, errWithdrawalsInactive) }
+func isWithdrawalExpired(err error) bool   { return utils.IsErr(err, errWithdrawalExpired) }
 
 // wrapRPCErr extracts the innermost error, wraps it in either a errHost or
 // errTransport and finally wraps it using the provided fnName.
@@ -167,7 +152,6 @@ func (s *streamV3) WriteResponse(resp rhpv3.ProtocolObject) (err error) {
 	return s.Stream.WriteResponse(resp)
 }
 
-// ReadRequest reads an RPC request using the new loop protocol.
 func (s *streamV3) ReadRequest(req rhpv3.ProtocolObject, maxLen uint64) (err error) {
 	defer wrapRPCErr(&err, "ReadRequest")
 	return s.Stream.ReadRequest(req, maxLen)
