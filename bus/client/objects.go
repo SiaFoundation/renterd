@@ -82,8 +82,12 @@ func (c *Client) ObjectsBySlabKey(ctx context.Context, bucket string, key object
 }
 
 // ObjectsStats returns information about the number of objects and their size.
-func (c *Client) ObjectsStats() (osr api.ObjectsStatsResponse, err error) {
-	err = c.c.GET("/stats/objects", &osr)
+func (c *Client) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (osr api.ObjectsStatsResponse, err error) {
+	values := url.Values{}
+	if opts.Bucket != "" {
+		values.Set("bucket", opts.Bucket)
+	}
+	err = c.c.WithContext(ctx).GET("/stats/objects?"+values.Encode(), &osr)
 	return
 }
 

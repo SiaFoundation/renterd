@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"bytes"
@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
@@ -264,7 +265,7 @@ func TestObjectEntries(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -435,7 +436,7 @@ func TestObjectsRename(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -491,7 +492,7 @@ func TestUploadDownloadEmpty(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -519,13 +520,13 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -546,8 +547,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 	for _, slab := range resp.Object.Slabs {
 		hosts := make(map[types.PublicKey]struct{})
 		roots := make(map[types.Hash256]struct{})
-		if len(slab.Shards) != testRedundancySettings.TotalShards {
-			t.Fatal("wrong amount of shards", len(slab.Shards), testRedundancySettings.TotalShards)
+		if len(slab.Shards) != test.RedundancySettings.TotalShards {
+			t.Fatal("wrong amount of shards", len(slab.Shards), test.RedundancySettings.TotalShards)
 		}
 		for _, shard := range slab.Shards {
 			if shard.LatestHost == (types.PublicKey{}) {
@@ -631,13 +632,13 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -697,25 +698,33 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// check objects stats.
-	info, err := cluster.Bus.ObjectsStats()
-	tt.OK(err)
-	objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
-	if info.TotalObjectsSize != objectsSize {
-		t.Error("wrong size", info.TotalObjectsSize, objectsSize)
-	}
-	sectorsSize := 15 * rhpv2.SectorSize
-	if info.TotalSectorsSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.TotalSectorsSize, sectorsSize)
-	}
-	if info.TotalUploadedSize != uint64(sectorsSize) {
-		t.Error("wrong size", info.TotalUploadedSize, sectorsSize)
-	}
-	if info.NumObjects != 4 {
-		t.Error("wrong number of objects", info.NumObjects, 4)
-	}
-	if info.MinHealth != 1 {
-		t.Errorf("expected minHealth of 1, got %v", info.MinHealth)
-	}
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		for _, opts := range []api.ObjectsStatsOpts{
+			{},                              // any bucket
+			{Bucket: api.DefaultBucketName}, // specific bucket
+		} {
+			info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+			tt.OK(err)
+			objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
+			if info.TotalObjectsSize != objectsSize {
+				return fmt.Errorf("wrong size %v %v", info.TotalObjectsSize, objectsSize)
+			}
+			sectorsSize := 15 * rhpv2.SectorSize
+			if info.TotalSectorsSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalSectorsSize, sectorsSize)
+			}
+			if info.TotalUploadedSize != uint64(sectorsSize) {
+				return fmt.Errorf("wrong size %v %v", info.TotalUploadedSize, sectorsSize)
+			}
+			if info.NumObjects != 4 {
+				return fmt.Errorf("wrong number of objects %v %v", info.NumObjects, 4)
+			}
+			if info.MinHealth != 1 {
+				return fmt.Errorf("expected minHealth of 1, got %v", info.MinHealth)
+			}
+		}
+		return nil
+	})
 
 	// download the data
 	for _, data := range [][]byte{small, large} {
@@ -763,18 +772,18 @@ func TestUploadDownloadExtended(t *testing.T) {
 // and download spending metrics are tracked properly.
 func TestUploadDownloadSpending(t *testing.T) {
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
 	w := cluster.Worker
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// check that the funding was recorded
@@ -883,7 +892,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		// fetch contract set contracts
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: testAutopilotConfig.Contracts.Set})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		currentSet := make(map[types.FileContractID]struct{})
 		for _, c := range contracts {
@@ -1044,7 +1053,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Reboot cluster.
-	cluster2 := cluster.Reboot(context.Background())
+	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
 	// Check that accounts were loaded from the bus.
@@ -1082,7 +1091,7 @@ func TestParallelUpload(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1160,7 +1169,7 @@ func TestParallelDownload(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1238,7 +1247,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 
 	// Restart cluster to have worker fetch the account from the bus again.
-	cluster2 := cluster.Reboot(context.Background())
+	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
 	// Account should need a sync.
@@ -1277,7 +1286,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: testRedundancySettings.TotalShards,
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -1308,7 +1317,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
-	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", testContractSet, res.Object.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "frankenstein", api.DownloadObjectOptions{}))
@@ -1516,20 +1525,20 @@ func TestUploadPacking(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// prepare 3 files which are all smaller than a slab but together make up
@@ -1633,7 +1642,7 @@ func TestUploadPacking(t *testing.T) {
 	download("file4", data4, 0, int64(len(data4)))
 
 	// assert number of objects
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 5 {
 		t.Fatalf("expected 5 objects, got %v", os.NumObjects)
@@ -1642,7 +1651,7 @@ func TestUploadPacking(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1764,7 +1773,7 @@ func TestSlabBufferStats(t *testing.T) {
 	}
 
 	// sanity check the default settings
-	if testAutopilotConfig.Contracts.Amount < uint64(testRedundancySettings.MinShards) {
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
 	}
 
@@ -1774,14 +1783,14 @@ func TestSlabBufferStats(t *testing.T) {
 	busCfg.SlabBufferCompletionThreshold = int64(threshold)
 	cluster := newTestCluster(t, testClusterOptions{
 		busCfg:        &busCfg,
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
 	w := cluster.Worker
-	rs := testRedundancySettings
+	rs := test.RedundancySettings
 	tt := cluster.tt
 
 	// prepare 3 files which are all smaller than a slab but together make up
@@ -1796,7 +1805,7 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data1), api.DefaultBucketName, "1", api.UploadObjectOptions{}))
 
 	// assert number of objects
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 1 {
 		t.Fatalf("expected 1 object, got %d", os.NumObjects)
@@ -1805,7 +1814,7 @@ func TestSlabBufferStats(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1830,8 +1839,8 @@ func TestSlabBufferStats(t *testing.T) {
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 slab buffer, got", len(buffers))
 	}
-	if buffers[0].ContractSet != testContractSet {
-		t.Fatalf("expected slab buffer contract set of %v, got %v", testContractSet, buffers[0].ContractSet)
+	if buffers[0].ContractSet != test.ContractSet {
+		t.Fatalf("expected slab buffer contract set of %v, got %v", test.ContractSet, buffers[0].ContractSet)
 	}
 	if buffers[0].Size != int64(len(data1)) {
 		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), buffers[0].Size)
@@ -1853,7 +1862,7 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data2), api.DefaultBucketName, "2", api.UploadObjectOptions{}))
 
 	// assert number of objects
-	os, err = b.ObjectsStats()
+	os, err = b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 2 {
 		t.Fatalf("expected 1 object, got %d", os.NumObjects)
@@ -1862,7 +1871,7 @@ func TestSlabBufferStats(t *testing.T) {
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
 	tt.Retry(60, time.Second, func() error {
-		os, err := b.ObjectsStats()
+		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		tt.OK(err)
 		if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
 			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1)+len(data2), os.TotalObjectsSize)
@@ -1915,9 +1924,9 @@ func TestAlerts(t *testing.T) {
 	tt.OK(b.RegisterAlert(context.Background(), alert))
 	findAlert := func(id types.Hash256) *alerts.Alert {
 		t.Helper()
-		alerts, err := b.Alerts()
+		ar, err := b.Alerts(context.Background(), alerts.AlertsOpts{})
 		tt.OK(err)
-		for _, alert := range alerts {
+		for _, alert := range ar.Alerts {
 			if alert.ID == id {
 				return &alert
 			}
@@ -1938,6 +1947,72 @@ func TestAlerts(t *testing.T) {
 	if foundAlert != nil {
 		t.Fatal("alert found")
 	}
+
+	// register 2 alerts
+	alert2 := alert
+	alert2.ID = frand.Entropy256()
+	alert2.Timestamp = time.Now().Add(time.Second)
+	tt.OK(b.RegisterAlert(context.Background(), alert))
+	tt.OK(b.RegisterAlert(context.Background(), alert2))
+	if foundAlert := findAlert(alert.ID); foundAlert == nil {
+		t.Fatal("alert not found")
+	} else if foundAlert := findAlert(alert2.ID); foundAlert == nil {
+		t.Fatal("alert not found")
+	}
+
+	// try to find with offset = 1
+	ar, err := b.Alerts(context.Background(), alerts.AlertsOpts{Offset: 1})
+	foundAlerts := ar.Alerts
+	tt.OK(err)
+	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert.ID {
+		t.Fatal("wrong alert")
+	}
+
+	// try to find with limit = 1
+	ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Limit: 1})
+	foundAlerts = ar.Alerts
+	tt.OK(err)
+	if len(foundAlerts) != 1 || foundAlerts[0].ID != alert2.ID {
+		t.Fatal("wrong alert")
+	}
+
+	// register more alerts
+	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
+		for j := 0; j < 3*int(severity); j++ {
+			tt.OK(b.RegisterAlert(context.Background(), alerts.Alert{
+				ID:       frand.Entropy256(),
+				Severity: severity,
+				Message:  "test",
+				Data: map[string]interface{}{
+					"origin": "test",
+				},
+				Timestamp: time.Now(),
+			}))
+		}
+	}
+	for severity := alerts.SeverityInfo; severity <= alerts.SeverityCritical; severity++ {
+		ar, err = b.Alerts(context.Background(), alerts.AlertsOpts{Severity: severity})
+		tt.OK(err)
+		if ar.Total() != 32 {
+			t.Fatal("expected 32 alerts", ar.Total())
+		} else if ar.Totals.Info != 3 {
+			t.Fatal("expected 3 info alerts", ar.Totals.Info)
+		} else if ar.Totals.Warning != 6 {
+			t.Fatal("expected 6 warning alerts", ar.Totals.Warning)
+		} else if ar.Totals.Error != 9 {
+			t.Fatal("expected 9 error alerts", ar.Totals.Error)
+		} else if ar.Totals.Critical != 14 {
+			t.Fatal("expected 14 critical alerts", ar.Totals.Critical)
+		} else if severity == alerts.SeverityInfo && len(ar.Alerts) != ar.Totals.Info {
+			t.Fatalf("expected %v info alerts, got %v", ar.Totals.Info, len(ar.Alerts))
+		} else if severity == alerts.SeverityWarning && len(ar.Alerts) != ar.Totals.Warning {
+			t.Fatalf("expected %v warning alerts, got %v", ar.Totals.Warning, len(ar.Alerts))
+		} else if severity == alerts.SeverityError && len(ar.Alerts) != ar.Totals.Error {
+			t.Fatalf("expected %v error alerts, got %v", ar.Totals.Error, len(ar.Alerts))
+		} else if severity == alerts.SeverityCritical && len(ar.Alerts) != ar.Totals.Critical {
+			t.Fatalf("expected %v critical alerts, got %v", ar.Totals.Critical, len(ar.Alerts))
+		}
+	}
 }
 
 func TestMultipartUploads(t *testing.T) {
@@ -1946,7 +2021,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
@@ -1957,7 +2032,7 @@ func TestMultipartUploads(t *testing.T) {
 
 	// Start a new multipart upload.
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{GenerateKey: true})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -1976,7 +2051,7 @@ func TestMultipartUploads(t *testing.T) {
 	// correctly.
 	putPart := func(partNum int, offset int, data []byte) string {
 		t.Helper()
-		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: offset})
+		res, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), api.DefaultBucketName, objPath, mpr.UploadID, partNum, api.UploadMultipartUploadPartOptions{EncryptionOffset: &offset})
 		tt.OK(err)
 		if res.ETag == "" {
 			t.Fatal("expected non-empty ETag")
@@ -2006,7 +2081,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Check objects stats.
-	os, err := b.ObjectsStats()
+	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 0 {
 		t.Fatalf("expected 0 object, got %v", os.NumObjects)
@@ -2065,7 +2140,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Check objects stats.
-	os, err = b.ObjectsStats()
+	os, err = b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 	tt.OK(err)
 	if os.NumObjects != 1 {
 		t.Fatalf("expected 1 object, got %v", os.NumObjects)
@@ -2192,7 +2267,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// Enable autopilot by setting it.
-	cluster.UpdateAutopilotConfig(context.Background(), testAutopilotConfig)
+	cluster.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig)
 
 	// Wait for a contract to form.
 	contractsFormed := cluster.WaitForContracts()
@@ -2226,8 +2301,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 	for _, m := range csMetrics {
 		if m.Contracts != 1 {
 			t.Fatalf("expected 1 contract, got %v", m.Contracts)
-		} else if m.Name != testContractSet {
-			t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+		} else if m.Name != test.ContractSet {
+			t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
 		} else if m.Timestamp.Std().Before(startTime) {
 			t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 		}
@@ -2243,8 +2318,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected added churn, got %v", m.Direction)
 	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
-	} else if m.Name != testContractSet {
-		t.Fatalf("expected contract set %v, got %v", testContractSet, m.Name)
+	} else if m.Name != test.ContractSet {
+		t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
 	} else if m.Timestamp.Std().Before(startTime) {
 		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}
@@ -2303,19 +2378,20 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	}
 
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         testRedundancySettings.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
-	defer cluster.Shutdown()
+
 	b := cluster.Bus
 	w := cluster.Worker
-	slabSize := testRedundancySettings.SlabSizeNoRedundancy()
+	slabSize := test.RedundancySettings.SlabSizeNoRedundancy()
 	tt := cluster.tt
 
 	// start a new multipart upload. We upload the parts in reverse order
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: object.GenerateEncryptionKey()})
+	key := object.GenerateEncryptionKey()
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: &key})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -2323,22 +2399,25 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// upload a part that is a partial slab
 	part3Data := bytes.Repeat([]byte{3}, int(slabSize)/4)
+	offset := int(slabSize + slabSize/4)
 	resp3, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part3Data), api.DefaultBucketName, objPath, mpr.UploadID, 3, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize + slabSize/4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload a part that is exactly a full slab
 	part2Data := bytes.Repeat([]byte{2}, int(slabSize))
+	offset = int(slabSize / 4)
 	resp2, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part2Data), api.DefaultBucketName, objPath, mpr.UploadID, 2, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: int(slabSize / 4),
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
 	// upload another part the same size as the first one
 	part1Data := bytes.Repeat([]byte{1}, int(slabSize)/4)
+	offset = 0
 	resp1, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(part1Data), api.DefaultBucketName, objPath, mpr.UploadID, 1, api.UploadMultipartUploadPartOptions{
-		EncryptionOffset: 0,
+		EncryptionOffset: &offset,
 	})
 	tt.OK(err)
 
@@ -2367,5 +2446,151 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))
 	} else if !bytes.Equal(receivedData, expectedData) {
 		t.Fatal("unexpected data")
+	}
+}
+
+func TestWalletRedistribute(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
+	defer cluster.Shutdown()
+
+	// redistribute into 5 outputs
+	_, err := cluster.Bus.WalletRedistribute(context.Background(), 5, types.Siacoins(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster.MineBlocks(1)
+
+	// assert we have 5 outputs with 10 SC
+	outputs, err := cluster.Bus.WalletOutputs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cnt int
+	for _, output := range outputs {
+		if output.Value.Cmp(types.Siacoins(10)) == 0 {
+			cnt++
+		}
+	}
+	if cnt != 5 {
+		t.Fatalf("expected 5 outputs with 10 SC, got %v", cnt)
+	}
+
+	// assert redistributing into 3 outputs succeeds, used to fail because we
+	// were broadcasting an empty transaction set
+	_, err = cluster.Bus.WalletRedistribute(context.Background(), 3, types.Siacoins(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHostScan(t *testing.T) {
+	// New cluster with autopilot disabled
+	cfg := clusterOptsDefault
+	cfg.skipRunningAutopilot = true
+	cluster := newTestCluster(t, cfg)
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// add 2 hosts to the cluster, 1 to scan and 1 to make sure we always have 1
+	// peer and consider ourselves connected to the internet
+	hosts := cluster.AddHosts(2)
+	host := hosts[0]
+
+	settings, err := host.RHPv2Settings()
+	tt.OK(err)
+
+	hk := host.PublicKey()
+	hostIP := settings.NetAddress
+
+	assertHost := func(ls time.Time, lss, slss bool, ts uint64) {
+		t.Helper()
+
+		hi, err := b.Host(context.Background(), host.PublicKey())
+		tt.OK(err)
+
+		if ls.IsZero() && !hi.Interactions.LastScan.IsZero() {
+			t.Fatal("expected last scan to be zero")
+		} else if !ls.IsZero() && !hi.Interactions.LastScan.After(ls) {
+			t.Fatal("expected last scan to be after", ls)
+		} else if hi.Interactions.LastScanSuccess != lss {
+			t.Fatalf("expected last scan success to be %v, got %v", lss, hi.Interactions.LastScanSuccess)
+		} else if hi.Interactions.SecondToLastScanSuccess != slss {
+			t.Fatalf("expected second to last scan success to be %v, got %v", slss, hi.Interactions.SecondToLastScanSuccess)
+		} else if hi.Interactions.TotalScans != ts {
+			t.Fatalf("expected total scans to be %v, got %v", ts, hi.Interactions.TotalScans)
+		}
+	}
+
+	scanHost := func() error {
+		// timing on the CI can be weird, wait a bit to make sure time passes
+		// between scans
+		time.Sleep(time.Millisecond)
+
+		resp, err := w.RHPScan(context.Background(), hk, hostIP, 10*time.Second)
+		tt.OK(err)
+		if resp.ScanError != "" {
+			return errors.New(resp.ScanError)
+		}
+		return nil
+	}
+
+	assertHost(time.Time{}, false, false, 0)
+
+	// scan the host the first time
+	ls := time.Now()
+	if err := scanHost(); err != nil {
+		t.Fatal(err)
+	}
+	assertHost(ls, true, false, 1)
+
+	// scan the host the second time
+	ls = time.Now()
+	if err := scanHost(); err != nil {
+		t.Fatal(err)
+	}
+	assertHost(ls, true, true, 2)
+
+	// close the host to make scans fail
+	tt.OK(host.Close())
+
+	// scan the host a third time
+	ls = time.Now()
+	if err := scanHost(); err == nil {
+		t.Fatal("expected scan error")
+	}
+	assertHost(ls, false, true, 3)
+
+	// fetch hosts for scanning with maxLastScan set to now which should return
+	// all hosts
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+			MaxLastScan: api.TimeRFC3339(time.Now()),
+		})
+		tt.OK(err)
+		if len(toScan) != 2 {
+			return fmt.Errorf("expected 2 hosts, got %v", len(toScan))
+		}
+		return nil
+	})
+
+	// fetch hosts again with the unix epoch timestamp which should only return
+	// 1 host since that one hasn't been scanned yet
+	toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+		MaxLastScan: api.TimeRFC3339(time.Unix(0, 1)),
+	})
+	tt.OK(err)
+	if len(toScan) != 1 {
+		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
 }

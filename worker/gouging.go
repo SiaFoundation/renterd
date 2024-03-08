@@ -39,6 +39,7 @@ var (
 type (
 	GougingChecker interface {
 		Check(_ *rhpv2.HostSettings, _ *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		BlocksUntilBlockHeightGouging(hostHeight uint64) int64
 	}
 
 	gougingChecker struct {
@@ -63,7 +64,7 @@ func GougingCheckerFromContext(ctx context.Context, criticalMigration bool) (Gou
 	return gc(criticalMigration)
 }
 
-func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingParams) context.Context {
+func WithGougingChecker(ctx context.Context, cs ConsensusState, gp api.GougingParams) context.Context {
 	return context.WithValue(ctx, keyGougingChecker, func(criticalMigration bool) (GougingChecker, error) {
 		consensusState, err := cs.ConsensusState(ctx)
 		if err != nil {
@@ -72,17 +73,16 @@ func WithGougingChecker(ctx context.Context, cs consensusState, gp api.GougingPa
 
 		// adjust the max download price if we are dealing with a critical
 		// migration that might be failing due to gouging checks
+		settings := gp.GougingSettings
 		if criticalMigration && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
-			if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); overflow {
-				return gougingChecker{}, errors.New("failed to apply the 'MigrationSurchargeMultiplier', overflow detected")
-			} else {
-				gp.GougingSettings.MaxDownloadPrice = adjustedMaxDownloadPrice
+			if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); !overflow {
+				settings.MaxDownloadPrice = adjustedMaxDownloadPrice
 			}
 		}
 
 		return gougingChecker{
 			consensusState: consensusState,
-			settings:       gp.GougingSettings,
+			settings:       settings,
 			txFee:          gp.TransactionFee,
 
 			// NOTE:
@@ -106,6 +106,16 @@ func NewGougingChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee typ
 		period:      &period,
 		renewWindow: &renewWindow,
 	}
+}
+
+func (gc gougingChecker) BlocksUntilBlockHeightGouging(hostHeight uint64) int64 {
+	blockHeight := gc.consensusState.BlockHeight
+	leeway := gc.settings.HostBlockHeightLeeway
+	var min uint64
+	if blockHeight >= uint64(leeway) {
+		min = blockHeight - uint64(leeway)
+	}
+	return int64(hostHeight) - int64(min)
 }
 
 func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.HostGougingBreakdown {

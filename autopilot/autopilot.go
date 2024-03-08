@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
 
@@ -166,11 +167,41 @@ func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
+		"POST   /config":        ap.configHandlerPOST,
 		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
 	})
+}
+
+func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode request
+	var req api.ConfigEvaluationRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// fetch necessary information
+	cfg := req.AutopilotConfig
+	gs := req.GougingSettings
+	rs := req.RedundancySettings
+	cs, err := ap.bus.ConsensusState(ctx)
+	if jc.Check("failed to get consensus state", err) != nil {
+		return
+	}
+	state := ap.State()
+
+	// fetch hosts
+	hosts, err := ap.bus.Hosts(ctx, api.GetHostsOptions{})
+	if jc.Check("failed to get hosts", err) != nil {
+		return
+	}
+
+	// evaluate the config
+	jc.Encode(evaluateConfig(cfg, cs, state.fee, state.period, rs, gs, hosts))
 }
 
 func (ap *Autopilot) Run() error {
@@ -195,13 +226,15 @@ func (ap *Autopilot) Run() error {
 
 	// schedule a trigger when the wallet receives its first deposit
 	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
-		ap.logger.Error(err)
+		if !errors.Is(err, context.Canceled) {
+			ap.logger.Error(err)
+		}
 		return nil
 	}
 
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
-	for {
+	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
@@ -220,7 +253,7 @@ func (ap *Autopilot) Run() error {
 					close(tickerFired)
 					return
 				}
-				ap.logger.Error("autopilot stopped before consensus was synced")
+				ap.logger.Info("autopilot stopped before consensus was synced")
 				return
 			} else if blocked {
 				if scanning, _ := ap.s.Status(); !scanning {
@@ -234,7 +267,7 @@ func (ap *Autopilot) Run() error {
 					close(tickerFired)
 					return
 				}
-				ap.logger.Error("autopilot stopped before it was able to confirm it was configured in the bus")
+				ap.logger.Info("autopilot stopped before it was able to confirm it was configured in the bus")
 				return
 			}
 
@@ -308,6 +341,7 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
+	return nil
 }
 
 // Shutdown shuts down the autopilot.
@@ -463,11 +497,12 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-	wallet, err := ap.bus.Wallet(ctx)
-	cancel()
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
+	defer cancel()
 
 	// no need to schedule a trigger if the wallet is already funded
+	wallet, err := ap.bus.Wallet(ctx)
 	if err != nil {
 		return err
 	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
@@ -697,4 +732,173 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(hosts)
+}
+
+func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (usables uint64) {
+	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+	for _, host := range hosts {
+		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
+		if usable {
+			usables++
+		}
+	}
+	return
+}
+
+// evaluateConfig evaluates the given configuration and if the gouging settings
+// are too strict for the number of contracts required by 'cfg', it will provide
+// a recommendation on how to loosen it.
+func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (resp api.ConfigEvaluationResponse) {
+	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+
+	resp.Hosts = uint64(len(hosts))
+	for _, host := range hosts {
+		usable, usableBreakdown := isUsableHost(cfg, rs, gc, host, 0, 0)
+		if usable {
+			resp.Usable++
+			continue
+		}
+		if usableBreakdown.blocked > 0 {
+			resp.Unusable.Blocked++
+		}
+		if usableBreakdown.notacceptingcontracts > 0 {
+			resp.Unusable.NotAcceptingContracts++
+		}
+		if usableBreakdown.notcompletingscan > 0 {
+			resp.Unusable.NotScanned++
+		}
+		if usableBreakdown.unknown > 0 {
+			resp.Unusable.Unknown++
+		}
+		if usableBreakdown.gougingBreakdown.ContractErr != "" {
+			resp.Unusable.Gouging.Contract++
+		}
+		if usableBreakdown.gougingBreakdown.DownloadErr != "" {
+			resp.Unusable.Gouging.Download++
+		}
+		if usableBreakdown.gougingBreakdown.GougingErr != "" {
+			resp.Unusable.Gouging.Gouging++
+		}
+		if usableBreakdown.gougingBreakdown.PruneErr != "" {
+			resp.Unusable.Gouging.Pruning++
+		}
+		if usableBreakdown.gougingBreakdown.UploadErr != "" {
+			resp.Unusable.Gouging.Upload++
+		}
+	}
+
+	if resp.Usable >= cfg.Contracts.Amount {
+		return // no recommendation needed
+	}
+
+	// optimise gouging settings
+	maxGS := func() api.GougingSettings {
+		return api.GougingSettings{
+			// these are the fields we optimise one-by-one
+			MaxRPCPrice:      types.MaxCurrency,
+			MaxContractPrice: types.MaxCurrency,
+			MaxDownloadPrice: types.MaxCurrency,
+			MaxUploadPrice:   types.MaxCurrency,
+			MaxStoragePrice:  types.MaxCurrency,
+
+			// these are not optimised, so we keep the same values as the user
+			// provided
+			MinMaxCollateral:              gs.MinMaxCollateral,
+			HostBlockHeightLeeway:         gs.HostBlockHeightLeeway,
+			MinPriceTableValidity:         gs.MinPriceTableValidity,
+			MinAccountExpiry:              gs.MinAccountExpiry,
+			MinMaxEphemeralAccountBalance: gs.MinMaxEphemeralAccountBalance,
+			MigrationSurchargeMultiplier:  gs.MigrationSurchargeMultiplier,
+		}
+	}
+
+	// use the input gouging settings as the starting point and try to optimise
+	// each field independent of the other fields we want to optimise
+	optimisedGS := gs
+	success := false
+
+	// MaxRPCPrice
+	tmpGS := maxGS()
+	tmpGS.MaxRPCPrice = gs.MaxRPCPrice
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxRPCPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+		optimisedGS.MaxRPCPrice = tmpGS.MaxRPCPrice
+		success = true
+	}
+	// MaxContractPrice
+	tmpGS = maxGS()
+	tmpGS.MaxContractPrice = gs.MaxContractPrice
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxContractPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+		optimisedGS.MaxContractPrice = tmpGS.MaxContractPrice
+		success = true
+	}
+	// MaxDownloadPrice
+	tmpGS = maxGS()
+	tmpGS.MaxDownloadPrice = gs.MaxDownloadPrice
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxDownloadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+		optimisedGS.MaxDownloadPrice = tmpGS.MaxDownloadPrice
+		success = true
+	}
+	// MaxUploadPrice
+	tmpGS = maxGS()
+	tmpGS.MaxUploadPrice = gs.MaxUploadPrice
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxUploadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+		optimisedGS.MaxUploadPrice = tmpGS.MaxUploadPrice
+		success = true
+	}
+	// MaxStoragePrice
+	tmpGS = maxGS()
+	tmpGS.MaxStoragePrice = gs.MaxStoragePrice
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxStoragePrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+		optimisedGS.MaxStoragePrice = tmpGS.MaxStoragePrice
+		success = true
+	}
+	// If one of the optimisations was successful, we return the optimised
+	// gouging settings
+	if success {
+		resp.Recommendation = &api.ConfigRecommendation{
+			GougingSettings: optimisedGS,
+		}
+	}
+	return
+}
+
+// optimiseGougingSetting tries to optimise one field of the gouging settings to
+// try and hit the target number of contracts.
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.Host) bool {
+	if cfg.Contracts.Amount == 0 {
+		return true // nothing to do
+	}
+	stepSize := []uint64{200, 150, 125, 110, 105}
+	maxSteps := 12
+
+	stepIdx := 0
+	nSteps := 0
+	prevVal := *field // to keep accurate value
+	for {
+		nUsable := countUsableHosts(cfg, cs, fee, currentPeriod, rs, *gs, hosts)
+		targetHit := nUsable >= cfg.Contracts.Amount
+
+		if targetHit && nSteps == 0 {
+			return true // target already hit without optimising
+		} else if targetHit && stepIdx == len(stepSize)-1 {
+			return true // target hit after optimising
+		} else if targetHit {
+			// move one step back and decrease step size
+			stepIdx++
+			nSteps--
+			*field = prevVal
+		} else if nSteps >= maxSteps {
+			return false // ran out of steps
+		}
+
+		// apply next step
+		prevVal = *field
+		newValue, overflow := prevVal.Mul64WithOverflow(stepSize[stepIdx])
+		if overflow {
+			return false
+		}
+		newValue = newValue.Div64(100)
+		*field = newValue
+		nSteps++
+	}
 }

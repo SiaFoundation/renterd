@@ -46,11 +46,12 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uplo
 // CreateMultipartUpload creates a new multipart upload.
 func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/create", api.MultipartCreateRequest{
-		Bucket:   bucket,
-		Path:     path,
-		Key:      opts.Key,
-		MimeType: opts.MimeType,
-		Metadata: opts.Metadata,
+		Bucket:      bucket,
+		GenerateKey: opts.GenerateKey,
+		Path:        path,
+		Key:         opts.Key,
+		MimeType:    opts.MimeType,
+		Metadata:    opts.Metadata,
 	}, &resp)
 	return
 }

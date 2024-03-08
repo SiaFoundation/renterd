@@ -82,7 +82,8 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_timestamp` (`timestamp`),
   KEY `idx_remaining_funds` (`remaining_funds_lo`,`remaining_funds_hi`),
   KEY `idx_delete_spending` (`delete_spending_lo`,`delete_spending_hi`),
-  KEY `idx_list_spending` (`list_spending_lo`,`list_spending_hi`)
+  KEY `idx_list_spending` (`list_spending_lo`,`list_spending_hi`),
+  KEY `idx_contracts_fcid_timestamp` (`fcid`,`timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbPerformanceMetric

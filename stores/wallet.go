@@ -130,7 +130,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 	// Add/Remove siacoin outputs.
 	for _, diff := range cc.SiacoinOutputDiffs {
 		var sco types.SiacoinOutput
-		convertToCore(diff.SiacoinOutput, &sco)
+		convertToCore(diff.SiacoinOutput, (*types.V1SiacoinOutput)(&sco))
 		if sco.Address != s.walletAddress {
 			continue
 		}
@@ -166,7 +166,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 				continue
 			}
 			var sco types.SiacoinOutput
-			convertToCore(dsco.SiacoinOutput, &sco)
+			convertToCore(dsco.SiacoinOutput, (*types.V1SiacoinOutput)(&sco))
 			s.unappliedTxnChanges = append(s.unappliedTxnChanges, txnChange{
 				addition: true,
 				txnID:    hash256(dsco.ID), // use output id as txn id
@@ -213,7 +213,7 @@ func (s *SQLStore) processConsensusChangeWallet(cc modules.ConsensusChange) {
 		for _, diff := range appliedDiff.SiacoinOutputDiffs {
 			if diff.Direction == modules.DiffRevert {
 				var so types.SiacoinOutput
-				convertToCore(diff.SiacoinOutput, &so)
+				convertToCore(diff.SiacoinOutput, (*types.V1SiacoinOutput)(&so))
 				spentOutputs[types.SiacoinOutputID(diff.ID)] = so
 			}
 		}

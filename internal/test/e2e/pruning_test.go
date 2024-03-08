@@ -1,4 +1,4 @@
-package testing
+package e2e
 
 import (
 	"bytes"
@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/test"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -136,8 +136,8 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// convenience variables
-	cfg := testAutopilotConfig
-	rs := testRedundancySettings
+	cfg := test.AutopilotConfig
+	rs := test.RedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
 	tt := cluster.tt
@@ -207,7 +207,7 @@ func TestSectorPruning(t *testing.T) {
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		res, err = b.PrunableData(context.Background())
 		tt.OK(err)
-		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*uint64(rs.TotalShards)*rhpv2.SectorSize {
+		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
 			return fmt.Errorf("unexpected prunable data %v", n)
 		}
 		return nil

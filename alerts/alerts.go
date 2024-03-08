@@ -35,6 +35,7 @@ const (
 
 type (
 	Alerter interface {
+		Alerts(_ context.Context, opts AlertsOpts) (resp AlertsResponse, err error)
 		RegisterAlert(_ context.Context, a Alert) error
 		DismissAlerts(_ context.Context, ids ...types.Hash256) error
 	}
@@ -63,7 +64,28 @@ type (
 		alerts             map[types.Hash256]Alert
 		webhookBroadcaster webhooks.Broadcaster
 	}
+
+	AlertsOpts struct {
+		Offset   int
+		Limit    int
+		Severity Severity
+	}
+
+	AlertsResponse struct {
+		Alerts  []Alert `json:"alerts"`
+		HasMore bool    `json:"hasMore"`
+		Totals  struct {
+			Info     int `json:"info"`
+			Warning  int `json:"warning"`
+			Error    int `json:"error"`
+			Critical int `json:"critical"`
+		} `json:"totals"`
+	}
 )
+
+func (ar AlertsResponse) Total() int {
+	return ar.Totals.Info + ar.Totals.Warning + ar.Totals.Error + ar.Totals.Critical
+}
 
 // String implements the fmt.Stringer interface.
 func (s Severity) String() string {
@@ -81,15 +103,8 @@ func (s Severity) String() string {
 	}
 }
 
-// MarshalJSON implements the json.Marshaler interface.
-func (s Severity) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`%q`, s.String())), nil
-}
-
-// UnmarshalJSON implements the json.Unmarshaler interface.
-func (s *Severity) UnmarshalJSON(b []byte) error {
-	status := strings.Trim(string(b), `"`)
-	switch status {
+func (s *Severity) LoadString(str string) error {
+	switch str {
 	case severityInfoStr:
 		*s = SeverityInfo
 	case severityWarningStr:
@@ -99,9 +114,19 @@ func (s *Severity) UnmarshalJSON(b []byte) error {
 	case severityCriticalStr:
 		*s = SeverityCritical
 	default:
-		return fmt.Errorf("unrecognized severity: %v", status)
+		return fmt.Errorf("unrecognized severity: %v", str)
 	}
 	return nil
+}
+
+// MarshalJSON implements the json.Marshaler interface.
+func (s Severity) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`%q`, s.String())), nil
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface.
+func (s *Severity) UnmarshalJSON(b []byte) error {
+	return s.LoadString(strings.Trim(string(b), `"`))
 }
 
 // RegisterAlert implements the Alerter interface.
@@ -158,19 +183,46 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	})
 }
 
-// Active returns the host's active alerts.
-func (m *Manager) Active() []Alert {
+// Alerts returns the host's active alerts.
+func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	offset, limit := opts.Offset, opts.Limit
+	resp := AlertsResponse{}
+
+	if offset >= len(m.alerts) {
+		return resp, nil
+	} else if limit == -1 {
+		limit = len(m.alerts)
+	}
+
 	alerts := make([]Alert, 0, len(m.alerts))
 	for _, a := range m.alerts {
+		if a.Severity == SeverityInfo {
+			resp.Totals.Info++
+		} else if a.Severity == SeverityWarning {
+			resp.Totals.Warning++
+		} else if a.Severity == SeverityError {
+			resp.Totals.Error++
+		} else if a.Severity == SeverityCritical {
+			resp.Totals.Critical++
+		}
+		if opts.Severity != 0 && a.Severity != opts.Severity {
+			continue // filter by severity
+		}
 		alerts = append(alerts, a)
 	}
 	sort.Slice(alerts, func(i, j int) bool {
 		return alerts[i].Timestamp.After(alerts[j].Timestamp)
 	})
-	return alerts
+	alerts = alerts[offset:]
+	if limit < len(alerts) {
+		alerts = alerts[:limit]
+		resp.HasMore = true
+	}
+	resp.Alerts = alerts
+	return resp, nil
 }
 
 func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {
@@ -202,6 +254,11 @@ func WithOrigin(alerter Alerter, origin string) Alerter {
 		alerter: alerter,
 		origin:  origin,
 	}
+}
+
+// Alerts implements the Alerter interface.
+func (a *originAlerter) Alerts(ctx context.Context, opts AlertsOpts) (resp AlertsResponse, err error) {
+	return a.alerter.Alerts(ctx, opts)
 }
 
 // RegisterAlert implements the Alerter interface.

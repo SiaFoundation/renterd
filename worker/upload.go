@@ -39,6 +39,7 @@ type (
 		hm     HostManager
 		mm     MemoryManager
 		os     ObjectStore
+		cl     ContractLocker
 		cs     ContractStore
 		logger *zap.SugaredLogger
 
@@ -137,9 +138,8 @@ type (
 	}
 
 	sectorUploadResp struct {
-		req  *sectorUploadReq
-		root types.Hash256
-		err  error
+		req *sectorUploadReq
+		err error
 	}
 )
 
@@ -148,8 +148,8 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 		panic("upload manager already initialized") // developer error
 	}
 
-	mm := newMemoryManager(logger, maxMemory)
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
+	mm := newMemoryManager(logger.Named("memorymanager"), maxMemory)
+	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
 func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
@@ -177,119 +177,107 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 		return "", err
 	}
 
-	// if packing was enabled try uploading packed slabs
-	if up.packing {
-		if err := w.tryUploadPackedSlabs(ctx, up.rs, up.contractSet, bufferSizeLimitReached); err != nil {
-			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
-		}
+	// return early if worker was shut down or if we don't have to consider
+	// packed uploads
+	if w.isStopped() || !up.packing {
+		return eTag, nil
 	}
+
+	// try and upload one slab synchronously
+	if bufferSizeLimitReached {
+		mem := w.uploadManager.mm.AcquireMemory(ctx, up.rs.SlabSize())
+		if mem != nil {
+			defer mem.Release()
+
+			// fetch packed slab to upload
+			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
+			if err != nil {
+				return "", fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+			}
+
+			// upload packed slab
+			if len(packedSlabs) > 0 {
+				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
+					w.logger.Error(err)
+				}
+			}
+		}
+
+		// make sure there's a goroutine uploading the remainder of the packed slabs
+		go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
+	}
+
 	return eTag, nil
 }
 
 func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string, lockPriority int) {
 	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
-
 	w.uploadsMu.Lock()
-	if w.uploadingPackedSlabs[key] {
+	if _, ok := w.uploadingPackedSlabs[key]; ok {
 		w.uploadsMu.Unlock()
 		return
 	}
-	w.uploadingPackedSlabs[key] = true
+	w.uploadingPackedSlabs[key] = struct{}{}
 	w.uploadsMu.Unlock()
 
 	// make sure we mark uploading packed slabs as false when we're done
 	defer func() {
 		w.uploadsMu.Lock()
-		w.uploadingPackedSlabs[key] = false
+		delete(w.uploadingPackedSlabs, key)
 		w.uploadsMu.Unlock()
 	}()
 
-	// keep uploading packed slabs until we're done
-	for {
-		uploaded, err := w.uploadPackedSlabs(w.shutdownCtx, defaultPackedSlabsLockDuration, rs, contractSet, lockPriority)
-		if err != nil {
-			w.logger.Errorf("couldn't upload packed slabs, err: %v", err)
-			return
-		} else if uploaded == 0 {
-			return
-		}
-	}
-}
-
-func (w *worker) tryUploadPackedSlabs(ctx context.Context, rs api.RedundancySettings, contractSet string, block bool) (err error) {
-	// if we want to block, try and upload one packed slab synchronously, we use
-	// a slightly higher upload priority to avoid reaching the context deadline
-	if block {
-		_, err = w.uploadPackedSlabs(ctx, defaultPackedSlabsLockDuration, rs, contractSet, lockingPriorityBlockedUpload)
-	}
-
-	// make sure there's a goroutine uploading the remainder of the packed slabs
-	go w.threadedUploadPackedSlabs(rs, contractSet, lockingPriorityBackgroundUpload)
-	return
-}
-
-func (w *worker) uploadPackedSlabs(ctx context.Context, lockingDuration time.Duration, rs api.RedundancySettings, contractSet string, lockPriority int) (uploaded int, err error) {
-	// upload packed slabs
-	var mu sync.Mutex
-	var errs error
+	// derive a context that we can use as an interrupt in case of an error or shutdown.
+	interruptCtx, interruptCancel := context.WithCancel(w.shutdownCtx)
+	defer interruptCancel()
 
 	var wg sync.WaitGroup
-	totalSize := uint64(rs.TotalShards) * rhpv2.SectorSize
-
-	// derive a context that we can use as an interrupt in case of an error.
-	interruptCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	for {
-		// block until we have memory for a slab or until we are interrupted
-		mem := w.uploadManager.mm.AcquireMemory(interruptCtx, totalSize)
+		// block until we have memory
+		mem := w.uploadManager.mm.AcquireMemory(interruptCtx, rs.SlabSize())
 		if mem == nil {
 			break // interrupted
 		}
 
-		// fetch packed slabs to upload
-		var packedSlabs []api.PackedSlab
-		packedSlabs, err = w.bus.PackedSlabsForUpload(ctx, lockingDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
+		// fetch packed slab to upload
+		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
 		if err != nil {
-			err = fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			mem.Release()
 			break
-		} else if len(packedSlabs) == 0 {
-			mem.Release()
-			break // no more slabs
 		}
-		ps := packedSlabs[0]
 
-		// launch upload for slab
+		// no more packed slabs to upload
+		if len(packedSlabs) == 0 {
+			mem.Release()
+			break
+		}
+
 		wg.Add(1)
 		go func(ps api.PackedSlab) {
-			defer mem.Release()
 			defer wg.Done()
-			err := w.uploadPackedSlab(ctx, rs, ps, mem, contractSet, lockPriority)
-			mu.Lock()
-			if err != nil {
-				errs = errors.Join(errs, err)
-				cancel() // prevent new uploads from being launched
-			} else {
-				uploaded++
+			defer mem.Release()
+
+			// we use the background context here, but apply a sane timeout,
+			// this ensures ongoing uploads are handled gracefully during
+			// shutdown
+			ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
+			defer cancel()
+
+			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
+			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
+				w.logger.Error(err)
+				interruptCancel() // prevent new uploads from being launched
 			}
-			mu.Unlock()
-		}(ps)
+		}(packedSlabs[0])
 	}
 
 	// wait for all threads to finish
 	wg.Wait()
-
-	// return collected errors
-	err = errors.Join(err, errs)
 	return
 }
 
-func (w *worker) uploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem Memory, contractSet string, lockPriority int) error {
-	// create a context with sane timeout
-	ctx, cancel := context.WithTimeout(ctx, defaultPackedSlabsUploadTimeout)
-	defer cancel()
-
+func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
@@ -314,11 +302,12 @@ func (w *worker) uploadPackedSlab(ctx context.Context, rs api.RedundancySettings
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
 	return &uploadManager{
 		hm:     hm,
 		mm:     mm,
 		os:     os,
+		cl:     cl,
 		cs:     cs,
 		logger: logger,
 
@@ -336,9 +325,10 @@ func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os 
 	}
 }
 
-func (mgr *uploadManager) newUploader(os ObjectStore, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
+func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
 	return &uploader{
 		os:     os,
+		cl:     cl,
 		cs:     cs,
 		hm:     hm,
 		logger: mgr.logger,
@@ -400,11 +390,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the object
 	o := object.NewObject(up.ec)
 
-	// create the hash reader
-	hr := newHashReader(r)
-
 	// create the cipher reader
-	cr, err := o.Encrypt(hr, up.encryptionOffset)
+	cr, err := o.Encrypt(r, up.encryptionOffset)
 	if err != nil {
 		return false, "", err
 	}
@@ -435,9 +422,9 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// channel to notify main thread of the number of slabs to wait for
 	numSlabsChan := make(chan int, 1)
 
-	// prepare slab size
-	size := int64(up.rs.MinShards) * rhpv2.SectorSize
-	redundantSize := uint64(up.rs.TotalShards) * rhpv2.SectorSize
+	// prepare slab sizes
+	slabSizeNoRedundancy := up.rs.SlabSizeNoRedundancy()
+	slabSize := up.rs.SlabSize()
 	var partialSlab []byte
 
 	// launch uploads in a separate goroutine
@@ -452,14 +439,14 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 			default:
 			}
 			// acquire memory
-			mem := mgr.mm.AcquireMemory(ctx, redundantSize)
+			mem := mgr.mm.AcquireMemory(ctx, slabSize)
 			if mem == nil {
 				return // interrupted
 			}
 
 			// read next slab's data
-			data := make([]byte, size)
-			length, err := io.ReadFull(io.LimitReader(cr, size), data)
+			data := make([]byte, slabSizeNoRedundancy)
+			length, err := io.ReadFull(io.LimitReader(cr, int64(slabSizeNoRedundancy)), data)
 			if err == io.EOF {
 				mem.Release()
 
@@ -532,8 +519,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 		o.Slabs = append(o.Slabs, resp.slab)
 	}
 
-	// calculate the eTag
-	eTag = hr.Hash()
+	// compute etag
+	eTag = o.ComputeETag()
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
@@ -751,7 +738,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists && bh < c.WindowEnd {
-			uploader := mgr.newUploader(mgr.os, mgr.cs, mgr.hm, c)
+			uploader := mgr.newUploader(mgr.os, mgr.cl, mgr.cs, mgr.hm, c)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}
@@ -765,20 +752,32 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	responseChan := make(chan sectorUploadResp)
 
 	// prepare sectors
+	var wg sync.WaitGroup
 	sectors := make([]*sectorUpload, len(shards))
-	for sI, shard := range shards {
-		// create the ctx
-		sCtx, sCancel := context.WithCancel(ctx)
+	for sI := range shards {
+		wg.Add(1)
+		go func(idx int) {
+			// create the ctx
+			sCtx, sCancel := context.WithCancel(ctx)
 
-		// create the sector
-		sectors[sI] = &sectorUpload{
-			data:   (*[rhpv2.SectorSize]byte)(shard),
-			index:  sI,
-			root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shard)),
-			ctx:    sCtx,
-			cancel: sCancel,
-		}
+			// create the sector
+			// NOTE: we are computing the sector root here and pass it all the
+			// way down to the RPC to avoid having to recompute it for the proof
+			// verification. This is necessary because we need it ahead of time
+			// for the call to AddUploadingSector in uploader.go
+			// Once we upload to temp storage we don't need AddUploadingSector
+			// anymore and can move it back to the RPC.
+			sectors[idx] = &sectorUpload{
+				data:   (*[rhpv2.SectorSize]byte)(shards[idx]),
+				index:  idx,
+				root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shards[idx])),
+				ctx:    sCtx,
+				cancel: sCancel,
+			}
+			wg.Done()
+		}(sI)
 	}
+	wg.Wait()
 
 	// prepare candidates
 	candidates := make([]*candidate, len(uploaders))
@@ -833,8 +832,6 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 }
 
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
-	start := time.Now()
-
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -871,6 +868,10 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	// create a request buffer
 	var buffer []*sectorUploadReq
 
+	// start the timer after the upload has started
+	// newSlabUpload is quite slow due to computing the sector roots
+	start := time.Now()
+
 	// collect responses
 	var used bool
 	var done bool
@@ -878,7 +879,7 @@ loop:
 	for slab.numInflight > 0 && !done {
 		select {
 		case <-u.shutdownCtx.Done():
-			return nil, 0, 0, errors.New("upload stopped")
+			return nil, 0, 0, ErrShuttingDown
 		case <-ctx.Done():
 			return nil, 0, 0, ctx.Err()
 		case resp := <-respChan:
@@ -930,6 +931,9 @@ loop:
 	// calculate the upload speed
 	bytes := slab.numUploaded * rhpv2.SectorSize
 	ms := time.Since(start).Milliseconds()
+	if ms == 0 {
+		ms = 1
+	}
 	uploadSpeed = int64(bytes) / ms
 
 	// calculate overdrive pct
@@ -1057,12 +1061,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 		return false, false
 	}
 
-	// sanity check we receive the expected root
-	if resp.root != req.sector.root {
-		s.errs[req.hk] = fmt.Errorf("root mismatch, %v != %v", resp.root, req.sector.root)
-		return false, false
-	}
-
 	// redundant sectors can't complete the upload
 	if sector.uploaded.Root != (types.Hash256{}) {
 		return false, false
@@ -1072,7 +1070,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	sector.finish(object.Sector{
 		Contracts:  map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
 		LatestHost: req.hk,
-		Root:       resp.root,
+		Root:       req.sector.root,
 	})
 
 	// update uploaded sectors
@@ -1119,22 +1117,12 @@ func (req *sectorUploadReq) done() bool {
 	}
 }
 
-func (req *sectorUploadReq) fail(err error) {
+func (req *sectorUploadReq) finish(err error) {
 	select {
 	case <-req.sector.ctx.Done():
 	case req.responseChan <- sectorUploadResp{
 		req: req,
 		err: err,
-	}:
-	}
-}
-
-func (req *sectorUploadReq) succeed(root types.Hash256) {
-	select {
-	case <-req.sector.ctx.Done():
-	case req.responseChan <- sectorUploadResp{
-		req:  req,
-		root: root,
 	}:
 	}
 }

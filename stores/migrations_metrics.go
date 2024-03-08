@@ -8,34 +8,18 @@ import (
 	"gorm.io/gorm"
 )
 
-// initMetricsSchema is executed only on a clean database. Otherwise the individual
-// migrations are executed.
-func initMetricsSchema(tx *gorm.DB) error {
-	// Pick the right migrations.
-	var schema []byte
-	var err error
-	if isSQLite(tx) {
-		schema, err = migrations.ReadFile("migrations/sqlite/metrics/schema.sql")
-	} else {
-		schema, err = migrations.ReadFile("migrations/mysql/metrics/schema.sql")
-	}
-	if err != nil {
-		return err
-	}
-
-	// Run it.
-	err = tx.Exec(string(schema)).Error
-	if err != nil {
-		return fmt.Errorf("failed to init schema: %w", err)
-	}
-	return nil
-}
-
 func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
+	dbIdentifier := "metrics"
 	migrations := []*gormigrate.Migration{
 		{
 			ID:      "00001_init",
 			Migrate: func(tx *gorm.DB) error { return errRunV072 },
+		},
+		{
+			ID: "00001_idx_contracts_fcid_timestamp",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00001_idx_contracts_fcid_timestamp", logger)
+			},
 		},
 	}
 
@@ -43,7 +27,7 @@ func performMetricsMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
 
 	// Set init function.
-	m.InitSchema(initMetricsSchema)
+	m.InitSchema(initSchema(db, dbIdentifier, logger))
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {

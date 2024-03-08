@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -69,44 +70,21 @@ func NewClient(address, password string) *Client {
 type (
 	Bus interface {
 		alerts.Alerter
-		consensusState
+		ConsensusState
 		webhooks.Broadcaster
 
 		AccountStore
+		ContractLocker
 		ContractStore
+		HostStore
 		ObjectStore
+		SettingStore
 
-		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
-		SyncerPeers(ctx context.Context) (resp []string, err error)
-
-		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
-		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
-		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-
-		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
-		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-
-		GougingParams(ctx context.Context) (api.GougingParams, error)
-		UploadParams(ctx context.Context) (api.UploadParams, error)
-
-		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
-		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
-		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
-		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
-
-		WalletDiscard(ctx context.Context, txn types.Transaction) error
-		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
-		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-
-		Bucket(_ context.Context, bucket string) (api.Bucket, error)
+		Syncer
+		Wallet
 	}
 
+	// An AccountStore manages ephemaral accounts state.
 	AccountStore interface {
 		Accounts(ctx context.Context) ([]api.Account, error)
 		AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
@@ -120,9 +98,19 @@ type (
 	}
 
 	ContractStore interface {
-		ContractLocker
-
+		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
+	}
+
+	HostStore interface {
+		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
+		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
+		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
+
+		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	}
 
 	ObjectStore interface {
@@ -140,9 +128,34 @@ type (
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+
+		// NOTE: used by worker
+		Bucket(_ context.Context, bucket string) (api.Bucket, error)
+		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
+		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
+		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 	}
 
-	consensusState interface {
+	SettingStore interface {
+		GougingParams(ctx context.Context) (api.GougingParams, error)
+		UploadParams(ctx context.Context) (api.UploadParams, error)
+	}
+
+	Syncer interface {
+		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
+		SyncerPeers(ctx context.Context) (resp []string, err error)
+	}
+
+	Wallet interface {
+		WalletDiscard(ctx context.Context, txn types.Transaction) error
+		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
+		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
+		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
+		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+	}
+
+	ConsensusState interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
 )
@@ -183,7 +196,8 @@ func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type worker struct {
-	alerts          alerts.Alerter
+	alerts alerts.Alerter
+
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
@@ -198,9 +212,8 @@ type worker struct {
 	transportPoolV3 *transportPoolV3
 
 	uploadsMu            sync.Mutex
-	uploadingPackedSlabs map[string]bool
+	uploadingPackedSlabs map[string]struct{}
 
-	hostInteractionRecorder  HostInteractionRecorder
 	contractSpendingRecorder ContractSpendingRecorder
 	contractLockingDuration  time.Duration
 
@@ -208,6 +221,15 @@ type worker struct {
 	shutdownCtxCancel context.CancelFunc
 
 	logger *zap.SugaredLogger
+}
+
+func (w *worker) isStopped() bool {
+	select {
+	case <-w.shutdownCtx.Done():
+		return true
+	default:
+	}
+	return false
 }
 
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
@@ -238,13 +260,6 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		return
 	}
 
-	// apply the timeout
-	if rsr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(rsr.Timeout))
-		defer cancel()
-	}
-
 	// only scan hosts if we are online
 	peers, err := w.bus.SyncerPeers(ctx)
 	if jc.Check("failed to fetch peers from bus", err) != nil {
@@ -257,7 +272,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	// scan host
 	var errStr string
-	settings, priceTable, elapsed, err := w.scanHost(ctx, rsr.HostKey, rsr.HostIP)
+	settings, priceTable, elapsed, err := w.scanHost(ctx, time.Duration(rsr.Timeout), rsr.HostKey, rsr.HostIP)
 	if err != nil {
 		errStr = err.Error()
 	}
@@ -342,11 +357,13 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	var err error
 	var hpt hostdb.HostPriceTable
 	defer func() {
-		w.hostInteractionRecorder.RecordPriceTableUpdate(hostdb.PriceTableUpdate{
-			HostKey:    rptr.HostKey,
-			Success:    isSuccessfulInteraction(err),
-			Timestamp:  time.Now(),
-			PriceTable: hpt,
+		w.bus.RecordPriceTables(ctx, []hostdb.PriceTableUpdate{
+			{
+				HostKey:    rptr.HostKey,
+				Success:    isSuccessfulInteraction(err),
+				Timestamp:  time.Now(),
+				PriceTable: hpt,
+			},
 		})
 	}()
 
@@ -837,6 +854,47 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
+func (w *worker) objectsHandlerHEAD(jc jape.Context) {
+	// parse bucket
+	bucket := api.DefaultBucketName
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+
+	// parse path
+	path := jc.PathParam("path")
+	if path == "" || strings.HasSuffix(path, "/") {
+		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch object metadata
+	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+		OnlyMetadata: true,
+	})
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	} else if res.Object == nil {
+		jc.Error(api.ErrObjectNotFound, http.StatusInternalServerError) // should never happen but checking because we deref. later
+		return
+	}
+
+	// serve the content to ensure we're setting the exact same headers as we
+	// would for a GET request
+	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, func(io.Writer, int64, int64) error { return nil })
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+	} else if err != nil {
+		jc.Error(err, status)
+	}
+}
+
 func (w *worker) objectsHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []api.ObjectMetadata{})
 
@@ -919,10 +977,12 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	// create a download function
 	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
 		ctx = WithGougingChecker(ctx, w.bus, gp)
-		err = w.downloadManager.DownloadObject(ctx, wr, res.Object.Object, uint64(offset), uint64(length), contracts)
+		err = w.downloadManager.DownloadObject(ctx, wr, *res.Object.Object, uint64(offset), uint64(length), contracts)
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) {
+			if !errors.Is(err, ErrShuttingDown) &&
+				!errors.Is(err, errDownloadCancelled) &&
+				!errors.Is(err, io.ErrClosedPipe) {
 				w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
 			}
 		}
@@ -1038,7 +1098,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if err := jc.Check("couldn't upload object", err); err != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 			}
 		}
@@ -1126,20 +1186,21 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// make sure only one of the following is set
-	var disablePreshardingEncryption bool
-	if jc.DecodeForm("disablepreshardingencryption", &disablePreshardingEncryption) != nil {
-		return
-	}
-	if !disablePreshardingEncryption && jc.Request.FormValue("offset") == "" {
-		jc.Error(errors.New("if presharding encryption isn't disabled, the offset needs to be set"), http.StatusBadRequest)
-		return
-	}
+	// get the offset
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
 	} else if offset < 0 {
 		jc.Error(errors.New("offset must be positive"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch upload from bus
+	upload, err := w.bus.MultipartUpload(ctx, uploadID)
+	if isError(err, api.ErrMultipartUploadNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch multipart upload", err) != nil {
 		return
 	}
 
@@ -1149,17 +1210,15 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
+		WithCustomKey(upload.Key),
 	}
-	if disablePreshardingEncryption {
-		opts = append(opts, WithCustomKey(object.NoOpKey))
-	} else {
-		upload, err := w.bus.MultipartUpload(ctx, uploadID)
-		if err != nil {
-			jc.Error(err, http.StatusBadRequest)
-			return
-		}
+
+	// make sure only one of the following is set
+	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && jc.Request.FormValue("offset") == "" {
+		jc.Error(errors.New("if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set"), http.StatusBadRequest)
+		return
+	} else if encryptionEnabled {
 		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
-		opts = append(opts, WithCustomKey(upload.Key))
 	}
 
 	// attach gouging checker to the context
@@ -1177,7 +1236,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	if jc.Check("couldn't upload object", err) != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
 			}
 		}
@@ -1272,7 +1331,7 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, downloadMaxMemory, uploadMaxMemory, uploadMaxOverdrive uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1292,6 +1351,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
+	l = l.Named("worker").Named(id)
+	ctx, cancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
@@ -1299,25 +1360,21 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
-		logger:                  l.Sugar().Named("worker").Named(id),
+		logger:                  l.Sugar(),
 		startTime:               time.Now(),
-		uploadingPackedSlabs:    make(map[string]bool),
+		uploadingPackedSlabs:    make(map[string]struct{}),
+		shutdownCtx:             ctx,
+		shutdownCtxCancel:       cancel,
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = context.WithValue(ctx, keyInteractionRecorder, w)
-	w.shutdownCtx = ctx
-	w.shutdownCtxCancel = cancel
 
 	w.initAccounts(b)
 	w.initPriceTables()
 	w.initTransportPool()
 
-	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Sugar().Named("downloadmanager"))
-	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Sugar().Named("uploadmanager"))
+	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Named("downloadmanager").Sugar())
+	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
 
 	w.initContractSpendingRecorder(busFlushInterval)
-	w.initHostInteractionRecorder(busFlushInterval)
 	return w, nil
 }
 
@@ -1344,6 +1401,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
+		"HEAD   /objects/*path": w.objectsHandlerHEAD,
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
@@ -1364,27 +1422,34 @@ func (w *worker) Shutdown(ctx context.Context) error {
 	w.uploadManager.Stop()
 
 	// stop recorders
-	w.hostInteractionRecorder.Stop(ctx)
 	w.contractSpendingRecorder.Stop(ctx)
 	return nil
 }
 
-func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+	logger := w.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
 	// prepare a helper for scanning
 	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+		// apply timeout
+		scanCtx := ctx
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			scanCtx, cancel = context.WithTimeout(scanCtx, timeout)
+			defer cancel()
+		}
 		// resolve hostIP. We don't want to scan hosts on private networks.
 		if !w.allowPrivateIPs {
 			host, _, err := net.SplitHostPort(hostIP)
 			if err != nil {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 			}
-			addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+			addrs, err := (&net.Resolver{}).LookupIPAddr(scanCtx, host)
 			if err != nil {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 			}
 			for _, addr := range addrs {
 				if isPrivateIP(addr.IP) {
-					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, errors.New("host is on a private network")
+					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
 				}
 			}
 		}
@@ -1392,13 +1457,15 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		// fetch the host settings
 		start := time.Now()
 		var settings rhpv2.HostSettings
-		err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-			if settings, err = RPCSettings(ctx, t); err == nil {
-				// NOTE: we overwrite the NetAddress with the host address here since we
-				// just used it to dial the host we know it's valid
-				settings.NetAddress = hostIP
+		err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+			var err error
+			if settings, err = RPCSettings(scanCtx, t); err != nil {
+				return fmt.Errorf("failed to fetch host settings: %w", err)
 			}
-			return err
+			// NOTE: we overwrite the NetAddress with the host address here
+			// since we just used it to dial the host we know it's valid
+			settings.NetAddress = hostIP
+			return nil
 		})
 		elapsed := time.Since(start)
 		if err != nil {
@@ -1407,9 +1474,9 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 
 		// fetch the host pricetable
 		var pt rhpv3.HostPriceTable
-		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
+		err = w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
 			if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
-				return err
+				return fmt.Errorf("failed to fetch host price table: %w", err)
 			} else {
 				pt = hpt.HostPriceTable
 				return nil
@@ -1424,11 +1491,16 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		// scan: second try
 		select {
 		case <-ctx.Done():
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, ctx.Err()
 		case <-time.After(time.Second):
 		}
 		settings, pt, duration, err = scan()
+
+		logger = logger.With("elapsed", duration)
 		if err == nil {
-			w.logger.Debug("successfully scanned host %v after retry", hostKey)
+			logger.Debug("successfully scanned host on second try")
+		} else if !isErrHostUnreachable(err) {
+			logger.Debugw("failed to scan host", zap.Error(err))
 		}
 	}
 
@@ -1436,19 +1508,28 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	// just in case since recording a failed scan might have serious
 	// repercussions
 	select {
-	case <-w.shutdownCtx.Done():
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, w.shutdownCtx.Err()
+	case <-ctx.Done():
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, ctx.Err()
 	default:
 	}
 
-	// record host scan
-	w.hostInteractionRecorder.RecordHostScan(hostdb.HostScan{
-		HostKey:    hostKey,
-		Success:    isSuccessfulInteraction(err),
-		Timestamp:  time.Now(),
-		Settings:   settings,
-		PriceTable: pt,
+	// record host scan - make sure this isn't interrupted by the same context
+	// used to time out the scan itself because otherwise we won't be able to
+	// record scans that timed out.
+	recordCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	scanErr := w.bus.RecordHostScans(recordCtx, []hostdb.HostScan{
+		{
+			HostKey:    hostKey,
+			Success:    isSuccessfulInteraction(err),
+			Timestamp:  time.Now(),
+			Settings:   settings,
+			PriceTable: pt,
+		},
 	})
+	if scanErr != nil {
+		logger.Errorw("failed to record host scan", zap.Error(scanErr))
+	}
 	return settings, pt, duration, err
 }
 
@@ -1462,6 +1543,17 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 		l.Errorf("%w: failed to discard txn: %v", *err, dErr)
 	}
 	cancel()
+}
+
+func isErrHostUnreachable(err error) bool {
+	return isError(err, os.ErrDeadlineExceeded) ||
+		isError(err, context.DeadlineExceeded) ||
+		isError(err, api.ErrHostOnPrivateNetwork) ||
+		isError(err, errors.New("no route to host")) ||
+		isError(err, errors.New("no such host")) ||
+		isError(err, errors.New("connection refused")) ||
+		isError(err, errors.New("unknown port")) ||
+		isError(err, errors.New("cannot assign requested address"))
 }
 
 func isErrDuplicateTransactionSet(err error) bool {

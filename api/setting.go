@@ -112,6 +112,11 @@ func (gs GougingSettings) Validate() error {
 	if gs.MinPriceTableValidity < 10*time.Second {
 		return errors.New("MinPriceTableValidity must be at least 10 seconds")
 	}
+	_, overflow := gs.MaxDownloadPrice.Mul64WithOverflow(gs.MigrationSurchargeMultiplier)
+	if overflow {
+		maxMultiplier := types.MaxCurrency.Div(gs.MaxDownloadPrice).Big().Uint64()
+		return fmt.Errorf("MigrationSurchargeMultiplier must be less than %v, otherwise applying it to MaxDownloadPrice overflows the currency type", maxMultiplier)
+	}
 	return nil
 }
 
@@ -121,7 +126,12 @@ func (rs RedundancySettings) Redundancy() float64 {
 	return float64(rs.TotalShards) / float64(rs.MinShards)
 }
 
-// SlabSizeNoRedundancy returns the size of a slab without added redundancy.
+// SlabSize returns the size of a slab.
+func (rs RedundancySettings) SlabSize() uint64 {
+	return uint64(rs.TotalShards) * rhpv2.SectorSize
+}
+
+// SlabSizeNoRedundancy returns the size of a slab without redundancy.
 func (rs RedundancySettings) SlabSizeNoRedundancy() uint64 {
 	return uint64(rs.MinShards) * rhpv2.SectorSize
 }

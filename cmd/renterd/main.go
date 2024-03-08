@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
@@ -25,7 +26,6 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
@@ -160,11 +160,11 @@ func getSeed() types.PrivateKey {
 			fmt.Println()
 			phrase = string(pw)
 		}
-		key, err := wallet.KeyFromPhrase(phrase)
-		if err != nil {
-			log.Fatal(err)
+		var rawSeed [32]byte
+		if err := wallet.SeedFromPhrase(&rawSeed, phrase); err != nil {
+			panic(err)
 		}
-		seed = key
+		seed = wallet.KeyFromSeed(&rawSeed, 0)
 	}
 	return seed
 }
@@ -315,8 +315,15 @@ func main() {
 		log.Println("Build Date:", build.BuildTime())
 		return
 	} else if flag.Arg(0) == "seed" {
-		log.Println("Seed phrase:")
-		fmt.Println(wallet.NewSeedPhrase())
+		var seed [32]byte
+		phrase := wallet.NewSeedPhrase()
+		if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
+			println(err.Error())
+			os.Exit(1)
+		}
+		key := wallet.KeyFromSeed(&seed, 0)
+		fmt.Println("Recovery Phrase:", phrase)
+		fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
 		return
 	} else if flag.Arg(0) == "config" {
 		cmdBuildConfig()
