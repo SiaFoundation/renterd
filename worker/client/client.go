@@ -77,13 +77,49 @@ func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
 	return
 }
 
+// HeadObject returns the metadata of the object at the given path.
+func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
+	c.c.Custom("HEAD", fmt.Sprintf("/objects/%s", path), nil, nil)
+
+	if strings.HasSuffix(path, "/") {
+		return nil, errors.New("the given path is a directory, HEAD can only be performed on objects")
+	}
+
+	values := url.Values{}
+	values.Set("bucket", url.QueryEscape(bucket))
+	path += "?" + values.Encode()
+
+	// TODO: support HEAD in jape client
+	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
+	if err != nil {
+		panic(err)
+	}
+	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	opts.ApplyHeaders(req.Header)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
+		err, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, errors.New(string(err))
+	}
+
+	head, err := parseObjectResponseHeaders(resp.Header)
+	if err != nil {
+		return nil, err
+	}
+	return &head, nil
+}
+
 // GetObject returns the object at given path alongside its metadata.
 func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	if strings.HasSuffix(path, "/") {
 		return nil, errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
-	// Start download.
 	path = api.ObjectPathEscape(path)
 	body, header, err := c.object(ctx, bucket, path, opts)
 	if err != nil {
@@ -96,41 +132,14 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 		}
 	}()
 
-	// Parse header.
-	var size int64
-	_, err = fmt.Sscan(header.Get("Content-Length"), &size)
+	head, err := parseObjectResponseHeaders(header)
 	if err != nil {
 		return nil, err
 	}
-	var r *api.DownloadRange
-	if cr := header.Get("Content-Range"); cr != "" {
-		dr, err := api.ParseDownloadRange(cr)
-		if err != nil {
-			return nil, err
-		}
-		r = &dr
-
-		// If a range is set, the size is the size extracted from the range
-		// since Content-Length will then only be the length of the returned
-		// range.
-		size = dr.Size
-	}
-
-	// Parse headers.
-	headers := make(map[string]string)
-	for k, v := range header {
-		if len(v) > 0 {
-			headers[k] = v[0]
-		}
-	}
 
 	return &api.GetObjectResponse{
-		Content:      body,
-		ContentType:  header.Get("Content-Type"),
-		LastModified: header.Get("Last-Modified"),
-		Range:        r,
-		Size:         size,
-		Metadata:     api.ExtractObjectUserMetadataFrom(headers),
+		Content:            body,
+		HeadObjectResponse: head,
 	}, nil
 }
 
@@ -281,6 +290,46 @@ func (c *Client) object(ctx context.Context, bucket, path string, opts api.Downl
 		return nil, nil, errors.New(string(err))
 	}
 	return resp.Body, resp.Header, err
+}
+
+func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, error) {
+	// parse size
+	var size int64
+	_, err := fmt.Sscan(header.Get("Content-Length"), &size)
+	if err != nil {
+		return api.HeadObjectResponse{}, err
+	}
+
+	// parse range
+	var r *api.DownloadRange
+	if cr := header.Get("Content-Range"); cr != "" {
+		dr, err := api.ParseDownloadRange(cr)
+		if err != nil {
+			return api.HeadObjectResponse{}, err
+		}
+		r = &dr
+
+		// if a range is set, the size is the size extracted from the range
+		// since Content-Length will then only be the length of the returned
+		// range.
+		size = dr.Size
+	}
+
+	// parse headers
+	headers := make(map[string]string)
+	for k, v := range header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+
+	return api.HeadObjectResponse{
+		ContentType:  header.Get("Content-Type"),
+		LastModified: header.Get("Last-Modified"),
+		Range:        r,
+		Size:         size,
+		Metadata:     api.ExtractObjectUserMetadataFrom(headers),
+	}, nil
 }
 
 func sizeFromSeeker(r io.Reader) (int64, error) {

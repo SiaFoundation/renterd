@@ -752,11 +752,14 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue
 		}
 
-		// if the host doesn't have a valid pricetable, update it
-		var invalidPT bool
-		if err := refreshPriceTable(ctx, w, &host.Host); err != nil {
-			c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-			invalidPT = true
+		// if the host doesn't have a valid pricetable, update it if we were
+		// able to obtain a revision
+		invalidPT := contract.Revision == nil
+		if contract.Revision != nil {
+			if err := refreshPriceTable(ctx, w, &host.Host); err != nil {
+				c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
+				invalidPT = true
+			}
 		}
 
 		// refresh the consensus state

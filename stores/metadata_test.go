@@ -3990,6 +3990,34 @@ func TestRefreshHealth(t *testing.T) {
 	} else if health(o2) != .6 {
 		t.Fatal("expected health to be .6, got", health(o2))
 	}
+
+	// add another object that is empty
+	o3 := t.Name() + "3"
+	if added, err := ss.addTestObject(o3, object.Object{
+		Key: object.GenerateEncryptionKey(),
+	}); err != nil {
+		t.Fatal(err)
+	} else if added.Health != 1 {
+		t.Fatal("expected health to be 1, got", added.Health)
+	}
+
+	// update its health to .1
+	if err := ss.db.
+		Model(&dbObject{}).
+		Where("object_id", o3).
+		Update("health", 0.1).
+		Error; err != nil {
+		t.Fatal(err)
+	} else if health(o3) != .1 {
+		t.Fatalf("expected health to be .1, got %v", health(o3))
+	}
+
+	// a refresh should not update its health
+	if err := ss.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if health(o3) != .1 {
+		t.Fatalf("expected health to be .1, got %v", health(o3))
+	}
 }
 
 func TestSlabCleanupTrigger(t *testing.T) {
