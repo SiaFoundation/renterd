@@ -1547,14 +1547,14 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 }
 
 func isErrHostUnreachable(err error) bool {
-	return isError(err, os.ErrDeadlineExceeded) ||
-		isError(err, context.DeadlineExceeded) ||
-		isError(err, api.ErrHostOnPrivateNetwork) ||
-		isError(err, errors.New("no route to host")) ||
-		isError(err, errors.New("no such host")) ||
-		isError(err, errors.New("connection refused")) ||
-		isError(err, errors.New("unknown port")) ||
-		isError(err, errors.New("cannot assign requested address"))
+	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
+		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
+		utils.IsErr(err, errors.New("no route to host")) ||
+		utils.IsErr(err, errors.New("no such host")) ||
+		utils.IsErr(err, errors.New("connection refused")) ||
+		utils.IsErr(err, errors.New("unknown port")) ||
+		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
 func isErrDuplicateTransactionSet(err error) bool {
