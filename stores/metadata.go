@@ -913,10 +913,6 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.C
 }
 
 func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
-	if !s.cs.isKnownContract(id) {
-		return nil, api.ErrContractNotFound
-	}
-
 	var dbRoots []hash256
 	if err = s.db.
 		Raw(`
@@ -992,10 +988,6 @@ SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as secto
 }
 
 func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
-	if !s.cs.isKnownContract(id) {
-		return api.ContractSize{}, api.ErrContractNotFound
-	}
-
 	var size struct {
 		Size     uint64 `json:"size"`
 		Prunable uint64 `json:"prunable"`

@@ -95,18 +95,11 @@ func TestHostPruning(t *testing.T) {
 	recordFailedInteractions(1, h1.PublicKey())
 
 	// assert the host was pruned
-	var cnt int
 	tt.Retry(10, time.Second, func() error {
 		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
-			triggered, err := a.Trigger(true) // trigger autopilot
-			if err != nil {
-				t.Logf("failed to trigger autopilot err %v, attempt %d", err, cnt)
-			} else {
-				t.Logf("triggered autopilot %t, attempt %d", triggered, cnt)
-			}
-			cnt++
+			a.Trigger(true) // trigger autopilot
 			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)
 		}
 		return nil

@@ -536,10 +536,26 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 		return
 	}
 
+	// convertToTransactions converts wallet events to API transactions.
+	convertToTransactions := func(events []wallet.Event) []api.Transaction {
+		transactions := make([]api.Transaction, len(events))
+		for i, e := range events {
+			transactions[i] = api.Transaction{
+				Raw:       e.Transaction,
+				Index:     e.Index,
+				ID:        types.TransactionID(e.ID),
+				Inflow:    e.Inflow,
+				Outflow:   e.Outflow,
+				Timestamp: e.Timestamp,
+			}
+		}
+		return transactions
+	}
+
 	if before.IsZero() && since.IsZero() {
 		events, err := b.w.Events(offset, limit)
 		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(api.ConvertToTransactions(events))
+			jc.Encode(convertToTransactions(events))
 		}
 		return
 	}
@@ -559,9 +575,9 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	}
 	events = filtered
 	if limit == 0 || limit == -1 {
-		jc.Encode(api.ConvertToTransactions(events[offset:]))
+		jc.Encode(convertToTransactions(events[offset:]))
 	} else {
-		jc.Encode(api.ConvertToTransactions(events[offset : offset+limit]))
+		jc.Encode(convertToTransactions(events[offset : offset+limit]))
 	}
 	return
 }
@@ -569,7 +585,19 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 func (b *bus) walletOutputsHandler(jc jape.Context) {
 	utxos, err := b.w.SpendableOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
-		jc.Encode(api.ConvertToSiacoinElements(utxos))
+		// convert to siacoin elements
+		elements := make([]api.SiacoinElement, len(utxos))
+		for i, sce := range utxos {
+			elements[i] = api.SiacoinElement{
+				ID: sce.StateElement.ID,
+				SiacoinOutput: types.SiacoinOutput{
+					Value:   sce.SiacoinOutput.Value,
+					Address: sce.SiacoinOutput.Address,
+				},
+				MaturityHeight: sce.MaturityHeight,
+			}
+		}
+		jc.Encode(elements)
 	}
 }
 

@@ -255,14 +255,13 @@ func (cs *chainSubscriber) commit() error {
 
 // shouldCommit returns whether the subscriber should commit its buffered state.
 func (cs *chainSubscriber) shouldCommit() bool {
-	return cs.mayCommit ||
-		time.Since(cs.lastSave) > cs.persistInterval ||
+	return cs.mayCommit && (time.Since(cs.lastSave) > cs.persistInterval ||
 		len(cs.announcements) > 0 ||
 		len(cs.revisions) > 0 ||
 		len(cs.proofs) > 0 ||
 		len(cs.outputs) > 0 ||
 		len(cs.events) > 0 ||
-		len(cs.contractState) > 0
+		len(cs.contractState) > 0)
 }
 
 func (cs *chainSubscriber) tryCommit() error {
@@ -300,15 +299,16 @@ func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate)
 		return // ignore old announcements
 	}
 	chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
-		if ha.NetAddress != "" {
-			cs.announcements = append(cs.announcements, announcement{
-				blockHeight:      cau.State.Index.Height,
-				blockID:          b.ID(),
-				hk:               hk,
-				timestamp:        b.Timestamp,
-				HostAnnouncement: ha,
-			})
+		if ha.NetAddress == "" {
+			return // ignore
 		}
+		cs.announcements = append(cs.announcements, announcement{
+			blockHeight:      cau.State.Index.Height,
+			blockID:          b.ID(),
+			hk:               hk,
+			timestamp:        b.Timestamp,
+			HostAnnouncement: ha,
+		})
 	})
 }
 

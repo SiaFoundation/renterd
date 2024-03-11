@@ -1,11 +1,9 @@
 package stores
 
 import (
-	"bytes"
 	"math"
 	"time"
 
-	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"gorm.io/gorm"
@@ -161,16 +159,6 @@ func (s *SQLStore) WalletEventCount() (uint64, error) {
 		return 0, err
 	}
 	return uint64(count), nil
-}
-
-func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
-	var buf bytes.Buffer
-	siad.MarshalSia(&buf)
-	d := types.NewBufDecoder(buf.Bytes())
-	core.DecodeFrom(d)
-	if d.Err() != nil {
-		panic(d.Err())
-	}
 }
 
 func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbWalletOutput) error {

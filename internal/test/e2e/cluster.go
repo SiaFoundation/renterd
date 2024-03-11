@@ -41,7 +41,6 @@ import (
 const (
 	testBusFlushInterval   = 100 * time.Millisecond
 	testBusPersistInterval = 2 * time.Second
-	latestHardforkHeight   = 50 // foundation hardfork height in testing
 )
 
 var (
@@ -425,7 +424,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay + 10) // mine some extra blocks
+		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay)
 		tt.Retry(1000, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
@@ -675,15 +674,11 @@ func (c *TestCluster) AddHost(h *Host) {
 	res, err := c.Bus.Wallet(context.Background())
 	c.tt.OK(err)
 
-	// Fund 1MS
-	fundAmt := types.Siacoins(1e6)
+	// Fund host with one blockreward
+	fundAmt := c.cm.TipState().BlockReward()
 	for fundAmt.Cmp(res.Confirmed) > 0 {
-		fundAmt = fundAmt.Div64(2)
-		if fundAmt.Cmp(types.Siacoins(1)) < 0 {
-			c.tt.Fatal("not enough funds to fund host")
-		}
+		c.tt.Fatal("not enough funds to fund host")
 	}
-
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
