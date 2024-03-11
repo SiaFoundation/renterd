@@ -23,6 +23,95 @@ API documentation can be found [here](https://api.sia.tech/renterd).<br>
 Setup guides are available on our [website](https://docs.sia.tech/renting/setting-up-renterd).<br>
 A project roadmap is available on [GitHub](https://github.com/orgs/SiaFoundation/projects/5).
 
+## Backups
+
+This section provides instructions on creating backups for `renterd` and
+restoring from those backups. Taking backups at regular intervals and testing
+whether you can restore from such a backup are crucial for ensuring the
+integrity and availability of your data. Make sure to never store your backups
+on the same machine `renterd` is running on.
+
+### Databases
+
+When uploading data to the Sia Network, `renterd` stores all necessary metadata
+to be able to download that data in its SQL databases. `renterd` uses two
+databases:
+
+- **main database**: contains all object -, contracts - and host metadata
+- **metrics database**: contains contract spending, performance metrics
+
+The main database is the most important one because it contains the object
+metadata, which is crucial to be able to recover your data. The `metrics`
+database is less important but there's various UI features that depend on it.
+
+---
+**NOTE**
+
+The name of these databases are configurable (see `RENTERD_DB_NAME` and
+`RENTERD_DB_METRICS_NAME`), so make sure to use the configured values, the
+following section will assume `renterd` defaults which are `renterd` and
+`renterd_metrics` for the main and metrics database respectively.
+
+---
+
+Depending on the user's configuration, these database are either SQLite or MySQL
+database. The following section outlines how to backup `renterd` in both
+scenarios.
+
+#### SQLite
+
+Backing up a SQLite database can be done using the following command:
+
+```bash
+sqlite3 db.sqlite ".backup 'db.bkp'"
+sqlite3 metrics.sqlite ".backup 'metrics.bkp'"
+```
+
+There is an alternative `.dump` command, which exports the database into a text
+file containing SQL statements. This backup is useful in its own, because it's
+more portable and can be used to import the contents of the database into
+another database on another system entirely. The `.backup` however yields a
+byte-for-byte replica of the original database file, it is usually a lot faster
+on large databases and it can be performed on a database that's actively being
+read or written to, even though we advise to shut down the renter before taking
+a backup.
+
+Restoring from a backup is as simple as putting the backup in place of the original.
+Another useful tool for backing up SQLite database is https://litestream.io/.
+
+#### MySQL
+
+Backuping up a MySQL database can be done using the `mysqldump` command. It's a
+utility provided by MySQL to backup or transfer a MySQL database. It's usually
+installed alongside the MySQL cient tools.
+
+The following command assumes MySQL is being ran from within a docker container:
+
+```bash
+docker exec [MYSQL_CONTAINER_NAME] /usr/bin/mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd > renterd_bkp.sql
+
+docker exec [MYSQL_CONTAINER_NAME] /usr/bin/mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics > renterd_metrics_bkp.sql
+```
+
+Restoring from this backup can be done using:
+
+```bash
+cat renterd_bkp.sql | docker exec -i [MYSQL_CONTAINER_NAME] /usr/bin/mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd
+
+cat renterd_metrics_bkp.sql | docker exec -i [MYSQL_CONTAINER_NAME] /usr/bin/mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics
+```
+
+### Partial Slabs
+
+For users that have upload packing enabled, it is very important to back up
+partial slabs alongside the database backups. These partial slabs are
+essentially a sort of buffer that gets uploaded to the network when that buffer
+reaches the size of a full slab, drastically speeding up a bunch of small file
+uploads. To ensure consistency between the database and these files on disk, it
+is recommended to gracefully shut the renter down before taking a backup of its
+database. These partial slabs are located in a folder called `partial_slabs`,
+right in the root folder.
+
 ## Docker Support
 
 `renterd` includes a `Dockerfile` which can be used for building and running
