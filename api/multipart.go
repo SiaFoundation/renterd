@@ -51,6 +51,10 @@ type (
 		MimeType    string
 		Metadata    ObjectUserMetadata
 	}
+
+	CompleteMultipartOptions struct {
+		Metadata ObjectUserMetadata
+	}
 )
 
 type (
@@ -76,6 +80,7 @@ type (
 
 	MultipartCompleteRequest struct {
 		Bucket   string `json:"bucket"`
+		Metadata ObjectUserMetadata
 		Path     string `json:"path"`
 		UploadID string `json:"uploadID"`
 		Parts    []MultipartCompletedPart

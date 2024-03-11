@@ -313,7 +313,7 @@ func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string
 	})
 }
 
-func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error) {
+func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error) {
 	// Sanity check input parts.
 	if !sort.SliceIsSorted(parts, func(i, j int) bool {
 		return parts[i].PartNumber < parts[j].PartNumber
@@ -431,6 +431,14 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 				}).Error
 			if err != nil {
 				return fmt.Errorf("failed to update slice %v: %w", i, err)
+			}
+		}
+
+		// Create new metadata.
+		if len(opts.Metadata) > 0 {
+			err = s.createUserMetadata(tx, obj.ID, opts.Metadata)
+			if err != nil {
+				return fmt.Errorf("failed to create metadata: %w", err)
 			}
 		}
 

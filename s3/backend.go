@@ -502,7 +502,8 @@ func (s *s3) AbortMultipartUpload(ctx context.Context, bucket, object string, id
 	return nil
 }
 
-func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
+func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, meta map[string]string, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
+	convertToSiaMetadataHeaders(meta)
 	var parts []api.MultipartCompletedPart
 	for _, part := range input.Parts {
 		parts = append(parts, api.MultipartCompletedPart{
@@ -510,7 +511,9 @@ func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string,
 			PartNumber: part.PartNumber,
 		})
 	}
-	resp, err := s.b.CompleteMultipartUpload(ctx, bucket, "/"+object, string(id), parts)
+	resp, err := s.b.CompleteMultipartUpload(ctx, bucket, "/"+object, string(id), parts, api.CompleteMultipartOptions{
+		Metadata: api.ExtractObjectUserMetadataFrom(meta),
+	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

@@ -2107,7 +2107,7 @@ func TestMultipartUploads(t *testing.T) {
 			PartNumber: 3,
 			ETag:       etag3,
 		},
-	})
+	}, api.CompleteMultipartOptions{})
 	tt.OK(err)
 	if ui.ETag == "" {
 		t.Fatal("unexpected response:", ui)
@@ -2435,7 +2435,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 			PartNumber: 3,
 			ETag:       resp3.ETag,
 		},
-	}))
+	}, api.CompleteMultipartOptions{}))
 
 	// download the object and verify its integrity
 	dst := new(bytes.Buffer)
