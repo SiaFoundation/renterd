@@ -471,7 +471,7 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	index := byte(0) // not used yet but can be used to derive more than 1 account per host
 
-	// Append the the host for which to create it and the index to the
+	// Append the host for which to create it and the index to the
 	// corresponding sub-key.
 	subKey := a.key
 	data := append(subKey, hostKey[:]...)

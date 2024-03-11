@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
+	"fmt"
 	"testing"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
 )
@@ -128,7 +129,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	w := newTestWorker(t)
 
 	// add hosts to worker
-	w.AddHosts(testRedundancySettings.TotalShards * 2)
+	w.AddHosts(testRedundancySettings.TotalShards)
 
 	// convenience variables
 	os := w.os
@@ -139,9 +140,6 @@ func TestUploadPackedSlab(t *testing.T) {
 	// create upload params
 	params := testParameters(t.Name())
 	params.packing = true
-
-	// block aysnc packed slab uploads
-	w.BlockAsyncPackedSlabUploads(params)
 
 	// create test data
 	data := frand.Bytes(128)
@@ -208,67 +206,60 @@ func TestUploadPackedSlab(t *testing.T) {
 		t.Fatal("data mismatch")
 	}
 
+	// define a helper that counts packed slabs
+	packedSlabsCount := func() int {
+		t.Helper()
+		os.mu.Lock()
+		cnt := len(os.partials)
+		os.mu.Unlock()
+		return cnt
+	}
+
+	// define a helper that uploads data using the worker
+	var c int
+	uploadBytes := func(n int) {
+		t.Helper()
+		params.path = fmt.Sprintf("%s_%d", t.Name(), c)
+		_, err := w.upload(context.Background(), bytes.NewReader(frand.Bytes(n)), w.Contracts(), params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c++
+	}
+
+	// block aysnc packed slab uploads
+	w.BlockAsyncPackedSlabUploads(params)
+
 	// configure max buffer size
 	os.setSlabBufferMaxSizeSoft(128)
 
-	// upload 2x64 bytes using the worker
-	params.path = t.Name() + "2"
-	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(64)), w.Contracts(), params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	params.path = t.Name() + "3"
-	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(64)), w.Contracts(), params)
-	if err != nil {
-		t.Fatal(err)
+	// upload 2x64 bytes using the worker and assert we still have two packed
+	// slabs (buffer limit not reached)
+	uploadBytes(64)
+	uploadBytes(64)
+	if packedSlabsCount() != 2 {
+		t.Fatal("expected 2 packed slabs")
 	}
 
-	// assert we still have two packed slabs (buffer limit not reached)
-	pss, err = os.PackedSlabsForUpload(context.Background(), 0, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, math.MaxInt)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(pss) != 2 {
-		t.Fatal("expected 2 packed slab")
+	// upload one more byte and assert we still have two packed slabs (one got
+	// uploaded synchronously because buffer limit was reached)
+	uploadBytes(1)
+	if packedSlabsCount() != 2 {
+		t.Fatal("expected 2 packed slabs")
 	}
-
-	// upload one more byte (buffer limit reached)
-	params.path = t.Name() + "4"
-	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(1)), w.Contracts(), params)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert we still have two packed slabs (one got uploaded synchronously)
-	pss, err = os.PackedSlabsForUpload(context.Background(), 0, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, math.MaxInt)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(pss) != 2 {
-		t.Fatal("expected 2 packed slab")
-	}
-
-	// allow some time for the background thread to realise we blocked async
-	// packed slab uploads
-	time.Sleep(time.Second)
 
 	// unblock asynchronous uploads
 	w.UnblockAsyncPackedSlabUploads(params)
+	uploadBytes(129) // ensure background thread is running
 
-	// upload 1 byte using the worker
-	params.path = t.Name() + "5"
-	_, err = w.upload(context.Background(), bytes.NewReader(frand.Bytes(129)), w.Contracts(), params)
-	if err != nil {
+	// assert packed slabs get uploaded asynchronously
+	if err := test.Retry(100, 100*time.Millisecond, func() error {
+		if packedSlabsCount() != 0 {
+			return errors.New("expected 0 packed slabs")
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
-	}
-
-	// allow some time for the thread to pick up the packed slabs
-	time.Sleep(time.Second)
-
-	// assert we uploaded all packed slabs
-	pss, err = os.PackedSlabsForUpload(context.Background(), 0, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(pss) != 0 {
-		t.Fatal("expected 0 packed slab")
 	}
 }
 

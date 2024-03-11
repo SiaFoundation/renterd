@@ -83,9 +83,14 @@ type (
 		Object  *Object          `json:"object,omitempty"`
 	}
 
-	// GetObjectResponse is the response type for the /worker/object endpoint.
+	// GetObjectResponse is the response type for the GET /worker/object endpoint.
 	GetObjectResponse struct {
-		Content      io.ReadCloser      `json:"content"`
+		Content io.ReadCloser `json:"content"`
+		HeadObjectResponse
+	}
+
+	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
+	HeadObjectResponse struct {
 		ContentType  string             `json:"contentType"`
 		LastModified string             `json:"lastModified"`
 		Range        *DownloadRange     `json:"range,omitempty"`
@@ -206,6 +211,10 @@ type (
 		Batch bool
 	}
 
+	HeadObjectOptions struct {
+		Range DownloadRange
+	}
+
 	DownloadObjectOptions struct {
 		GetObjectOptions
 		Range DownloadRange
@@ -298,6 +307,16 @@ func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 func (opts DeleteObjectOptions) Apply(values url.Values) {
 	if opts.Batch {
 		values.Set("batch", "true")
+	}
+}
+
+func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
+	if opts.Range != (DownloadRange{}) {
+		if opts.Range.Length == -1 {
+			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
+		} else {
+			h.Set("Range", fmt.Sprintf("bytes=%v-%v", opts.Range.Offset, opts.Range.Offset+opts.Range.Length-1))
+		}
 	}
 }
 

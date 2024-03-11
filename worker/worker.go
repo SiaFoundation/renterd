@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -258,13 +259,6 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 		return
 	}
 
-	// apply the timeout
-	if rsr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(rsr.Timeout))
-		defer cancel()
-	}
-
 	// only scan hosts if we are online
 	peers, err := w.bus.SyncerPeers(ctx)
 	if jc.Check("failed to fetch peers from bus", err) != nil {
@@ -277,7 +271,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 
 	// scan host
 	var errStr string
-	settings, priceTable, elapsed, err := w.scanHost(ctx, rsr.HostKey, rsr.HostIP)
+	settings, priceTable, elapsed, err := w.scanHost(ctx, time.Duration(rsr.Timeout), rsr.HostKey, rsr.HostIP)
 	if err != nil {
 		errStr = err.Error()
 	}
@@ -859,6 +853,47 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
+func (w *worker) objectsHandlerHEAD(jc jape.Context) {
+	// parse bucket
+	bucket := api.DefaultBucketName
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	}
+
+	// parse path
+	path := jc.PathParam("path")
+	if path == "" || strings.HasSuffix(path, "/") {
+		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch object metadata
+	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+		OnlyMetadata: true,
+	})
+	if errors.Is(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	} else if res.Object == nil {
+		jc.Error(api.ErrObjectNotFound, http.StatusInternalServerError) // should never happen but checking because we deref. later
+		return
+	}
+
+	// serve the content to ensure we're setting the exact same headers as we
+	// would for a GET request
+	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, func(io.Writer, int64, int64) error { return nil })
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
+	} else if err != nil {
+		jc.Error(err, status)
+	}
+}
+
 func (w *worker) objectsHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []api.ObjectMetadata{})
 
@@ -1365,6 +1400,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
+		"HEAD   /objects/*path": w.objectsHandlerHEAD,
 		"GET    /objects/*path": w.objectsHandlerGET,
 		"PUT    /objects/*path": w.objectsHandlerPUT,
 		"DELETE /objects/*path": w.objectsHandlerDELETE,
@@ -1389,22 +1425,30 @@ func (w *worker) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+	logger := w.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
 	// prepare a helper for scanning
 	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+		// apply timeout
+		scanCtx := ctx
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			scanCtx, cancel = context.WithTimeout(scanCtx, timeout)
+			defer cancel()
+		}
 		// resolve hostIP. We don't want to scan hosts on private networks.
 		if !w.allowPrivateIPs {
 			host, _, err := net.SplitHostPort(hostIP)
 			if err != nil {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 			}
-			addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+			addrs, err := (&net.Resolver{}).LookupIPAddr(scanCtx, host)
 			if err != nil {
 				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 			}
 			for _, addr := range addrs {
 				if isPrivateIP(addr.IP) {
-					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, errors.New("host is on a private network")
+					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
 				}
 			}
 		}
@@ -1412,13 +1456,15 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		// fetch the host settings
 		start := time.Now()
 		var settings rhpv2.HostSettings
-		err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-			if settings, err = RPCSettings(ctx, t); err == nil {
-				// NOTE: we overwrite the NetAddress with the host address here since we
-				// just used it to dial the host we know it's valid
-				settings.NetAddress = hostIP
+		err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+			var err error
+			if settings, err = RPCSettings(scanCtx, t); err != nil {
+				return fmt.Errorf("failed to fetch host settings: %w", err)
 			}
-			return err
+			// NOTE: we overwrite the NetAddress with the host address here
+			// since we just used it to dial the host we know it's valid
+			settings.NetAddress = hostIP
+			return nil
 		})
 		elapsed := time.Since(start)
 		if err != nil {
@@ -1427,9 +1473,9 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 
 		// fetch the host pricetable
 		var pt rhpv3.HostPriceTable
-		err = w.transportPoolV3.withTransportV3(ctx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
+		err = w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
 			if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
-				return err
+				return fmt.Errorf("failed to fetch host price table: %w", err)
 			} else {
 				pt = hpt.HostPriceTable
 				return nil
@@ -1444,11 +1490,16 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		// scan: second try
 		select {
 		case <-ctx.Done():
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, ctx.Err()
 		case <-time.After(time.Second):
 		}
 		settings, pt, duration, err = scan()
+
+		logger = logger.With("elapsed", duration)
 		if err == nil {
-			w.logger.Debugf("successfully scanned host %v after retry", hostKey)
+			logger.Debug("successfully scanned host on second try")
+		} else if !isErrHostUnreachable(err) {
+			logger.Debugw("failed to scan host", zap.Error(err))
 		}
 	}
 
@@ -1456,8 +1507,8 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 	// just in case since recording a failed scan might have serious
 	// repercussions
 	select {
-	case <-w.shutdownCtx.Done():
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, w.shutdownCtx.Err()
+	case <-ctx.Done():
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, ctx.Err()
 	default:
 	}
 
@@ -1476,7 +1527,7 @@ func (w *worker) scanHost(ctx context.Context, hostKey types.PublicKey, hostIP s
 		},
 	})
 	if scanErr != nil {
-		w.logger.Errorf("failed to record host scan: %v", scanErr)
+		logger.Errorw("failed to record host scan", zap.Error(scanErr))
 	}
 	return settings, pt, duration, err
 }
@@ -1491,4 +1542,15 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 		l.Errorf("%w: failed to discard txn: %v", *err, dErr)
 	}
 	cancel()
+}
+
+func isErrHostUnreachable(err error) bool {
+	return isError(err, os.ErrDeadlineExceeded) ||
+		isError(err, context.DeadlineExceeded) ||
+		isError(err, api.ErrHostOnPrivateNetwork) ||
+		isError(err, errors.New("no route to host")) ||
+		isError(err, errors.New("no such host")) ||
+		isError(err, errors.New("connection refused")) ||
+		isError(err, errors.New("unknown port")) ||
+		isError(err, errors.New("cannot assign requested address"))
 }

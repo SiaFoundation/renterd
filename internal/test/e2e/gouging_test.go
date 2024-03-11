@@ -53,17 +53,21 @@ func TestGouging(t *testing.T) {
 		t.Fatal("unexpected data")
 	}
 
+	// update the gouging settings to limit the max storage price to 100H
+	gs := test.GougingSettings
+	gs.MaxStoragePrice = types.NewCurrency64(100)
+	if err := b.UpdateSetting(context.Background(), api.SettingGouging, gs); err != nil {
+		t.Fatal(err)
+	}
 	// fetch current contract set
 	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: cfg.Set})
 	tt.OK(err)
 
-	// update the host settings so it's gouging
+	// update one host's settings so it's gouging
 	hk := contracts[0].HostKey
 	host := hostsMap[hk.String()]
 	settings := host.settings.Settings()
-	settings.IngressPrice = types.Siacoins(1)
-	settings.EgressPrice = types.Siacoins(1)
-	settings.ContractPrice = types.Siacoins(11)
+	settings.StoragePrice = types.NewCurrency64(101) // gouging
 	tt.OK(host.UpdateSettings(settings))
 
 	// make sure the price table expires so the worker is forced to fetch it
@@ -76,7 +80,7 @@ func TestGouging(t *testing.T) {
 	// update all host settings so they're gouging
 	for _, h := range cluster.hosts {
 		settings := h.settings.Settings()
-		settings.EgressPrice = types.Siacoins(1)
+		settings.StoragePrice = types.NewCurrency64(101)
 		if err := h.UpdateSettings(settings); err != nil {
 			t.Fatal(err)
 		}
@@ -91,4 +95,20 @@ func TestGouging(t *testing.T) {
 	if err := w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil {
 		t.Fatal("expected download to fail", err)
 	}
+
+	// try optimising gouging settings
+	resp, err := cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, gs, test.RedundancySettings)
+	tt.OK(err)
+	if resp.Recommendation == nil {
+		t.Fatal("expected recommendation")
+	}
+
+	// set optimised settings
+	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
+
+	// upload some data - should work now once contract maintenance is done
+	tt.Retry(30, time.Second, func() error {
+		_, err := w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{})
+		return err
+	})
 }
