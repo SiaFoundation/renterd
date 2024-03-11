@@ -2392,7 +2392,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
-	defer cluster.Shutdown()
+
 	b := cluster.Bus
 	w := cluster.Worker
 	slabSize := test.RedundancySettings.SlabSizeNoRedundancy()
@@ -2456,5 +2456,151 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))
 	} else if !bytes.Equal(receivedData, expectedData) {
 		t.Fatal("unexpected data")
+	}
+}
+
+func TestWalletRedistribute(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: true,
+	})
+	defer cluster.Shutdown()
+
+	// redistribute into 5 outputs
+	_, err := cluster.Bus.WalletRedistribute(context.Background(), 5, types.Siacoins(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster.MineBlocks(1)
+
+	// assert we have 5 outputs with 10 SC
+	outputs, err := cluster.Bus.WalletOutputs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cnt int
+	for _, output := range outputs {
+		if output.Value.Cmp(types.Siacoins(10)) == 0 {
+			cnt++
+		}
+	}
+	if cnt != 5 {
+		t.Fatalf("expected 5 outputs with 10 SC, got %v", cnt)
+	}
+
+	// assert redistributing into 3 outputs succeeds, used to fail because we
+	// were broadcasting an empty transaction set
+	_, err = cluster.Bus.WalletRedistribute(context.Background(), 3, types.Siacoins(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHostScan(t *testing.T) {
+	// New cluster with autopilot disabled
+	cfg := clusterOptsDefault
+	cfg.skipRunningAutopilot = true
+	cluster := newTestCluster(t, cfg)
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// add 2 hosts to the cluster, 1 to scan and 1 to make sure we always have 1
+	// peer and consider ourselves connected to the internet
+	hosts := cluster.AddHosts(2)
+	host := hosts[0]
+
+	settings, err := host.RHPv2Settings()
+	tt.OK(err)
+
+	hk := host.PublicKey()
+	hostIP := settings.NetAddress
+
+	assertHost := func(ls time.Time, lss, slss bool, ts uint64) {
+		t.Helper()
+
+		hi, err := b.Host(context.Background(), host.PublicKey())
+		tt.OK(err)
+
+		if ls.IsZero() && !hi.Interactions.LastScan.IsZero() {
+			t.Fatal("expected last scan to be zero")
+		} else if !ls.IsZero() && !hi.Interactions.LastScan.After(ls) {
+			t.Fatal("expected last scan to be after", ls)
+		} else if hi.Interactions.LastScanSuccess != lss {
+			t.Fatalf("expected last scan success to be %v, got %v", lss, hi.Interactions.LastScanSuccess)
+		} else if hi.Interactions.SecondToLastScanSuccess != slss {
+			t.Fatalf("expected second to last scan success to be %v, got %v", slss, hi.Interactions.SecondToLastScanSuccess)
+		} else if hi.Interactions.TotalScans != ts {
+			t.Fatalf("expected total scans to be %v, got %v", ts, hi.Interactions.TotalScans)
+		}
+	}
+
+	scanHost := func() error {
+		// timing on the CI can be weird, wait a bit to make sure time passes
+		// between scans
+		time.Sleep(time.Millisecond)
+
+		resp, err := w.RHPScan(context.Background(), hk, hostIP, 10*time.Second)
+		tt.OK(err)
+		if resp.ScanError != "" {
+			return errors.New(resp.ScanError)
+		}
+		return nil
+	}
+
+	assertHost(time.Time{}, false, false, 0)
+
+	// scan the host the first time
+	ls := time.Now()
+	if err := scanHost(); err != nil {
+		t.Fatal(err)
+	}
+	assertHost(ls, true, false, 1)
+
+	// scan the host the second time
+	ls = time.Now()
+	if err := scanHost(); err != nil {
+		t.Fatal(err)
+	}
+	assertHost(ls, true, true, 2)
+
+	// close the host to make scans fail
+	tt.OK(host.Close())
+
+	// scan the host a third time
+	ls = time.Now()
+	if err := scanHost(); err == nil {
+		t.Fatal("expected scan error")
+	}
+	assertHost(ls, false, true, 3)
+
+	// fetch hosts for scanning with maxLastScan set to now which should return
+	// all hosts
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+			MaxLastScan: api.TimeRFC3339(time.Now()),
+		})
+		tt.OK(err)
+		if len(toScan) != 2 {
+			return fmt.Errorf("expected 2 hosts, got %v", len(toScan))
+		}
+		return nil
+	})
+
+	// fetch hosts again with the unix epoch timestamp which should only return
+	// 1 host since that one hasn't been scanned yet
+	toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+		MaxLastScan: api.TimeRFC3339(time.Unix(0, 1)),
+	})
+	tt.OK(err)
+	if len(toScan) != 1 {
+		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
 }

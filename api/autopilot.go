@@ -91,9 +91,37 @@ type (
 		StartTime TimeRFC3339 `json:"startTime"`
 		BuildState
 	}
-)
 
-type (
+	ConfigEvaluationRequest struct {
+		AutopilotConfig    AutopilotConfig    `json:"autopilotConfig"`
+		GougingSettings    GougingSettings    `json:"gougingSettings"`
+		RedundancySettings RedundancySettings `json:"redundancySettings"`
+	}
+
+	ConfigRecommendation struct {
+		GougingSettings GougingSettings `json:"gougingSettings"`
+	}
+
+	// ConfigEvaluationResponse is the response type for /evaluate
+	ConfigEvaluationResponse struct {
+		Hosts    uint64 `json:"hosts"`
+		Usable   uint64 `json:"usable"`
+		Unusable struct {
+			Blocked uint64 `json:"blocked"`
+			Gouging struct {
+				Contract uint64 `json:"contract"`
+				Download uint64 `json:"download"`
+				Gouging  uint64 `json:"gouging"`
+				Pruning  uint64 `json:"pruning"`
+				Upload   uint64 `json:"upload"`
+			} `json:"gouging"`
+			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
+			NotScanned            uint64 `json:"notScanned"`
+			Unknown               uint64 `json:"unknown"`
+		}
+		Recommendation *ConfigRecommendation `json:"recommendation,omitempty"`
+	}
+
 	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
 	HostHandlerResponse struct {
 		Host   hostdb.Host                `json:"host"`

@@ -623,6 +623,11 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 	}
 
 	var ids []types.TransactionID
+	if len(txns) == 0 {
+		jc.Encode(ids)
+		return
+	}
+
 	for i := 0; i < len(txns); i++ {
 		b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
 		ids = append(ids, txns[i].ID())

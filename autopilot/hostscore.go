@@ -13,6 +13,8 @@ import (
 	"go.sia.tech/siad/build"
 )
 
+const smallestValidScore = math.SmallestNonzeroFloat64
+
 func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
