@@ -136,12 +136,9 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 
 	// refill accounts in separate goroutines
 	for _, c := range contracts {
-		// add logging for contracts in the set
-		_, inSet := inContractSet[c.ID]
-
 		// launch refill if not already in progress
 		if a.markRefillInProgress(workerID, c.HostKey) {
-			go func(contract api.ContractMetadata, inSet bool) {
+			go func(contract api.ContractMetadata) {
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
 				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, workerID, contract)
@@ -166,7 +163,7 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 				}
 
 				a.markRefillDone(workerID, contract.HostKey)
-			}(c, inSet)
+			}(c)
 		}
 	}
 }
