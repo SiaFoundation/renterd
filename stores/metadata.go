@@ -1724,7 +1724,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// NOTE: the metadata is not deleted because this delete will cascade,
 		// if we stop recreating the object we have to make sure to delete the
 		// object's metadata before trying to recreate it
-		deleted, err := s.deleteObject(tx, bucket, path)
+		_, err := s.deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
@@ -1771,10 +1771,6 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("failed to create user metadata: %w", err)
 		}
 
-		// Delete slabs.
-		if deleted > 0 {
-			return pruneSlabs(tx)
-		}
 		return nil
 	})
 }
@@ -2731,7 +2727,13 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 	if tx.Error != nil {
 		return 0, tx.Error
 	}
-	return tx.RowsAffected, nil
+	numDeleted := tx.RowsAffected
+	if numDeleted == 0 {
+		return 0, nil // nothing to prune if no object was deleted
+	} else if err := pruneSlabs(tx); err != nil {
+		return numDeleted, err
+	}
+	return numDeleted, nil
 }
 
 // deleteObjects deletes a batch of objects from the database. The order of
