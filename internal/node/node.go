@@ -137,11 +137,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 	cancelSubscribe := make(chan struct{})
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
 		subscribeErr := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe)
 		if errors.Is(subscribeErr, modules.ErrInvalidConsensusChangeID) {
 			l.Warn("Invalid consensus change ID detected - resyncing consensus")
 			// Reset the consensus state within the database and rescan.
-			if err := sqlStore.ResetConsensusSubscription(); err != nil {
+			if err := sqlStore.ResetConsensusSubscription(ctx); err != nil {
 				l.Fatal(fmt.Sprintf("Failed to reset consensus subscription of SQLStore: %v", err))
 				return
 			}

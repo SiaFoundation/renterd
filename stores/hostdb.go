@@ -427,6 +427,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.H
 	var h dbHost
 
 	tx := ss.db.
+		WithContext(ctx).
 		Where(&dbHost{PublicKey: publicKey(hostKey)}).
 		Preload("Allowlist").
 		Preload("Blocklist").
@@ -456,6 +457,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	var hostAddresses []hostdb.HostAddress
 
 	err := ss.db.
+		WithContext(ctx).
 		Model(&dbHost{}).
 		Where("last_scan < ?", maxLastScan.UnixNano()).
 		Offset(offset).
@@ -546,6 +548,7 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	// fetch all hosts outside of the transaction
 	var hosts []dbHost
 	if err := ss.db.
+		WithContext(ctx).
 		Model(&dbHost{}).
 		Where("recent_downtime >= ? AND recent_scan_failures >= ?", maxDowntime, minRecentFailures).
 		Find(&hosts).
@@ -561,7 +564,7 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	// remove every host one by one
 	var errs []error
 	for _, h := range hosts {
-		if err := ss.retryTransaction(func(tx *gorm.DB) error {
+		if err := ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 			// fetch host contracts
 			hcs, err := contractsForHost(tx, h)
 			if err != nil {
@@ -575,7 +578,7 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 			}
 
 			// archive host contracts
-			if err := archiveContracts(ctx, tx, hcs, toArchive); err != nil {
+			if err := archiveContracts(tx, hcs, toArchive); err != nil {
 				return err
 			}
 
@@ -609,7 +612,7 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 
 	// clear allowlist
 	if clear {
-		return ss.retryTransaction(func(tx *gorm.DB) error {
+		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 			return tx.Where("TRUE").Delete(&dbAllowlistEntry{}).Error
 		})
 	}
@@ -624,7 +627,7 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 		toDelete[i] = publicKey(entry)
 	}
 
-	return ss.retryTransaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 		if len(toInsert) > 0 {
 			if err := tx.Create(&toInsert).Error; err != nil {
 				return err
@@ -648,7 +651,7 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 
 	// clear blocklist
 	if clear {
-		return ss.retryTransaction(func(tx *gorm.DB) error {
+		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 			return tx.Where("TRUE").Delete(&dbBlocklistEntry{}).Error
 		})
 	}
@@ -658,7 +661,7 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
 	}
 
-	return ss.retryTransaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 		if len(toInsert) > 0 {
 			if err := tx.Create(&toInsert).Error; err != nil {
 				return err
@@ -676,6 +679,7 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
 	var pubkeys []publicKey
 	err = ss.db.
+		WithContext(ctx).
 		Model(&dbAllowlistEntry{}).
 		Pluck("entry", &pubkeys).
 		Error
@@ -688,6 +692,7 @@ func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.Public
 
 func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = ss.db.
+		WithContext(ctx).
 		Model(&dbBlocklistEntry{}).
 		Pluck("entry", &blocklist).
 		Error
@@ -719,7 +724,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 			end = len(hks)
 		}
 		var batchHosts []dbHost
-		if err := ss.db.Where("public_key IN (?)", hks[i:end]).
+		if err := ss.db.WithContext(ctx).Where("public_key IN (?)", hks[i:end]).
 			Find(&batchHosts).Error; err != nil {
 			return err
 		}
@@ -732,7 +737,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 
 	// Write the interactions and update to the hosts atomically within a single
 	// transaction.
-	return ss.retryTransaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 		// Handle scans
 		for _, scan := range scans {
 			host, exists := hostMap[publicKey(scan.HostKey)]
@@ -841,7 +846,7 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ho
 			end = len(hks)
 		}
 		var batchHosts []dbHost
-		if err := ss.db.Where("public_key IN (?)", hks[i:end]).
+		if err := ss.db.WithContext(ctx).Where("public_key IN (?)", hks[i:end]).
 			Find(&batchHosts).Error; err != nil {
 			return err
 		}
@@ -854,7 +859,7 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ho
 
 	// Write the interactions and update to the hosts atomically within a single
 	// transaction.
-	return ss.retryTransaction(func(tx *gorm.DB) error {
+	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
 		// Handle price table updates
 		for _, ptu := range priceTableUpdate {
 			host, exists := hostMap[publicKey(ptu.HostKey)]
@@ -1086,7 +1091,7 @@ func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEnt
 }
 
 func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Model(&dbHost{}).
 			Where("public_key", publicKey(hk)).
 			Update("lost_sectors", 0).

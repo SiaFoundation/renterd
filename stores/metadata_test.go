@@ -1867,7 +1867,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(context.Background(), ss.db, []fileContractID{fileContractID(fcid1)})
+	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3285,7 +3285,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// See if we can fetch the object by slab.
 	var ec object.EncryptionKey
-	if obj, err := ss.objectRaw(context.Background(), ss.db, b1, "/bar"); err != nil {
+	if obj, err := ss.objectRaw(ss.db, b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if err := ec.UnmarshalBinary(obj[0].SlabKey); err != nil {
 		t.Fatal(err)

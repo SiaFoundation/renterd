@@ -292,7 +292,7 @@ func TestConsensusReset(t *testing.T) {
 	})
 
 	// Reset the consensus.
-	if err := ss.ResetConsensusSubscription(); err != nil {
+	if err := ss.ResetConsensusSubscription(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 

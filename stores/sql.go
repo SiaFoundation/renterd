@@ -446,7 +446,7 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 		ss.logger.Error(fmt.Sprintf("failed to fetch blocklist, err: %v", err))
 	}
 
-	err := ss.retryTransaction(func(tx *gorm.DB) (err error) {
+	err := ss.retryTransaction(context.Background(), func(tx *gorm.DB) (err error) {
 		if len(ss.unappliedAnnouncements) > 0 {
 			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
 				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
@@ -514,9 +514,10 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 	return nil
 }
 
-func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
 	abortRetry := func(err error) bool {
 		if err == nil ||
+			errors.Is(err, context.Canceled) ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
 			errors.Is(err, errInvalidNumberOfShards) ||
 			errors.Is(err, errShardRootChanged) ||
@@ -539,7 +540,7 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 	}
 	var err error
 	for i := 0; i < len(s.retryTransactionIntervals); i++ {
-		err = s.db.Transaction(fc, opts...)
+		err = s.db.WithContext(ctx).Transaction(fc, opts...)
 		if abortRetry(err) {
 			return err
 		}
@@ -566,10 +567,10 @@ func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID,
 	return ci, ccid, nil
 }
 
-func (s *SQLStore) ResetConsensusSubscription() error {
+func (s *SQLStore) ResetConsensusSubscription(ctx context.Context) error {
 	// empty tables and reinit consensus_infos
 	var ci dbConsensusInfo
-	err := s.retryTransaction(func(tx *gorm.DB) error {
+	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		if err := s.db.Exec("DELETE FROM consensus_infos").Error; err != nil {
 			return err
 		} else if err := s.db.Exec("DELETE FROM siacoin_elements").Error; err != nil {
