@@ -1723,7 +1723,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 	usedContracts := o.Contracts()
 
 	// UpdateObject is ACID.
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	var nDeleted int64
+	err := s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete. We want to get rid of the object and its slices if it
 		// exists.
 		//
@@ -1734,10 +1735,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// NOTE: the metadata is not deleted because this delete will cascade,
 		// if we stop recreating the object we have to make sure to delete the
 		// object's metadata before trying to recreate it
-		_, err := s.deleteObject(tx, bucket, path)
-		if err != nil {
-			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
+		var err error
+		resp := tx.Exec("DELETE FROM objects WHERE object_id = ? AND db_bucket_id = ?", path, bucketID)
+		if resp.Error != nil {
+			return fmt.Errorf("UpdateObject: failed to delete object: %w", resp.Error)
 		}
+		nDeleted = resp.RowsAffected
 
 		// 	Insert a new object.
 		objKey, err := o.Key.MarshalBinary()
@@ -1791,9 +1794,17 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		if err := s.createUserMetadata(tx, objID, metadata); err != nil {
 			return fmt.Errorf("failed to create user metadata: %w", err)
 		}
-
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if nDeleted > 0 {
+		if err := s.retryTransaction(pruneSlabs); err != nil {
+			return fmt.Errorf("UpdateObject: failed to prune slabs: %w", err)
+		}
+	}
+	return pruneSlabs(s.db)
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
