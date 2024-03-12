@@ -18,7 +18,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/gofakes3"
@@ -2425,7 +2424,7 @@ func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
 }
 
 // New returns a new Bus.
-func New(am alerts.Alerter, hm WebhookManager, cm *chain.Manager, s *syncer.Syncer, w *wallet.SingleAddressWallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am alerts.Alerter, hm WebhookManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		webhooks:         hm,
