@@ -180,11 +180,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 
 	shutdownFn := func(ctx context.Context) error {
+		close(cancelSubscribe)
 		return errors.Join(
-			func() error {
-				close(cancelSubscribe)
-				return nil
-			}(),
 			g.Close(),
 			cs.Close(),
 			tp.Close(),

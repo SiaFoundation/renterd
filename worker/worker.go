@@ -1540,7 +1540,7 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	if dErr := bus.WalletDiscard(ctx, txn); dErr != nil {
-		l.Errorf("%w: failed to discard txn: %v", *err, dErr)
+		l.Errorf("%w: %v, failed to discard txn: %v", *err, errContext, dErr)
 	}
 	cancel()
 }

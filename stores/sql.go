@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -514,7 +513,7 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 	return nil
 }
 
-func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
 	abortRetry := func(err error) bool {
 		if err == nil ||
 			errors.Is(err, context.Canceled) ||
@@ -540,7 +539,7 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 	}
 	var err error
 	for i := 0; i < len(s.retryTransactionIntervals); i++ {
-		err = s.db.WithContext(ctx).Transaction(fc, opts...)
+		err = s.db.WithContext(ctx).Transaction(fc)
 		if abortRetry(err) {
 			return err
 		}
