@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
@@ -49,6 +50,19 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
+	// ChainManager tracks multiple blockchains and identifies the best valid
+	// chain.
+	ChainManager interface {
+		AddBlocks(blocks []types.Block) error
+		AddPoolTransactions(txns []types.Transaction) (bool, error)
+		Block(id types.BlockID) (types.Block, bool)
+		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
+		PoolTransactions() []types.Transaction
+		RecommendedFee() types.Currency
+		TipState() consensus.State
+		UnconfirmedParents(txn types.Transaction) []types.Transaction
+	}
+
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
@@ -177,14 +191,47 @@ type (
 
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 	}
+
+	Syncer interface {
+		Addr() string
+		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastTransactionSet([]types.Transaction)
+		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
+		Peers() []*syncer.Peer
+	}
+
+	Wallet interface {
+		Address() types.Address
+		Balance() (wallet.Balance, error)
+		Close() error
+		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
+		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
+		ReleaseInputs(txns ...types.Transaction)
+		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
+		SpendableOutputs() ([]wallet.SiacoinElement, error)
+		Tip() (types.ChainIndex, error)
+		UnconfirmedTransactions() ([]wallet.Event, error)
+		Events(offset, limit int) ([]wallet.Event, error)
+	}
+
+	WebhookManager interface {
+		webhooks.Broadcaster
+		Close() error
+		Delete(webhooks.Webhook) error
+		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
+		Register(webhooks.Webhook) error
+	}
 )
 
 type bus struct {
 	startTime time.Time
 
-	cm *chain.Manager
-	s  *syncer.Syncer
-	w  *wallet.SingleAddressWallet
+	alerts   alerts.Alerter
+	webhooks WebhookManager
+
+	cm ChainManager
+	s  Syncer
+	w  Wallet
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
@@ -197,10 +244,7 @@ type bus struct {
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
-	alerts   alerts.Alerter
-	alertMgr *alerts.Manager
-	hooks    *webhooks.Manager
-	logger   *zap.SugaredLogger
+	logger *zap.SugaredLogger
 }
 
 // Handler returns an HTTP handler that serves the bus API.
@@ -345,7 +389,7 @@ func (b *bus) Handler() http.Handler {
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
-	b.hooks.Close()
+	b.webhooks.Close()
 	accounts := b.accounts.ToPersist()
 	err := b.eas.SaveAccounts(ctx, accounts)
 	if err != nil {
@@ -1768,7 +1812,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
-	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
+	ar, err := b.alerts.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}
@@ -1792,7 +1836,7 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 	} else if jc.DecodeForm("severity", &severity) != nil {
 		return
 	}
-	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
+	ar, err := b.alerts.Alerts(jc.Request.Context(), alerts.AlertsOpts{
 		Offset:   offset,
 		Limit:    limit,
 		Severity: severity,
@@ -1808,7 +1852,7 @@ func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	if jc.Decode(&ids) != nil {
 		return
 	}
-	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
+	jc.Check("failed to dismiss alerts", b.alerts.DismissAlerts(jc.Request.Context(), ids...))
 }
 
 func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
@@ -1816,7 +1860,7 @@ func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
 	if jc.Decode(&alert) != nil {
 		return
 	}
-	jc.Check("failed to register alert", b.alertMgr.RegisterAlert(jc.Request.Context(), alert))
+	jc.Check("failed to register alert", b.alerts.RegisterAlert(jc.Request.Context(), alert))
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -2049,7 +2093,7 @@ func (b *bus) webhookActionHandlerPost(jc jape.Context) {
 	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
 		return
 	}
-	b.hooks.BroadcastAction(jc.Request.Context(), action)
+	b.webhooks.BroadcastAction(jc.Request.Context(), action)
 }
 
 func (b *bus) webhookHandlerDelete(jc jape.Context) {
@@ -2057,7 +2101,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	if jc.Decode(&wh) != nil {
 		return
 	}
-	err := b.hooks.Delete(wh)
+	err := b.webhooks.Delete(wh)
 	if errors.Is(err, webhooks.ErrWebhookNotFound) {
 		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
 		return
@@ -2067,7 +2111,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 }
 
 func (b *bus) webhookHandlerGet(jc jape.Context) {
-	webhooks, queueInfos := b.hooks.Info()
+	webhooks, queueInfos := b.webhooks.Info()
 	jc.Encode(api.WebHookResponse{
 		Queues:   queueInfos,
 		Webhooks: webhooks,
@@ -2079,7 +2123,7 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	err := b.hooks.Register(webhooks.Webhook{
+	err := b.webhooks.Register(webhooks.Webhook{
 		Event:  req.Event,
 		Module: req.Module,
 		URL:    req.URL,
@@ -2381,11 +2425,10 @@ func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
 }
 
 // New returns a new Bus.
-func New(am *alerts.Manager, hm *webhooks.Manager, cm *chain.Manager, s *syncer.Syncer, w *wallet.SingleAddressWallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am alerts.Alerter, hm WebhookManager, cm *chain.Manager, s *syncer.Syncer, w *wallet.SingleAddressWallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
-		alertMgr:         am,
-		hooks:            hm,
+		webhooks:         hm,
 		cm:               cm,
 		s:                s,
 		w:                w,
