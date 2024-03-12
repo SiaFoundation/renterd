@@ -4552,7 +4552,12 @@ func TestTypeCurrency(t *testing.T) {
 // threads won't cause deadlocks.
 func TestUpdateObjectParallel(t *testing.T) {
 	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
+
+	// check if we are running against mysql and only persist if we aren't
+	dbURI, _, _, _ := DBConfigFromEnv()
+	if dbURI == "" {
+		cfg.persistent = true
+	}
 	ss := newTestSQLStore(t, cfg)
 	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
 	defer ss.Close()
