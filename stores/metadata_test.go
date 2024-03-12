@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4544,4 +4545,94 @@ func TestTypeCurrency(t *testing.T) {
 			t.Fatal("invalid result")
 		}
 	}
+}
+
+// TestUpdateObjectParallel calls UpdateObject from multiple threads in parallel
+// while retries are disabled to make sure calling the same method from multiple
+// threads won't cause deadlocks.
+func TestUpdateObjectParallel(t *testing.T) {
+	cfg := defaultTestSQLStoreConfig
+	cfg.dir = t.TempDir()
+	cfg.persistent = true
+	ss := newTestSQLStore(t, cfg)
+	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
+	defer ss.Close()
+
+	// create 2 hosts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2 := hks[0], hks[1]
+
+	// create 2 contracts
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1, fcid2 := fcids[0], fcids[1]
+
+	c := make(chan string)
+	ctx, cancel := context.WithCancel(context.Background())
+	work := func() {
+		t.Helper()
+		defer cancel()
+		for name := range c {
+			// create an object
+			obj := object.Object{
+				Key: object.GenerateEncryptionKey(),
+				Slabs: []object.SlabSlice{
+					{
+						Slab: object.Slab{
+							Health:    1.0,
+							Key:       object.GenerateEncryptionKey(),
+							MinShards: 1,
+							Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+						},
+						Offset: 10,
+						Length: 100,
+					},
+					{
+						Slab: object.Slab{
+							Health:    1.0,
+							Key:       object.GenerateEncryptionKey(),
+							MinShards: 2,
+							Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+						},
+						Offset: 20,
+						Length: 200,
+					},
+				},
+			}
+
+			// update the object
+			if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			work()
+			wg.Done()
+		}()
+	}
+
+	// create 1000 objects and then overwrite them
+	for i := 0; i < 2; i++ {
+		for j := 0; j < 1000; j++ {
+			select {
+			case c <- fmt.Sprintf("object-%d", j):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+
+	close(c)
+	wg.Wait()
 }

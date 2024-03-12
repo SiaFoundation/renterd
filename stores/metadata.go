@@ -1726,36 +1726,34 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
-		// Fetch contract set.
-		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
-		}
-
-		// Insert a new object.
+		// 	Insert a new object.
 		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
-		var bucketID uint
-		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
-			Take(&bucketID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch bucket id: %w", err)
-		}
-		obj := dbObject{
-			DBBucketID: bucketID,
-			ObjectID:   path,
-			Key:        objKey,
-			Size:       o.TotalSize(),
-			MimeType:   mimeType,
-			Etag:       eTag,
-		}
-		err = tx.Create(&obj).Error
+		err = tx.Model(&dbObject{}).
+			Create(map[string]any{
+				"db_bucket_id": gorm.Expr("(SELECT id from buckets WHERE buckets.name = ?)", bucket),
+				"object_id":    path,
+				"key":          objKey,
+				"size":         o.TotalSize(),
+				"mime_type":    mimeType,
+				"etag":         eTag,
+			}).Error
 		if err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
+		}
+
+		// Get the id of the object
+		var objID uint
+		err = tx.Model(&dbObject{}).
+			Select("id").
+			Where("object_id = ?", path).
+			Where("db_bucket_id = (SELECT id from buckets WHERE buckets.name = ?)", bucket).
+			Scan(&objID).
+			Error
+		if err != nil {
+			return err
 		}
 
 		// Fetch the used contracts.
@@ -1764,13 +1762,19 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
 
+		// Fetch contract set.
+		var cs dbContractSet
+		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
+			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
+		}
+
 		// Create all slices. This also creates any missing slabs or sectors.
-		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
+		if err := s.createSlices(tx, &objID, nil, cs.ID, contracts, o.Slabs); err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
 
 		// Create all user metadata.
-		if err := s.createUserMetadata(tx, obj.ID, metadata); err != nil {
+		if err := s.createUserMetadata(tx, objID, metadata); err != nil {
 			return fmt.Errorf("failed to create user metadata: %w", err)
 		}
 
