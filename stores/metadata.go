@@ -1474,7 +1474,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 		if force {
 			// delete potentially existing object at destination
 			if _, err := s.deleteObject(tx, bucket, keyNew); err != nil {
-				return err
+				return fmt.Errorf("RenameObject: failed to delete object: %w", err)
 			}
 		}
 		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
@@ -1539,6 +1539,13 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
+		if srcBucket != dstBucket || srcPath != dstPath {
+			_, err = s.deleteObject(tx, dstBucket, dstPath)
+			if err != nil {
+				return fmt.Errorf("CopyObject: failed to delete object: %w", err)
+			}
+		}
+
 		var srcObj dbObject
 		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
 			Joins("DBBucket").
@@ -1564,10 +1571,6 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
 			return tx.Save(&srcObj).Error
-		}
-		_, err = s.deleteObject(tx, dstBucket, dstPath)
-		if err != nil {
-			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		var srcSlices []dbSlice
@@ -1720,7 +1723,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// object's metadata before trying to recreate it
 		_, err := s.deleteObject(tx, bucket, path)
 		if err != nil {
-			return fmt.Errorf("failed to delete object: %w", err)
+			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
 		// Fetch contract set.
@@ -1780,7 +1783,10 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		rowsAffected, err = s.deleteObject(tx, bucket, key)
-		return err
+		if err != nil {
+			return fmt.Errorf("RemoveObject: failed to delete object: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return err

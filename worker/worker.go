@@ -1098,7 +1098,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if err := jc.Check("couldn't upload object", err); err != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 			}
 		}
