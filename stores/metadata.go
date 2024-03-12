@@ -32,8 +32,9 @@ const (
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
 
+	// sectorInsertionBatchSize is the number of sectors per batch when we
+	// upsert sectors.
 	sectorInsertionBatchSize = 500
-	sectorQueryBatchSize     = 100
 
 	refreshHealthMinHealthValidity = 12 * time.Hour
 	refreshHealthMaxHealthValidity = 72 * time.Hour

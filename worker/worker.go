@@ -42,7 +42,6 @@ const (
 
 	lockingPriorityActiveContractRevision = 100
 	lockingPriorityRenew                  = 80
-	lockingPriorityPriceTable             = 60
 	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 30
 	lockingPriorityPruning                = 20
