@@ -425,7 +425,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	// Fund the bus.
 	if funding {
 		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay)
-		tt.Retry(1000, 100*time.Millisecond, func() error {
+		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
 			} else if !cs.Synced {
@@ -435,9 +435,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			if res, err := cluster.Bus.Wallet(ctx); err != nil {
 				return err
 			} else if res.Confirmed.IsZero() {
-				tt.Fatal("wallet not funded")
+				return fmt.Errorf("wallet not funded: %+v", res)
+			} else {
+				return nil
 			}
-			return nil
 		})
 	}
 
