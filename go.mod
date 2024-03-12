@@ -2,7 +2,7 @@ module go.sia.tech/renterd
 
 go 1.21.6
 
-toolchain go1.22.0
+toolchain go1.22.1
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3

@@ -1848,7 +1848,7 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 			Preload("Shards").
 			Take(&slab).
 			Error; err == gorm.ErrRecordNotFound {
-			return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
+			return fmt.Errorf("slab with key '%s' not found: %w", s.Key.String(), err)
 		} else if err != nil {
 			return err
 		}
