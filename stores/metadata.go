@@ -1723,8 +1723,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 	usedContracts := o.Contracts()
 
 	// UpdateObject is ACID.
-	var nDeleted int64
-	err := s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(func(tx *gorm.DB) error {
 		// Try to delete. We want to get rid of the object and its slices if it
 		// exists.
 		//
@@ -1735,42 +1734,27 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// NOTE: the metadata is not deleted because this delete will cascade,
 		// if we stop recreating the object we have to make sure to delete the
 		// object's metadata before trying to recreate it
-		var err error
-		resp := tx.Exec("DELETE FROM objects WHERE object_id = ? AND db_bucket_id = ?", path, bucketID)
-		if resp.Error != nil {
-			return fmt.Errorf("UpdateObject: failed to delete object: %w", resp.Error)
+		_, err := s.deleteObject(tx, bucket, path)
+		if err != nil {
+			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
-		nDeleted = resp.RowsAffected
 
 		// 	Insert a new object.
 		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
-		err = tx.Model(&dbObject{}).
-			Create(map[string]any{
-				"created_at":   time.Now(),
-				"db_bucket_id": bucketID,
-				"object_id":    path,
-				"key":          objKey,
-				"size":         o.TotalSize(),
-				"mime_type":    mimeType,
-				"etag":         eTag,
-			}).Error
+		obj := dbObject{
+			DBBucketID: bucketID,
+			ObjectID:   path,
+			Key:        objKey,
+			Size:       o.TotalSize(),
+			MimeType:   mimeType,
+			Etag:       eTag,
+		}
+		err = tx.Create(&obj).Error
 		if err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
-		}
-
-		// Get the id of the object
-		var objID uint
-		err = tx.Model(&dbObject{}).
-			Select("id").
-			Where("object_id = ?", path).
-			Where("db_bucket_id", bucketID).
-			Scan(&objID).
-			Error
-		if err != nil {
-			return err
 		}
 
 		// Fetch contract set.
@@ -1786,25 +1770,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// Create all slices. This also creates any missing slabs or sectors.
-		if err := s.createSlices(tx, &objID, nil, cs.ID, contracts, o.Slabs); err != nil {
+		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
 		}
 
 		// Create all user metadata.
-		if err := s.createUserMetadata(tx, objID, metadata); err != nil {
+		if err := s.createUserMetadata(tx, obj.ID, metadata); err != nil {
 			return fmt.Errorf("failed to create user metadata: %w", err)
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if nDeleted > 0 {
-		if err := s.retryTransaction(pruneSlabs); err != nil {
-			return fmt.Errorf("UpdateObject: failed to prune slabs: %w", err)
-		}
-	}
-	return pruneSlabs(s.db)
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
@@ -2757,7 +2732,21 @@ AND slabs.db_buffered_slab_id IS NULL
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
 func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64, error) {
-	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
+	// check if the object exists first to avoid unnecessary locking for the
+	// common case
+	var objID uint
+	resp := tx.Model(&dbObject{}).
+		Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
+		Select("id").
+		Limit(1).
+		Scan(&objID)
+	if err := resp.Error; err != nil {
+		return 0, err
+	} else if resp.RowsAffected == 0 {
+		return 0, nil
+	}
+
+	tx = tx.Where("id", objID).
 		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error

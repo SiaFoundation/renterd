@@ -4550,6 +4550,11 @@ func TestTypeCurrency(t *testing.T) {
 // TestUpdateObjectParallel calls UpdateObject from multiple threads in parallel
 // while retries are disabled to make sure calling the same method from multiple
 // threads won't cause deadlocks.
+//
+// NOTE: This test only covers the optimistic case of inserting objects without
+// overwriting them. As soon as combining deletions and insertions within the
+// same transaction, deadlocks become more likely due to the gap locks MySQL
+// uses.
 func TestUpdateObjectParallel(t *testing.T) {
 	cfg := defaultTestSQLStoreConfig
 
@@ -4591,7 +4596,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 							Health:    1.0,
 							Key:       object.GenerateEncryptionKey(),
 							MinShards: 1,
-							Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+							Shards:    newTestShards(hk1, fcid1, frand.Entropy256()),
 						},
 						Offset: 10,
 						Length: 100,
@@ -4601,7 +4606,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 							Health:    1.0,
 							Key:       object.GenerateEncryptionKey(),
 							MinShards: 2,
-							Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+							Shards:    newTestShards(hk2, fcid2, frand.Entropy256()),
 						},
 						Offset: 20,
 						Length: 200,
@@ -4627,13 +4632,11 @@ func TestUpdateObjectParallel(t *testing.T) {
 	}
 
 	// create 1000 objects and then overwrite them
-	for i := 0; i < 2; i++ {
-		for j := 0; j < 1000; j++ {
-			select {
-			case c <- fmt.Sprintf("object-%d", j):
-			case <-ctx.Done():
-				return
-			}
+	for i := 0; i < 1000; i++ {
+		select {
+		case c <- fmt.Sprintf("object-%d", i):
+		case <-ctx.Done():
+			return
 		}
 	}
 
