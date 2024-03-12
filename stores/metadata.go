@@ -1773,16 +1773,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return err
 		}
 
-		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, usedContracts)
-		if err != nil {
-			return fmt.Errorf("failed to fetch used contracts: %w", err)
-		}
-
 		// Fetch contract set.
 		var cs dbContractSet
 		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
 			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
+		}
+
+		// Fetch the used contracts.
+		contracts, err := fetchUsedContracts(tx, usedContracts)
+		if err != nil {
+			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
 
 		// Create all slices. This also creates any missing slabs or sectors.
