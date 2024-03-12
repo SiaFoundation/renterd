@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -390,6 +392,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the object
 	o := object.NewObject(up.ec)
 
+	// create the md5 hasher for the etag
+	// NOTE: we use md5 since it's s3 compatible and clients expect it to be md5
+	hasher := md5.New()
+	r = io.TeeReader(r, hasher)
+
 	// create the cipher reader
 	cr, err := o.Encrypt(r, up.encryptionOffset)
 	if err != nil {
@@ -520,7 +527,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// compute etag
-	eTag = o.ComputeETag()
+	eTag = hex.EncodeToString(hasher.Sum(nil))
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
