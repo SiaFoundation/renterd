@@ -1706,6 +1706,19 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 	}
 
+	// check if bucket exists - doing so before the transaction to avoid
+	// deadlocks while risking the bucket updating in the meantime
+	var bucketID uint
+	if resp := s.db.
+		Model(&dbBucket{}).
+		Select("id").
+		Where("name", bucket).
+		Scan(&bucketID); resp.Error != nil {
+		return resp.Error
+	} else if resp.RowsAffected == 0 {
+		return api.ErrBucketNotFound
+	}
+
 	// collect all used contracts
 	usedContracts := o.Contracts()
 
@@ -1733,7 +1746,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 		err = tx.Model(&dbObject{}).
 			Create(map[string]any{
-				"db_bucket_id": gorm.Expr("(SELECT id from buckets WHERE buckets.name = ?)", bucket),
+				"created_at":   time.Now(),
+				"db_bucket_id": bucketID,
 				"object_id":    path,
 				"key":          objKey,
 				"size":         o.TotalSize(),
@@ -1749,7 +1763,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		err = tx.Model(&dbObject{}).
 			Select("id").
 			Where("object_id = ?", path).
-			Where("db_bucket_id = (SELECT id from buckets WHERE buckets.name = ?)", bucket).
+			Where("db_bucket_id", bucketID).
 			Scan(&objID).
 			Error
 		if err != nil {
