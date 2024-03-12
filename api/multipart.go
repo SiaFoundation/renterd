@@ -79,11 +79,11 @@ type (
 	}
 
 	MultipartCompleteRequest struct {
-		Bucket   string `json:"bucket"`
-		Metadata ObjectUserMetadata
-		Path     string `json:"path"`
-		UploadID string `json:"uploadID"`
-		Parts    []MultipartCompletedPart
+		Bucket   string                   `json:"bucket"`
+		Metadata ObjectUserMetadata       `json:"metadata"`
+		Path     string                   `json:"path"`
+		UploadID string                   `json:"uploadID"`
+		Parts    []MultipartCompletedPart `json:"parts"`
 	}
 
 	MultipartCreateRequest struct {
