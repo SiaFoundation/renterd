@@ -239,12 +239,18 @@ func (ap *Autopilot) Run() error {
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 
+			// log worker id chosen for this maintenance iteration.
+			workerID, err := w.ID(ap.shutdownCtx)
+			if err != nil {
+				ap.logger.Warn("failed to reach worker, err: %v", err)
+			} else {
+				ap.logger.Infof("using worker %s for iteration", workerID)
+			}
+
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ap.shutdownCtx, w, forceScan)
-
-			// reset forceScan
-			forceScan = false
+			forceScan = false // reset forceScan
 
 			// block until consensus is synced
 			if synced, blocked, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
@@ -269,14 +275,6 @@ func (ap *Autopilot) Run() error {
 				ap.logger.Info("autopilot stopped before it was able to confirm it was configured in the bus")
 				return
 			}
-
-			// Log worker id chosen for this maintenance iteration.
-			workerID, err := w.ID(ap.shutdownCtx)
-			if err != nil {
-				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
-				return
-			}
-			ap.logger.Infof("using worker %s for iteration", workerID)
 
 			// update the loop state
 			//
