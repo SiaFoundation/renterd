@@ -4552,7 +4552,6 @@ func TestTypeCurrency(t *testing.T) {
 // threads won't cause deadlocks.
 func TestUpdateObjectParallel(t *testing.T) {
 	cfg := defaultTestSQLStoreConfig
-	cfg.dir = t.TempDir()
 	cfg.persistent = true
 	ss := newTestSQLStore(t, cfg)
 	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
