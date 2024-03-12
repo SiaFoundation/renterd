@@ -31,7 +31,6 @@ import (
 )
 
 // TODOs:
-// - pass last tip to AddSubscriber
 // - add wallet metrics
 // - add UPNP support
 
@@ -163,8 +162,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	// start the syncer
 	go s.Run()
 
+	// fetch chain index
+	ci, err := sqlStore.ChainIndex()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: failed to fetch chain index", err)
+	}
+
 	// subscribe the store to the chain manager
-	err = cm.AddSubscriber(sqlStore, types.ChainIndex{})
+	err = cm.AddSubscriber(sqlStore, ci)
 	if err != nil {
 		return nil, nil, nil, err
 	}

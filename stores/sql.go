@@ -287,16 +287,21 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
 
+	err := s.cs.Close()
+	if err != nil {
+		return err
+	}
+
+	err = s.slabBufferMgr.Close()
+	if err != nil {
+		return err
+	}
+
 	db, err := s.db.DB()
 	if err != nil {
 		return err
 	}
 	dbMetrics, err := s.dbMetrics.DB()
-	if err != nil {
-		return err
-	}
-
-	err = s.cs.Close()
 	if err != nil {
 		return err
 	}
@@ -310,15 +315,25 @@ func (s *SQLStore) Close() error {
 		return err
 	}
 
-	err = s.slabBufferMgr.Close()
-	if err != nil {
-		return err
-	}
-
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
 	return nil
+}
+
+// ChainIndex returns the last stored chain index.
+func (ss *SQLStore) ChainIndex() (types.ChainIndex, error) {
+	var ci dbConsensusInfo
+	if err := ss.db.
+		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
+		FirstOrCreate(&ci).
+		Error; err != nil {
+		return types.ChainIndex{}, err
+	}
+	return types.ChainIndex{
+		Height: ci.Height,
+		ID:     types.BlockID(ci.BlockID),
+	}, nil
 }
 
 // ProcessChainApplyUpdate implements chain.Subscriber.
