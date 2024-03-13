@@ -3492,6 +3492,13 @@ func TestListObjects(t *testing.T) {
 		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
 	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].ETag = testETag
+			tests[i].want[j].MimeType = testMimeType
+		}
+	}
 	for _, test := range tests {
 		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
 		if err != nil {

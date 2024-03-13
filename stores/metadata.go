@@ -2894,7 +2894,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	}
 	var rows []rawObjectMetadata
 	if err := s.db.
-		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as mimeType, o.created_at as ModTime").
+		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").

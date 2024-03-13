@@ -499,6 +499,13 @@ func TestS3List(t *testing.T) {
 		if !cmp.Equal(test.want, got) {
 			t.Errorf("test %d: unexpected response, want %v got %v", i, test.want, got)
 		}
+		for _, obj := range result.Contents {
+			if obj.ETag == "" {
+				t.Fatal("expected non-empty ETag")
+			} else if obj.LastModified.IsZero() {
+				t.Fatal("expected non-zero LastModified")
+			}
+		}
 	}
 }
 
