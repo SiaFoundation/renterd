@@ -56,6 +56,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, dbIdentifier, "00005_zero_size_object_health", logger)
 			},
 		},
+		{
+			ID: "00006_idx_objects_created_at",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00006_idx_objects_created_at", logger)
+			},
+		},
 	}
 
 	// Create migrator.
