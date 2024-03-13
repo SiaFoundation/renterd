@@ -264,9 +264,9 @@ func (b *authenticatedBackend) AbortMultipartUpload(ctx context.Context, bucket,
 	return b.backend.AbortMultipartUpload(ctx, bucket, object, id)
 }
 
-func (b *authenticatedBackend) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (resp *gofakes3.CompleteMultipartUploadResult, err error) {
+func (b *authenticatedBackend) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, meta map[string]string, input *gofakes3.CompleteMultipartUploadRequest) (resp *gofakes3.CompleteMultipartUploadResult, err error) {
 	if !b.permsFromCtx(ctx, bucket).CompleteMultipartUpload {
 		return nil, gofakes3.ErrAccessDenied
 	}
-	return b.backend.CompleteMultipartUpload(ctx, bucket, object, id, input)
+	return b.backend.CompleteMultipartUpload(ctx, bucket, object, id, meta, input)
 }

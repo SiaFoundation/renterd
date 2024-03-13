@@ -254,6 +254,38 @@ func TestS3ObjectMetadata(t *testing.T) {
 	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, head.UserMetadata)
+
+	// upload a file using multipart upload
+	core := cluster.S3Core
+	uid, err := core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "multi", minio.PutObjectOptions{
+		UserMetadata: map[string]string{
+			"New": "1",
+		},
+	})
+	tt.OK(err)
+	data := frand.Bytes(3)
+
+	part, err := core.PutObjectPart(context.Background(), api.DefaultBucketName, "foo", uid, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+	tt.OK(err)
+	_, err = core.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "multi", uid, []minio.CompletePart{
+		{
+			PartNumber: part.PartNumber,
+			ETag:       part.ETag,
+		},
+	}, minio.PutObjectOptions{
+		UserMetadata: map[string]string{
+			"Complete": "2",
+		},
+	})
+	tt.OK(err)
+
+	// check metadata
+	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, "multi", minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(map[string]string{
+		"New":      "1",
+		"Complete": "2",
+	}, head.UserMetadata)
 }
 
 func TestS3Authentication(t *testing.T) {

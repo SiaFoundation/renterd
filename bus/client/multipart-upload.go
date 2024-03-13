@@ -33,10 +33,11 @@ func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet
 }
 
 // CompleteMultipartUpload completes a multipart upload.
-func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart) (resp api.MultipartCompleteResponse, err error) {
+func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (resp api.MultipartCompleteResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/complete", api.MultipartCompleteRequest{
 		Bucket:   bucket,
 		Path:     path,
+		Metadata: opts.Metadata,
 		UploadID: uploadID,
 		Parts:    parts,
 	}, &resp)
