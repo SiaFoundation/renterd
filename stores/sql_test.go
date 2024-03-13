@@ -332,20 +332,27 @@ type sqliteQueryPlan struct {
 	Detail string `json:"detail"`
 }
 
-func (p sqliteQueryPlan) usesIndex() bool {
+func (p sqliteQueryPlan) usesIndex(index string) bool {
 	d := strings.ToLower(p.Detail)
-	return strings.Contains(d, "using index") || strings.Contains(d, "using covering index")
+	if index == "" {
+		return strings.Contains(d, "using index") || strings.Contains(d, "using covering index")
+	}
+	return strings.Contains(d, fmt.Sprintf("using index %s", index))
 }
 
 //nolint:tagliatelle
 type mysqlQueryPlan struct {
 	Extra        string `json:"Extra"`
 	PossibleKeys string `json:"possible_keys"`
+	Key          string `json:"key"`
 }
 
-func (p mysqlQueryPlan) usesIndex() bool {
-	d := strings.ToLower(p.Extra)
-	return strings.Contains(d, "using index") || strings.Contains(p.PossibleKeys, "idx_")
+func (p mysqlQueryPlan) usesIndex(index string) bool {
+	if index == "" {
+		d := strings.ToLower(p.Extra)
+		return strings.Contains(d, "using index") || strings.Contains(p.PossibleKeys, "idx_")
+	}
+	return p.Key == index
 }
 
 func TestQueryPlan(t *testing.T) {
@@ -385,16 +392,48 @@ func TestQueryPlan(t *testing.T) {
 			var explain sqliteQueryPlan
 			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error; err != nil {
 				t.Fatal(err)
-			} else if !explain.usesIndex() {
+			} else if !explain.usesIndex("") {
 				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
 			}
 		} else {
 			var explain mysqlQueryPlan
 			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&explain).Error; err != nil {
 				t.Fatal(err)
-			} else if !explain.usesIndex() {
+			} else if !explain.usesIndex("") {
 				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
 			}
+		}
+	}
+}
+
+func TestContractMetricsQueryPlan(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	query := "SELECT * FROM contracts WHERE contracts.timestamp >= 1 AND contracts.timestamp < 2 AND contracts.fcid = '<binary>' LIMIT 1"
+	queryWithHint := strings.Replace(query, "WHERE", "USE INDEX (idx_contracts_fcid_timestamp) WHERE", 1)
+
+	if isSQLite(ss.dbMetrics) {
+		// in SQLite the query uses the index we want by default
+		var explain sqliteQueryPlan
+		if err := ss.dbMetrics.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error; err != nil {
+			t.Fatal(err)
+		} else if !explain.usesIndex("idx_contracts_fcid_timestamp") {
+			t.Fatalf("index 'idx_contracts_fcid_timestamp' not used in query '%s', plan %+v", query, explain)
+		}
+	} else {
+		var explain mysqlQueryPlan
+		if err := ss.dbMetrics.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&explain).Error; err != nil {
+			t.Fatal(err)
+		} else if !explain.usesIndex("") || explain.usesIndex("idx_contracts_fcid_timestamp") {
+			t.Fatalf("index 'idx_contracts_fcid_timestamp' not expected to be used in query '%s' although it should use an index, plan %+v", query, explain)
+		}
+
+		// update query to specify the index
+		if err := ss.dbMetrics.Raw(fmt.Sprintf("EXPLAIN %s;", queryWithHint)).Scan(&explain).Error; err != nil {
+			t.Fatal(err)
+		} else if !explain.usesIndex("idx_contracts_fcid_timestamp") {
+			t.Fatalf("index 'idx_contracts_fcid_timestamp' should've been used in query '%s', plan %+v", query, explain)
 		}
 	}
 }

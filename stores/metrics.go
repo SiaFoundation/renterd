@@ -555,11 +555,16 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 			return fmt.Errorf("failed to fetch distinct contract ids: %w", err)
 		}
 
+		var indexHint string
+		if !isSQLite(tx) {
+			indexHint = "USE INDEX (idx_contracts_fcid_timestamp)"
+		}
+
 		for intervalStart := start; intervalStart.Before(end); intervalStart = intervalStart.Add(interval) {
 			intervalEnd := intervalStart.Add(interval)
 			for _, fcid := range fcids {
 				var metrics []dbContractMetric
-				err := tx.Raw("SELECT * FROM contracts WHERE contracts.timestamp >= ? AND contracts.timestamp < ? AND contracts.fcid = ? LIMIT 1", unixTimeMS(intervalStart), unixTimeMS(intervalEnd), fileContractID(fcid)).
+				err := tx.Raw(fmt.Sprintf("SELECT * FROM contracts %s WHERE contracts.timestamp >= ? AND contracts.timestamp < ? AND contracts.fcid = ? LIMIT 1", indexHint), unixTimeMS(intervalStart), unixTimeMS(intervalEnd), fileContractID(fcid)).
 					Scan(&metrics).Error
 				if err != nil {
 					return fmt.Errorf("failed to fetch contract metrics: %w", err)
