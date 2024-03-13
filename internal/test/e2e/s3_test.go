@@ -3,6 +3,8 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -72,8 +74,12 @@ func TestS3Basic(t *testing.T) {
 
 	// add object to the bucket
 	data := frand.Bytes(10)
+	etag := md5.Sum(data)
 	uploadInfo, err := s3.PutObject(context.Background(), bucket, objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	tt.OK(err)
+	if uploadInfo.ETag != hex.EncodeToString(etag[:]) {
+		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), uploadInfo.ETag)
+	}
 	busObject, err := cluster.Bus.Object(context.Background(), bucket, objPath, api.GetObjectOptions{})
 	tt.OK(err)
 	if busObject.Object == nil {

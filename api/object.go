@@ -92,7 +92,7 @@ type (
 	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
 	HeadObjectResponse struct {
 		ContentType  string             `json:"contentType"`
-		Etag         string             `json:"etag"`
+		Etag         string             `json:"eTag"`
 		LastModified string             `json:"lastModified"`
 		Range        *DownloadRange     `json:"range,omitempty"`
 		Size         int64              `json:"size"`
