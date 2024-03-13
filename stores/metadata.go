@@ -1739,6 +1739,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 		err = tx.
 			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "db_bucket_id"}, {Name: "object_id"}},
 				UpdateAll: true,
 			}).
 			Create(&obj).Error

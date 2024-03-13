@@ -1056,11 +1056,10 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// The expected object is the same except for some ids which were
 	// incremented due to the object and slab being overwritten.
-	two := uint(2)
-	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 1
-	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 2
+	expectedObj.Slabs[0].DBObjectID = &one
+	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[1].DBObjectID = &one
+	expectedObj.Slabs[1].DBSlabID = 4
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1082,7 +1081,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   1,
+				DBSlabID:   3,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1122,7 +1121,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   2,
+				DBSlabID:   4,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
