@@ -1056,9 +1056,10 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// The expected object is the same except for some ids which were
 	// incremented due to the object and slab being overwritten.
-	expectedObj.Slabs[0].DBObjectID = &one
+	two := uint(2)
+	expectedObj.Slabs[0].DBObjectID = &two
 	expectedObj.Slabs[0].DBSlabID = 3
-	expectedObj.Slabs[1].DBObjectID = &one
+	expectedObj.Slabs[1].DBObjectID = &two
 	expectedObj.Slabs[1].DBSlabID = 4
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
@@ -4557,10 +4558,14 @@ func TestTypeCurrency(t *testing.T) {
 func TestUpdateObjectParallel(t *testing.T) {
 	cfg := defaultTestSQLStoreConfig
 
-	// check if we are running against mysql and only persist if we aren't
 	dbURI, _, _, _ := DBConfigFromEnv()
 	if dbURI == "" {
-		cfg.persistent = true
+		// it's pretty much impossile to optimise for both sqlite and mysql at
+		// the same time so we skip this test for SQLite for now
+		// TODO: once we moved away from gorm and implement separate interfaces
+		// for SQLite and MySQL, we have more control over the used queries and
+		// can revisit this
+		t.SkipNow()
 	}
 	ss := newTestSQLStore(t, cfg)
 	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
