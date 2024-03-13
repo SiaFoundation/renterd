@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
@@ -1197,7 +1198,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// fetch upload from bus
 	upload, err := w.bus.MultipartUpload(ctx, uploadID)
-	if isError(err, api.ErrMultipartUploadNotFound) {
+	if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to fetch multipart upload", err) != nil {
@@ -1546,14 +1547,14 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 }
 
 func isErrHostUnreachable(err error) bool {
-	return isError(err, os.ErrDeadlineExceeded) ||
-		isError(err, context.DeadlineExceeded) ||
-		isError(err, api.ErrHostOnPrivateNetwork) ||
-		isError(err, errors.New("no route to host")) ||
-		isError(err, errors.New("no such host")) ||
-		isError(err, errors.New("connection refused")) ||
-		isError(err, errors.New("unknown port")) ||
-		isError(err, errors.New("cannot assign requested address"))
+	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
+		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
+		utils.IsErr(err, errors.New("no route to host")) ||
+		utils.IsErr(err, errors.New("no such host")) ||
+		utils.IsErr(err, errors.New("connection refused")) ||
+		utils.IsErr(err, errors.New("unknown port")) ||
+		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
 func isErrDuplicateTransactionSet(err error) bool {

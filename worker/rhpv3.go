@@ -10,7 +10,6 @@ import (
 	"math"
 	"math/big"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 )
@@ -47,6 +47,12 @@ const (
 )
 
 var (
+	// errHost is used to wrap rpc errors returned by the host.
+	errHost = errors.New("host responded with error")
+
+	// errTransport is used to wrap rpc errors caused by the transport.
+	errTransport = errors.New("transport error")
+
 	// errBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
@@ -83,31 +89,42 @@ var (
 	errWithdrawalExpired = errors.New("withdrawal request expired")
 )
 
-func isBalanceInsufficient(err error) bool { return isError(err, errBalanceInsufficient) }
-func isBalanceMaxExceeded(err error) bool  { return isError(err, errBalanceMaxExceeded) }
-func isClosedStream(err error) bool {
-	return isError(err, mux.ErrClosedStream) || isError(err, net.ErrClosed)
+// IsErrHost indicates whether an error was returned by a host as part of an RPC.
+func IsErrHost(err error) bool {
+	return utils.IsErr(err, errHost)
 }
-func isInsufficientFunds(err error) bool  { return isError(err, ErrInsufficientFunds) }
-func isPriceTableExpired(err error) bool  { return isError(err, errPriceTableExpired) }
-func isPriceTableGouging(err error) bool  { return isError(err, errPriceTableGouging) }
-func isPriceTableNotFound(err error) bool { return isError(err, errPriceTableNotFound) }
-func isSectorNotFound(err error) bool {
-	return isError(err, errSectorNotFound) || isError(err, errSectorNotFoundOld)
-}
-func isWithdrawalsInactive(err error) bool { return isError(err, errWithdrawalsInactive) }
-func isWithdrawalExpired(err error) bool   { return isError(err, errWithdrawalExpired) }
 
-func isError(err error, target error) bool {
-	if err == nil {
-		return err == target
+func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceInsufficient) }
+func isBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
+func isClosedStream(err error) bool {
+	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
+}
+func isInsufficientFunds(err error) bool  { return utils.IsErr(err, ErrInsufficientFunds) }
+func isPriceTableExpired(err error) bool  { return utils.IsErr(err, errPriceTableExpired) }
+func isPriceTableGouging(err error) bool  { return utils.IsErr(err, errPriceTableGouging) }
+func isPriceTableNotFound(err error) bool { return utils.IsErr(err, errPriceTableNotFound) }
+func isSectorNotFound(err error) bool {
+	return utils.IsErr(err, errSectorNotFound) || utils.IsErr(err, errSectorNotFoundOld)
+}
+func isWithdrawalsInactive(err error) bool { return utils.IsErr(err, errWithdrawalsInactive) }
+func isWithdrawalExpired(err error) bool   { return utils.IsErr(err, errWithdrawalExpired) }
+
+// wrapRPCErr extracts the innermost error, wraps it in either a errHost or
+// errTransport and finally wraps it using the provided fnName.
+func wrapRPCErr(err *error, fnName string) {
+	if *err == nil {
+		return
 	}
-	// compare error first
-	if errors.Is(err, target) {
-		return true
+	innerErr := *err
+	for errors.Unwrap(innerErr) != nil {
+		innerErr = errors.Unwrap(innerErr)
 	}
-	// then compare the string in case the error was returned by a host
-	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
+	if errors.As(*err, new(*rhpv3.RPCError)) {
+		*err = fmt.Errorf("%w: '%w'", errHost, innerErr)
+	} else {
+		*err = fmt.Errorf("%w: '%w'", errTransport, innerErr)
+	}
+	*err = fmt.Errorf("%s: %w", fnName, *err)
 }
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
@@ -123,6 +140,26 @@ type transportV3 struct {
 type streamV3 struct {
 	cancel context.CancelFunc
 	*rhpv3.Stream
+}
+
+func (s *streamV3) ReadResponse(resp rhpv3.ProtocolObject, maxLen uint64) (err error) {
+	defer wrapRPCErr(&err, "ReadResponse")
+	return s.Stream.ReadResponse(resp, maxLen)
+}
+
+func (s *streamV3) WriteResponse(resp rhpv3.ProtocolObject) (err error) {
+	defer wrapRPCErr(&err, "WriteResponse")
+	return s.Stream.WriteResponse(resp)
+}
+
+func (s *streamV3) ReadRequest(req rhpv3.ProtocolObject, maxLen uint64) (err error) {
+	defer wrapRPCErr(&err, "ReadRequest")
+	return s.Stream.ReadRequest(req, maxLen)
+}
+
+func (s *streamV3) WriteRequest(rpcID types.Specifier, req rhpv3.ProtocolObject) (err error) {
+	defer wrapRPCErr(&err, "WriteRequest")
+	return s.Stream.WriteRequest(rpcID, req)
 }
 
 // Close closes the stream and cancels the goroutine launched by DialStream.
