@@ -1747,6 +1747,11 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("failed to create object: %w", err)
 		}
 
+		// Fetch object id for the created or updated object.
+		if err := tx.Model(&dbObject{}).Select("id").Scan(&obj.ID).Error; err != nil {
+			return fmt.Errorf("failed to fetch object id: %w", err)
+		}
+
 		// Fetch contract set.
 		var cs dbContractSet
 		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
