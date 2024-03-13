@@ -1709,37 +1709,27 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 	// collect all used contracts
 	usedContracts := o.Contracts()
 
+	// fetch bucket id
+	var bucketID uint
+	err := s.db.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
+		Take(&bucketID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
 	// UpdateObject is ACID.
 	return s.retryTransaction(func(tx *gorm.DB) error {
-		// Try to delete. We want to get rid of the object and its slices if it
-		// exists.
-		//
-		// NOTE: the object's created_at is currently used as its ModTime, if we
-		// ever stop recreating the object but update it instead we need to take
-		// this into account
-		//
-		// NOTE: the metadata is not deleted because this delete will cascade,
-		// if we stop recreating the object we have to make sure to delete the
-		// object's metadata before trying to recreate it
-		_, err := s.deleteObject(tx, bucket, path)
-		if err != nil {
-			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
-		}
-
-		// Insert a new object.
-		var bucketID uint
-		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
-			Take(&bucketID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch bucket id: %w", err)
-		}
+		// Insert a new object or update an existing one.
 		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
 		obj := dbObject{
+			Model: Model{
+				CreatedAt: time.Now(),
+			},
 			DBBucketID: bucketID,
 			ObjectID:   path,
 			Key:        objKey,
@@ -1747,7 +1737,11 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			MimeType:   mimeType,
 			Etag:       eTag,
 		}
-		err = tx.Create(&obj).Error
+		err = tx.
+			Clauses(clause.OnConflict{
+				UpdateAll: true,
+			}).
+			Create(&obj).Error
 		if err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
 		}
@@ -1764,9 +1758,33 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("failed to fetch used contracts: %w", err)
 		}
 
+		// Delete any old slices.
+		var slices []dbSlice
+		if err := tx.Where("db_object_id = ?", obj.ID).Limit(1).Find(&slices).Error; err != nil {
+			return fmt.Errorf("failed to fetch slices: %w", err)
+		}
+		if len(slices) > 0 {
+			if err := tx.Where("db_object_id", obj.ID).Delete(&dbSlice{}).Error; err != nil {
+				return fmt.Errorf("failed to delete slices: %w", err)
+			} else if err := pruneSlabs(tx); err != nil {
+				return fmt.Errorf("failed to prune slabs: %w", err)
+			}
+		}
+
 		// Create all slices. This also creates any missing slabs or sectors.
 		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
 			return fmt.Errorf("failed to create slices: %w", err)
+		}
+
+		// Delete any old user metadata.
+		var oldMetadata []dbObjectUserMetadata
+		if err := tx.Where("db_object_id = ?", obj.ID).Limit(1).Find(&oldMetadata).Error; err != nil {
+			return fmt.Errorf("failed to fetch user metadata: %w", err)
+		}
+		if len(oldMetadata) > 0 {
+			if err := tx.Where("db_object_id", obj.ID).Delete(&dbObjectUserMetadata{}).Error; err != nil {
+				return fmt.Errorf("failed to delete user metadata: %w", err)
+			}
 		}
 
 		// Create all user metadata.
