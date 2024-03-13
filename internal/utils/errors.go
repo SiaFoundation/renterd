@@ -14,5 +14,7 @@ func IsErr(err error, target error) bool {
 	} else if errors.Is(err, target) {
 		return true
 	}
-	return strings.Contains(err.Error(), target.Error())
+	// TODO: we can get rid of the lower casing once siad is gone and
+	// renterd/hostd use the same error messages
+	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
 }
