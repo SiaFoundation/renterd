@@ -872,7 +872,7 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
 		OnlyMetadata: true,
 	})
-	if errors.Is(err, api.ErrObjectNotFound) {
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {

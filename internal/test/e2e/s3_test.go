@@ -92,6 +92,10 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(b, data) {
 		t.Fatal("data mismatch")
+	} else if info, err := obj.Stat(); err != nil {
+		t.Fatal(err)
+	} else if info.ETag != uploadInfo.ETag {
+		t.Fatal("unexpected ETag:", info.ETag, uploadInfo.ETag)
 	}
 
 	// stat object
@@ -99,6 +103,8 @@ func TestS3Basic(t *testing.T) {
 	tt.OK(err)
 	if info.Size != int64(len(data)) {
 		t.Fatal("size mismatch")
+	} else if info.ETag != uploadInfo.ETag {
+		t.Fatal("unexpected ETag:", info.ETag)
 	}
 
 	// add another bucket
@@ -580,12 +586,28 @@ func TestS3MultipartUploads(t *testing.T) {
 	}
 
 	// Download object
+	expectedData := []byte("helloworld!")
 	downloadedObj, err := s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
 	tt.OK(err)
 	if data, err := io.ReadAll(downloadedObj); err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(data, []byte("helloworld!")) {
+	} else if !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", string(data))
+	} else if info, err := downloadedObj.Stat(); err != nil {
+		t.Fatal(err)
+	} else if info.ETag != ui.ETag {
+		t.Fatal("unexpected ETag:", info.ETag)
+	} else if info.Size != int64(len(expectedData)) {
+		t.Fatal("unexpected size:", info.Size)
+	}
+
+	// Stat object
+	if info, err := s3.StatObject(context.Background(), "multipart", "foo", minio.StatObjectOptions{}); err != nil {
+		t.Fatal(err)
+	} else if info.ETag != ui.ETag {
+		t.Fatal("unexpected ETag:", info.ETag)
+	} else if info.Size != int64(len(expectedData)) {
+		t.Fatal("unexpected size:", info.Size)
 	}
 
 	// Download again with range request.

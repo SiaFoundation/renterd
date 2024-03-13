@@ -3,6 +3,7 @@ package s3
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -268,7 +269,14 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	res.Metadata["Content-Type"] = res.ContentType
 	res.Metadata["Last-Modified"] = res.LastModified
 
+	// etag to bytes
+	etag, err := hex.DecodeString(res.Etag)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+
 	return &gofakes3.Object{
+		Hash:     etag,
 		Name:     gofakes3.URLEncode(objectName),
 		Metadata: res.Metadata,
 		Size:     res.Size,
@@ -287,9 +295,8 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{
-		IgnoreDelim:  true,
-		OnlyMetadata: true,
+	res, err := s.w.HeadObject(ctx, bucketName, objectName, api.HeadObjectOptions{
+		IgnoreDelim: true,
 	})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		return nil, gofakes3.KeyNotFound(objectName)
@@ -299,18 +306,25 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 
 	// set user metadata
 	metadata := make(map[string]string)
-	for k, v := range res.Object.Metadata {
+	for k, v := range res.Metadata {
 		metadata[amazonMetadataPrefix+k] = v
 	}
 
 	// decorate metadata
-	metadata["Content-Type"] = res.Object.MimeType
-	metadata["Last-Modified"] = res.Object.LastModified()
+	metadata["Content-Type"] = res.ContentType
+	metadata["Last-Modified"] = res.LastModified
+
+	// etag to bytes
+	hash, err := hex.DecodeString(res.Etag)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
 
 	return &gofakes3.Object{
+		Hash:     hash,
 		Name:     gofakes3.URLEncode(objectName),
 		Metadata: metadata,
-		Size:     res.Object.Size,
+		Size:     res.Size,
 		Contents: io.NopCloser(bytes.NewReader(nil)),
 	}, nil
 }
