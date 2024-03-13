@@ -1706,19 +1706,6 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 	}
 
-	// check if bucket exists - doing so before the transaction to avoid
-	// deadlocks while risking the bucket updating in the meantime
-	var bucketID uint
-	if resp := s.db.
-		Model(&dbBucket{}).
-		Select("id").
-		Where("name", bucket).
-		Scan(&bucketID); resp.Error != nil {
-		return resp.Error
-	} else if resp.RowsAffected == 0 {
-		return api.ErrBucketNotFound
-	}
-
 	// collect all used contracts
 	usedContracts := o.Contracts()
 
@@ -1739,7 +1726,15 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
-		// 	Insert a new object.
+		// Insert a new object.
+		var bucketID uint
+		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
+			Take(&bucketID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
+		} else if err != nil {
+			return fmt.Errorf("failed to fetch bucket id: %w", err)
+		}
 		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
