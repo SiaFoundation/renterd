@@ -312,6 +312,12 @@ func (opts DeleteObjectOptions) Apply(values url.Values) {
 	}
 }
 
+func (opts HeadObjectOptions) Apply(values url.Values) {
+	if opts.IgnoreDelim {
+		values.Set("ignoreDelim", "true")
+	}
+}
+
 func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
 	if opts.Range != (DownloadRange{}) {
 		if opts.Range.Length == -1 {
@@ -319,9 +325,6 @@ func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
 		} else {
 			h.Set("Range", fmt.Sprintf("bytes=%v-%v", opts.Range.Offset, opts.Range.Offset+opts.Range.Length-1))
 		}
-	}
-	if opts.IgnoreDelim {
-		h.Set("ignoreDelim", "true")
 	}
 }
 

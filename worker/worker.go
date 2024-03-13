@@ -860,16 +860,21 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
+	var ignoreDelim bool
+	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+		return
+	}
 
 	// parse path
 	path := jc.PathParam("path")
-	if path == "" || strings.HasSuffix(path, "/") {
+	if !ignoreDelim && (path == "" || strings.HasSuffix(path, "/")) {
 		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
 		return
 	}
 
 	// fetch object metadata
 	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+		IgnoreDelim:  ignoreDelim,
 		OnlyMetadata: true,
 	})
 	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {

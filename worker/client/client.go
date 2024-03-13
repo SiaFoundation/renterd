@@ -81,12 +81,9 @@ func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
 func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
 	c.c.Custom("HEAD", fmt.Sprintf("/objects/%s", path), nil, nil)
 
-	if strings.HasSuffix(path, "/") {
-		return nil, errors.New("the given path is a directory, HEAD can only be performed on objects")
-	}
-
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
+	opts.Apply(values)
 	path = api.ObjectPathEscape(path)
 	path += "?" + values.Encode()
 
