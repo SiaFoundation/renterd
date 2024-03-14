@@ -648,7 +648,7 @@ func (s SettingsResp) PrometheusMetric() (metrics []prometheus.Metric) {
 	if err != nil {
 		return
 	}
-	for k, _ := range resp.V4Keypairs {
+	for k := range resp.V4Keypairs {
 		metrics = append(metrics, prometheus.Metric{
 			Name: "renterd_settings_s3v4keypair",
 			Labels: map[string]any{
