@@ -1004,7 +1004,7 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
 		err := w.RHPBroadcast(ctx, contract.ID)
 		cancel()
-		if err != nil && strings.Contains(err.Error(), "transaction has a file contract with an outdated revision number") {
+		if utils.IsErr(err, errors.New("transaction has a file contract with an outdated revision number")) {
 			continue // don't log - revision was already broadcasted
 		} else if err != nil {
 			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),

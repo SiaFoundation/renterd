@@ -878,7 +878,7 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 		IgnoreDelim:  ignoreDelim,
 		OnlyMetadata: true,
 	})
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -951,7 +951,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	path := jc.PathParam("path")
 	res, err := w.bus.Object(ctx, bucket, path, opts)
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("couldn't get object or entries", err) != nil {
@@ -1041,7 +1041,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// return early if the bucket does not exist
 	_, err = w.bus.Bucket(ctx, bucket)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
@@ -1160,7 +1160,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// return early if the bucket does not exist
 	_, err = w.bus.Bucket(ctx, bucket)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
@@ -1263,7 +1263,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 		return
 	}
 	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), api.DeleteObjectOptions{Batch: batch})
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1563,5 +1563,5 @@ func isErrHostUnreachable(err error) bool {
 }
 
 func isErrDuplicateTransactionSet(err error) bool {
-	return err != nil && strings.Contains(err.Error(), modules.ErrDuplicateTransactionSet.Error())
+	return utils.IsErr(err, modules.ErrDuplicateTransactionSet)
 }
