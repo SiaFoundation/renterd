@@ -746,7 +746,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 		return
 	}
 
-	b.w.SignTransaction(&txn, toSign, ExplicitCoveredFields(txn))
+	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 
 	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
@@ -2385,42 +2385,6 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(resp)
-}
-
-// ExplicitCoveredFields returns a CoveredFields that covers all elements
-// present in txn.
-func ExplicitCoveredFields(txn types.Transaction) (cf types.CoveredFields) {
-	for i := range txn.SiacoinInputs {
-		cf.SiacoinInputs = append(cf.SiacoinInputs, uint64(i))
-	}
-	for i := range txn.SiacoinOutputs {
-		cf.SiacoinOutputs = append(cf.SiacoinOutputs, uint64(i))
-	}
-	for i := range txn.FileContracts {
-		cf.FileContracts = append(cf.FileContracts, uint64(i))
-	}
-	for i := range txn.FileContractRevisions {
-		cf.FileContractRevisions = append(cf.FileContractRevisions, uint64(i))
-	}
-	for i := range txn.StorageProofs {
-		cf.StorageProofs = append(cf.StorageProofs, uint64(i))
-	}
-	for i := range txn.SiafundInputs {
-		cf.SiafundInputs = append(cf.SiafundInputs, uint64(i))
-	}
-	for i := range txn.SiafundOutputs {
-		cf.SiafundOutputs = append(cf.SiafundOutputs, uint64(i))
-	}
-	for i := range txn.MinerFees {
-		cf.MinerFees = append(cf.MinerFees, uint64(i))
-	}
-	for i := range txn.ArbitraryData {
-		cf.ArbitraryData = append(cf.ArbitraryData, uint64(i))
-	}
-	for i := range txn.Signatures {
-		cf.Signatures = append(cf.Signatures, uint64(i))
-	}
-	return
 }
 
 // New returns a new Bus.

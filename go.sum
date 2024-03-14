@@ -260,6 +260,8 @@ go.sia.tech/coreutils v0.0.4-0.20240306153355-9185ee5bb346 h1:HeZRhx0JEWLYZ9TZMA
 go.sia.tech/coreutils v0.0.4-0.20240306153355-9185ee5bb346/go.mod h1:UBFc77wXiE//eyilO5HLOncIEj7F69j0Nv2OkFujtP0=
 go.sia.tech/coreutils v0.0.4-0.20240307153935-66de052e7ef7 h1:XXIMhtB9mcR1PlwdkPT78gWaCMSTJ/xDwrOm+qJJBY4=
 go.sia.tech/coreutils v0.0.4-0.20240307153935-66de052e7ef7/go.mod h1:OTMMLucKVcpMDCIwGQlvbi4QNgc3O2Y291xMheYrpOQ=
+go.sia.tech/coreutils v0.0.4-0.20240313143809-01b5d444a630 h1:KpVSI9ijpyyjwXvxV0tSWK9ukFyTupibg9OrlvjiKDk=
+go.sia.tech/coreutils v0.0.4-0.20240313143809-01b5d444a630/go.mod h1:QvsXghS4wqhJosQq3AkMjA2mJ6pbDB7PgG+w5b09/z0=
 go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2 h1:ulzfJNjxN5DjXHClkW2pTiDk+eJ+0NQhX87lFDZ03t0=
 go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
 go.sia.tech/hostd v1.0.2-beta.2.0.20240131203318-9d84aad6ef13 h1:JcyVUtJfzeMh+zJAW20BMVhBYekg+h0T8dMeF7GzAFs=

@@ -156,7 +156,24 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		if cfg.Network == nil {
 			return nil, nil, nil, errors.New("cannot bootstrap without a network")
 		}
-		bootstrap(*cfg.Network, sqlStore)
+
+		var bootstrapPeers []string
+		switch cfg.Network.Name {
+		case "mainnet":
+			bootstrapPeers = syncer.MainnetBootstrapPeers
+		case "zen":
+			bootstrapPeers = syncer.ZenBootstrapPeers
+		case "anagami":
+			bootstrapPeers = syncer.AnagamiBootstrapPeers
+		default:
+			return nil, nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", cfg.Network.Name)
+		}
+
+		for _, addr := range bootstrapPeers {
+			if err := sqlStore.AddPeer(addr); err != nil {
+				return nil, nil, nil, fmt.Errorf("%w: failed to add bootstrap peer '%s'", err, addr)
+			}
+		}
 	}
 
 	// start the syncer
