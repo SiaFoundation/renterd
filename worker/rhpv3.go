@@ -177,7 +177,7 @@ type transportPoolV3 struct {
 	pool map[string]*transportV3
 }
 
-func newTransportPoolV3(w *worker) *transportPoolV3 {
+func newTransportPoolV3() *transportPoolV3 {
 	return &transportPoolV3{
 		pool: make(map[string]*transportV3),
 	}
@@ -365,7 +365,7 @@ func (w *worker) initTransportPool() {
 	if w.transportPoolV3 != nil {
 		panic("transport pool already initialized") // developer error
 	}
-	w.transportPoolV3 = newTransportPoolV3(w)
+	w.transportPoolV3 = newTransportPoolV3()
 }
 
 // ForHost returns an account to use for a given host. If the account

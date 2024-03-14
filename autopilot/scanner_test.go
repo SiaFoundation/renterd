@@ -87,7 +87,7 @@ func TestScanner(t *testing.T) {
 	// init new scanner
 	b := &mockBus{hosts: hosts}
 	w := &mockWorker{blockChan: make(chan struct{})}
-	s := newTestScanner(b, w)
+	s := newTestScanner(b)
 
 	// assert it started a host scan
 	s.tryPerformHostScan(context.Background(), w, false)
@@ -139,7 +139,7 @@ func (s *scanner) isScanning() bool {
 	return s.scanning
 }
 
-func newTestScanner(b *mockBus, w *mockWorker) *scanner {
+func newTestScanner(b *mockBus) *scanner {
 	ap := &Autopilot{}
 	ap.shutdownCtx, ap.shutdownCtxCancel = context.WithCancel(context.Background())
 	return &scanner{
