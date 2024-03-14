@@ -1,4 +1,4 @@
-name: Add bugs to bugs project
+name: Add issues and PRs to Sia project
 
 on:
   issues:
