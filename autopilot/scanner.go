@@ -163,9 +163,9 @@ func (s *scanner) isInterrupted() bool {
 	}
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) bool {
+func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) {
 	if s.ap.isStopped() {
-		return false
+		return
 	}
 
 	scanType := "host scan"
@@ -185,7 +185,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		s.interruptScanChan = make(chan struct{})
 	} else if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
-		return false
+		return
 	}
 	s.scanningLastStart = time.Now()
 	s.scanning = true
@@ -229,7 +229,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		s.logger.Debugf("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(scanType)
-	return true
+	return
 }
 
 func (s *scanner) tryUpdateTimeout() {

@@ -98,7 +98,7 @@ func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
 	return time.Duration(totalNumMS) * time.Millisecond
 }
 
-func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
+func (m *migrator) tryPerformMigrations(wp *workerPool) {
 	m.mu.Lock()
 	if m.migrating || m.ap.isStopped() {
 		m.mu.Unlock()

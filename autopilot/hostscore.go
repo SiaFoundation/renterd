@@ -36,7 +36,7 @@ func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expect
 		Collateral:       collateralScore(cfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
 		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
-		StorageRemaining: storageRemainingScore(cfg, h.Settings, storedData, expectedRedundancy, allocationPerHost),
+		StorageRemaining: storageRemainingScore(h.Settings, storedData, allocationPerHost),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(h.Settings),
 	}
@@ -74,7 +74,7 @@ func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.AutopilotCon
 	panic("unreachable")
 }
 
-func storageRemainingScore(cfg api.AutopilotConfig, h rhpv2.HostSettings, storedData uint64, expectedRedundancy, allocationPerHost float64) float64 {
+func storageRemainingScore(h rhpv2.HostSettings, storedData uint64, allocationPerHost float64) float64 {
 	// hostExpectedStorage is the amount of storage that we expect to be able to
 	// store on this host overall, which should include the stored data that is
 	// already on the host.
@@ -291,7 +291,7 @@ func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) ty
 	return uploadSectorCostRHPv3.Mul64(numSectors)
 }
 
-func downloadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+func downloadCostForScore(h hostdb.Host, bytes uint64) types.Currency {
 	rsc := h.PriceTable.BaseCost().Add(h.PriceTable.ReadSectorCost(rhpv2.SectorSize))
 	downloadSectorCostRHPv3, _ := rsc.Total()
 	numSectors := bytesToSectors(bytes)
@@ -314,7 +314,7 @@ func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedu
 	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, h.Settings)
 	hostContractPrice := contractPriceForScore(h)
 	hostUploadCost := uploadCostForScore(cfg, h, uploadPerHost)
-	hostDownloadCost := downloadCostForScore(cfg, h, downloadPerHost)
+	hostDownloadCost := downloadCostForScore(h, downloadPerHost)
 	hostStorageCost := storageCostForScore(cfg, h, storagePerHost)
 	siafundFee := hostCollateral.
 		Add(hostContractPrice).

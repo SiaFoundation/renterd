@@ -276,7 +276,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
+		minScore = c.calculateMinScore(candidates, state.cfg.Contracts.Amount)
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
@@ -324,10 +324,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// calculate remaining funds
-	remaining, err := c.remainingFunds(contracts)
-	if err != nil {
-		return false, err
-	}
+	remaining := c.remainingFunds(contracts)
 
 	// calculate 'limit' amount of contracts we want to renew
 	var limit int
@@ -1140,7 +1137,7 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, ci contractInfo, fee types.Currency) (types.Currency, error) {
+func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contractInfo, fee types.Currency) types.Currency {
 	// refresh with 1.2x the funds
 	refreshAmount := ci.contract.TotalCost.Mul64(6).Div64(5)
 
@@ -1159,7 +1156,7 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 		"fcid", ci.contract.ID,
 		"refreshAmount", refreshAmount,
 		"refreshAmountCapped", refreshAmountCapped)
-	return refreshAmountCapped, nil
+	return refreshAmountCapped
 }
 
 func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, fee types.Currency, renewing bool) (types.Currency, error) {
@@ -1249,7 +1246,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) float64 {
+func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uint64) float64 {
 	// return early if there's no hosts
 	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
@@ -1475,11 +1472,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	// calculate the renter funds
 	var renterFunds types.Currency
 	if isOutOfFunds(state.cfg, ci.priceTable, ci.contract) {
-		renterFunds, err = c.refreshFundingEstimate(ctx, state.cfg, ci, state.fee)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-			return api.ContractMetadata{}, true, err
-		}
+		renterFunds = c.refreshFundingEstimate(state.cfg, ci, state.fee)
 	} else {
 		renterFunds = rev.ValidRenterPayout() // don't increase funds
 	}
@@ -1599,7 +1592,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) tryPerformPruning(ctx context.Context, wp *workerPool) {
+func (c *contractor) tryPerformPruning(wp *workerPool) {
 	c.mu.Lock()
 	if c.pruning || c.ap.isStopped() {
 		c.mu.Unlock()

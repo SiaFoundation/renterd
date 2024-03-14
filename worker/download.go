@@ -495,11 +495,11 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 		host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 		downloader := newDownloader(mgr.shutdownCtx, host)
 		mgr.downloaders[c.HostKey] = downloader
-		go downloader.processQueue(mgr.hm)
+		go downloader.processQueue()
 	}
 }
 
-func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.SlabSlice, migration bool) *slabDownload {
+func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bool) *slabDownload {
 	// calculate the offset and length
 	offset, length := slice.SectorRegion()
 
@@ -529,7 +529,7 @@ func (mgr *downloadManager) newSlabDownload(ctx context.Context, slice object.Sl
 
 func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
 	// prepare new download
-	slab := mgr.newSlabDownload(ctx, slice, migration)
+	slab := mgr.newSlabDownload(slice, migration)
 
 	// execute download
 	return slab.download(ctx)

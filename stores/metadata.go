@@ -32,8 +32,9 @@ const (
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
 
+	// sectorInsertionBatchSize is the number of sectors per batch when we
+	// upsert sectors.
 	sectorInsertionBatchSize = 500
-	sectorQueryBatchSize     = 100
 
 	refreshHealthMinHealthValidity = 12 * time.Hour
 	refreshHealthMaxHealthValidity = 72 * time.Hour
@@ -2428,7 +2429,7 @@ func (s *SQLStore) objectRaw(txn *gorm.DB, bucket string, path string) (rows raw
 
 // contract retrieves a contract from the store.
 func (s *SQLStore) contract(ctx context.Context, id fileContractID) (dbContract, error) {
-	return contract(s.db, id)
+	return contract(s.db.WithContext(ctx), id)
 }
 
 // PackedSlabsForUpload returns up to 'limit' packed slabs that are ready for
@@ -2828,6 +2829,7 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileC
 	})
 }
 
+// nolint:unparam
 func sqlConcat(db *gorm.DB, a, b string) string {
 	if isSQLite(db) {
 		return fmt.Sprintf("%s || %s", a, b)
@@ -2842,6 +2844,7 @@ func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) clau
 	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(min).Unix(), int(max.Seconds()), int(min.Seconds()))
 }
 
+// nolint:unparam
 func sqlWhereBucket(objTable string, bucket string) clause.Expr {
 	return gorm.Expr(fmt.Sprintf("%s.db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", objTable), bucket)
 }
