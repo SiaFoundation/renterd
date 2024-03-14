@@ -88,6 +88,11 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		page.MaxKeys = maxKeysDefault
 	}
 
+	// Adjust marker
+	if page.HasMarker {
+		page.Marker = "/" + page.Marker
+	}
+
 	var objects []api.ObjectMetadata
 	var err error
 	response := gofakes3.NewObjectList()
@@ -141,6 +146,10 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
+
+	// Remove the leading slash from the marker since we also do that for the
+	// name of each object
+	response.NextMarker = strings.TrimPrefix(response.NextMarker, "/")
 
 	// Loop over the entries and add them to the response.
 	for _, object := range objects {
