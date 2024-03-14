@@ -193,8 +193,10 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	s.logger.Infof("%s started", scanType)
 
 	s.wg.Add(1)
+	s.ap.wg.Add(1)
 	go func(st string) {
 		defer s.wg.Done()
+		defer s.ap.wg.Done()
 
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.isInterrupted() || s.ap.isStopped() {
@@ -250,10 +252,7 @@ func (s *scanner) tryUpdateTimeout() {
 
 func (s *scanner) launchHostScans() chan scanReq {
 	reqChan := make(chan scanReq, s.scanBatchSize)
-
-	s.ap.wg.Add(1)
 	go func() {
-		defer s.ap.wg.Done()
 		defer close(reqChan)
 
 		var offset int
