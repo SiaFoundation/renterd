@@ -226,6 +226,7 @@ type bus struct {
 	startTime time.Time
 
 	alerts   alerts.Alerter
+	alertMgr *alerts.Manager
 	webhooks WebhookManager
 
 	cm ChainManager
@@ -1811,7 +1812,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
-	ar, err := b.alerts.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}
@@ -1835,7 +1836,7 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 	} else if jc.DecodeForm("severity", &severity) != nil {
 		return
 	}
-	ar, err := b.alerts.Alerts(jc.Request.Context(), alerts.AlertsOpts{
+	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
 		Offset:   offset,
 		Limit:    limit,
 		Severity: severity,
@@ -1851,7 +1852,7 @@ func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	if jc.Decode(&ids) != nil {
 		return
 	}
-	jc.Check("failed to dismiss alerts", b.alerts.DismissAlerts(jc.Request.Context(), ids...))
+	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
 }
 
 func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
@@ -1859,7 +1860,7 @@ func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
 	if jc.Decode(&alert) != nil {
 		return
 	}
-	jc.Check("failed to register alert", b.alerts.RegisterAlert(jc.Request.Context(), alert))
+	jc.Check("failed to register alert", b.alertMgr.RegisterAlert(jc.Request.Context(), alert))
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
@@ -2388,9 +2389,10 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(am alerts.Alerter, hm WebhookManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
+		alertMgr:         am,
 		webhooks:         hm,
 		cm:               cm,
 		s:                s,

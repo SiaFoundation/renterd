@@ -266,10 +266,7 @@ func (a *originAlerter) RegisterAlert(ctx context.Context, alert Alert) error {
 	if alert.Data == nil {
 		alert.Data = make(map[string]any)
 	}
-	_, set := alert.Data["origin"]
-	if !set {
-		alert.Data["origin"] = a.origin
-	}
+	alert.Data["origin"] = a.origin
 	return a.alerter.RegisterAlert(ctx, alert)
 }
 
