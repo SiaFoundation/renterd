@@ -507,6 +507,23 @@ func TestS3List(t *testing.T) {
 			}
 		}
 	}
+
+	// use pagination to loop over objects one-by-one
+	marker := ""
+	expectedOrder := []string{"a/", "a/a/a", "a/b", "ab", "b", "c/a", "d", "y/", "y/y/y/y"}
+	hasMore := true
+	for i := 0; hasMore; i++ {
+		result, err := core.ListObjectsV2("bucket", "", "", marker, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(result.Contents) != 1 {
+			t.Fatalf("unexpected number of objects, %d != 1", len(result.Contents))
+		} else if result.Contents[0].Key != expectedOrder[i] {
+			t.Errorf("unexpected object, %s != %s", result.Contents[0].Key, expectedOrder[i])
+		}
+		marker = result.NextContinuationToken
+		hasMore = result.IsTruncated
+	}
 }
 
 func TestS3MultipartUploads(t *testing.T) {
