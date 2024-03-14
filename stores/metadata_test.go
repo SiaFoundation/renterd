@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3491,6 +3492,13 @@ func TestListObjects(t *testing.T) {
 		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
 	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].ETag = testETag
+			tests[i].want[j].MimeType = testMimeType
+		}
+	}
 	for _, test := range tests {
 		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
 		if err != nil {
@@ -4544,4 +4552,105 @@ func TestTypeCurrency(t *testing.T) {
 			t.Fatal("invalid result")
 		}
 	}
+}
+
+// TestUpdateObjectParallel calls UpdateObject from multiple threads in parallel
+// while retries are disabled to make sure calling the same method from multiple
+// threads won't cause deadlocks.
+//
+// NOTE: This test only covers the optimistic case of inserting objects without
+// overwriting them. As soon as combining deletions and insertions within the
+// same transaction, deadlocks become more likely due to the gap locks MySQL
+// uses.
+func TestUpdateObjectParallel(t *testing.T) {
+	cfg := defaultTestSQLStoreConfig
+
+	dbURI, _, _, _ := DBConfigFromEnv()
+	if dbURI == "" {
+		// it's pretty much impossile to optimise for both sqlite and mysql at
+		// the same time so we skip this test for SQLite for now
+		// TODO: once we moved away from gorm and implement separate interfaces
+		// for SQLite and MySQL, we have more control over the used queries and
+		// can revisit this
+		t.SkipNow()
+	}
+	ss := newTestSQLStore(t, cfg)
+	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
+	defer ss.Close()
+
+	// create 2 hosts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2 := hks[0], hks[1]
+
+	// create 2 contracts
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1, fcid2 := fcids[0], fcids[1]
+
+	c := make(chan string)
+	ctx, cancel := context.WithCancel(context.Background())
+	work := func() {
+		t.Helper()
+		defer cancel()
+		for name := range c {
+			// create an object
+			obj := object.Object{
+				Key: object.GenerateEncryptionKey(),
+				Slabs: []object.SlabSlice{
+					{
+						Slab: object.Slab{
+							Health:    1.0,
+							Key:       object.GenerateEncryptionKey(),
+							MinShards: 1,
+							Shards:    newTestShards(hk1, fcid1, frand.Entropy256()),
+						},
+						Offset: 10,
+						Length: 100,
+					},
+					{
+						Slab: object.Slab{
+							Health:    1.0,
+							Key:       object.GenerateEncryptionKey(),
+							MinShards: 2,
+							Shards:    newTestShards(hk2, fcid2, frand.Entropy256()),
+						},
+						Offset: 20,
+						Length: 200,
+					},
+				},
+			}
+
+			// update the object
+			if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			work()
+			wg.Done()
+		}()
+	}
+
+	// create 1000 objects and then overwrite them
+	for i := 0; i < 1000; i++ {
+		select {
+		case c <- fmt.Sprintf("object-%d", i):
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	close(c)
+	wg.Wait()
 }

@@ -327,6 +327,12 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 	}
 	var eTag string
 	err = s.retryTransaction(func(tx *gorm.DB) error {
+		// Delete potentially existing object.
+		_, err := s.deleteObject(tx, bucket, path)
+		if err != nil {
+			return fmt.Errorf("failed to delete object: %w", err)
+		}
+
 		// Find multipart upload.
 		var mu dbMultipartUpload
 		err = tx.Where("upload_id = ?", uploadID).
@@ -345,12 +351,6 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		// Check bucket name.
 		if mu.DBBucket.Name != bucket {
 			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
-		}
-
-		// Delete potentially existing object.
-		_, err := s.deleteObject(tx, bucket, path)
-		if err != nil {
-			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		// Sort the parts.

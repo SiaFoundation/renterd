@@ -1474,7 +1474,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 		if force {
 			// delete potentially existing object at destination
 			if _, err := s.deleteObject(tx, bucket, keyNew); err != nil {
-				return err
+				return fmt.Errorf("RenameObject: failed to delete object: %w", err)
 			}
 		}
 		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
@@ -1539,6 +1539,13 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
 	err = s.retryTransaction(func(tx *gorm.DB) error {
+		if srcBucket != dstBucket || srcPath != dstPath {
+			_, err = s.deleteObject(tx, dstBucket, dstPath)
+			if err != nil {
+				return fmt.Errorf("CopyObject: failed to delete object: %w", err)
+			}
+		}
+
 		var srcObj dbObject
 		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
 			Joins("DBBucket").
@@ -1564,10 +1571,6 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 				return fmt.Errorf("failed to update user metadata: %w", err)
 			}
 			return tx.Save(&srcObj).Error
-		}
-		_, err = s.deleteObject(tx, dstBucket, dstPath)
-		if err != nil {
-			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		var srcSlices []dbSlice
@@ -1708,12 +1711,6 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 
 	// UpdateObject is ACID.
 	return s.retryTransaction(func(tx *gorm.DB) error {
-		// Fetch contract set.
-		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
-		}
-
 		// Try to delete. We want to get rid of the object and its slices if it
 		// exists.
 		//
@@ -1726,7 +1723,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// object's metadata before trying to recreate it
 		_, err := s.deleteObject(tx, bucket, path)
 		if err != nil {
-			return fmt.Errorf("failed to delete object: %w", err)
+			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
 		// Insert a new object.
@@ -1734,14 +1731,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		if err != nil {
 			return fmt.Errorf("failed to marshal object key: %w", err)
 		}
+		// fetch bucket id
 		var bucketID uint
-		err = tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
+		err = s.db.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
 			Take(&bucketID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
 		} else if err != nil {
 			return fmt.Errorf("failed to fetch bucket id: %w", err)
 		}
+
 		obj := dbObject{
 			DBBucketID: bucketID,
 			ObjectID:   path,
@@ -1753,6 +1752,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		err = tx.Create(&obj).Error
 		if err != nil {
 			return fmt.Errorf("failed to create object: %w", err)
+		}
+
+		// Fetch contract set.
+		var cs dbContractSet
+		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
+			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
 		}
 
 		// Fetch the used contracts.
@@ -1780,7 +1785,10 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 	var err error
 	err = s.retryTransaction(func(tx *gorm.DB) error {
 		rowsAffected, err = s.deleteObject(tx, bucket, key)
-		return err
+		if err != nil {
+			return fmt.Errorf("RemoveObject: failed to delete object: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -2722,7 +2730,21 @@ AND slabs.db_buffered_slab_id IS NULL
 // without an obect after the deletion. That means in case of packed uploads,
 // the slab is only deleted when no more objects point to it.
 func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64, error) {
-	tx = tx.Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
+	// check if the object exists first to avoid unnecessary locking for the
+	// common case
+	var objID uint
+	resp := tx.Model(&dbObject{}).
+		Where("object_id = ? AND ?", path, sqlWhereBucket("objects", bucket)).
+		Select("id").
+		Limit(1).
+		Scan(&objID)
+	if err := resp.Error; err != nil {
+		return 0, err
+	} else if resp.RowsAffected == 0 {
+		return 0, nil
+	}
+
+	tx = tx.Where("id", objID).
 		Delete(&dbObject{})
 	if tx.Error != nil {
 		return 0, tx.Error
@@ -2872,7 +2894,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	}
 	var rows []rawObjectMetadata
 	if err := s.db.
-		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as mimeType, o.created_at as ModTime").
+		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").

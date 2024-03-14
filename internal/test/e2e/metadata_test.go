@@ -55,6 +55,8 @@ func TestObjectMetadata(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gor.Metadata, opts.Metadata) {
 		t.Fatal("metadata mismatch", gor.Metadata)
+	} else if gor.Etag == "" {
+		t.Fatal("missing etag")
 	}
 
 	// perform a HEAD request and assert the headers are all present
@@ -63,6 +65,7 @@ func TestObjectMetadata(t *testing.T) {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{
 		ContentType:  or.Object.ContentType(),
+		Etag:         gor.Etag,
 		LastModified: or.Object.LastModified(),
 		Range:        &api.DownloadRange{Offset: 1, Length: 1, Size: int64(len(data))},
 		Size:         int64(len(data)),

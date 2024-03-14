@@ -861,19 +861,24 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
+	var ignoreDelim bool
+	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+		return
+	}
 
 	// parse path
 	path := jc.PathParam("path")
-	if path == "" || strings.HasSuffix(path, "/") {
+	if !ignoreDelim && (path == "" || strings.HasSuffix(path, "/")) {
 		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
 		return
 	}
 
 	// fetch object metadata
 	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+		IgnoreDelim:  ignoreDelim,
 		OnlyMetadata: true,
 	})
-	if errors.Is(err, api.ErrObjectNotFound) {
+	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -1099,7 +1104,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if err := jc.Check("couldn't upload object", err); err != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 			}
 		}
