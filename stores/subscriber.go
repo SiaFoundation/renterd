@@ -371,28 +371,30 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 
 	// v1 contracts
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
-		var r *revision
+		r := &revision{
+			revisionNumber: fce.FileContract.RevisionNumber,
+			fileSize:       fce.FileContract.Filesize,
+		}
 		if rev != nil {
-			r = &revision{
-				revisionNumber: rev.FileContract.RevisionNumber,
-				fileSize:       rev.FileContract.Filesize,
-			}
+			r.revisionNumber = rev.FileContract.RevisionNumber
+			r.fileSize = rev.FileContract.Filesize
 		}
 		processContract(fce.ID, r, resolved, valid)
 	})
 
 	// v2 contracts
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		var r *revision
-		if rev != nil {
-			r = &revision{
-				revisionNumber: rev.V2FileContract.RevisionNumber,
-				fileSize:       rev.V2FileContract.Filesize,
-			}
+		r := &revision{
+			revisionNumber: fce.V2FileContract.RevisionNumber,
+			fileSize:       fce.V2FileContract.Filesize,
 		}
-		resolved := res != nil
-		valid := false
+
+		var valid bool
+		var resolved bool
 		if res != nil {
+			r.revisionNumber = rev.V2FileContract.RevisionNumber
+			r.fileSize = rev.V2FileContract.Filesize
+
 			switch res.(type) {
 			case *types.V2FileContractFinalization:
 				valid = true
@@ -403,6 +405,8 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 			case *types.V2FileContractExpiration:
 				valid = fce.V2FileContract.Filesize == 0
 			}
+
+			resolved = true
 		}
 		processContract(fce.ID, r, resolved, valid)
 	})
