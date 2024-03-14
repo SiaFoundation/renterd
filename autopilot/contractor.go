@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
@@ -1425,7 +1426,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if utils.IsErr(err, wallet.ErrInsufficientBalance) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1508,7 +1509,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 			return api.ContractMetadata{}, true, err
 		}
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if utils.IsErr(err, wallet.ErrInsufficientBalance) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
