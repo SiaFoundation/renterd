@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/prometheus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -374,6 +375,34 @@ func (b *bus) Handler() http.Handler {
 	})
 }
 
+func (b *bus) writeResponse(c jape.Context, code int, resp any) {
+	var responseFormat string
+	if err := c.DecodeForm("response", &responseFormat); err != nil {
+		return
+	}
+
+	if resp != nil {
+		switch responseFormat {
+		case "prometheus":
+			v, ok := resp.(prometheus.Marshaller)
+			if !ok {
+				err := fmt.Errorf("response does not implement prometheus.Marshaller %T", resp)
+				c.Error(err, http.StatusInternalServerError)
+				b.logger.Error("response does not implement prometheus.Marshaller", zap.Stack("stack"), zap.Error(err))
+				return
+			}
+
+			enc := prometheus.NewEncoder(c.ResponseWriter)
+			if err := enc.Append(v); err != nil {
+				b.logger.Error("failed to marshal prometheus response", zap.Error(err))
+				return
+			}
+		default:
+			c.Encode(resp)
+		}
+	}
+}
+
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	b.hooks.Close()
@@ -411,11 +440,11 @@ func (b *bus) syncerAddrHandler(jc jape.Context) {
 	if jc.Check("failed to fetch syncer's address", err) != nil {
 		return
 	}
-	jc.Encode(addr)
+	b.writeResponse(jc, http.StatusOK, SyncerAddrResp(addr))
 }
 
 func (b *bus) syncerPeersHandler(jc jape.Context) {
-	jc.Encode(b.s.Peers())
+	b.writeResponse(jc, http.StatusOK, SyncerPeersResp(b.s.Peers()))
 }
 
 func (b *bus) syncerConnectHandler(jc jape.Context) {
@@ -426,7 +455,7 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
-	jc.Encode(b.consensusState())
+	b.writeResponse(jc, http.StatusOK, ConsensusStateResp(b.consensusState()))
 }
 
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
@@ -437,11 +466,11 @@ func (b *bus) consensusNetworkHandler(jc jape.Context) {
 
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
 	fee := b.tp.RecommendedFee()
-	jc.Encode(fee)
+	b.writeResponse(jc, http.StatusOK, TxPoolResp(fee))
 }
 
 func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
-	jc.Encode(b.tp.Transactions())
+	b.writeResponse(jc, http.StatusOK, TxPoolTxResp(b.tp.Transactions()))
 }
 
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
@@ -456,7 +485,7 @@ func (b *bus) bucketsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
 	}
-	jc.Encode(resp)
+	b.writeResponse(jc, http.StatusOK, BucketResp(resp))
 }
 
 func (b *bus) bucketsHandlerPOST(jc jape.Context) {
@@ -519,13 +548,13 @@ func (b *bus) walletHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
-	jc.Encode(api.WalletResponse{
+	b.writeResponse(jc, http.StatusOK, WalletResp(api.WalletResponse{
 		ScanHeight:  b.w.Height(),
 		Address:     address,
 		Confirmed:   confirmed,
 		Spendable:   spendable,
 		Unconfirmed: unconfirmed,
-	})
+	}))
 }
 
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
@@ -540,14 +569,14 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	}
 	txns, err := b.w.Transactions(before, since, offset, limit)
 	if jc.Check("couldn't load transactions", err) == nil {
-		jc.Encode(txns)
+		b.writeResponse(jc, http.StatusOK, WalletTransactionsResp(txns))
 	}
 }
 
 func (b *bus) walletOutputsHandler(jc jape.Context) {
 	utxos, err := b.w.UnspentOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
-		jc.Encode(utxos)
+		b.writeResponse(jc, http.StatusOK, WalletOutputsResp(utxos))
 	}
 }
 
@@ -752,7 +781,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 			relevant = append(relevant, txn)
 		}
 	}
-	jc.Encode(relevant)
+	b.writeResponse(jc, http.StatusOK, WalletPendingResp(relevant))
 }
 
 func (b *bus) hostsHandlerGET(jc jape.Context) {
@@ -765,7 +794,7 @@ func (b *bus) hostsHandlerGET(jc jape.Context) {
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	b.writeResponse(jc, http.StatusOK, HostsResp(hosts))
 }
 
 func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
@@ -811,7 +840,7 @@ func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	b.writeResponse(jc, http.StatusOK, HostsScanningResp(hosts))
 }
 
 func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
@@ -869,7 +898,7 @@ func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
 func (b *bus) hostsAllowlistHandlerGET(jc jape.Context) {
 	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
-		jc.Encode(allowlist)
+		b.writeResponse(jc, http.StatusOK, AllowListResp(allowlist))
 	}
 }
 
@@ -889,7 +918,7 @@ func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
 	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
-		jc.Encode(blocklist)
+		b.writeResponse(jc, http.StatusOK, BlocklistResp(blocklist))
 	}
 }
 
@@ -915,7 +944,7 @@ func (b *bus) contractsHandlerGET(jc jape.Context) {
 		ContractSet: cs,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(contracts)
+		b.writeResponse(jc, http.StatusOK, ContractsResp(contracts))
 	}
 }
 
@@ -1035,11 +1064,11 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		return contracts[i].Prunable > contracts[j].Prunable
 	})
 
-	jc.Encode(api.ContractsPrunableDataResponse{
+	b.writeResponse(jc, http.StatusOK, ContractsPrunableResp(api.ContractsPrunableDataResponse{
 		Contracts:     contracts,
 		TotalPrunable: totalPrunable,
 		TotalSize:     totalSize,
-	})
+	}))
 }
 
 func (b *bus) contractSizeHandlerGET(jc jape.Context) {
@@ -1180,7 +1209,7 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
-	jc.Encode(keys)
+	b.writeResponse(jc, http.StatusOK, SearchObjectsResp(keys))
 }
 
 func (b *bus) objectsHandlerGET(jc jape.Context) {
@@ -1359,7 +1388,7 @@ func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't get slab buffers info", err) != nil {
 		return
 	}
-	jc.Encode(buffers)
+	b.writeResponse(jc, http.StatusOK, SlabBuffersResp(buffers))
 }
 
 func (b *bus) objectsStatshandlerGET(jc jape.Context) {
@@ -1371,7 +1400,7 @@ func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 	if jc.Check("couldn't get objects stats", err) != nil {
 		return
 	}
-	jc.Encode(info)
+	b.writeResponse(jc, http.StatusOK, ObjectsStatsResp(info))
 }
 
 func (b *bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
@@ -1572,7 +1601,10 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-
+	// if key == "s3authentication" {
+	// 	// b.writeResponse(jc, http.StatusOK, SettingsResp(setting))
+	// 	jc.Encode(resp)
+	// } else {
 	var resp interface{}
 	err = json.Unmarshal([]byte(setting), &resp)
 	if err != nil {
@@ -1581,6 +1613,7 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	}
 
 	jc.Encode(resp)
+	// }
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
@@ -1683,12 +1716,12 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 		uploadPacking = pus.Enabled
 	}
 
-	jc.Encode(api.UploadParams{
+	b.writeResponse(jc, http.StatusOK, UploadParamsResp(api.UploadParams{
 		ContractSet:   contractSet,
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
 		UploadPacking: uploadPacking,
-	})
+	}))
 }
 
 func (b *bus) consensusState() api.ConsensusState {
@@ -1704,7 +1737,7 @@ func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	jc.Encode(gp)
+	b.writeResponse(jc, http.StatusOK, GougingParamsResp(gp))
 }
 
 func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
@@ -1737,7 +1770,7 @@ func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}
-	jc.Encode(ar.Alerts)
+	b.writeResponse(jc, http.StatusOK, AlertsResp(ar.Alerts))
 }
 
 func (b *bus) handleGETAlerts(jc jape.Context) {
@@ -1971,7 +2004,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) stateHandlerGET(jc jape.Context) {
-	jc.Encode(api.BusStateResponse{
+	b.writeResponse(jc, http.StatusOK, StateResp(api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
 			Network:   build.NetworkName(),
@@ -1980,7 +2013,7 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 			OS:        runtime.GOOS,
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
-	})
+	}))
 }
 
 func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
