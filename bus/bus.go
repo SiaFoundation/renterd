@@ -189,7 +189,7 @@ type (
 	EphemeralAccountStore interface {
 		Accounts(context.Context) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown() error
+		SetUncleanShutdown(context.Context) error
 	}
 
 	MetricsStore interface {
@@ -2022,7 +2022,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	if jc.Decode(&wh) != nil {
 		return
 	}
-	err := b.hooks.Delete(wh)
+	err := b.hooks.Delete(jc.Request.Context(), wh)
 	if errors.Is(err, webhooks.ErrWebhookNotFound) {
 		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
 		return
@@ -2044,7 +2044,7 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	err := b.hooks.Register(webhooks.Webhook{
+	err := b.hooks.Register(jc.Request.Context(), webhooks.Webhook{
 		Event:  req.Event,
 		Module: req.Module,
 		URL:    req.URL,
@@ -2412,7 +2412,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 
 	// mark the shutdown as unclean, this will be overwritten when/if the
 	// accounts are saved on shutdown
-	if err := eas.SetUncleanShutdown(); err != nil {
+	if err := eas.SetUncleanShutdown(ctx); err != nil {
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
 	return b, nil

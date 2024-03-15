@@ -41,6 +41,7 @@ func readInput(context string) string {
 }
 
 // wrapANSI wraps the output in ANSI escape codes if enabled.
+// nolint: unparam
 func wrapANSI(prefix, output, suffix string) string {
 	if enableANSI {
 		return prefix + output + suffix
