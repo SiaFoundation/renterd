@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -74,10 +76,6 @@ var (
 		},
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
-			Log: config.DatabaseLog{
-				IgnoreRecordNotFoundError: true,
-				SlowThreshold:             100 * time.Millisecond,
-			},
 			MySQL: config.MySQL{
 				Database:        "renterd",
 				User:            "renterd",
@@ -85,7 +83,22 @@ var (
 			},
 		},
 		Log: config.Log{
-			Level: "warn",
+			Path:  "", // deprecated. included for compatibility.
+			Level: "info",
+			File: config.LogFile{
+				Enabled: true,
+				Format:  "json",
+				Path:    os.Getenv("RENTERD_LOG_FILE"),
+			},
+			StdOut: config.StdOut{
+				Enabled:    true,
+				Format:     "human",
+				EnableANSI: runtime.GOOS != "windows",
+			},
+			Database: config.DatabaseLog{
+				IgnoreRecordNotFoundError: true,
+				SlowThreshold:             100 * time.Millisecond,
+			},
 		},
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
@@ -411,6 +424,7 @@ func main() {
 		)
 	}
 
+	// Log level for db
 	var level logger.LogLevel
 	switch strings.ToLower(cfg.Log.Level) {
 	case "silent":
@@ -426,11 +440,7 @@ func main() {
 	}
 
 	// Create logger.
-	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
-	if cfg.Log.Path != "" {
-		renterdLog = cfg.Log.Path
-	}
-	logger, closeFn, err := node.NewLogger(renterdLog)
+	logger, closeFn, err := NewLogger(cfg.Directory, cfg.Log)
 	if err != nil {
 		log.Fatalln("failed to create logger:", err)
 	}
@@ -438,10 +448,18 @@ func main() {
 
 	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", build.NetworkName()), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
 
-	busCfg.DBLoggerConfig = stores.LoggerConfig{
+	// configure database logger
+	dbLogCfg := cfg.Log.Database
+	if cfg.Database.Log != (config.DatabaseLog{}) {
+		dbLogCfg = cfg.Database.Log
+	}
+	busCfg.DBLogger = zapgorm2.Logger{
+		ZapLogger:                 logger,
 		LogLevel:                  level,
-		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
-		SlowThreshold:             cfg.Database.Log.SlowThreshold,
+		SlowThreshold:             dbLogCfg.SlowThreshold,
+		SkipCallerLookup:          false,
+		IgnoreRecordNotFoundError: dbLogCfg.IgnoreRecordNotFoundError,
+		Context:                   nil,
 	}
 
 	type shutdownFn struct {
