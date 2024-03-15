@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/prometheus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -173,6 +174,34 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
 	})
+}
+
+func (ap *Autopilot) writeResponse(c jape.Context, code int, resp any) {
+	var responseFormat string
+	if err := c.DecodeForm("response", &responseFormat); err != nil {
+		return
+	}
+
+	if resp != nil {
+		switch responseFormat {
+		case "prometheus":
+			v, ok := resp.(prometheus.Marshaller)
+			if !ok {
+				err := fmt.Errorf("response does not implement prometheus.Marshaller %T", resp)
+				c.Error(err, http.StatusInternalServerError)
+				ap.logger.Error("response does not implement prometheus.Marshaller", zap.Stack("stack"), zap.Error(err))
+				return
+			}
+
+			enc := prometheus.NewEncoder(c.ResponseWriter)
+			if err := enc.Append(v); err != nil {
+				ap.logger.Error("failed to marshal prometheus response", zap.Error(err))
+				return
+			}
+		default:
+			c.Encode(resp)
+		}
+	}
 }
 
 func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
@@ -701,7 +730,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(api.AutopilotStateResponse{
+	ap.writeResponse(jc, http.StatusOK, AutopilotStateResp(api.AutopilotStateResponse{
 		Configured:         err == nil,
 		Migrating:          migrating,
 		MigratingLastStart: api.TimeRFC3339(mLastStart),
@@ -719,7 +748,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 			OS:        runtime.GOOS,
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
-	})
+	}))
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
