@@ -1601,19 +1601,17 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	// if key == "s3authentication" {
-	// 	// b.writeResponse(jc, http.StatusOK, SettingsResp(setting))
-	// 	jc.Encode(resp)
-	// } else {
 	var resp interface{}
 	err = json.Unmarshal([]byte(setting), &resp)
 	if err != nil {
 		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	jc.Encode(resp)
-	// }
+	if key == "s3authentication" {
+		b.writeResponse(jc, http.StatusOK, SettingsResp(resp.(map[string]interface{})))
+	} else {
+		jc.Encode(resp)
+	}
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {

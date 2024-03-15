@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -640,15 +639,10 @@ func (so SearchObjectsResp) PrometheusMetric() (metrics []prometheus.Metric) {
 //
 // Prometheus specific:
 // /setting/s3authentication
-type SettingsResp string
+type SettingsResp map[string]interface{}
 
 func (s SettingsResp) PrometheusMetric() (metrics []prometheus.Metric) {
-	var resp api.S3AuthenticationSettings
-	err := json.Unmarshal([]byte(s), &resp)
-	if err != nil {
-		return
-	}
-	for k := range resp.V4Keypairs {
+	for k := range s["v4Keypairs"].(map[string]interface{}) {
 		metrics = append(metrics, prometheus.Metric{
 			Name: "renterd_settings_s3v4keypair",
 			Labels: map[string]any{
