@@ -712,7 +712,7 @@ func (sar SyncerAddrResp) PrometheusMetric() (metrics []prometheus.Metric) {
 	metrics = append(metrics, prometheus.Metric{
 		Name: "renterd_syncer_address",
 		Labels: map[string]any{
-			"address": sar,
+			"address": string(sar),
 		},
 		Value: 1,
 	})
