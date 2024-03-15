@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strings"
 	"sync"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
@@ -454,7 +454,7 @@ func (mgr *downloadManager) numDownloaders() int {
 // in the partial slab buffer.
 func (mgr *downloadManager) fetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error) {
 	data, err := mgr.os.FetchPartialSlab(ctx, key, offset, length)
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		// Check if slab was already uploaded.
 		slab, err := mgr.os.Slab(ctx, key)
 		if err != nil {

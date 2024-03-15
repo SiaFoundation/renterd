@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/gofakes3/signature"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 var (
@@ -89,7 +89,7 @@ func newAuthenticatedBackend(b *s3) *authenticatedBackend {
 
 func (b *authenticatedBackend) applyBucketPolicy(ctx context.Context, bucketName string, p *permissions) error {
 	bucket, err := b.backend.b.Bucket(ctx, bucketName)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())

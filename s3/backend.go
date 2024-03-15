@@ -10,6 +10,7 @@ import (
 
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
@@ -109,7 +110,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		}
 		var res api.ObjectsResponse
 		res, err = s.b.Object(ctx, bucketName, path, opts)
-		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		if utils.IsErr(err, api.ErrBucketNotFound) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
 			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -129,7 +130,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 
 		var res api.ObjectsListResponse
 		res, err = s.b.ListObjects(ctx, bucketName, opts)
-		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		if utils.IsErr(err, api.ErrBucketNotFound) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
 			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -169,7 +170,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(ctx context.Context, name string) error {
 	err := s.b.CreateBucket(ctx, name, api.CreateBucketOptions{})
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+	if utils.IsErr(err, api.ErrBucketExists) {
 		return gofakes3.ErrBucketAlreadyExists
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -183,7 +184,7 @@ func (s *s3) CreateBucket(ctx context.Context, name string) error {
 // TODO: backend could be improved to allow for checking specific dir in root.
 func (s *s3) BucketExists(ctx context.Context, name string) (bool, error) {
 	_, err := s.b.Bucket(ctx, name)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return false, nil
 	} else if err != nil {
 		return false, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -203,9 +204,9 @@ func (s *s3) BucketExists(ctx context.Context, name string) (bool, error) {
 // atomically checking whether a bucket is empty.
 func (s *s3) DeleteBucket(ctx context.Context, name string) error {
 	err := s.b.DeleteBucket(ctx, name)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotEmpty) {
 		return gofakes3.ErrBucketNotEmpty
-	} else if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	} else if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.BucketNotFound(name)
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -243,9 +244,9 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	}
 
 	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return nil, gofakes3.BucketNotFound(bucketName)
-	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	} else if utils.IsErr(err, api.ErrObjectNotFound) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -298,7 +299,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 	res, err := s.w.HeadObject(ctx, bucketName, objectName, api.HeadObjectOptions{
 		IgnoreDelim: true,
 	})
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -346,9 +347,9 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
 	err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
-	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	} else if utils.IsErr(err, api.ErrObjectNotFound) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
@@ -371,7 +372,7 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 	}
 
 	ur, err := s.w.UploadObject(ctx, input, bucketName, key, opts)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -387,7 +388,7 @@ func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...stri
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
 		err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
-		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		if err != nil && !utils.IsErr(err, api.ErrObjectNotFound) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     objectName,
 				Code:    gofakes3.ErrInternal,

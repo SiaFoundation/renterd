@@ -632,7 +632,7 @@ func (ap *Autopilot) isStopped() bool {
 
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
-	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		jc.Error(errors.New("autopilot is not configured yet"), http.StatusNotFound)
 		return
 	}
@@ -654,7 +654,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	// fetch the autopilot and update its config
 	var contractSetChanged bool
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
-	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
