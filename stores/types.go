@@ -35,7 +35,37 @@ type (
 	balance        big.Int
 	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
+	setting        string
 )
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (setting) GormDataType() string {
+	return "string"
+}
+
+// String implements fmt.Stringer to prevent "s3authentication" settings from
+// getting leaked.
+func (s setting) String() string {
+	if strings.Contains(string(s), "v4Keypairs") {
+		return "*****"
+	}
+	return string(s)
+}
+
+// Scan scans value into the setting
+func (s *setting) Scan(value interface{}) error {
+	str, ok := value.(string)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal setting value:", value))
+	}
+	*s = setting(str)
+	return nil
+}
+
+// Value returns an key value, implements driver.Valuer interface.
+func (s setting) Value() (driver.Value, error) {
+	return string(s), nil
+}
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (secretKey) GormDataType() string {
