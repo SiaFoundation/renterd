@@ -465,7 +465,7 @@ func (b *bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
-	fee := b.tp.RecommendedFee()
+	fee := b.tp.RecommendedFee().ExactString()
 	b.writeResponse(jc, http.StatusOK, TxPoolResp(fee))
 }
 

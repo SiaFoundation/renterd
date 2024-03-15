@@ -734,12 +734,22 @@ func (srp SyncerPeersResp) PrometheusMetric() (metrics []prometheus.Metric) {
 	return
 }
 
-type TxPoolResp types.Currency
+type TxPoolResp string
+
+func (t TxPoolResp) ToFloat64() (float64, error) {
+	// Convert string to float64
+	return strconv.ParseFloat(string(t), 64)
+}
 
 func (tpr TxPoolResp) PrometheusMetric() (metrics []prometheus.Metric) {
+	floatValue, err := tpr.ToFloat64()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
 	metrics = append(metrics, prometheus.Metric{
 		Name:  "renterd_tpool_fee",
-		Value: types.Currency(tpr).Siacoins(),
+		Value: floatValue,
 	})
 	return
 }
