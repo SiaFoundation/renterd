@@ -25,92 +25,160 @@ A project roadmap is available on [GitHub](https://github.com/orgs/SiaFoundation
 
 ## Backups
 
-This section provides instructions on creating backups for `renterd` and
-restoring from those backups. Taking backups at regular intervals and testing
-whether you can restore from such a backup are crucial for ensuring the
-integrity and availability of your data. Make sure to never store your backups
-on the same machine `renterd` is running on.
-
-### Databases
-
-When uploading data to the Sia Network, `renterd` stores all necessary metadata
-to be able to download that data in its SQL databases. `renterd` uses two
-databases:
-
-- **main database**: contains all object -, contracts - and host metadata
-- **metrics database**: contains contract spending, performance metrics
-
-The main database is the most important one because it contains the object
-metadata, which is crucial to be able to recover your data. The `metrics`
-database is less important but there's various UI features that depend on it.
+This section provides a step-by-step guide on how to create a backup for
+`renterd` and restore from that backup. Taking backups at regular intervals and
+testing whether you can restore from such a backup are _crucial_ for ensuring
+the integrity and availability of your data. Also make sure to never store your
+backups on the same machine `renterd` is running on.
 
 ---
-**NOTE**
+**IMPORTANT NOTE**
 
-The name of these databases are configurable (see `RENTERD_DB_NAME` and
-`RENTERD_DB_METRICS_NAME`), so make sure to use the configured values, the
-following section will assume `renterd` defaults which are `renterd` and
-`renterd_metrics` for the main and metrics database respectively.
+Having a backup is not enough to ensure the data can be recovered in a disaster
+scenario. The renter has to be online enough of the time to ensure the data gets
+migrated away from hosts that went offline.
 
 ---
 
-Depending on the user's configuration, these database are either SQLite or MySQL
-database. The following section outlines how to backup `renterd` in both
-scenarios.
+### Backup renterd
 
-#### SQLite
+#### Step 1: shutdown renter
 
-Backing up a SQLite database can be done using the following command:
+To be on the safe side, we advise shutting down the renter before taking a
+backup. The main reason is a feature called "upload packing", which is enabled
+by default, which uses on-disk buffers. Taking a backup of a running `renterd`
+node would not ensure consistency between what is in the database and what is
+on-disk. Even if that feature is disabled, it is still advisable to shut down
+the renter before taking a backup.
+
+#### Step 2: backing up the database
+
+`renterd` stores everything in two SQL databases, one main database and another
+one for metrics. The main database holds things like contract - and host
+ metadata, but most importantly it includes all necessary object metadata to be
+able to download the data uploaded to the Sia network. It is very important to
+have a working backup of this database to ensure files can be recovered in the
+event the database got corrupted. The metrics database is less important, but
+there's various UI features that depend on it so we advise to back that up as
+well.
+
+Depending on how the renter is configured, the databases are either SQLite
+(default) or MySQL databases. By default, the SQLite databases are called
+`db.sqlite` and `metrics.sqlite` for the main and metrics database respectively.
+These are again configurable, for the sake of this documentation however we'll
+assume the defaults are used.
+
+These databases are located in a folder called `db`, right in the renter's root
+directory.
+
+**SQLite**
+
+For SQLite, a backup is best taken using the `.backup` command, specifying the
+database we want to backup and a name for the backup. There should only be two
+files in the `db` folder, if you encounter write-ahead log files or index files
+(usually named `X-wal` or `X-shm`) it's an indication the renter was not shut
+down gracefully. In that case it's best to restart the renter and shut it down
+again.
 
 ```bash
 sqlite3 db.sqlite ".backup 'db.bkp'"
 sqlite3 metrics.sqlite ".backup 'metrics.bkp'"
 ```
 
-There is an alternative `.dump` command, which exports the database into a text
-file containing SQL statements. This backup is useful in its own, because it's
-more portable and can be used to import the contents of the database into
-another database on another system entirely. The `.backup` however yields a
-byte-for-byte replica of the original database file, it is usually a lot faster
-on large databases and it can be performed on a database that's actively being
-read or written to, even though we advise to shut down the renter before taking
-a backup.
-
-Restoring from a backup is as simple as putting the backup in place of the original.
-Another useful tool for backing up SQLite database is https://litestream.io/.
-
-#### MySQL
+**MySQL**
 
 Backuping up a MySQL database can be done using the `mysqldump` command. It's a
 utility provided by MySQL to backup or transfer a MySQL database. It's usually
 installed alongside the MySQL cient tools.
 
-The following command assumes MySQL is being ran from within a docker container:
-
 ```bash
-docker exec [MYSQL_CONTAINER_NAME] /usr/bin/mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd > renterd_bkp.sql
-
-docker exec [MYSQL_CONTAINER_NAME] /usr/bin/mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics > renterd_metrics_bkp.sql
+mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd > renterd_bkp.sql
+mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics > renterd_metrics_bkp.sql
 ```
 
-Restoring from this backup can be done using:
-
-```bash
-cat renterd_bkp.sql | docker exec -i [MYSQL_CONTAINER_NAME] /usr/bin/mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd
-
-cat renterd_metrics_bkp.sql | docker exec -i [MYSQL_CONTAINER_NAME] /usr/bin/mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics
-```
-
-### Partial Slabs
+#### Step 3: backing up partial slabs
 
 For users that have upload packing enabled, it is very important to back up
 partial slabs alongside the database backups. These partial slabs are
 essentially a sort of buffer that gets uploaded to the network when that buffer
-reaches the size of a full slab, drastically speeding up a bunch of small file
-uploads. To ensure consistency between the database and these files on disk, it
-is recommended to gracefully shut the renter down before taking a backup of its
-database. These partial slabs are located in a folder called `partial_slabs`,
-right in the root folder.
+reaches a certain size, drastically speeding up a bunch of small file uploads.
+These partial slabs are located in a folder called `partial_slabs`, right in the
+renter's root directory.
+
+```bash
+tar -cvf partial_slabs.tar partial_slabs/
+```
+
+### Install from a backup
+
+The easiest way to install from a backup is to do a fresh install of `renterd`
+and then following the steps outlined in the section below where we restore from
+a backup (e.g. overwrite the database). The most important thing to keep in mind
+is to use the same seed (`RENTERD_SEED`) as the one in the backup.
+
+When you have the new renter up and running and consensus is synced, we don't
+have to go through configuring it because we'll overwrite the settings in the
+following section.
+
+### Restore a backup
+
+#### Step 1: shutdown renter
+
+Same as before we advise to shut down the renter before reinstating a backup to
+ensure consistency. It's a good idea to backup the database right before trying
+to restore a backup to be safe and have a way out in case overwriting the
+database renders it corrupt somehow.
+
+#### Step 2: restore the database backup
+
+**SQLite**
+
+For SQLite we can reinstate the database by replacing both `.sqlite` files with
+our backups.
+
+**MySQL**
+
+Depending on when the backup was taken its schema might be out of date. To
+maximize the chance the schema migrations go smoothly, it's advisable to
+recreate the databases before importing the backup. Take a backup before doing
+this.
+
+```bash
+# log in to MySQL shell
+mysql -u [RENTERD_DB_USER] -p
+
+# recreate renterd database
+DROP DATABASE IF EXISTS renterd;
+CREATE DATABASE renterd;
+
+# recreate renterd_metrics database
+DROP DATABASE IF EXISTS renterd_metrics;
+CREATE DATABASE renterd_metrics;
+```
+
+The backups can then be imported using the following commands:
+
+```
+cat renterd_bkp.sql | mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd
+cat renterd_metrics_bkp.sql | mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics
+```
+#### Step 3: restore the partial slabs
+
+If applicable, remove the contents of the `partial_slabs` directory and replace it with your backup.
+
+```bash
+rm -rf partial_slabs
+tar -xvf partial_slabs.tar
+```
+
+#### Step 4: start the renter
+
+After starting the renter it is possible it has to run through migrations to its
+database schema. Depending on when the backup was taken, this might take some
+time. If we restored the backup on a fresh `renterd` install, it will take some
+time for consensus to sync.
+
+#### Scenario 2:
 
 ## Docker Support
 
