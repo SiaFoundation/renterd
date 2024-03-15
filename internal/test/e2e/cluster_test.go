@@ -590,38 +590,6 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatalf("mismatch for offset %v", offset)
 		}
 	}
-
-	// fetch the contracts.
-	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-	tt.OK(err)
-
-	// collect the current revision heights
-	revisionHeights := make(map[types.FileContractID]uint64)
-	for _, c := range contracts {
-		revisionHeights[c.ID] = c.RevisionHeight
-	}
-
-	// broadcast the revision for each contract
-	for _, c := range contracts {
-		tt.OK(w.RHPBroadcast(context.Background(), c.ID))
-	}
-	cluster.MineBlocks(1)
-
-	// check the revision height was updated.
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		// fetch the contracts.
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-		if err != nil {
-			return err
-		}
-		// assert the revision height was updated.
-		for _, c := range contracts {
-			if c.RevisionHeight == revisionHeights[c.ID] {
-				return fmt.Errorf("%v should have been revised", c.ID)
-			}
-		}
-		return nil
-	})
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
@@ -941,6 +909,53 @@ func TestUploadDownloadSpending(t *testing.T) {
 		return nil
 	})
 	tt.OK(err)
+}
+
+func TestContractApplyChainUpdates(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster without autopilot
+	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
+	defer cluster.Shutdown()
+
+	// convenience variables
+	w := cluster.Worker
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// manually form a contract with the host
+	cs, _ := b.ConsensusState(context.Background())
+	wallet, _ := b.Wallet(context.Background())
+	rev, _, _ := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	contract, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	tt.OK(err)
+
+	// assert revision height is 0
+	if contract.RevisionHeight != 0 {
+		t.Fatalf("expected revision height to be 0, got %v", contract.RevisionHeight)
+	}
+
+	// broadcast the revision for each contract
+	fcid := contract.ID
+	tt.OK(w.RHPBroadcast(context.Background(), fcid))
+	cluster.MineBlocks(1)
+
+	// check the revision height was updated.
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		c, err := cluster.Bus.Contract(context.Background(), fcid)
+		tt.OK(err)
+		if c.RevisionHeight == 0 {
+			return fmt.Errorf("contract %v should have been revised", c.ID)
+		}
+		return nil
+	})
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
