@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -109,7 +108,6 @@ type (
 
 	dbConsensusInfo struct {
 		Model
-		CCID    []byte
 		Height  uint64
 		BlockID hash256
 	}
@@ -906,39 +904,6 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ho
 	})
 }
 
-func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
-	height := uint64(cc.InitialHeight())
-	for range cc.RevertedBlocks {
-		height--
-	}
-
-	var newAnnouncements []announcement
-	for _, sb := range cc.AppliedBlocks {
-		var b types.Block
-		convertToCore(sb, (*types.V1Block)(&b))
-
-		// Process announcements, but only if they are not too old.
-		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			chain.ForEachHostAnnouncement(types.Block(b), func(hk types.PublicKey, ha chain.HostAnnouncement) {
-				if ha.NetAddress == "" {
-					return
-				}
-				newAnnouncements = append(newAnnouncements, announcement{
-					HostAnnouncement: ha,
-					blockHeight:      height,
-					blockID:          b.ID(),
-					hk:               hk,
-					timestamp:        b.Timestamp,
-				})
-				ss.unappliedHostKeys[hk] = struct{}{}
-			})
-		}
-		height++
-	}
-
-	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
-}
-
 // excludeBlocked can be used as a scope for a db transaction to exclude blocked
 // hosts.
 func (ss *SQLStore) excludeBlocked(db *gorm.DB) *gorm.DB {
@@ -985,18 +950,6 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 		blocked = true
 	}
 	return
-}
-
-func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {
-	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-		Model: Model{
-			ID: consensusInfoID,
-		},
-	}).Updates(map[string]interface{}{
-		"CCID":     newCCID[:],
-		"height":   newTip.Height,
-		"block_id": hash256(newTip.ID),
-	}).Error
 }
 
 func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {

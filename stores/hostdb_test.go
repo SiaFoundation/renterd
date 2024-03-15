@@ -14,8 +14,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/siad/modules"
-	stypes "go.sia.tech/siad/types"
 	"gorm.io/gorm"
 )
 
@@ -27,9 +25,6 @@ func (s *SQLStore) insertTestAnnouncement(a announcement) error {
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	if ss.ccid != modules.ConsensusChangeBeginning {
-		t.Fatal("wrong ccid", ss.ccid, modules.ConsensusChangeBeginning)
-	}
 
 	// Try to fetch a random host. Should fail.
 	ctx := context.Background()
@@ -116,28 +111,6 @@ func TestSQLHostDB(t *testing.T) {
 	}
 	if h3.KnownSince.IsZero() {
 		t.Fatal("known since not set")
-	}
-
-	// Wait for the persist interval to pass to make sure an empty consensus
-	// change triggers a persist.
-	time.Sleep(testPersistInterval)
-
-	// Apply a consensus change.
-	ccid2 := modules.ConsensusChangeID{1, 2, 3}
-	ss.ProcessConsensusChange(modules.ConsensusChange{
-		ID:            ccid2,
-		AppliedBlocks: []stypes.Block{{}},
-		AppliedDiffs:  []modules.ConsensusChangeDiffs{{}},
-	})
-
-	// Connect to the same DB again.
-	hdb2 := ss.Reopen()
-	if hdb2.ccid != ccid2 {
-		t.Fatal("ccid wasn't updated", hdb2.ccid, ccid2)
-	}
-	_, err = hdb2.Host(ctx, hk)
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -1021,30 +994,32 @@ func TestAnnouncementMaxAge(t *testing.T) {
 	db := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer db.Close()
 
-	if len(db.unappliedAnnouncements) != 0 {
+	// assert we don't have any announcements
+	if len(db.cs.announcements) != 0 {
 		t.Fatal("expected 0 announcements")
 	}
 
-	db.processConsensusChangeHostDB(
-		modules.ConsensusChange{
-			ID:          modules.ConsensusChangeID{1},
-			BlockHeight: 1,
-			AppliedBlocks: []stypes.Block{
-				{
-					Timestamp:    stypes.Timestamp(time.Now().Add(-time.Hour).Add(-time.Minute).Unix()),
-					Transactions: []stypes.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1000"))},
-				},
-				{
-					Timestamp:    stypes.Timestamp(time.Now().Add(-time.Hour).Add(time.Minute).Unix()),
-					Transactions: []stypes.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1001"))},
-				},
-			},
-		},
-	)
+	// fabricate two blocks with announcements, one before the cutoff and one after
+	b1 := types.Block{
+		Transactions: []types.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1000"))},
+		Timestamp:    time.Now().Add(-db.cs.announcementMaxAge).Add(-time.Second),
+	}
+	b2 := types.Block{
+		Transactions: []types.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1001"))},
+		Timestamp:    time.Now().Add(-db.cs.announcementMaxAge).Add(time.Second),
+	}
 
-	if len(db.unappliedAnnouncements) != 1 {
+	// process b1, expect no announcements
+	db.cs.processChainApplyUpdateHostDB(&chain.ApplyUpdate{Block: b1})
+	if len(db.cs.announcements) != 0 {
+		t.Fatal("expected 0 announcements")
+	}
+
+	// process b2, expect 1 announcement
+	db.cs.processChainApplyUpdateHostDB(&chain.ApplyUpdate{Block: b2})
+	if len(db.cs.announcements) != 1 {
 		t.Fatal("expected 1 announcement")
-	} else if db.unappliedAnnouncements[0].NetAddress != "foo.com:1001" {
+	} else if db.cs.announcements[0].HostAnnouncement.NetAddress != "foo.com:1001" {
 		t.Fatal("unexpected announcement")
 	}
 }
@@ -1072,10 +1047,15 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
-	s.unappliedHostKeys[hk] = struct{}{}
-	s.unappliedAnnouncements = append(s.unappliedAnnouncements, newTestAnnouncement(hk, na))
-	s.lastSave = time.Now().Add(s.persistInterval * -2)
-	return s.applyUpdates(false)
+	// NOTE: insert through subscriber to ensure allowlist/blocklist get updated
+	s.cs.announcements = append(s.cs.announcements, announcement{
+		blockHeight:      s.cs.tip.Height,
+		blockID:          s.cs.tip.ID,
+		hk:               hk,
+		timestamp:        time.Now().UTC().Round(time.Second),
+		HostAnnouncement: chain.HostAnnouncement{NetAddress: na},
+	})
+	return s.cs.commit()
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all
@@ -1132,6 +1112,6 @@ func newTestHostAnnouncement(na string) (chain.HostAnnouncement, types.PrivateKe
 	return a, sk
 }
 
-func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) stypes.Transaction {
-	return stypes.Transaction{ArbitraryData: [][]byte{ha.ToArbitraryData(sk)}}
+func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) types.Transaction {
+	return types.Transaction{ArbitraryData: [][]byte{ha.ToArbitraryData(sk)}}
 }

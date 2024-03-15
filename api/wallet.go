@@ -11,6 +11,26 @@ import (
 )
 
 type (
+	// A SiacoinElement is a SiacoinOutput along with its ID.
+	SiacoinElement struct {
+		types.SiacoinOutput
+		ID             types.Hash256 `json:"id"`
+		MaturityHeight uint64        `json:"maturityHeight"`
+	}
+
+	// A Transaction is an on-chain transaction relevant to a particular wallet,
+	// paired with useful metadata.
+	Transaction struct {
+		Raw       types.Transaction   `json:"raw,omitempty"`
+		Index     types.ChainIndex    `json:"index"`
+		ID        types.TransactionID `json:"id"`
+		Inflow    types.Currency      `json:"inflow"`
+		Outflow   types.Currency      `json:"outflow"`
+		Timestamp time.Time           `json:"timestamp"`
+	}
+)
+
+type (
 	// WalletFundRequest is the request type for the /wallet/fund endpoint.
 	WalletFundRequest struct {
 		Transaction        types.Transaction `json:"transaction"`
@@ -73,6 +93,7 @@ type (
 		Spendable   types.Currency `json:"spendable"`
 		Confirmed   types.Currency `json:"confirmed"`
 		Unconfirmed types.Currency `json:"unconfirmed"`
+		Immature    types.Currency `json:"immature"`
 	}
 
 	// WalletSignRequest is the request type for the /wallet/sign endpoint.

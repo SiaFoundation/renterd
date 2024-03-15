@@ -21,12 +21,12 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
@@ -102,7 +102,7 @@ func TestNewTestCluster(t *testing.T) {
 	// revision first.
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
-	cluster.MineBlocks(int(contract.WindowStart - cs.BlockHeight - 4))
+	cluster.MineBlocks(contract.WindowStart - cs.BlockHeight - 4)
 	cluster.Sync()
 	if cs.LastBlockTime.IsZero() {
 		t.Fatal("last block time not set")
@@ -590,38 +590,6 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatalf("mismatch for offset %v", offset)
 		}
 	}
-
-	// fetch the contracts.
-	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-	tt.OK(err)
-
-	// broadcast the revision for each contract and assert the revision height
-	// is 0.
-	for _, c := range contracts {
-		if c.RevisionHeight != 0 {
-			t.Fatal("revision height should be 0")
-		}
-		tt.OK(w.RHPBroadcast(context.Background(), c.ID))
-	}
-
-	// mine a block to get the revisions mined.
-	cluster.MineBlocks(1)
-
-	// check the revision height was updated.
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		// fetch the contracts.
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-		if err != nil {
-			return err
-		}
-		// assert the revision height was updated.
-		for _, c := range contracts {
-			if c.RevisionHeight == 0 {
-				return errors.New("revision height should be > 0")
-			}
-		}
-		return nil
-	})
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
@@ -943,17 +911,60 @@ func TestUploadDownloadSpending(t *testing.T) {
 	tt.OK(err)
 }
 
+func TestContractApplyChainUpdates(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster without autopilot
+	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
+	defer cluster.Shutdown()
+
+	// convenience variables
+	w := cluster.Worker
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// manually form a contract with the host
+	cs, _ := b.ConsensusState(context.Background())
+	wallet, _ := b.Wallet(context.Background())
+	rev, _, _ := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	contract, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	tt.OK(err)
+
+	// assert revision height is 0
+	if contract.RevisionHeight != 0 {
+		t.Fatalf("expected revision height to be 0, got %v", contract.RevisionHeight)
+	}
+
+	// broadcast the revision for each contract
+	fcid := contract.ID
+	tt.OK(w.RHPBroadcast(context.Background(), fcid))
+	cluster.MineBlocks(1)
+
+	// check the revision height was updated.
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		c, err := cluster.Bus.Contract(context.Background(), fcid)
+		tt.OK(err)
+		if c.RevisionHeight == 0 {
+			return fmt.Errorf("contract %v should have been revised", c.ID)
+		}
+		return nil
+	})
+}
+
 // TestEphemeralAccounts tests the use of ephemeral accounts.
 func TestEphemeralAccounts(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
 
-	dir := t.TempDir()
-	cluster := newTestCluster(t, testClusterOptions{
-		dir:    dir,
-		logger: zap.NewNop(),
-	})
+	cluster := newTestCluster(t, testClusterOptions{})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
@@ -1350,7 +1361,7 @@ func TestContractArchival(t *testing.T) {
 	endHeight := contracts[0].WindowEnd
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
-	cluster.MineBlocks(int(endHeight - cs.BlockHeight + 1))
+	cluster.MineBlocks(endHeight - cs.BlockHeight + 1)
 
 	// check that we have 0 contracts
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -1693,8 +1704,6 @@ func TestUploadPacking(t *testing.T) {
 }
 
 func TestWallet(t *testing.T) {
-	t.Skip("TODO: re-enable after our subscriber processes blocks properly")
-
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -2197,7 +2206,7 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 			Value:   toSend,
 		},
 	}, false)
-	tt.AssertIs(err, wallet.ErrInsufficientBalance)
+	tt.AssertIs(err, wallet.ErrNotEnoughFunds)
 
 	// try again - this time using unconfirmed transactions
 	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
@@ -2232,46 +2241,48 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 }
 
 func TestWalletFormUnconfirmed(t *testing.T) {
-	// New cluster with autopilot disabled
+	// create cluster without autopilot
 	cfg := clusterOptsDefault
 	cfg.skipSettingAutopilot = true
 	cluster := newTestCluster(t, cfg)
 	defer cluster.Shutdown()
+
+	// convenience variables
 	b := cluster.Bus
 	tt := cluster.tt
 
-	// Add a host.
+	// add a host (non-blocking)
 	cluster.AddHosts(1)
 
-	// Send the full balance back to the wallet to make sure it's all
-	// unconfirmed.
+	// send all money to ourselves, making sure it's unconfirmed
+	feeReserve := types.Siacoins(1).Div64(100)
 	wr, err := b.Wallet(context.Background())
 	tt.OK(err)
 	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
 		{
 			Address: wr.Address,
-			Value:   wr.Confirmed.Sub(types.Siacoins(1).Div64(100)), // leave some for the fee
+			Value:   wr.Confirmed.Sub(feeReserve), // leave some for the fee
 		},
 	}, false))
 
-	// There should be hardly any money in the wallet.
+	// check wallet only has the reserve in the confirmed balance
 	wr, err = b.Wallet(context.Background())
 	tt.OK(err)
-	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(types.Siacoins(1).Div64(100)) > 0 {
+	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(feeReserve) > 0 {
 		t.Fatal("wallet should have hardly any confirmed balance")
 	}
 
-	// There shouldn't be any contracts at this point.
+	// there shouldn't be any contracts yet
 	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 0 {
 		t.Fatal("expected 0 contracts", len(contracts))
 	}
 
-	// Enable autopilot by setting it.
+	// enable the autopilot by configuring it
 	cluster.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig)
 
-	// Wait for a contract to form.
+	// wait for a contract to form
 	contractsFormed := cluster.WaitForContracts()
 	if len(contractsFormed) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))

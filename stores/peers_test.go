@@ -17,7 +17,7 @@ func TestPeers(t *testing.T) {
 
 	// assert ErrPeerNotFound before we add it
 	err := ss.UpdatePeerInfo(testPeer, func(info *syncer.PeerInfo) {})
-	if err != ErrPeerNotFound {
+	if err != syncer.ErrPeerNotFound {
 		t.Fatal("expected peer not found")
 	}
 

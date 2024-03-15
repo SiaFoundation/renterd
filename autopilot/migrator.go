@@ -144,7 +144,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 					// fetch worker id once
 					id, err := w.ID(ctx)
 					if err != nil {
-						m.logger.Errorf("failed to fetch worker id: %v", err)
+						m.logger.Errorf("failed to reach worker, err: %v", err)
 						return
 					}
 

@@ -42,31 +42,48 @@ type (
 		events        []eventChange
 
 		contractState map[types.Hash256]contractState
-		hosts         map[types.PublicKey]struct{}
 		mayCommit     bool
 		outputs       map[types.Hash256]outputChange
 		proofs        map[types.Hash256]uint64
 		revisions     map[types.Hash256]revisionUpdate
-		transactions  []txnChange
 	}
 )
 
-func NewChainSubscriber(db *gorm.DB, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, addr types.Address, ancmtMaxAge time.Duration) *chainSubscriber {
+func newChainSubscriber(sqlStore *SQLStore, logger *zap.SugaredLogger, intvls []time.Duration, persistInterval time.Duration, walletAddress types.Address, ancmtMaxAge time.Duration) (*chainSubscriber, error) {
+	// load known contracts
+	var activeFCIDs []fileContractID
+	if err := sqlStore.db.Model(&dbContract{}).
+		Select("fcid").
+		Find(&activeFCIDs).Error; err != nil {
+		return nil, err
+	}
+	var archivedFCIDs []fileContractID
+	if err := sqlStore.db.Model(&dbArchivedContract{}).
+		Select("fcid").
+		Find(&archivedFCIDs).Error; err != nil {
+		return nil, err
+	}
+	knownContracts := make(map[types.FileContractID]struct{})
+	for _, fcid := range append(activeFCIDs, archivedFCIDs...) {
+		knownContracts[types.FileContractID(fcid)] = struct{}{}
+	}
+
 	return &chainSubscriber{
 		announcementMaxAge: ancmtMaxAge,
-		db:                 db,
+		db:                 sqlStore.db,
 		logger:             logger,
 		retryIntervals:     intvls,
-		walletAddress:      addr,
-		lastSave:           time.Now(),
-		persistInterval:    persistInterval,
 
-		contractState: make(map[types.Hash256]contractState),
-		outputs:       make(map[types.Hash256]outputChange),
-		hosts:         make(map[types.PublicKey]struct{}),
-		proofs:        make(map[types.Hash256]uint64),
-		revisions:     make(map[types.Hash256]revisionUpdate),
-	}
+		walletAddress:   walletAddress,
+		lastSave:        time.Now(),
+		persistInterval: persistInterval,
+
+		contractState:  make(map[types.Hash256]contractState),
+		outputs:        make(map[types.Hash256]outputChange),
+		proofs:         make(map[types.Hash256]uint64),
+		revisions:      make(map[types.Hash256]revisionUpdate),
+		knownContracts: knownContracts,
+	}, nil
 }
 
 func (cs *chainSubscriber) Close() error {
@@ -74,12 +91,13 @@ func (cs *chainSubscriber) Close() error {
 	defer cs.mu.Unlock()
 
 	cs.closed = true
-	cs.persistTimer.Stop()
-	select {
-	case <-cs.persistTimer.C:
-	default:
+	if cs.persistTimer != nil {
+		cs.persistTimer.Stop()
+		select {
+		case <-cs.persistTimer.C:
+		default:
+		}
 	}
-
 	return nil
 }
 
@@ -95,7 +113,9 @@ func (cs *chainSubscriber) ProcessChainApplyUpdate(cau *chain.ApplyUpdate, mayCo
 
 	cs.processChainApplyUpdateHostDB(cau)
 	cs.processChainApplyUpdateContracts(cau)
-	// TODO: handle wallet here
+	if err := cs.processChainApplyUpdateWallet(cau); err != nil {
+		return err
+	}
 
 	cs.tip = cau.State.Index
 	cs.mayCommit = mayCommit
@@ -115,7 +135,9 @@ func (cs *chainSubscriber) ProcessChainRevertUpdate(cru *chain.RevertUpdate) err
 
 	cs.processChainRevertUpdateHostDB(cru)
 	cs.processChainRevertUpdateContracts(cru)
-	// TODO: handle wallet here
+	if err := cs.processChainRevertUpdateWallet(cru); err != nil {
+		return err
+	}
 
 	cs.tip = cru.State.Index
 	cs.mayCommit = true
@@ -127,6 +149,12 @@ func (cs *chainSubscriber) Tip() types.ChainIndex {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return cs.tip
+}
+
+func (cs *chainSubscriber) addKnownContract(id types.FileContractID) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.knownContracts[id] = struct{}{}
 }
 
 func (cs *chainSubscriber) isKnownContract(id types.FileContractID) bool {
@@ -158,11 +186,15 @@ func (cs *chainSubscriber) commit() error {
 			if err = insertAnnouncements(tx, cs.announcements); err != nil {
 				return fmt.Errorf("%w; failed to insert %d announcements", err, len(cs.announcements))
 			}
-		}
-		if len(cs.hosts) > 0 && (len(allowlist)+len(blocklist)) > 0 {
-			for host := range cs.hosts {
-				if err := updateBlocklist(tx, host, allowlist, blocklist); err != nil {
-					cs.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
+			if len(allowlist)+len(blocklist) > 0 {
+				updated := make(map[types.PublicKey]struct{})
+				for _, ann := range cs.announcements {
+					if _, seen := updated[ann.hk]; !seen {
+						updated[ann.hk] = struct{}{}
+						if err := updateBlocklist(tx, ann.hk, allowlist, blocklist); err != nil {
+							cs.logger.Error(fmt.Sprintf("failed to update blocklist, err: %v", err))
+						}
+					}
 				}
 			}
 		}
@@ -178,22 +210,22 @@ func (cs *chainSubscriber) commit() error {
 		}
 		for _, oc := range cs.outputs {
 			if oc.addition {
-				err = applyUnappliedOutputAdditions(tx, oc.sco)
+				err = applyUnappliedOutputAdditions(tx, oc.se)
 			} else {
-				err = applyUnappliedOutputRemovals(tx, oc.oid)
+				err = applyUnappliedOutputRemovals(tx, oc.se.OutputID)
 			}
 			if err != nil {
 				return fmt.Errorf("%w; failed to apply unapplied output change", err)
 			}
 		}
-		for _, tc := range cs.transactions {
+		for _, tc := range cs.events {
 			if tc.addition {
-				err = applyUnappliedTxnAdditions(tx, tc.txn)
+				err = applyUnappliedEventAdditions(tx, tc.event)
 			} else {
-				err = applyUnappliedTxnRemovals(tx, tc.txnID)
+				err = applyUnappliedEventRemovals(tx, tc.event.EventID)
 			}
 			if err != nil {
-				return fmt.Errorf("%w; failed to apply unapplied txn change", err)
+				return fmt.Errorf("%w; failed to apply unapplied event change", err)
 			}
 		}
 		for fcid, cs := range cs.contractState {
@@ -212,28 +244,24 @@ func (cs *chainSubscriber) commit() error {
 
 	cs.announcements = nil
 	cs.contractState = make(map[types.Hash256]contractState)
-	cs.hosts = make(map[types.PublicKey]struct{})
 	cs.mayCommit = false
-	cs.outputs = nil
+	cs.outputs = make(map[types.Hash256]outputChange)
 	cs.proofs = make(map[types.Hash256]uint64)
 	cs.revisions = make(map[types.Hash256]revisionUpdate)
-	cs.transactions = nil
+	cs.events = nil
 	cs.lastSave = time.Now()
 	return nil
 }
 
 // shouldCommit returns whether the subscriber should commit its buffered state.
 func (cs *chainSubscriber) shouldCommit() bool {
-	mayCommit := cs.mayCommit
-	persistIntervalPassed := time.Since(cs.lastSave) > cs.persistInterval
-	hasAnnouncements := len(cs.announcements) > 0
-	hasRevisions := len(cs.revisions) > 0
-	hasProofs := len(cs.proofs) > 0
-	hasOutputChanges := len(cs.outputs) > 0
-	hasTxnChanges := len(cs.transactions) > 0
-	hasContractState := len(cs.contractState) > 0
-	return mayCommit || persistIntervalPassed || hasAnnouncements || hasRevisions ||
-		hasProofs || hasOutputChanges || hasTxnChanges || hasContractState
+	return cs.mayCommit && (time.Since(cs.lastSave) > cs.persistInterval ||
+		len(cs.announcements) > 0 ||
+		len(cs.revisions) > 0 ||
+		len(cs.proofs) > 0 ||
+		len(cs.outputs) > 0 ||
+		len(cs.events) > 0 ||
+		len(cs.contractState) > 0)
 }
 
 func (cs *chainSubscriber) tryCommit() error {
@@ -242,9 +270,17 @@ func (cs *chainSubscriber) tryCommit() error {
 		return nil
 	} else if err := cs.commit(); err != nil {
 		cs.logger.Errorw("failed to commit chain update", zap.Error(err))
+		return err
 	}
 
 	// force a persist if no block has been received for some time
+	if cs.persistTimer != nil {
+		cs.persistTimer.Stop()
+		select {
+		case <-cs.persistTimer.C:
+		default:
+		}
+	}
 	cs.persistTimer = time.AfterFunc(10*time.Second, func() {
 		cs.mu.Lock()
 		defer cs.mu.Unlock()
@@ -267,12 +303,12 @@ func (cs *chainSubscriber) processChainApplyUpdateHostDB(cau *chain.ApplyUpdate)
 			return // ignore
 		}
 		cs.announcements = append(cs.announcements, announcement{
-			HostAnnouncement: ha,
 			blockHeight:      cau.State.Index.Height,
 			blockID:          b.ID(),
+			hk:               hk,
 			timestamp:        b.Timestamp,
+			HostAnnouncement: ha,
 		})
-		cs.hosts[types.PublicKey(hk)] = struct{}{}
 	})
 }
 
@@ -287,7 +323,7 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 	}
 
 	// generic helper for processing v1 and v2 contracts
-	processContract := func(fcid types.Hash256, rev *revision, resolved, valid bool) {
+	processContract := func(fcid types.Hash256, rev revision, resolved, valid bool) {
 		// ignore irrelevant contracts
 		if !cs.isKnownContract(types.FileContractID(fcid)) {
 			return
@@ -302,18 +338,16 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 		}
 
 		// renewed: 'active' -> 'complete'
-		if rev != nil {
-			cs.revisions[fcid] = revisionUpdate{
-				height: cau.State.Index.Height,
-				number: rev.revisionNumber,
-				size:   rev.fileSize,
-			}
-			if rev.revisionNumber == types.MaxRevisionNumber && rev.fileSize == 0 {
-				cs.contractState[fcid] = contractStateComplete // renewed: 'active' -> 'complete'
-				cs.logger.Infow("contract state changed: active -> complete",
-					"fcid", fcid,
-					"reason", "final revision confirmed")
-			}
+		if rev.revisionNumber == types.MaxRevisionNumber && rev.fileSize == 0 {
+			cs.contractState[fcid] = contractStateComplete // renewed: 'active' -> 'complete'
+			cs.logger.Infow("contract state changed: active -> complete",
+				"fcid", fcid,
+				"reason", "final revision confirmed")
+		}
+		cs.revisions[fcid] = revisionUpdate{
+			height: cau.State.Index.Height,
+			number: rev.revisionNumber,
+			size:   rev.fileSize,
 		}
 
 		// storage proof: 'active' -> 'complete/failed'
@@ -335,27 +369,30 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 
 	// v1 contracts
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
-		var r *revision
+		var r revision
 		if rev != nil {
-			r = &revision{
-				revisionNumber: rev.FileContract.RevisionNumber,
-				fileSize:       rev.FileContract.Filesize,
-			}
+			r.revisionNumber = rev.FileContract.RevisionNumber
+			r.fileSize = rev.FileContract.Filesize
+		} else {
+			r.revisionNumber = fce.FileContract.RevisionNumber
+			r.fileSize = fce.FileContract.Filesize
 		}
 		processContract(fce.ID, r, resolved, valid)
 	})
 
 	// v2 contracts
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		var r *revision
+		var r revision
 		if rev != nil {
-			r = &revision{
-				revisionNumber: rev.V2FileContract.RevisionNumber,
-				fileSize:       rev.V2FileContract.Filesize,
-			}
+			r.revisionNumber = rev.V2FileContract.RevisionNumber
+			r.fileSize = rev.V2FileContract.Filesize
+		} else {
+			r.revisionNumber = fce.V2FileContract.RevisionNumber
+			r.fileSize = fce.V2FileContract.Filesize
 		}
-		resolved := res != nil
-		valid := false
+
+		var valid bool
+		var resolved bool
 		if res != nil {
 			switch res.(type) {
 			case *types.V2FileContractFinalization:
@@ -367,6 +404,8 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 			case *types.V2FileContractExpiration:
 				valid = fce.V2FileContract.Filesize == 0
 			}
+
+			resolved = true
 		}
 		processContract(fce.ID, r, resolved, valid)
 	})
@@ -465,6 +504,14 @@ func (cs *chainSubscriber) processChainRevertUpdateContracts(cru *chain.RevertUp
 		}
 		processContract(fce.ID, prevRev, r, resolved, valid)
 	})
+}
+
+func (cs *chainSubscriber) processChainApplyUpdateWallet(cau *chain.ApplyUpdate) error {
+	return wallet.ApplyChainUpdates(cs, cs.walletAddress, []*chain.ApplyUpdate{cau})
+}
+
+func (cs *chainSubscriber) processChainRevertUpdateWallet(cru *chain.RevertUpdate) error {
+	return wallet.RevertChainUpdate(cs, cs.walletAddress, cru)
 }
 
 func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {

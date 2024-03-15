@@ -62,6 +62,12 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, dbIdentifier, "00006_peer_store", logger)
 			},
 		},
+		{
+			ID: "00006_coreutils_wallet",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00006_coreutils_wallet", logger)
+			},
+		},
 	}
 
 	// Create migrator.

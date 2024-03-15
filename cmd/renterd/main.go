@@ -386,10 +386,11 @@ func main() {
 		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
 	}
 
-	network, _ := build.Network()
+	network, genesis := build.Network()
 	busCfg := node.BusConfig{
 		Bus:                 cfg.Bus,
 		Network:             network,
+		Genesis:             genesis,
 		SlabPruningInterval: time.Hour,
 		SlabPruningCooldown: 30 * time.Second,
 	}
@@ -483,13 +484,13 @@ func main() {
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, shutdown, _, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
 		shutdownFns = append(shutdownFns, shutdownFn{
 			name: "Bus",
-			fn:   fn,
+			fn:   shutdown,
 		})
 
 		mux.sub["/api/bus"] = treeMux{h: auth(b)}

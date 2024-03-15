@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -14,8 +15,11 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
@@ -31,12 +35,12 @@ import (
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
+	stypes "go.sia.tech/siad/types"
 )
 
 const (
 	testBusFlushInterval   = 100 * time.Millisecond
 	testBusPersistInterval = 2 * time.Second
-	latestHardforkHeight   = 50 // foundation hardfork height in testing
 )
 
 var (
@@ -61,7 +65,7 @@ type TestCluster struct {
 	s3ShutdownFns        []func(context.Context) error
 
 	network *consensus.Network
-	miner   *node.Miner
+	cm      *chain.Manager
 	apID    string
 	dbName  string
 	dir     string
@@ -186,8 +190,6 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
-	t.Helper()
-
 	// Skip any test that requires a cluster when running short tests.
 	if testing.Short() {
 		t.SkipNow()
@@ -298,11 +300,8 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	})
 	tt.OK(err)
 
-	// Create miner.
-	busCfg.Miner = node.NewMiner(busClient)
-
 	// Create bus.
-	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -312,7 +311,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	var busShutdownFns []func(context.Context) error
 	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
-	busShutdownFns = append(busShutdownFns, bStopFn)
+	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
 	w, wShutdownFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
@@ -357,7 +356,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		dbName:  dbName,
 		logger:  logger,
 		network: busCfg.Network,
-		miner:   busCfg.Miner,
+		cm:      cm,
 		tt:      tt,
 		wk:      wk,
 
@@ -425,25 +424,21 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(latestHardforkHeight)
-		tt.Retry(1000, 100*time.Millisecond, func() error {
-			resp, err := busClient.ConsensusState(ctx)
-			if err != nil {
+		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		tt.Retry(100, 100*time.Millisecond, func() error {
+			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
+			} else if !cs.Synced {
+				return fmt.Errorf("chain not synced: %v", cs.Synced)
 			}
 
-			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
-				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
-			}
-			res, err := cluster.Bus.Wallet(ctx)
-			if err != nil {
+			if res, err := cluster.Bus.Wallet(ctx); err != nil {
 				return err
+			} else if res.Confirmed.IsZero() {
+				return fmt.Errorf("wallet not funded: %+v", res)
+			} else {
+				return nil
 			}
-
-			if res.Confirmed.IsZero() {
-				tt.Fatal("wallet not funded")
-			}
-			return nil
 		})
 	}
 
@@ -451,7 +446,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
-		_ = cluster.WaitForAccounts()
+		cluster.WaitForAccounts()
 	}
 
 	return cluster
@@ -502,7 +497,7 @@ func (c *TestCluster) MineToRenewWindow() {
 	if cs.BlockHeight >= renewWindowStart {
 		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
-	c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
+	c.MineBlocks(renewWindowStart - cs.BlockHeight)
 	c.Sync()
 }
 
@@ -541,24 +536,26 @@ func (c *TestCluster) synced(hosts []*Host) (bool, error) {
 }
 
 // MineBlocks uses the bus' miner to mine n blocks.
-func (c *TestCluster) MineBlocks(n int) {
+func (c *TestCluster) MineBlocks(n uint64) {
 	c.tt.Helper()
 	wallet, err := c.Bus.Wallet(context.Background())
 	c.tt.OK(err)
 
 	// If we don't have any hosts in the cluster mine all blocks right away.
 	if len(c.hosts) == 0 {
-		c.tt.OK(c.miner.Mine(wallet.Address, n))
+		c.tt.OK(c.mineBlocks(wallet.Address, n))
 		c.Sync()
+		return
 	}
+
 	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
 	// hosts by too many blocks.
-	for mined := 0; mined < n; {
+	for mined := uint64(0); mined < n; {
 		toMine := n - mined
 		if toMine > 10 {
 			toMine = 10
 		}
-		c.tt.OK(c.miner.Mine(wallet.Address, toMine))
+		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
 		c.Sync()
 		mined += toMine
 	}
@@ -584,6 +581,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 
 func (c *TestCluster) WaitForContracts() []api.Contract {
 	c.tt.Helper()
+
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
@@ -677,7 +675,11 @@ func (c *TestCluster) AddHost(h *Host) {
 	res, err := c.Bus.Wallet(context.Background())
 	c.tt.OK(err)
 
-	fundAmt := res.Confirmed.Div64(2).Div64(uint64(len(c.hosts))) // 50% of bus balance
+	// Fund host with one blockreward
+	fundAmt := c.cm.TipState().BlockReward()
+	for fundAmt.Cmp(res.Confirmed) > 0 {
+		c.tt.Fatal("not enough funds to fund host")
+	}
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
@@ -833,43 +835,56 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	})
 }
 
-// testNetwork returns a custom network for testing which matches the
-// configuration of siad consensus in testing.
-func testNetwork() *consensus.Network {
-	n := &consensus.Network{
-		InitialCoinbase: types.Siacoins(300000),
-		MinimumCoinbase: types.Siacoins(299990),
-		InitialTarget:   types.BlockID{4: 32},
+func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
+	for i := uint64(0); i < n; i++ {
+		if block, found := coreutils.MineBlock(c.cm, addr, time.Second); !found {
+			return errors.New("failed to find block")
+		} else if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
-	n.HardforkDevAddr.Height = 3
-	n.HardforkDevAddr.OldAddress = types.Address{}
-	n.HardforkDevAddr.NewAddress = types.Address{}
+func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
+	var buf bytes.Buffer
+	siad.MarshalSia(&buf)
+	d := types.NewBufDecoder(buf.Bytes())
+	core.DecodeFrom(d)
+	if d.Err() != nil {
+		panic(d.Err())
+	}
+}
 
-	n.HardforkTax.Height = 10
+// testNetwork returns a modified version of Zen used for testing
+func testNetwork() (*consensus.Network, types.Block) {
+	// use a modified version of Zen
+	n, genesis := chain.TestnetZen()
 
-	n.HardforkStorageProof.Height = 10
+	// we have to set the initial target to 128 to ensure blocks we mine match
+	// the PoW testnet in siad testnet consensu
+	n.InitialTarget = types.BlockID{0x80}
 
-	n.HardforkOak.Height = 20
-	n.HardforkOak.FixHeight = 23
-	n.HardforkOak.GenesisTimestamp = time.Now().Add(-1e6 * time.Second)
-
-	n.HardforkASIC.Height = 5
-	n.HardforkASIC.OakTime = 10000 * time.Second
-	n.HardforkASIC.OakTarget = types.BlockID{255, 255}
-
-	n.HardforkFoundation.Height = 50
-	n.HardforkFoundation.PrimaryAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
-	n.HardforkFoundation.FailsafeAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
-
-	// make it difficult to reach v2 in most tests
+	// we have to make minimum coinbase get hit after 10 blocks to ensure we
+	// match the siad test network settings, otherwise the blocksubsidy is
+	// considered invalid after 10 blocks
+	n.MinimumCoinbase = types.Siacoins(299990)
+	n.HardforkDevAddr.Height = 1
+	n.HardforkTax.Height = 1
+	n.HardforkStorageProof.Height = 1
+	n.HardforkOak.Height = 1
+	n.HardforkASIC.Height = 1
+	n.HardforkFoundation.Height = 1
 	n.HardforkV2.AllowHeight = 1000
 	n.HardforkV2.RequireHeight = 1020
 
-	return n
+	// TODO: remove once we got rid of all siad dependencies
+	convertToCore(stypes.GenesisBlock, (*types.V1Block)(&genesis))
+	return n, genesis
 }
 
 func testBusCfg() node.BusConfig {
+	network, genesis := testNetwork()
 	return node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
@@ -879,7 +894,8 @@ func testBusCfg() node.BusConfig {
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
-		Network:             testNetwork(),
+		Network:             network,
+		Genesis:             genesis,
 		SlabPruningInterval: time.Second,
 		SlabPruningCooldown: 10 * time.Millisecond,
 	}

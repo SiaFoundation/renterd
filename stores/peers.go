@@ -34,11 +34,6 @@ type (
 )
 
 var (
-	// TODO: use syncer.ErrPeerNotFound when added
-	ErrPeerNotFound = errors.New("peer not found")
-)
-
-var (
 	_ syncer.PeerStore = (*SQLStore)(nil)
 )
 
@@ -88,6 +83,22 @@ func (s *SQLStore) Peers() ([]syncer.PeerInfo, error) {
 	return infos, nil
 }
 
+// PeerInfo returns the metadata for the specified peer or ErrPeerNotFound
+// if the peer wasn't found in the store.
+func (s *SQLStore) PeerInfo(addr string) (syncer.PeerInfo, error) {
+	var peer dbSyncerPeer
+	err := s.db.
+		Where("address = ?", addr).
+		Take(&peer).
+		Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return syncer.PeerInfo{}, syncer.ErrPeerNotFound
+	} else if err != nil {
+		return syncer.PeerInfo{}, err
+	}
+	return peer.info(), nil
+}
+
 // UpdatePeerInfo updates the metadata for the specified peer. If the peer
 // is not found, the error should be ErrPeerNotFound.
 func (s *SQLStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
@@ -98,7 +109,7 @@ func (s *SQLStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error 
 			Take(&peer).
 			Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrPeerNotFound
+			return syncer.ErrPeerNotFound
 		} else if err != nil {
 			return err
 		}

@@ -2993,12 +2993,6 @@ func TestContractSizes(t *testing.T) {
 	if n := prunableData(nil); n != 0 {
 		t.Fatal("expected no prunable data", n)
 	}
-
-	// assert passing a non-existent fcid returns an error
-	_, err = ss.ContractSize(context.Background(), types.FileContractID{9})
-	if err != api.ErrContractNotFound {
-		t.Fatal(err)
-	}
 }
 
 // dbObject retrieves a dbObject from the store.
