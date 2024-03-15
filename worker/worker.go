@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/prometheus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
@@ -221,6 +222,34 @@ type worker struct {
 	shutdownCtxCancel context.CancelFunc
 
 	logger *zap.SugaredLogger
+}
+
+func (w *worker) writeResponse(c jape.Context, code int, resp any) {
+	var responseFormat string
+	if err := c.DecodeForm("response", &responseFormat); err != nil {
+		return
+	}
+
+	if resp != nil {
+		switch responseFormat {
+		case "prometheus":
+			v, ok := resp.(prometheus.Marshaller)
+			if !ok {
+				err := fmt.Errorf("response does not implement prometheus.Marshaller %T", resp)
+				c.Error(err, http.StatusInternalServerError)
+				w.logger.Error("response does not implement prometheus.Marshaller", zap.Stack("stack"), zap.Error(err))
+				return
+			}
+
+			enc := prometheus.NewEncoder(c.ResponseWriter)
+			if err := enc.Append(v); err != nil {
+				w.logger.Error("failed to marshal prometheus response", zap.Error(err))
+				return
+			}
+		default:
+			c.Encode(resp)
+		}
+	}
 }
 
 func (w *worker) isStopped() bool {
@@ -820,13 +849,13 @@ func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
 	})
 
 	// encode response
-	jc.Encode(api.DownloadStatsResponse{
+	w.writeResponse(jc, http.StatusOK, DownloadStatsResp(api.DownloadStatsResponse{
 		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyDownloaders:   healthy,
 		NumDownloaders:       uint64(len(stats.downloaders)),
 		DownloadersStats:     dss,
-	})
+	}))
 }
 
 func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
@@ -845,13 +874,13 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 
 	// encode response
-	jc.Encode(api.UploadStatsResponse{
+	w.writeResponse(jc, http.StatusOK, UploadStatsResp(api.UploadStatsResponse{
 		AvgSlabUploadSpeedMBPS: math.Ceil(stats.avgSlabUploadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:        math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyUploaders:       stats.healthyUploaders,
 		NumUploaders:           stats.numUploaders,
 		UploadersStats:         uss,
-	})
+	}))
 }
 
 func (w *worker) objectsHandlerHEAD(jc jape.Context) {
@@ -1301,10 +1330,10 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 }
 
 func (w *worker) memoryGET(jc jape.Context) {
-	jc.Encode(api.MemoryResponse{
+	w.writeResponse(jc, http.StatusOK, MemoryResp(api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
 		Upload:   w.uploadManager.mm.Status(),
-	})
+	}))
 }
 
 func (w *worker) accountHandlerGET(jc jape.Context) {
