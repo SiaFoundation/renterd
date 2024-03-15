@@ -323,7 +323,7 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 	}
 
 	// generic helper for processing v1 and v2 contracts
-	processContract := func(fcid types.Hash256, rev *revision, resolved, valid bool) {
+	processContract := func(fcid types.Hash256, rev revision, resolved, valid bool) {
 		// ignore irrelevant contracts
 		if !cs.isKnownContract(types.FileContractID(fcid)) {
 			return
@@ -338,18 +338,16 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 		}
 
 		// renewed: 'active' -> 'complete'
-		if rev != nil {
-			cs.revisions[fcid] = revisionUpdate{
-				height: cau.State.Index.Height,
-				number: rev.revisionNumber,
-				size:   rev.fileSize,
-			}
-			if rev.revisionNumber == types.MaxRevisionNumber && rev.fileSize == 0 {
-				cs.contractState[fcid] = contractStateComplete // renewed: 'active' -> 'complete'
-				cs.logger.Infow("contract state changed: active -> complete",
-					"fcid", fcid,
-					"reason", "final revision confirmed")
-			}
+		if rev.revisionNumber == types.MaxRevisionNumber && rev.fileSize == 0 {
+			cs.contractState[fcid] = contractStateComplete // renewed: 'active' -> 'complete'
+			cs.logger.Infow("contract state changed: active -> complete",
+				"fcid", fcid,
+				"reason", "final revision confirmed")
+		}
+		cs.revisions[fcid] = revisionUpdate{
+			height: cau.State.Index.Height,
+			number: rev.revisionNumber,
+			size:   rev.fileSize,
 		}
 
 		// storage proof: 'active' -> 'complete/failed'
@@ -371,30 +369,31 @@ func (cs *chainSubscriber) processChainApplyUpdateContracts(cau *chain.ApplyUpda
 
 	// v1 contracts
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
-		r := &revision{
-			revisionNumber: fce.FileContract.RevisionNumber,
-			fileSize:       fce.FileContract.Filesize,
-		}
+		var r revision
 		if rev != nil {
 			r.revisionNumber = rev.FileContract.RevisionNumber
 			r.fileSize = rev.FileContract.Filesize
+		} else {
+			r.revisionNumber = fce.FileContract.RevisionNumber
+			r.fileSize = fce.FileContract.Filesize
 		}
 		processContract(fce.ID, r, resolved, valid)
 	})
 
 	// v2 contracts
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		r := &revision{
-			revisionNumber: fce.V2FileContract.RevisionNumber,
-			fileSize:       fce.V2FileContract.Filesize,
+		var r revision
+		if rev != nil {
+			r.revisionNumber = rev.V2FileContract.RevisionNumber
+			r.fileSize = rev.V2FileContract.Filesize
+		} else {
+			r.revisionNumber = fce.V2FileContract.RevisionNumber
+			r.fileSize = fce.V2FileContract.Filesize
 		}
 
 		var valid bool
 		var resolved bool
 		if res != nil {
-			r.revisionNumber = rev.V2FileContract.RevisionNumber
-			r.fileSize = rev.V2FileContract.Filesize
-
 			switch res.(type) {
 			case *types.V2FileContractFinalization:
 				valid = true
