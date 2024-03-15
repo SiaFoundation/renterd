@@ -54,11 +54,14 @@ func (s setting) String() string {
 
 // Scan scans value into the setting
 func (s *setting) Scan(value interface{}) error {
-	str, ok := value.(string)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal setting value:", value))
+	switch value := value.(type) {
+	case string:
+		*s = setting(value)
+	case []byte:
+		*s = setting(value)
+	default:
+		return fmt.Errorf("failed to unmarshal setting value from type %t", value)
 	}
-	*s = setting(str)
 	return nil
 }
 
