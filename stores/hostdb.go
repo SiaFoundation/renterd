@@ -80,6 +80,45 @@ type (
 		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
+	// dbHostInfo contains information about a host that is collected and used
+	// by the autopilot.
+	dbHostInfo struct {
+		Model
+
+		DBAutopilotID uint `gorm:"index:idx_host_infos_id,unique"`
+		DBAutopilot   dbAutopilot
+
+		DBHostID uint `gorm:"index:idx_host_infos_id,unique"`
+		DBHost   dbHost
+
+		// usability
+		UsabilityBlocked               bool `gorm:"index:idx_host_infos_usability_blocked"`
+		UsabilityOffline               bool `gorm:"index:idx_host_infos_usability_offline"`
+		UsabilityLowScore              bool `gorm:"index:idx_host_infos_usability_low_score"`
+		UsabilityRedundantIP           bool `gorm:"index:idx_host_infos_usability_redundant_ip"`
+		UsabilityGouging               bool `gorm:"index:idx_host_infos_usability_gouging"`
+		UsabilityNotAcceptingContracts bool `gorm:"index:idx_host_infos_usability_not_accepting_contracts"`
+		UsabilityNotAnnounced          bool `gorm:"index:idx_host_infos_usability_not_announced"`
+		UsabilityNotCompletingScan     bool `gorm:"index:idx_host_infos_usability_not_completing_scan"`
+		UsabilityUnknown               bool `gorm:"index:idx_host_infos_usability_unknown"`
+
+		// score
+		ScoreAge              float64 `gorm:"index:idx_host_infos_score_age"`
+		ScoreCollateral       float64 `gorm:"index:idx_host_infos_score_collateral"`
+		ScoreInteractions     float64 `gorm:"index:idx_host_infos_score_interactions"`
+		ScoreStorageRemaining float64 `gorm:"index:idx_host_infos_score_storage_remaining"`
+		ScoreUptime           float64 `gorm:"index:idx_host_infos_score_uptime"`
+		ScoreVersion          float64 `gorm:"index:idx_host_infos_score_version"`
+		ScorePrices           float64 `gorm:"index:idx_host_infos_score_prices"`
+
+		// gouging
+		GougingContractErr string
+		GougingDownloadErr string
+		GougingGougingErr  string
+		GougingPruneErr    string
+		GougingUploadErr   string
+	}
+
 	// dbAllowlistEntry defines a table that stores the host blocklist.
 	dbAllowlistEntry struct {
 		Model
@@ -276,6 +315,9 @@ func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 func (dbHost) TableName() string { return "hosts" }
 
 // TableName implements the gorm.Tabler interface.
+func (dbHostInfo) TableName() string { return "host_infos" }
+
+// TableName implements the gorm.Tabler interface.
 func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
 
 // TableName implements the gorm.Tabler interface.
@@ -315,6 +357,70 @@ func (h dbHost) convert() hostdb.Host {
 		PublicKey: types.PublicKey(h.PublicKey),
 		Scanned:   h.Scanned,
 		Settings:  h.Settings.convert(),
+	}
+}
+
+func (hi dbHostInfo) convert() api.HostInfo {
+	return api.HostInfo{
+		Host: hi.DBHost.convert(),
+		Gouging: api.HostGougingBreakdown{
+			ContractErr: hi.GougingContractErr,
+			DownloadErr: hi.GougingDownloadErr,
+			GougingErr:  hi.GougingGougingErr,
+			PruneErr:    hi.GougingPruneErr,
+			UploadErr:   hi.GougingUploadErr,
+		},
+		Score: api.HostScoreBreakdown{
+			Age:              hi.ScoreAge,
+			Collateral:       hi.ScoreCollateral,
+			Interactions:     hi.ScoreInteractions,
+			StorageRemaining: hi.ScoreStorageRemaining,
+			Uptime:           hi.ScoreUptime,
+			Version:          hi.ScoreVersion,
+			Prices:           hi.ScorePrices,
+		},
+		Usability: api.HostUsabilityBreakdown{
+			Blocked:               hi.UsabilityBlocked,
+			Offline:               hi.UsabilityOffline,
+			LowScore:              hi.UsabilityLowScore,
+			RedundantIP:           hi.UsabilityRedundantIP,
+			Gouging:               hi.UsabilityGouging,
+			NotAcceptingContracts: hi.UsabilityNotAcceptingContracts,
+			NotAnnounced:          hi.UsabilityNotAnnounced,
+			NotCompletingScan:     hi.UsabilityNotCompletingScan,
+			Unknown:               hi.UsabilityUnknown,
+		},
+	}
+}
+
+func convertHostInfo(apID, hID uint, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) *dbHostInfo {
+	return &dbHostInfo{
+		DBAutopilotID: apID,
+		DBHostID:      hID,
+
+		UsabilityBlocked:               usability.Blocked,
+		UsabilityOffline:               usability.Offline,
+		UsabilityLowScore:              usability.LowScore,
+		UsabilityRedundantIP:           usability.RedundantIP,
+		UsabilityGouging:               usability.Gouging,
+		UsabilityNotAcceptingContracts: usability.NotAcceptingContracts,
+		UsabilityNotAnnounced:          usability.NotAnnounced,
+		UsabilityNotCompletingScan:     usability.NotCompletingScan,
+		UsabilityUnknown:               usability.Unknown,
+
+		ScoreAge:              score.Age,
+		ScoreCollateral:       score.Collateral,
+		ScoreInteractions:     score.Interactions,
+		ScoreStorageRemaining: score.StorageRemaining,
+		ScoreUptime:           score.Uptime,
+		ScoreVersion:          score.Version,
+		ScorePrices:           score.Prices,
+
+		GougingContractErr: gouging.ContractErr,
+		GougingDownloadErr: gouging.DownloadErr,
+		GougingGougingErr:  gouging.GougingErr,
+		GougingPruneErr:    gouging.PruneErr,
+		GougingUploadErr:   gouging.UploadErr,
 	}
 }
 
@@ -441,6 +547,126 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.H
 		Host:    h.convert(),
 		Blocked: ss.isBlocked(h),
 	}, nil
+}
+
+func (ss *SQLStore) HostInfo(ctx context.Context, autopilotID string, hk types.PublicKey) (hi api.HostInfo, err error) {
+	err = ss.db.Transaction(func(tx *gorm.DB) error {
+		// fetch ap id
+		var apID uint
+		if err := tx.
+			Model(&dbAutopilot{}).
+			Where("identifier = ?", autopilotID).
+			Select("id").
+			Take(&apID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrAutopilotNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// fetch host id
+		var hID uint
+		if err := tx.
+			Model(&dbHost{}).
+			Where("public_key = ?", publicKey(hk)).
+			Select("id").
+			Take(&hID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrHostNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// fetch host info
+		var entity dbHostInfo
+		if err := tx.
+			Model(&dbHostInfo{}).
+			Where("db_autopilot_id = ? AND db_host_id = ?", apID, hID).
+			Preload("DBHost").
+			First(&entity).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrHostInfoNotFound
+		} else if err != nil {
+			return err
+		}
+
+		hi = entity.convert()
+		return nil
+	})
+	return
+}
+
+func (ss *SQLStore) HostInfos(ctx context.Context, autopilotID string) (his []api.HostInfo, err error) {
+	err = ss.db.Transaction(func(tx *gorm.DB) error {
+		// fetch ap id
+		var apID uint
+		if err := tx.
+			Model(&dbAutopilot{}).
+			Where("identifier = ?", autopilotID).
+			Select("id").
+			Take(&apID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrAutopilotNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// fetch host info
+		var infos []dbHostInfo
+		if err := tx.
+			Model(&dbHostInfo{}).
+			Where("db_autopilot_id = ?", apID).
+			Preload("DBHost").
+			Find(&infos).
+			Error; err != nil {
+			return err
+		}
+		for _, hi := range infos {
+			his = append(his, hi.convert())
+		}
+		return nil
+	})
+	return
+}
+
+func (ss *SQLStore) UpdateHostInfo(ctx context.Context, autopilotID string, hk types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) (err error) {
+	err = ss.db.Transaction(func(tx *gorm.DB) error {
+		// fetch ap id
+		var apID uint
+		if err := tx.
+			Model(&dbAutopilot{}).
+			Where("identifier = ?", autopilotID).
+			Select("id").
+			Take(&apID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrAutopilotNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// fetch host id
+		var hID uint
+		if err := tx.
+			Model(&dbHost{}).
+			Where("public_key = ?", publicKey(hk)).
+			Select("id").
+			Take(&hID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrHostNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// update host info
+		return tx.
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "db_autopilot_id"}, {Name: "db_host_id"}},
+				UpdateAll: true,
+			}).
+			Create(convertHostInfo(apID, hID, gouging, score, usability)).
+			Error
+	})
+	return
 }
 
 // HostsForScanning returns the address of hosts for scanning.

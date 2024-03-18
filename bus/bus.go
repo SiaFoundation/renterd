@@ -104,6 +104,10 @@ type (
 		HostBlocklist(ctx context.Context) ([]string, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
+
+		HostInfo(ctx context.Context, autopilotID string, hk types.PublicKey) (api.HostInfo, error)
+		HostInfos(ctx context.Context, autopilotID string) ([]api.HostInfo, error)
+		UpdateHostInfo(ctx context.Context, autopilotID string, hk types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -253,6 +257,10 @@ func (b *bus) Handler() http.Handler {
 		"GET    /autopilots":    b.autopilotsListHandlerGET,
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
 		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
+
+		"GET    /autopilot/:id/hosts":         b.autopilotHostInfosHandlerGET,
+		"GET    /autopilot/:id/host/:hostkey": b.autopilotHostInfoHandlerGET,
+		"PUT    /autopilot/:id/host/:hostkey": b.autopilotHostInfoHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -1959,6 +1967,65 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	}
 
 	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
+}
+
+func (b *bus) autopilotHostInfoHandlerGET(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+
+	hi, err := b.hdb.HostInfo(jc.Request.Context(), id, hostKey)
+	if errors.Is(err, api.ErrAutopilotNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch host info", err) != nil {
+		return
+	}
+	jc.Encode(hi)
+}
+
+func (b *bus) autopilotHostInfosHandlerGET(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	his, err := b.hdb.HostInfos(jc.Request.Context(), id)
+	if errors.Is(err, api.ErrAutopilotNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch host infos", err) != nil {
+		return
+	}
+	jc.Encode(his)
+}
+
+func (b *bus) autopilotHostInfoHandlerPUT(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var hostKey types.PublicKey
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	var hir api.UpdateHostInfoRequest
+	if jc.Check("failed to decode host info", jc.Decode(&hir)) != nil {
+		return
+	}
+
+	err := b.hdb.UpdateHostInfo(jc.Request.Context(), id, hostKey, hir.Gouging, hir.Score, hir.Usability)
+	if errors.Is(err, api.ErrAutopilotNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to update host info", err) != nil {
+		return
+	}
 }
 
 func (b *bus) contractTaxHandlerGET(jc jape.Context) {
