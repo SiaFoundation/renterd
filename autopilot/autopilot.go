@@ -804,7 +804,6 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 			// these are not optimised, so we keep the same values as the user
 			// provided
-			MinMaxCollateral:              gs.MinMaxCollateral,
 			HostBlockHeightLeeway:         gs.HostBlockHeightLeeway,
 			MinPriceTableValidity:         gs.MinPriceTableValidity,
 			MinAccountExpiry:              gs.MinAccountExpiry,

@@ -38,10 +38,6 @@ type (
 
 	// GougingSettings contain some price settings used in price gouging.
 	GougingSettings struct {
-		// MinMaxCollateral is the minimum value for 'MaxCollateral' in the host's
-		// price settings
-		MinMaxCollateral types.Currency `json:"minMaxCollateral"`
-
 		// MaxRPCPrice is the maximum allowed base price for RPCs
 		MaxRPCPrice types.Currency `json:"maxRPCPrice"`
 
