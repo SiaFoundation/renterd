@@ -316,7 +316,7 @@ func (ap *Autopilot) Run() error {
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Debug("account refills loop launched")
+					ap.logger.Info("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
 			}
@@ -328,7 +328,7 @@ func (ap *Autopilot) Run() error {
 			if ap.state.cfg.Contracts.Prune {
 				ap.c.tryPerformPruning(ap.workers)
 			} else {
-				ap.logger.Debug("pruning disabled")
+				ap.logger.Info("pruning disabled")
 			}
 		})
 

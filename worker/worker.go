@@ -688,7 +688,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			// sync the account
 			err = h.SyncAccount(ctx, &rev)
 			if err != nil {
-				w.logger.Debugf(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+				w.logger.Infof(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
@@ -1503,9 +1503,9 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 
 		logger = logger.With("elapsed", duration)
 		if err == nil {
-			logger.Debug("successfully scanned host on second try")
+			logger.Info("successfully scanned host on second try")
 		} else if !isErrHostUnreachable(err) {
-			logger.Debugw("failed to scan host", zap.Error(err))
+			logger.Infow("failed to scan host", zap.Error(err))
 		}
 	}
 

@@ -205,7 +205,7 @@ OUTER:
 			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
 			return
 		}
-		m.logger.Debugf("recomputed slab health in %v", time.Since(start))
+		m.logger.Infof("recomputed slab health in %v", time.Since(start))
 
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, set, migratorBatchSize)
@@ -213,7 +213,7 @@ OUTER:
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
 		}
-		m.logger.Debugf("%d potential slabs fetched for migration", len(toMigrateNew))
+		m.logger.Infof("%d potential slabs fetched for migration", len(toMigrateNew))
 
 		// merge toMigrateNew with toMigrate
 		// NOTE: when merging, we remove all slabs from toMigrate that don't
@@ -248,7 +248,7 @@ OUTER:
 		migrateNewMap = nil // free map
 
 		// log the updated list of slabs to migrate
-		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+		m.logger.Infof("%d slabs to migrate", len(toMigrate))
 
 		// register an alert to notify users about ongoing migrations.
 		if len(toMigrate) > 0 {

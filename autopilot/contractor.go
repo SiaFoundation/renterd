@@ -212,7 +212,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	for _, c := range currentSet {
 		isInCurrentSet[c.ID] = struct{}{}
 	}
-	c.logger.Debugf("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
+	c.logger.Infof("contract set '%s' holds %d contracts", state.cfg.Contracts.Set, len(currentSet))
 
 	// fetch all contracts from the worker.
 	start := time.Now()
@@ -224,7 +224,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Error(resp.Error)
 	}
 	contracts := resp.Contracts
-	c.logger.Debugf("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
+	c.logger.Infof("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
 
 	// run revision broadcast
 	c.runRevisionBroadcast(ctx, w, contracts, isInCurrentSet)
@@ -317,7 +317,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// archive contracts
 	if len(toArchive) > 0 {
-		c.logger.Debugf("archiving %d contracts: %+v", len(toArchive), toArchive)
+		c.logger.Infof("archiving %d contracts: %+v", len(toArchive), toArchive)
 		if err := c.ap.bus.ArchiveContracts(ctx, toArchive); err != nil {
 			c.logger.Errorf("failed to archive contracts, err: %v", err) // continue
 		}
@@ -487,7 +487,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 				Time:   now,
 			})
 			setRemovals[contract.ID] = removals
-			c.logger.Debugf("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
+			c.logger.Infof("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
 		}
 	}
 	for _, contract := range newSet {
@@ -505,7 +505,7 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 				Time: now,
 			})
 			setAdditions[contract.ID] = additions
-			c.logger.Debugf("contract %v was added to the contract set, size: %v", contract.ID, contractData[contract.ID])
+			c.logger.Infof("contract %v was added to the contract set, size: %v", contract.ID, contractData[contract.ID])
 		}
 	}
 
@@ -513,12 +513,12 @@ func (c *contractor) computeContractSetChanged(ctx context.Context, name string,
 	for _, fcid := range renewed {
 		_, exists := inNewSet[fcid.to.ID]
 		if !exists {
-			c.logger.Debugf("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to.ID])
+			c.logger.Infof("contract %v was renewed but did not make it into the contract set, size: %v", fcid, contractData[fcid.to.ID])
 		}
 	}
 
 	// log a warning if the contract set does not contain enough contracts
-	logFn := c.logger.Debugw
+	logFn := c.logger.Infow
 	if len(newSet) < int(c.ap.State().rs.TotalShards) {
 		logFn = c.logger.Warnw
 	}
@@ -626,7 +626,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	for _, txn := range pending {
 		for _, mTxnID := range c.maintenanceTxnIDs {
 			if mTxnID == txn.ID() {
-				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
+				l.Infof("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
 			}
 		}
@@ -640,7 +640,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		return err
 	}
 	if uint64(len(available)) >= uint64(wantedNumOutputs) {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
+		l.Infof("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
 		return nil
 	}
 	wantedNumOutputs -= len(available)
@@ -654,7 +654,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", wantedNumOutputs, amount, balance, err)
 	}
 
-	l.Debugf("wallet maintenance succeeded, txns %v", ids)
+	l.Infof("wallet maintenance succeeded, txns %v", ids)
 	c.maintenanceTxnIDs = ids
 	return nil
 }
@@ -663,7 +663,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	if c.ap.isStopped() {
 		return
 	}
-	c.logger.Debug("running contract checks")
+	c.logger.Info("running contract checks")
 
 	// convenience variables
 	state := c.ap.State()
@@ -685,7 +685,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 	var notfound int
 	defer func() {
-		c.logger.Debugw(
+		c.logger.Infow(
 			"contracts checks completed",
 			"contracts", len(contracts),
 			"notfound", notfound,
@@ -853,7 +853,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, candid
 	state := c.ap.State()
 	shouldFilter := !state.cfg.Hosts.AllowRedundantIPs
 
-	c.logger.Debugw(
+	c.logger.Infow(
 		"run contract formations",
 		"usedHosts", len(usedHosts),
 		"required", state.cfg.Contracts.Amount,
@@ -861,7 +861,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, candid
 		"budget", budget,
 	)
 	defer func() {
-		c.logger.Debugw(
+		c.logger.Infow(
 			"contract formations completed",
 			"formed", len(formed),
 			"budget", budget,
@@ -873,7 +873,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, candid
 	selected := candidates.randSelectByScore(wanted)
 
 	// print warning if we couldn't find enough hosts were found
-	c.logger.Debugf("looking for %d candidate hosts", wanted)
+	c.logger.Infof("looking for %d candidate hosts", wanted)
 	if len(selected) < wanted {
 		msg := "no candidate hosts found"
 		if len(selected) > 0 {
@@ -882,7 +882,7 @@ func (c *contractor) runContractFormations(ctx context.Context, w Worker, candid
 		if len(candidates) >= wanted {
 			c.logger.Warnw(msg, unusableHosts.keysAndValues()...)
 		} else {
-			c.logger.Debugw(msg, unusableHosts.keysAndValues()...)
+			c.logger.Infow(msg, unusableHosts.keysAndValues()...)
 		}
 	}
 
@@ -1030,14 +1030,14 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 }
 
 func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []api.ContractMetadata) {
-	c.logger.Debugw(
+	c.logger.Infow(
 		"run contracts renewals",
 		"torenew", len(toRenew),
 		"limit", limit,
 		"budget", budget,
 	)
 	defer func() {
-		c.logger.Debugw(
+		c.logger.Infow(
 			"contracts renewals completed",
 			"renewals", len(renewals),
 			"tokeep", len(toKeep),
@@ -1088,13 +1088,13 @@ func (c *contractor) runContractRenewals(ctx context.Context, w Worker, toRenew 
 }
 
 func (c *contractor) runContractRefreshes(ctx context.Context, w Worker, toRefresh []contractInfo, budget *types.Currency) (refreshed []renewal, _ error) {
-	c.logger.Debugw(
+	c.logger.Infow(
 		"run contracts refreshes",
 		"torefresh", len(toRefresh),
 		"budget", budget,
 	)
 	defer func() {
-		c.logger.Debugw(
+		c.logger.Infow(
 			"contracts refreshes completed",
 			"refreshed", len(refreshed),
 			"budget", budget,
@@ -1152,7 +1152,7 @@ func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contract
 	if refreshAmountCapped.Cmp(minimum) < 0 {
 		refreshAmountCapped = minimum
 	}
-	c.logger.Debugw("refresh estimate",
+	c.logger.Infow("refresh estimate",
 		"fcid", ci.contract.ID,
 		"refreshAmount", refreshAmount,
 		"refreshAmountCapped", refreshAmountCapped)
@@ -1228,7 +1228,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	}
 
 	if renewing {
-		c.logger.Debugw("renew estimate",
+		c.logger.Infow("renew estimate",
 			"fcid", ci.contract.ID,
 			"dataStored", dataStored,
 			"storageCost", storageCost.String(),
@@ -1327,7 +1327,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		unused = append(unused, h)
 	}
 
-	c.logger.Debugw(fmt.Sprintf("selected %d (potentially) usable hosts for scoring out of %d", len(unused), len(hosts)),
+	c.logger.Infow(fmt.Sprintf("selected %d (potentially) usable hosts for scoring out of %d", len(unused), len(hosts)),
 		"excluded", excluded,
 		"notcompletedscan", notcompletedscan,
 		"used", len(usedHosts))
@@ -1360,7 +1360,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		unusable++
 	}
 
-	c.logger.Debugw(fmt.Sprintf("scored %d unused hosts out of %v, took %v", len(candidates), len(unused), time.Since(start)),
+	c.logger.Infow(fmt.Sprintf("scored %d unused hosts out of %v, took %v", len(candidates), len(unused), time.Since(start)),
 		"zeroscore", zeros,
 		"unusable", unusable,
 		"used", len(usedHosts))
@@ -1397,14 +1397,14 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		c.logger.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
 		return api.ContractMetadata{}, false, errors.New("insufficient budget")
 	}
 
 	// sanity check the endheight is not the same on renewals
 	endHeight := endHeight(cfg, state.period)
 	if endHeight <= rev.EndHeight() {
-		c.logger.Debugw("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", state.period, "bh", cs.BlockHeight)
+		c.logger.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", state.period, "bh", cs.BlockHeight)
 		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
 	}
 
@@ -1440,7 +1440,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 	}
 
 	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
-	c.logger.Debugw(
+	c.logger.Infow(
 		"renewal succeeded",
 		"fcid", renewedContract.ID,
 		"renewedFrom", fcid,
@@ -1493,7 +1493,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)
 	if err != nil {
 		if strings.Contains(err.Error(), "new collateral is too low") {
-			c.logger.Debugw("refresh failed: contract wouldn't have enough collateral after refresh",
+			c.logger.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
 				"hk", hk,
 				"fcid", fcid,
 				"unallocatedCollateral", unallocatedCollateral.String(),
@@ -1520,7 +1520,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 
 	// add to renewed set
 	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
-	c.logger.Debugw("refresh succeeded",
+	c.logger.Infow("refresh succeeded",
 		"fcid", refreshedContract.ID,
 		"renewedFrom", contract.ID,
 		"renterFunds", renterFunds.String(),
@@ -1538,7 +1538,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	// fetch host settings
 	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
 	if err != nil {
-		c.logger.Debugw(err.Error(), "hk", hk)
+		c.logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
 	}
 
@@ -1552,7 +1552,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	txnFee := state.fee.Mul64(estimatedFileContractTransactionSetSize)
 	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Debugw("insufficient budget", "budget", budget, "needed", renterFunds)
+		c.logger.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
 		return api.ContractMetadata{}, false, errors.New("insufficient budget")
 	}
 
@@ -1583,7 +1583,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 		return api.ContractMetadata{}, true, err
 	}
 
-	c.logger.Debugw("formation succeeded",
+	c.logger.Infow("formation succeeded",
 		"hk", hk,
 		"fcid", formedContract.ID,
 		"renterFunds", renterFunds.String(),
