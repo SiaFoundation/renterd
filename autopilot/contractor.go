@@ -101,14 +101,8 @@ type (
 		pruning          bool
 		pruningLastStart time.Time
 
-		cachedHostInfo   map[types.PublicKey]hostInfo
 		cachedDataStored map[types.PublicKey]uint64
 		cachedMinScore   float64
-	}
-
-	hostInfo struct {
-		Usable         bool
-		UnusableResult unusableHostResult
 	}
 
 	scoredHost struct {
@@ -281,35 +275,19 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
 
-	// fetch consensus state
-	cs, err := c.ap.bus.ConsensusState(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	// create gouging checker
-	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-
-	// prepare hosts for cache
-	hostInfos := make(map[types.PublicKey]hostInfo)
-	for _, h := range hosts {
-		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
-		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, h, minScore, hostData[h.PublicKey])
-		hostInfos[h.PublicKey] = hostInfo{
-			Usable:         isUsable,
-			UnusableResult: unusableResult,
-		}
-	}
-
 	// update cache.
 	c.mu.Lock()
-	c.cachedHostInfo = hostInfos
 	c.cachedDataStored = hostData
 	c.cachedMinScore = minScore
 	c.mu.Unlock()
 
-	// run checks
+	// run host checks
+	err = c.runHostChecks(ctx, hosts)
+	if err != nil {
+		return false, fmt.Errorf("failed to run host checks, err: %v", err)
+	}
+
+	// run contract checks
 	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
@@ -741,15 +719,15 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host, err := c.ap.bus.Host(ctx, hk)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("missing host, err: %v", err), "hk", hk)
-			toStopUsing[fcid] = errHostNotFound.Error()
+			toStopUsing[fcid] = api.ErrUsabilityHostNotFound.Error()
 			notfound++
 			continue
 		}
 
 		// if the host is blocked we ignore it, it might be unblocked later
 		if host.Blocked {
-			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", errHostBlocked.Error())
-			toStopUsing[fcid] = errHostBlocked.Error()
+			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", api.ErrUsabilityHostBlocked.Error())
+			toStopUsing[fcid] = api.ErrUsabilityHostBlocked.Error()
 			continue
 		}
 
@@ -780,9 +758,9 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, contract.FileSize())
-		if !usable {
-			reasons := unusableResult.reasons()
+		hi := calculateHostInfo(state.cfg, state.rs, gc, host.Host, minScore, contract.FileSize())
+		if !hi.Usability.Usable() {
+			reasons := hi.Usability.UnusableReasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", reasons)
 			continue
@@ -795,7 +773,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
 			} else if !state.cfg.Hosts.AllowRedundantIPs && ipFilter.IsRedundantIP(contract.HostIP, contract.HostKey) {
-				toStopUsing[fcid] = fmt.Sprintf("%v; %v", errHostRedundantIP, errContractNoRevision)
+				toStopUsing[fcid] = fmt.Sprintf("%v; %v", api.ErrUsabilityHostRedundantIP, errContractNoRevision)
 			} else {
 				toKeep = append(toKeep, contract.ContractMetadata)
 				remainingKeepLeeway-- // we let it slide
@@ -847,7 +825,38 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
+func (c *contractor) runHostChecks(ctx context.Context, hosts []hostdb.Host) error {
+	// convenience variables
+	state := c.ap.State()
+
+	// fetch consensus state
+	cs, err := c.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return err
+	}
+
+	// create gouging checker
+	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+
+	// grab min score and host data from cache
+	c.mu.Lock()
+	minScore := c.cachedMinScore
+	hostData := c.cachedDataStored
+	c.mu.Unlock()
+
+	// update host info
+	for _, h := range hosts {
+		h.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
+		hi := calculateHostInfo(state.cfg, state.rs, gc, h, minScore, hostData[h.PublicKey])
+		err := c.ap.bus.UpdateHostInfo(ctx, c.ap.id, h.PublicKey, hi.Gouging, hi.Score, hi.Usability)
+		if err != nil {
+			c.logger.Errorw(fmt.Sprintf("failed to update host info, err: %v", err), "hk", h.PublicKey)
+		}
+	}
+	return nil
+}
+
+func (c *contractor) runContractFormations(ctx context.Context, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostsBreakdown, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
 	if c.ap.isStopped() {
 		return nil, nil
 	}
@@ -1300,13 +1309,13 @@ func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredH
 	return minScore
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostsBreakdown, error) {
 	start := time.Now()
 
 	// fetch consensus state
 	cs, err := c.ap.bus.ConsensusState(ctx)
 	if err != nil {
-		return nil, unusableHostResult{}, err
+		return nil, unusableHostsBreakdown{}, err
 	}
 
 	// create a gouging checker
@@ -1336,7 +1345,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		"used", len(usedHosts))
 
 	// score all unused hosts
-	var unusableHostResult unusableHostResult
+	var unusableHosts unusableHostsBreakdown
 	var unusable, zeros int
 	var candidates []scoredHost
 	for _, h := range unused {
@@ -1349,15 +1358,15 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
-		if usable {
-			candidates = append(candidates, scoredHost{h, result.scoreBreakdown.Score()})
+		hi := calculateHostInfo(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
+		if hi.Usability.Usable() {
+			candidates = append(candidates, scoredHost{h, hi.Score.Score()})
 			continue
 		}
 
 		// keep track of unusable host results
-		unusableHostResult.merge(result)
-		if result.scoreBreakdown.Score() == 0 {
+		unusableHosts.track(hi.Usability)
+		if hi.Score.Score() == 0 {
 			zeros++
 		}
 		unusable++
@@ -1368,7 +1377,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		"unusable", unusable,
 		"used", len(usedHosts))
 
-	return candidates, unusableHostResult, nil
+	return candidates, unusableHosts, nil
 }
 
 func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {

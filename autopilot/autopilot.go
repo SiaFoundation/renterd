@@ -59,6 +59,10 @@ type Bus interface {
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.Host, error)
 
+	HostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey) (api.HostInfo, error)
+	HostInfos(ctx context.Context, autopilotID string, opts api.HostInfoOptions) ([]api.HostInfo, error)
+	UpdateHostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) error
+
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
@@ -685,7 +689,7 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 
-	host, err := ap.c.HostInfo(jc.Request.Context(), hostKey)
+	host, err := ap.bus.HostInfo(jc.Request.Context(), ap.id, hostKey)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
@@ -724,22 +728,45 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
+	var req api.HostInfosRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	hosts, err := ap.c.HostInfos(jc.Request.Context(), req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	hosts, err := ap.bus.HostInfos(jc.Request.Context(), ap.id, api.HostInfoOptions{
+		UsabilityMode: req.UsabilityMode,
+		SearchHostOptions: api.SearchHostOptions{
+			FilterMode:      req.FilterMode,
+			AddressContains: req.AddressContains,
+			KeyIn:           req.KeyIn,
+			Offset:          req.Offset,
+			Limit:           req.Limit,
+		},
+	})
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	resps := make([]api.HostHandlerResponse, len(hosts))
+	for i, host := range hosts {
+		resps[i] = api.HostHandlerResponse{
+			Host: host.Host,
+			Checks: &api.HostHandlerResponseChecks{
+				Gouging:          host.Gouging.Gouging(),
+				GougingBreakdown: host.Gouging,
+				Score:            host.Score.Score(),
+				ScoreBreakdown:   host.Score,
+				Usable:           host.Usability.Usable(),
+				UnusableReasons:  host.Usability.UnusableReasons(),
+			},
+		}
+	}
+	jc.Encode(resps)
 }
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
-		if usable {
+		hi := calculateHostInfo(cfg, rs, gc, host, smallestValidScore, 0)
+		if hi.Usability.Usable() {
 			usables++
 		}
 	}
@@ -754,36 +781,36 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
-		usable, usableBreakdown := isUsableHost(cfg, rs, gc, host, 0, 0)
-		if usable {
+		hi := calculateHostInfo(cfg, rs, gc, host, 0, 0)
+		if hi.Usability.Usable() {
 			resp.Usable++
 			continue
 		}
-		if usableBreakdown.blocked > 0 {
+		if hi.Usability.Blocked {
 			resp.Unusable.Blocked++
 		}
-		if usableBreakdown.notacceptingcontracts > 0 {
+		if hi.Usability.NotAcceptingContracts {
 			resp.Unusable.NotAcceptingContracts++
 		}
-		if usableBreakdown.notcompletingscan > 0 {
+		if hi.Usability.NotCompletingScan {
 			resp.Unusable.NotScanned++
 		}
-		if usableBreakdown.unknown > 0 {
+		if hi.Usability.Unknown {
 			resp.Unusable.Unknown++
 		}
-		if usableBreakdown.gougingBreakdown.ContractErr != "" {
+		if hi.Gouging.ContractErr != "" {
 			resp.Unusable.Gouging.Contract++
 		}
-		if usableBreakdown.gougingBreakdown.DownloadErr != "" {
+		if hi.Gouging.DownloadErr != "" {
 			resp.Unusable.Gouging.Download++
 		}
-		if usableBreakdown.gougingBreakdown.GougingErr != "" {
+		if hi.Gouging.GougingErr != "" {
 			resp.Unusable.Gouging.Gouging++
 		}
-		if usableBreakdown.gougingBreakdown.PruneErr != "" {
+		if hi.Gouging.PruneErr != "" {
 			resp.Unusable.Gouging.Pruning++
 		}
-		if usableBreakdown.gougingBreakdown.UploadErr != "" {
+		if hi.Gouging.UploadErr != "" {
 			resp.Unusable.Gouging.Upload++
 		}
 	}

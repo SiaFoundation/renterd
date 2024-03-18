@@ -106,7 +106,7 @@ type (
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
 		HostInfo(ctx context.Context, autopilotID string, hk types.PublicKey) (api.HostInfo, error)
-		HostInfos(ctx context.Context, autopilotID string) ([]api.HostInfo, error)
+		HostInfos(ctx context.Context, autopilotID string, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostInfo, error)
 		UpdateHostInfo(ctx context.Context, autopilotID string, hk types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) error
 	}
 
@@ -258,9 +258,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
 		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
 
-		"GET    /autopilot/:id/hosts":         b.autopilotHostInfosHandlerGET,
 		"GET    /autopilot/:id/host/:hostkey": b.autopilotHostInfoHandlerGET,
 		"PUT    /autopilot/:id/host/:hostkey": b.autopilotHostInfoHandlerPUT,
+		"POST   /autopilot/:id/hosts":         b.autopilotHostInfosHandlerPOST,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -1989,22 +1989,6 @@ func (b *bus) autopilotHostInfoHandlerGET(jc jape.Context) {
 	jc.Encode(hi)
 }
 
-func (b *bus) autopilotHostInfosHandlerGET(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	his, err := b.hdb.HostInfos(jc.Request.Context(), id)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch host infos", err) != nil {
-		return
-	}
-	jc.Encode(his)
-}
-
 func (b *bus) autopilotHostInfoHandlerPUT(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
@@ -2026,6 +2010,46 @@ func (b *bus) autopilotHostInfoHandlerPUT(jc jape.Context) {
 	} else if jc.Check("failed to update host info", err) != nil {
 		return
 	}
+}
+
+func (b *bus) autopilotHostInfosHandlerPOST(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var req api.HostInfosRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// validate filter mode
+	if fm := req.FilterMode; fm != "" {
+		if fm != api.HostFilterModeAll &&
+			fm != api.HostFilterModeAllowed &&
+			fm != api.HostFilterModeBlocked {
+			jc.Error(fmt.Errorf("invalid filter mode: '%v', allowed values are '%s', '%s', '%s'", fm, api.HostFilterModeAll, api.HostFilterModeAllowed, api.HostFilterModeBlocked), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// validate usability mode
+	if um := req.UsabilityMode; um != "" {
+		if um != api.UsabilityFilterModeUsable &&
+			um != api.UsabilityFilterModeUnusable &&
+			um != api.UsabilityFilterModeAll {
+			jc.Error(fmt.Errorf("invalid usability mode: '%v', allowed values are '%s', '%s', '%s'", um, api.UsabilityFilterModeAll, api.UsabilityFilterModeUsable, api.UsabilityFilterModeUnusable), http.StatusBadRequest)
+			return
+		}
+	}
+
+	his, err := b.hdb.HostInfos(jc.Request.Context(), id, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	if errors.Is(err, api.ErrAutopilotNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch host infos", err) != nil {
+		return
+	}
+	jc.Encode(his)
 }
 
 func (b *bus) contractTaxHandlerGET(jc jape.Context) {

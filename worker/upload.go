@@ -276,7 +276,6 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 
 	// wait for all threads to finish
 	wg.Wait()
-	return
 }
 
 func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {

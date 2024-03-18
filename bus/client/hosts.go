@@ -100,3 +100,32 @@ func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, 
 	err = c.c.WithContext(ctx).PUT("/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove, Clear: clear})
 	return
 }
+
+// HostInfo returns the host info for a given host and autopilot identifier.
+func (c *Client) HostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey) (hostInfo api.HostInfo, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/autopilot/%s/host/%s", autopilotID, hostKey), &hostInfo)
+	return
+}
+
+// UpdateHostInfo updates the host info for a given host and autopilot identifier.
+func (c *Client) UpdateHostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s/host/%s", autopilotID, hostKey), api.UpdateHostInfoRequest{
+		Gouging:   gouging,
+		Score:     score,
+		Usability: usability,
+	})
+	return
+}
+
+// HostInfos returns the host info for all hosts known to the autopilot with the given identifier.
+func (c *Client) HostInfos(ctx context.Context, autopilotID string, opts api.HostInfoOptions) (hostInfos []api.HostInfo, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/autopilot/%s", autopilotID), api.HostInfosRequest{
+		Offset:          opts.Offset,
+		Limit:           opts.Limit,
+		FilterMode:      opts.FilterMode,
+		UsabilityMode:   opts.UsabilityMode,
+		AddressContains: opts.AddressContains,
+		KeyIn:           opts.KeyIn,
+	}, &hostInfos)
+	return
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -1065,7 +1066,11 @@ func TestAnnouncementMaxAge(t *testing.T) {
 }
 
 func TestHostInfo(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	cfg := defaultTestSQLStoreConfig
+	cfg.persistent = true
+	cfg.dir = "/Users/peterjan/testing"
+	os.RemoveAll(cfg.dir)
+	ss := newTestSQLStore(t, cfg)
 	defer ss.Close()
 
 	// fetch info for a non-existing autopilot
@@ -1133,7 +1138,7 @@ func TestHostInfo(t *testing.T) {
 	}
 
 	// add another host info
-	err = ss.addTestHost(types.PublicKey{2})
+	err = ss.addCustomTestHost(types.PublicKey{2}, "bar.com:1000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1143,12 +1148,108 @@ func TestHostInfo(t *testing.T) {
 	}
 
 	// fetch all infos for autopilot
-	his, err := ss.HostInfos(context.Background(), "foo")
+	his, err := ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 2 {
 		t.Fatal("unexpected")
 	} else if his[0].Host.PublicKey != (types.PublicKey{1}) || his[1].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+
+	// fetch infos using offset & limit
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 0 {
+		t.Fatal("unexpected")
+	}
+
+	// fetch infos using net addresses
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "bar", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+
+	// fetch infos using keyIn
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{{2}}, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+
+	// fetch infos using mode filters
+	err = ss.UpdateHostBlocklistEntries(context.Background(), []string{"bar.com:1000"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
+		t.Fatal("unexpected", his)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+	err = ss.UpdateHostBlocklistEntries(context.Background(), nil, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch infos using usability filters
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 0 {
+		t.Fatal("unexpected")
+	}
+	// update info
+	want.Usability.Blocked = false
+	want.Usability.Offline = false
+	want.Usability.LowScore = false
+	want.Usability.RedundantIP = false
+	want.Usability.Gouging = false
+	want.Usability.NotAcceptingContracts = false
+	want.Usability.NotAnnounced = false
+	want.Usability.NotCompletingScan = false
+	want.Usability.Unknown = false
+	err = ss.UpdateHostInfo(context.Background(), "foo", types.PublicKey{1}, want.Gouging, want.Score, want.Usability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
 		t.Fatal("unexpected", his)
 	}
 }
