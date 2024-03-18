@@ -30,6 +30,8 @@ type (
 	}
 
 	DatabaseLog struct {
+		Enabled                   bool          `yaml:"enabled,omitempty"`
+		Level                     string        `yaml:"level,omitempty"`
 		IgnoreRecordNotFoundError bool          `yaml:"ignoreRecordNotFoundError,omitempty"`
 		SlowThreshold             time.Duration `yaml:"slowThreshold,omitempty"`
 	}

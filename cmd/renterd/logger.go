@@ -23,7 +23,7 @@ func NewLogger(dir string, cfg config.Log) (*zap.Logger, func(context.Context) e
 	}
 
 	// log level
-	level, err := zapcore.ParseLevel(cfg.Path)
+	level, err := zapcore.ParseLevel(cfg.Level)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse log level: %w", err)
 	}
