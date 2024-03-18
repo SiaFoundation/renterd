@@ -72,7 +72,7 @@ func NewLogger(dir string, cfg config.Log) (*zap.Logger, func(context.Context) e
 	// stdout logger
 	if cfg.StdOut.Enabled {
 		var encoder zapcore.Encoder
-		switch cfg.File.Format {
+		switch cfg.StdOut.Format {
 		case "json":
 			encoder = jsonEncoder()
 		default: // stdout defaults to human
@@ -98,7 +98,6 @@ func jsonEncoder() zapcore.Encoder {
 // text.
 func humanEncoder(showColors bool) zapcore.Encoder {
 	cfg := zap.NewProductionEncoderConfig()
-	cfg.TimeKey = "" // prevent duplicate timestamps
 	cfg.EncodeTime = zapcore.RFC3339TimeEncoder
 	cfg.EncodeDuration = zapcore.StringDurationEncoder
 
