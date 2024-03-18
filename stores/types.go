@@ -65,7 +65,7 @@ func (s *setting) Scan(value interface{}) error {
 	return nil
 }
 
-// Value returns an key value, implements driver.Valuer interface.
+// Value returns a setting value, implements driver.Valuer interface.
 func (s setting) Value() (driver.Value, error) {
 	return string(s), nil
 }
