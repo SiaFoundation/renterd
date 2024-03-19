@@ -91,7 +91,10 @@ func NewLogger(dir string, cfg config.Log) (*zap.Logger, func(context.Context) e
 // jsonEncoder returns a zapcore.Encoder that encodes logs as JSON intended for
 // parsing.
 func jsonEncoder() zapcore.Encoder {
-	return zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig())
+	cfg := zap.NewProductionEncoderConfig()
+	cfg.EncodeTime = zapcore.RFC3339TimeEncoder
+	cfg.EncodeDuration = zapcore.StringDurationEncoder
+	return zapcore.NewJSONEncoder(cfg)
 }
 
 // humanEncoder returns a zapcore.Encoder that encodes logs as human-readable
