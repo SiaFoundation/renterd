@@ -40,6 +40,7 @@ func TestHostScore(t *testing.T) {
 	}
 	h1 := newHost(test.NewHostSettings())
 	h2 := newHost(test.NewHostSettings())
+	cfg := cfg.Contracts
 
 	// assert both hosts score equal
 	redundancy := 3.0
@@ -109,11 +110,9 @@ func TestHostScore(t *testing.T) {
 func TestPriceAdjustmentScore(t *testing.T) {
 	score := func(cpp uint32) float64 {
 		t.Helper()
-		cfg := api.AutopilotConfig{
-			Contracts: api.ContractsConfig{
-				Allowance: types.Siacoins(5000),
-				Amount:    50,
-			},
+		cfg := api.ContractsConfig{
+			Allowance: types.Siacoins(5000),
+			Amount:    50,
 		}
 		return priceAdjustmentScore(types.Siacoins(cpp), cfg)
 	}
@@ -174,10 +173,8 @@ func TestCollateralScore(t *testing.T) {
 	storageCost := uint64(100)
 	score := func(collateral, maxCollateral uint64) float64 {
 		t.Helper()
-		cfg := api.AutopilotConfig{
-			Contracts: api.ContractsConfig{
-				Period: period,
-			},
+		cfg := api.ContractsConfig{
+			Period: period,
 		}
 		pt := rhpv3.HostPriceTable{
 			CollateralCost: types.NewCurrency64(collateral),

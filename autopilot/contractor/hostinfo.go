@@ -11,10 +11,10 @@ import (
 )
 
 func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, state *State) (api.HostHandlerResponse, error) {
-	if state.Config().Contracts.Allowance.IsZero() {
+	if state.ContractsConfig().Allowance.IsZero() {
 		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
-	if state.Config().Contracts.Amount == 0 {
+	if state.ContractsConfig().Amount == 0 {
 		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts amount is zero")
 	}
 	if state.Period() == 0 {
@@ -39,7 +39,7 @@ func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, stat
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(state.Config(), state.RS, gc, host, minScore, storedData)
+	isUsable, unusableResult := isUsableHost(state.ContractsConfig(), state.RS, gc, host, minScore, storedData)
 	return api.HostHandlerResponse{
 		Host: host.Host,
 		Checks: &api.HostHandlerResponseChecks{
@@ -75,7 +75,7 @@ func (c *Contractor) hostInfoFromCache(ctx context.Context, state *State, host h
 			c.logger.Error("failed to fetch consensus state from bus: %v", err)
 		} else {
 			gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
-			isUsable, unusableResult := isUsableHost(state.Config(), state.RS, gc, host, minScore, storedData)
+			isUsable, unusableResult := isUsableHost(state.ContractsConfig(), state.RS, gc, host, minScore, storedData)
 			hi = hostInfo{
 				Usable:         isUsable,
 				UnusableResult: unusableResult,

@@ -27,8 +27,12 @@ func (state *State) Allowance() types.Currency {
 	return state.AP.Config.Contracts.Allowance
 }
 
-func (state *State) Config() api.AutopilotConfig {
+func (state *State) AutopilotConfig() api.AutopilotConfig {
 	return state.AP.Config
+}
+
+func (state *State) ContractsConfig() api.ContractsConfig {
+	return state.AP.Config.Contracts
 }
 
 func (state *State) ContractSet() string {

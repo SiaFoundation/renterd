@@ -7,8 +7,8 @@ import (
 	"go.sia.tech/renterd/worker"
 )
 
-func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
-	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+func countUsableHosts(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
+	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.RenewWindow)
 	for _, host := range hosts {
 		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
 		if usable {
@@ -21,8 +21,8 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // EvaluateConfig evaluates the given configuration and if the gouging settings
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
-func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
-	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+func EvaluateConfig(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
+	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
@@ -60,7 +60,7 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 		}
 	}
 
-	if resp.Usable >= cfg.Contracts.Amount {
+	if resp.Usable >= cfg.Amount {
 		return // no recommendation needed
 	}
 
@@ -136,8 +136,8 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 // optimiseGougingSetting tries to optimise one field of the gouging settings to
 // try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.HostInfo) bool {
-	if cfg.Contracts.Amount == 0 {
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.HostInfo) bool {
+	if cfg.Amount == 0 {
 		return true // nothing to do
 	}
 	stepSize := []uint64{200, 150, 125, 110, 105}
@@ -148,7 +148,7 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 	prevVal := *field // to keep accurate value
 	for {
 		nUsable := countUsableHosts(cfg, cs, fee, currentPeriod, rs, *gs, hosts)
-		targetHit := nUsable >= cfg.Contracts.Amount
+		targetHit := nUsable >= cfg.Amount
 
 		if targetHit && nSteps == 0 {
 			return true // target already hit without optimising

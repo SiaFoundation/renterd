@@ -227,7 +227,7 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *State) (bool, error) {
 	// check if we can skip maintenance
-	if reason, skip := canSkipContractMaintenance(ctx, state.Config().Contracts); skip {
+	if reason, skip := canSkipContractMaintenance(ctx, state.ContractsConfig()); skip {
 		if reason != "" {
 			c.logger.Warn(reason)
 		}
@@ -326,7 +326,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, s
 	for _, h := range hosts {
 		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		isUsable, unusableResult := isUsableHost(state.Config(), state.RS, gc, h, minScore, hostData[h.PublicKey])
+		isUsable, unusableResult := isUsableHost(state.ContractsConfig(), state.RS, gc, h, minScore, hostData[h.PublicKey])
 		hostInfos[h.PublicKey] = hostInfo{
 			Usable:         isUsable,
 			UnusableResult: unusableResult,
@@ -719,7 +719,7 @@ LOOP:
 		host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.Config(), state.RS, gc, host, minScore, contract.FileSize())
+		usable, unusableResult := isUsableHost(state.ContractsConfig(), state.RS, gc, host, minScore, contract.FileSize())
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -756,7 +756,7 @@ LOOP:
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, priceTable: host.PriceTable.HostPriceTable, settings: host.Settings}
-		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.Config(), state.RS, ci, cs.BlockHeight, ipFilter)
+		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.AutopilotConfig(), state.RS, ci, cs.BlockHeight, ipFilter)
 		ci.usable = usable
 		ci.recoverable = recoverable
 		if !usable {
@@ -850,7 +850,7 @@ func (c *Contractor) runContractFormations(ctx context.Context, w Worker, state 
 	}
 
 	// calculate min/max contract funds
-	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(state.Config())
+	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(state.AutopilotConfig())
 
 LOOP:
 	for h := 0; missing > 0 && h < len(selected); h++ {
@@ -1168,7 +1168,7 @@ func (c *Contractor) renewFundingEstimate(ctx context.Context, state *State, ci 
 
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
-	minInitialContractFunds, _ := initialContractFundingMinMax(state.Config())
+	minInitialContractFunds, _ := initialContractFundingMinMax(state.AutopilotConfig())
 	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
 	cappedEstimatedCost := estimatedCost
 	if cappedEstimatedCost.Cmp(minimum) < 0 {
@@ -1293,7 +1293,7 @@ func (c *Contractor) candidateHosts(ctx context.Context, state *State, hosts []h
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		usable, result := isUsableHost(state.Config(), state.RS, gc, h, minScore, storedData[h.PublicKey])
+		usable, result := isUsableHost(state.ContractsConfig(), state.RS, gc, h, minScore, storedData[h.PublicKey])
 		if usable {
 			candidates = append(candidates, scoredHost{h.Host, result.scoreBreakdown.Score()})
 			continue
@@ -1415,8 +1415,8 @@ func (c *Contractor) refreshContract(ctx context.Context, w Worker, state *State
 
 	// calculate the renter funds
 	var renterFunds types.Currency
-	if isOutOfFunds(state.Config(), ci.priceTable, ci.contract) {
-		renterFunds = c.refreshFundingEstimate(state.Config(), ci, state.Fee)
+	if isOutOfFunds(state.AutopilotConfig(), ci.priceTable, ci.contract) {
+		renterFunds = c.refreshFundingEstimate(state.AutopilotConfig(), ci, state.Fee)
 	} else {
 		renterFunds = rev.ValidRenterPayout() // don't increase funds
 	}
@@ -1431,7 +1431,7 @@ func (c *Contractor) refreshContract(ctx context.Context, w Worker, state *State
 	unallocatedCollateral := contract.RemainingCollateral()
 
 	// a refresh should always result in a contract that has enough collateral
-	minNewCollateral := minRemainingCollateral(state.Config(), state.RS, renterFunds, settings, ci.priceTable).Mul64(2)
+	minNewCollateral := minRemainingCollateral(state.AutopilotConfig(), state.RS, renterFunds, settings, ci.priceTable).Mul64(2)
 
 	// renew the contract
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, state.Address, renterFunds, minNewCollateral, expectedStorage, settings.WindowSize)

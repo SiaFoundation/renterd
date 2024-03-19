@@ -176,7 +176,7 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) (bool, unusableHostResult) {
+func isUsableHost(cfg api.ContractsConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) (bool, unusableHostResult) {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
