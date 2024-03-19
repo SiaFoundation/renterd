@@ -243,7 +243,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// fetch all hosts
-	hosts, err := c.ap.bus.Hosts(ctx, api.GetHostsOptions{})
+	hosts, err := c.ap.bus.Hosts(ctx, api.HostsOptions{FilterMode: api.HostFilterModeAll})
 	if err != nil {
 		return false, err
 	}
@@ -755,7 +755,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 		// decide whether the host is still good
-		hi := calculateHostInfo(state.cfg, state.rs, gc, host.Host, minScore, contract.FileSize())
+		hi := calculateHostInfo(state.cfg, state.rs, gc, host, minScore, contract.FileSize())
 		if !hi.Usability.Usable() {
 			reasons := hi.Usability.UnusableReasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -822,7 +822,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runHostChecks(ctx context.Context, hosts []hostdb.Host) error {
+func (c *contractor) runHostChecks(ctx context.Context, hosts []hostdb.HostInfo) error {
 	// convenience variables
 	state := c.ap.State()
 
@@ -1306,7 +1306,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostsBreakdown, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostsBreakdown, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1320,12 +1320,17 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// select unused hosts that passed a scan
-	var unused []hostdb.Host
-	var excluded, notcompletedscan int
+	var unused []hostdb.HostInfo
+	var blocked, excluded, notcompletedscan int
 	for _, h := range hosts {
 		// filter out used hosts
 		if _, exclude := usedHosts[h.PublicKey]; exclude {
 			excluded++
+			continue
+		}
+		// filter out blocked hosts
+		if h.Blocked {
+			blocked++
 			continue
 		}
 		// filter out unscanned hosts
@@ -1337,6 +1342,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 	}
 
 	c.logger.Debugw(fmt.Sprintf("selected %d (potentially) usable hosts for scoring out of %d", len(unused), len(hosts)),
+		"blocked", blocked,
 		"excluded", excluded,
 		"notcompletedscan", notcompletedscan,
 		"used", len(usedHosts))
@@ -1357,7 +1363,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
 		hi := calculateHostInfo(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
 		if hi.Usability.Usable() {
-			candidates = append(candidates, scoredHost{h, hi.Score.TotalScore()})
+			candidates = append(candidates, scoredHost{h.Host, hi.Score.TotalScore()})
 			continue
 		}
 

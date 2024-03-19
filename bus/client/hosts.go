@@ -30,7 +30,7 @@ func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err err
 }
 
 // Hosts returns 'limit' hosts at given 'offset'.
-func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []hostdb.Host, err error) {
+func (c *Client) Hosts(ctx context.Context, opts api.HostsOptions) (hosts []hostdb.HostInfo, err error) {
 	values := url.Values{}
 	opts.Apply(values)
 	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
@@ -78,7 +78,7 @@ func (c *Client) ResetLostSectors(ctx context.Context, hostKey types.PublicKey) 
 }
 
 // SearchHosts returns all hosts that match certain search criteria.
-func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []hostdb.Host, err error) {
+func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []hostdb.HostInfo, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
 		Offset:          opts.Offset,
 		Limit:           opts.Limit,

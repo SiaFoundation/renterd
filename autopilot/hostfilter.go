@@ -99,7 +99,7 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 }
 
 // calculateHostInfo returns the host info for the given host. This function will
-func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.Host, minScore float64, storedData uint64) api.HostInfo {
+func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) api.HostInfo {
 	// sanity check redundancy settings
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
@@ -113,6 +113,8 @@ func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc wo
 	// populate host info fields
 	if !h.IsAnnounced() {
 		ub.NotAnnounced = true
+	} else if h.Blocked {
+		ub.Blocked = true
 	} else if !h.Scanned {
 		ub.NotCompletingScan = true
 	} else {
@@ -137,7 +139,7 @@ func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc wo
 			// not gouging, this because the core package does not have overflow
 			// checks in its cost calculations needed to calculate the period
 			// cost
-			sb = hostScore(cfg, h, storedData, rs.Redundancy())
+			sb = hostScore(cfg, h.Host, storedData, rs.Redundancy())
 			if sb.TotalScore() < minScore {
 				ub.LowScore = true
 			}
@@ -145,7 +147,7 @@ func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc wo
 	}
 
 	return api.HostInfo{
-		Host:      h,
+		Host:      h.Host,
 		Usability: ub,
 		Gouging:   gb,
 		Score:     sb,
