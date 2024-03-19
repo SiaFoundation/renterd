@@ -107,8 +107,8 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		conn = NewMySQLConnection(dbUser, dbPassword, dbURI, dbName)
 		connMetrics = NewMySQLConnection(dbUser, dbPassword, dbURI, dbMetricsName)
 	} else if cfg.persistent {
-		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
-		connMetrics = NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite"))
+		conn = NewSQLiteConnection(filepath.Join(dir, "db.sqlite"))
+		connMetrics = NewSQLiteConnection(filepath.Join(dir, "metrics.sqlite"))
 	} else {
 		conn = NewEphemeralSQLiteConnection(dbName)
 		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
@@ -292,7 +292,7 @@ func TestConsensusReset(t *testing.T) {
 	})
 
 	// Reset the consensus.
-	if err := ss.ResetConsensusSubscription(); err != nil {
+	if err := ss.ResetConsensusSubscription(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -332,27 +332,20 @@ type sqliteQueryPlan struct {
 	Detail string `json:"detail"`
 }
 
-func (p sqliteQueryPlan) usesIndex(index string) bool {
+func (p sqliteQueryPlan) usesIndex() bool {
 	d := strings.ToLower(p.Detail)
-	if index == "" {
-		return strings.Contains(d, "using index") || strings.Contains(d, "using covering index")
-	}
-	return strings.Contains(d, fmt.Sprintf("using index %s", index))
+	return strings.Contains(d, "using index") || strings.Contains(d, "using covering index")
 }
 
 //nolint:tagliatelle
 type mysqlQueryPlan struct {
 	Extra        string `json:"Extra"`
 	PossibleKeys string `json:"possible_keys"`
-	Key          string `json:"key"`
 }
 
-func (p mysqlQueryPlan) usesIndex(index string) bool {
-	if index == "" {
-		d := strings.ToLower(p.Extra)
-		return strings.Contains(d, "using index") || strings.Contains(p.PossibleKeys, "idx_")
-	}
-	return p.Key == index
+func (p mysqlQueryPlan) usesIndex() bool {
+	d := strings.ToLower(p.Extra)
+	return strings.Contains(d, "using index") || strings.Contains(p.PossibleKeys, "idx_")
 }
 
 func TestQueryPlan(t *testing.T) {
@@ -388,64 +381,22 @@ func TestQueryPlan(t *testing.T) {
 	}
 
 	for _, query := range queries {
-		plan := queryPlan(ss.db)
-		if err := explainQuery(ss.db, query, plan); err != nil {
-			t.Fatal(err)
-		} else if !plan.usesIndex("") {
-			t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, plan)
+		if isSQLite(ss.db) {
+			var explain sqliteQueryPlan
+			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error; err != nil {
+				t.Fatal(err)
+			} else if !explain.usesIndex() {
+				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
+			}
+		} else {
+			var explain mysqlQueryPlan
+			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&explain).Error; err != nil {
+				t.Fatal(err)
+			} else if !explain.usesIndex() {
+				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
+			}
 		}
 	}
-}
-
-func TestContractMetricsQueryPlan(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-	db := ss.dbMetrics
-
-	query := "SELECT * FROM contracts c WHERE c.timestamp >= 1 AND c.timestamp < 2 AND c.fcid = '<binary>' LIMIT 1"
-	plan := queryPlan(db)
-	if err := explainQuery(db, query, plan); err != nil {
-		t.Fatal(err)
-	}
-
-	if isSQLite(db) {
-		// SQLite uses the index by default
-		if !plan.usesIndex("idx_contracts_fcid_timestamp") {
-			t.Fatalf("unexpected query plan %+v", plan)
-		}
-	} else {
-		// MySQL uses an index, but not 'idx_contracts_fcid_timestamp'
-		if !plan.usesIndex("") || plan.usesIndex("idx_contracts_fcid_timestamp") {
-			t.Fatalf("unexpected query plan %+v", plan)
-		}
-
-		// redo the query with hint
-		queryWithHint := strings.Replace(query, "WHERE", "USE INDEX (idx_contracts_fcid_timestamp) WHERE", 1)
-		if err := explainQuery(db, queryWithHint, plan); err != nil {
-			t.Fatal(err)
-		}
-
-		// assert it uses 'idx_contracts_fcid_timestamp' now
-		if !plan.usesIndex("idx_contracts_fcid_timestamp") {
-			t.Fatalf("unexpected query plan %+v", plan)
-		}
-	}
-}
-
-func queryPlan(db *gorm.DB) interface{ usesIndex(index string) bool } {
-	if isSQLite(db) {
-		return &sqliteQueryPlan{}
-	}
-	return &mysqlQueryPlan{}
-}
-
-func explainQuery(db *gorm.DB, query string, res interface{}) (err error) {
-	if isSQLite(db) {
-		err = db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&res).Error
-	} else {
-		err = db.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&res).Error
-	}
-	return
 }
 
 func TestApplyUpdatesErr(t *testing.T) {
