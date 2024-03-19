@@ -461,23 +461,25 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error) {
+func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.HostInfo, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
 
-	var hosts []hostdb.Host
-	var fullHosts []dbHost
-
 	// Apply filter mode.
+	var blocked bool
 	query := ss.db
 	switch filterMode {
 	case api.HostFilterModeAllowed:
 		query = query.Scopes(ss.excludeBlocked)
 	case api.HostFilterModeBlocked:
 		query = query.Scopes(ss.excludeAllowed)
+		blocked = true
 	case api.HostFilterModeAll:
-		// nothing to do
+		// preload allowlist and blocklist
+		query = query.
+			Preload("Allowlist").
+			Preload("Blocklist")
 	default:
 		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
 	}
@@ -500,12 +502,24 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 		})
 	}
 
+	var hosts []hostdb.HostInfo
+	var fullHosts []dbHost
 	err := query.
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, fh := range fullHosts {
-				hosts = append(hosts, fh.convert())
+				if filterMode == api.HostFilterModeAll {
+					hosts = append(hosts, hostdb.HostInfo{
+						Host:    fh.convert(),
+						Blocked: ss.isBlocked(fh),
+					})
+				} else {
+					hosts = append(hosts, hostdb.HostInfo{
+						Host:    fh.convert(),
+						Blocked: blocked,
+					})
+				}
 			}
 			return nil
 		}).
@@ -517,8 +531,8 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 }
 
 // Hosts returns non-blocked hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error) {
-	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
+func (ss *SQLStore) Hosts(ctx context.Context, filterMode string, offset, limit int) ([]hostdb.HostInfo, error) {
+	return ss.SearchHosts(ctx, filterMode, "", nil, offset, limit)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {

@@ -92,13 +92,13 @@ type (
 	// A HostDB stores information about hosts.
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-		Hosts(ctx context.Context, offset, limit int) ([]hostdb.Host, error)
+		Hosts(ctx context.Context, filterMode string, offset, limit int) ([]hostdb.HostInfo, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.Host, error)
+		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.HostInfo, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -758,10 +758,23 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 func (b *bus) hostsHandlerGET(jc jape.Context) {
 	offset := 0
 	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
+	filterMode := api.HostFilterModeAllowed
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("filterMode", &filterMode) != nil {
 		return
 	}
-	hosts, err := b.hdb.Hosts(jc.Request.Context(), offset, limit)
+
+	// validate filterMode
+	switch filterMode {
+	case api.HostFilterModeAllowed:
+	case api.HostFilterModeBlocked:
+	case api.HostFilterModeAll:
+	default:
+		jc.Error(errors.New("invalid filter mode"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch hosts
+	hosts, err := b.hdb.Hosts(jc.Request.Context(), filterMode, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}

@@ -54,10 +54,10 @@ type Bus interface {
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error)
+	Hosts(ctx context.Context, opts api.HostsOptions) ([]hostdb.HostInfo, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.Host, error)
+	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
 
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
@@ -196,7 +196,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	state := ap.State()
 
 	// fetch hosts
-	hosts, err := ap.bus.Hosts(ctx, api.GetHostsOptions{})
+	hosts, err := ap.bus.Hosts(ctx, api.HostsOptions{})
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -735,7 +735,7 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	jc.Encode(hosts)
 }
 
-func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (usables uint64) {
+func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
 		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
@@ -749,7 +749,7 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // evaluateConfig evaluates the given configuration and if the gouging settings
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
-func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (resp api.ConfigEvaluationResponse) {
+func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
@@ -865,7 +865,7 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 // optimiseGougingSetting tries to optimise one field of the gouging settings to
 // try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.Host) bool {
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.HostInfo) bool {
 	if cfg.Contracts.Amount == 0 {
 		return true // nothing to do
 	}

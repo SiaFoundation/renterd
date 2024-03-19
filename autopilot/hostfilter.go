@@ -176,7 +176,7 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
+func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) (bool, unusableHostResult) {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -187,6 +187,8 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 
 	if !h.IsAnnounced() {
 		errs = append(errs, errHostNotAnnounced)
+	} else if h.Blocked {
+		errs = append(errs, errHostBlocked)
 	} else if !h.Scanned {
 		errs = append(errs, errHostNotCompletingScan)
 	} else {
@@ -211,7 +213,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 			// not gouging, this because the core package does not have overflow
 			// checks in its cost calculations needed to calculate the period
 			// cost
-			scoreBreakdown = hostScore(cfg, h, storedData, rs.Redundancy())
+			scoreBreakdown = hostScore(cfg, h.Host, storedData, rs.Redundancy())
 			if scoreBreakdown.Score() < minScore {
 				errs = append(errs, fmt.Errorf("%w: (%s): %v < %v", errLowScore, scoreBreakdown.String(), scoreBreakdown.Score(), minScore))
 			}

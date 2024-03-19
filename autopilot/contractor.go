@@ -249,7 +249,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// fetch all hosts
-	hosts, err := c.ap.bus.Hosts(ctx, api.GetHostsOptions{})
+	hosts, err := c.ap.bus.Hosts(ctx, api.HostsOptions{})
 	if err != nil {
 		return false, err
 	}
@@ -777,7 +777,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.Host, minScore, contract.FileSize())
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, contract.FileSize())
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -1297,7 +1297,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1311,7 +1311,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// select unused hosts that passed a scan
-	var unused []hostdb.Host
+	var unused []hostdb.HostInfo
 	var excluded, notcompletedscan int
 	for _, h := range hosts {
 		// filter out used hosts
@@ -1348,7 +1348,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
 		usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
 		if usable {
-			candidates = append(candidates, scoredHost{h, result.scoreBreakdown.Score()})
+			candidates = append(candidates, scoredHost{h.Host, result.scoreBreakdown.Score()})
 			continue
 		}
 
