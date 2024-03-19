@@ -33,6 +33,7 @@ type (
 		// scanner tests with every interface change
 		bus interface {
 			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
+			Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error)
 			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
@@ -211,7 +212,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 
 		// fetch the config right before removing offline hosts to get the most
 		// recent settings in case they were updated while scanning.
-		autopilot, err := s.ap.Config(ctx)
+		autopilot, err := s.bus.Autopilot(ctx, s.ap.id)
 		if err != nil {
 			s.logger.Errorf("tryPerformHostScan: failed to fetch autopilot config: %v", err)
 			return
