@@ -182,13 +182,14 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 	}
 
 	var errs []error
+	if h.Blocked {
+		errs = append(errs, errHostBlocked)
+	}
+
 	var gougingBreakdown api.HostGougingBreakdown
 	var scoreBreakdown api.HostScoreBreakdown
-
 	if !h.IsAnnounced() {
 		errs = append(errs, errHostNotAnnounced)
-	} else if h.Blocked {
-		errs = append(errs, errHostBlocked)
 	} else if !h.Scanned {
 		errs = append(errs, errHostNotCompletingScan)
 	} else {
