@@ -20,10 +20,6 @@ type mockBus struct {
 	reqs  []string
 }
 
-func (b *mockBus) Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error) {
-	return api.Autopilot{}, nil
-}
-
 func (b *mockBus) SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error) {
 	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
 

@@ -284,6 +284,9 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
+			// prune hosts that have been offline for too long
+			ap.s.PruneHosts(ap.shutdownCtx, autopilot.Config.Hosts)
+
 			// Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ap.shutdownCtx)
 			if err != nil {
