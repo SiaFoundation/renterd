@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
@@ -298,7 +299,7 @@ func (u *uploader) tryRecomputeStats() {
 func (u *uploader) tryRefresh(ctx context.Context) bool {
 	// fetch the renewed contract
 	renewed, err := u.cs.RenewedContract(ctx, u.ContractID())
-	if isError(err, api.ErrContractNotFound) || isError(err, context.Canceled) {
+	if utils.IsErr(err, api.ErrContractNotFound) || utils.IsErr(err, context.Canceled) {
 		return false
 	} else if err != nil {
 		u.logger.Errorf("failed to fetch renewed contract %v, err: %v", u.ContractID(), err)

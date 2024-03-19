@@ -1,7 +1,7 @@
 package stores
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -514,8 +515,14 @@ func (cs *chainSubscriber) processChainRevertUpdateWallet(cru *chain.RevertUpdat
 	return wallet.RevertChainUpdate(cs, cs.walletAddress, cru)
 }
 
-func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
-	return retryTransaction(cs.db, cs.logger, fc, cs.retryIntervals, opts...)
+func (cs *chainSubscriber) retryTransaction(fc func(tx *gorm.DB) error) error {
+	return retryTransaction(context.Background(), cs.db, cs.logger, cs.retryIntervals, fc, func(err error) bool {
+		return err == nil ||
+			utils.IsErr(err, gorm.ErrRecordNotFound) ||
+			utils.IsErr(err, context.Canceled) ||
+			utils.IsErr(err, errNoSuchTable) ||
+			utils.IsErr(err, errDuplicateEntry)
+	})
 }
 
 // AddEvents is called with all relevant events added in the update.

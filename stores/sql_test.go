@@ -104,8 +104,8 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		conn = NewMySQLConnection(dbUser, dbPassword, dbURI, dbName)
 		connMetrics = NewMySQLConnection(dbUser, dbPassword, dbURI, dbMetricsName)
 	} else if cfg.persistent {
-		conn = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
-		connMetrics = NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite"))
+		conn = NewSQLiteConnection(filepath.Join(dir, "db.sqlite"))
+		connMetrics = NewSQLiteConnection(filepath.Join(dir, "metrics.sqlite"))
 	} else {
 		conn = NewEphemeralSQLiteConnection(dbName)
 		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
@@ -265,13 +265,6 @@ func (s *SQLStore) overrideSlabHealth(objectID string, health float64) (err erro
 		) AS sub
 	)`, health, objectID)).Error
 	return
-}
-
-type queryPlanExplain struct {
-	ID      int    `json:"id"`
-	Parent  int    `json:"parent"`
-	NotUsed bool   `json:"notused"`
-	Detail  string `json:"detail"`
 }
 
 type sqliteQueryPlan struct {

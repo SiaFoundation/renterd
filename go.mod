@@ -15,8 +15,8 @@ require (
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.1
 	go.sia.tech/coreutils v0.0.4-0.20240313143809-01b5d444a630
-	go.sia.tech/gofakes3 v0.0.0-20231109151325-e0d47c10dce2
-	go.sia.tech/hostd v1.0.2
+	go.sia.tech/gofakes3 v0.0.1
+	go.sia.tech/hostd v1.0.3
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca

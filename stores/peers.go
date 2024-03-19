@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -58,7 +59,7 @@ func (p dbSyncerPeer) info() syncer.PeerInfo {
 // AddPeer adds a peer to the store. If the peer already exists, nil should
 // be returned.
 func (s *SQLStore) AddPeer(addr string) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(context.Background(), func(tx *gorm.DB) error {
 		res := tx.
 			Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "address"}},
@@ -102,7 +103,7 @@ func (s *SQLStore) PeerInfo(addr string) (syncer.PeerInfo, error) {
 // UpdatePeerInfo updates the metadata for the specified peer. If the peer
 // is not found, the error should be ErrPeerNotFound.
 func (s *SQLStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(context.Background(), func(tx *gorm.DB) error {
 		var peer dbSyncerPeer
 		err := tx.
 			Where("address = ?", addr).
@@ -133,7 +134,7 @@ func (s *SQLStore) Ban(addr string, duration time.Duration, reason string) error
 		return err
 	}
 
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(context.Background(), func(tx *gorm.DB) error {
 		res := tx.
 			Clauses(clause.OnConflict{
 				Columns: []clause.Column{{Name: "net_cidr"}},
@@ -183,7 +184,7 @@ func (s *SQLStore) Banned(addr string) (bool, error) {
 	}
 
 	var ban dbSyncerBan
-	if err := s.retryTransaction(func(tx *gorm.DB) error {
+	if err := s.retryTransaction(context.Background(), func(tx *gorm.DB) error {
 		return tx.
 			Model(&dbSyncerBan{}).
 			Where("net_cidr IN ?", checkSubnets).

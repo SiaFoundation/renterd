@@ -36,11 +36,44 @@ type (
 	balance        big.Int
 	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
+	setting        string
 
 	// NOTE: we have to wrap the proof here because Gorm can't scan bytes into
 	// multiple slices, all bytes are scanned into the first row
 	merkleProof struct{ proof []types.Hash256 }
 )
+
+// GormDataType implements gorm.GormDataTypeInterface.
+func (setting) GormDataType() string {
+	return "string"
+}
+
+// String implements fmt.Stringer to prevent "s3authentication" settings from
+// getting leaked.
+func (s setting) String() string {
+	if strings.Contains(string(s), "v4Keypairs") {
+		return "*****"
+	}
+	return string(s)
+}
+
+// Scan scans value into the setting
+func (s *setting) Scan(value interface{}) error {
+	switch value := value.(type) {
+	case string:
+		*s = setting(value)
+	case []byte:
+		*s = setting(value)
+	default:
+		return fmt.Errorf("failed to unmarshal setting value from type %t", value)
+	}
+	return nil
+}
+
+// Value returns a setting value, implements driver.Valuer interface.
+func (s setting) Value() (driver.Value, error) {
+	return string(s), nil
+}
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (secretKey) GormDataType() string {

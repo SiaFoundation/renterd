@@ -81,12 +81,10 @@ func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
 func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
 	c.c.Custom("HEAD", fmt.Sprintf("/objects/%s", path), nil, nil)
 
-	if strings.HasSuffix(path, "/") {
-		return nil, errors.New("the given path is a directory, HEAD can only be performed on objects")
-	}
-
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
+	opts.Apply(values)
+	path = api.ObjectPathEscape(path)
 	path += "?" + values.Encode()
 
 	// TODO: support HEAD in jape client
@@ -325,6 +323,7 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 
 	return api.HeadObjectResponse{
 		ContentType:  header.Get("Content-Type"),
+		Etag:         trimEtag(header.Get("ETag")),
 		LastModified: header.Get("Last-Modified"),
 		Range:        r,
 		Size:         size,
@@ -346,4 +345,9 @@ func sizeFromSeeker(r io.Reader) (int64, error) {
 		return 0, err
 	}
 	return size, nil
+}
+
+func trimEtag(etag string) string {
+	etag = strings.TrimPrefix(etag, "\"")
+	return strings.TrimSuffix(etag, "\"")
 }

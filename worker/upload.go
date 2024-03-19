@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -390,6 +392,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the object
 	o := object.NewObject(up.ec)
 
+	// create the md5 hasher for the etag
+	// NOTE: we use md5 since it's s3 compatible and clients expect it to be md5
+	hasher := md5.New()
+	r = io.TeeReader(r, hasher)
+
 	// create the cipher reader
 	cr, err := o.Encrypt(r, up.encryptionOffset)
 	if err != nil {
@@ -397,7 +404,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, up.rs.TotalShards, contracts, up.bh, lockPriority)
+	upload, err := mgr.newUpload(up.rs.TotalShards, contracts, up.bh, lockPriority)
 	if err != nil {
 		return false, "", err
 	}
@@ -520,7 +527,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// compute etag
-	eTag = o.ComputeETag()
+	eTag = hex.EncodeToString(hasher.Sum(nil))
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
@@ -558,7 +565,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -603,7 +610,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 	defer cancel()
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -675,7 +682,7 @@ func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (cand
 	return
 }
 
-func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
+func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 

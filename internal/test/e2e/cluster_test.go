@@ -1109,7 +1109,7 @@ func TestParallelUpload(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	upload := func() error {
+	upload := func() {
 		t.Helper()
 		// prepare some data - make sure it's more than one sector
 		data := make([]byte, rhpv2.SectorSize)
@@ -1118,7 +1118,6 @@ func TestParallelUpload(t *testing.T) {
 		// upload the data
 		path := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
 		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
-		return nil
 	}
 
 	// Upload in parallel
@@ -1127,10 +1126,7 @@ func TestParallelUpload(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := upload(); err != nil {
-				t.Error(err)
-				return
-			}
+			upload()
 		}()
 	}
 	wg.Wait()
@@ -2118,7 +2114,7 @@ func TestMultipartUploads(t *testing.T) {
 			PartNumber: 3,
 			ETag:       etag3,
 		},
-	})
+	}, api.CompleteMultipartOptions{})
 	tt.OK(err)
 	if ui.ETag == "" {
 		t.Fatal("unexpected response:", ui)
@@ -2448,7 +2444,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 			PartNumber: 3,
 			ETag:       resp3.ETag,
 		},
-	}))
+	}, api.CompleteMultipartOptions{}))
 
 	// download the object and verify its integrity
 	dst := new(bytes.Buffer)

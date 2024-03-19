@@ -46,7 +46,6 @@ type (
 
 	outputChange struct {
 		addition bool
-		oid      hash256
 		se       dbWalletOutput
 	}
 

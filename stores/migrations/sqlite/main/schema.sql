@@ -52,6 +52,7 @@ CREATE INDEX `idx_objects_health` ON `objects`(`health`);
 CREATE INDEX `idx_objects_object_id` ON `objects`(`object_id`);
 CREATE INDEX `idx_objects_size` ON `objects`(`size`);
 CREATE UNIQUE INDEX `idx_object_bucket` ON `objects`(`db_bucket_id`,`object_id`);
+CREATE INDEX `idx_objects_created_at` ON `objects`(`created_at`);
 
 -- dbMultipartUpload
 CREATE TABLE `multipart_uploads` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`key` blob,`upload_id` text NOT NULL,`object_id` text NOT NULL,`db_bucket_id` integer NOT NULL,`mime_type` text,CONSTRAINT `fk_multipart_uploads_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`) ON DELETE CASCADE);

@@ -263,7 +263,7 @@ jobs:
     steps:
       - name: Extract Tag Name
         id: get_tag
-        run: echo "::set-output name=tag_name::${GITHUB_REF#refs/tags/}"
+        run: echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Repository Dispatch
         uses: peter-evans/repository-dispatch@v3
@@ -274,7 +274,7 @@ jobs:
           client-payload: >
             {
               "description": "Renterd: The Next-Gen Sia Renter",
-              "tag": "${{ steps.get_tag.outputs.tag_name }}",
+              "tag": "${{ env.tag_name }}",
               "project": "renterd",
               "workflow_id": "${{ github.run_id }}"
             }

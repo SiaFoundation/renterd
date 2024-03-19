@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
@@ -41,7 +42,6 @@ const (
 
 	lockingPriorityActiveContractRevision = 100
 	lockingPriorityRenew                  = 80
-	lockingPriorityPriceTable             = 60
 	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 30
 	lockingPriorityPruning                = 20
@@ -860,19 +860,24 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
+	var ignoreDelim bool
+	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+		return
+	}
 
 	// parse path
 	path := jc.PathParam("path")
-	if path == "" || strings.HasSuffix(path, "/") {
+	if !ignoreDelim && (path == "" || strings.HasSuffix(path, "/")) {
 		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
 		return
 	}
 
 	// fetch object metadata
 	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+		IgnoreDelim:  ignoreDelim,
 		OnlyMetadata: true,
 	})
-	if errors.Is(err, api.ErrObjectNotFound) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -945,7 +950,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	path := jc.PathParam("path")
 	res, err := w.bus.Object(ctx, bucket, path, opts)
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("couldn't get object or entries", err) != nil {
@@ -1035,7 +1040,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 
 	// return early if the bucket does not exist
 	_, err = w.bus.Bucket(ctx, bucket)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
@@ -1098,7 +1103,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	if err := jc.Check("couldn't upload object", err); err != nil {
 		if err != nil {
 			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
+			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
 				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
 			}
 		}
@@ -1154,7 +1159,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// return early if the bucket does not exist
 	_, err = w.bus.Bucket(ctx, bucket)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
@@ -1197,7 +1202,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// fetch upload from bus
 	upload, err := w.bus.MultipartUpload(ctx, uploadID)
-	if isError(err, api.ErrMultipartUploadNotFound) {
+	if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to fetch multipart upload", err) != nil {
@@ -1257,7 +1262,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 		return
 	}
 	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), api.DeleteObjectOptions{Batch: batch})
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1540,18 +1545,18 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	if dErr := bus.WalletDiscard(ctx, txn); dErr != nil {
-		l.Errorf("%w: failed to discard txn: %v", *err, dErr)
+		l.Errorf("%w: %v, failed to discard txn: %v", *err, errContext, dErr)
 	}
 	cancel()
 }
 
 func isErrHostUnreachable(err error) bool {
-	return isError(err, os.ErrDeadlineExceeded) ||
-		isError(err, context.DeadlineExceeded) ||
-		isError(err, api.ErrHostOnPrivateNetwork) ||
-		isError(err, errors.New("no route to host")) ||
-		isError(err, errors.New("no such host")) ||
-		isError(err, errors.New("connection refused")) ||
-		isError(err, errors.New("unknown port")) ||
-		isError(err, errors.New("cannot assign requested address"))
+	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
+		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
+		utils.IsErr(err, errors.New("no route to host")) ||
+		utils.IsErr(err, errors.New("no such host")) ||
+		utils.IsErr(err, errors.New("connection refused")) ||
+		utils.IsErr(err, errors.New("unknown port")) ||
+		utils.IsErr(err, errors.New("cannot assign requested address"))
 }

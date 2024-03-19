@@ -268,6 +268,10 @@ go.sia.tech/hostd v1.0.2-beta.2.0.20240131203318-9d84aad6ef13 h1:JcyVUtJfzeMh+zJ
 go.sia.tech/hostd v1.0.2-beta.2.0.20240131203318-9d84aad6ef13/go.mod h1:axfDFNGPnVrGMf2nrX6sDNYJrft87kTD3XpzOyT+Wi8=
 go.sia.tech/hostd v1.0.2 h1:GjzNIAlwg3/dViF6258Xn5DI3+otQLRqmkoPDugP+9Y=
 go.sia.tech/hostd v1.0.2/go.mod h1:zGw+AGVmazAp4ydvo7bZLNKTy1J51RI6Mp/oxRtYT6c=
+go.sia.tech/gofakes3 v0.0.1 h1:8vtYH/B17NJ4GXLWiONfhwBrrmtJtYiofnO3PfjU298=
+go.sia.tech/gofakes3 v0.0.1/go.mod h1:PlsiVCn6+wssrR7bsOIlZm0DahsVrDydrlbjY4F14sg=
+go.sia.tech/hostd v1.0.3 h1:BCaFg6DGf33JEH/5DqFj6cnaz3EbiyjpbhfSj/Lo6e8=
+go.sia.tech/hostd v1.0.3/go.mod h1:R+01UddrgmAUcdBkEO8VcnYqPX/mod45DC5m/v/crzE=
 go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640 h1:mSaJ622P7T/M97dAK8iPV+IRIC9M5vV28NHeceoWO3M=
 go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640/go.mod h1:4QqmBB+t3W7cNplXPj++ZqpoUb2PeiS66RLpXmEGap4=
 go.sia.tech/mux v1.2.0 h1:ofa1Us9mdymBbGMY2XH/lSpY8itFsKIo/Aq8zwe+GHU=

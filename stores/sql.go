@@ -2,12 +2,10 @@ package stores
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +15,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -40,6 +39,11 @@ var (
 
 var (
 	_ wallet.SingleAddressStore = (*SQLStore)(nil)
+)
+
+var (
+	errNoSuchTable    = errors.New("no such table")
+	errDuplicateEntry = errors.New("Duplicate entry")
 )
 
 type (
@@ -346,42 +350,39 @@ func (s *SQLStore) ProcessChainRevertUpdate(cru *chain.RevertUpdate) error {
 	return s.cs.ProcessChainRevertUpdate(cru)
 }
 
-func retryTransaction(db *gorm.DB, logger *zap.SugaredLogger, fc func(tx *gorm.DB) error, intervals []time.Duration, opts ...*sql.TxOptions) error {
-	abortRetry := func(err error) bool {
-		if err == nil ||
-			errors.Is(err, gorm.ErrRecordNotFound) ||
-			errors.Is(err, errInvalidNumberOfShards) ||
-			errors.Is(err, errShardRootChanged) ||
-			errors.Is(err, api.ErrContractNotFound) ||
-			errors.Is(err, api.ErrObjectNotFound) ||
-			errors.Is(err, api.ErrObjectCorrupted) ||
-			errors.Is(err, api.ErrBucketExists) ||
-			errors.Is(err, api.ErrBucketNotFound) ||
-			errors.Is(err, api.ErrBucketNotEmpty) ||
-			errors.Is(err, api.ErrContractNotFound) ||
-			errors.Is(err, api.ErrMultipartUploadNotFound) ||
-			errors.Is(err, api.ErrObjectExists) ||
-			strings.Contains(err.Error(), "no such table") ||
-			strings.Contains(err.Error(), "Duplicate entry") ||
-			errors.Is(err, api.ErrPartNotFound) ||
-			errors.Is(err, api.ErrSlabNotFound) ||
-			errors.Is(err, syncer.ErrPeerNotFound) {
-			return true
-		}
-		return false
-	}
+func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
+	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, func(err error) bool {
+		return err == nil ||
+			utils.IsErr(err, context.Canceled) ||
+			utils.IsErr(err, gorm.ErrRecordNotFound) ||
+			utils.IsErr(err, errInvalidNumberOfShards) ||
+			utils.IsErr(err, errShardRootChanged) ||
+			utils.IsErr(err, api.ErrContractNotFound) ||
+			utils.IsErr(err, api.ErrObjectNotFound) ||
+			utils.IsErr(err, api.ErrObjectCorrupted) ||
+			utils.IsErr(err, api.ErrBucketExists) ||
+			utils.IsErr(err, api.ErrBucketNotFound) ||
+			utils.IsErr(err, api.ErrBucketNotEmpty) ||
+			utils.IsErr(err, api.ErrContractNotFound) ||
+			utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
+			utils.IsErr(err, api.ErrObjectExists) ||
+			utils.IsErr(err, errNoSuchTable) ||
+			utils.IsErr(err, errDuplicateEntry) ||
+			utils.IsErr(err, api.ErrPartNotFound) ||
+			utils.IsErr(err, api.ErrSlabNotFound) ||
+			utils.IsErr(err, syncer.ErrPeerNotFound)
+	})
+}
+
+func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {
 	var err error
 	for i := 0; i < len(intervals); i++ {
-		err = db.Transaction(fc, opts...)
-		if abortRetry(err) {
+		err = db.WithContext(ctx).Transaction(fn)
+		if abortFn(err) {
 			return err
 		}
 		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(intervals), intervals[i], err))
 		time.Sleep(intervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
-}
-
-func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
-	return retryTransaction(s.db, s.logger, fc, s.retryTransactionIntervals, opts...)
 }

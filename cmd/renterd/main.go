@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -24,6 +25,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker"
@@ -224,7 +226,7 @@ func parseEnvVar(s string, v interface{}) {
 
 func listenTCP(logger *zap.Logger, addr string) (net.Listener, error) {
 	l, err := net.Listen("tcp", addr)
-	if err != nil && strings.Contains(err.Error(), "no such host") && strings.Contains(addr, "localhost") {
+	if utils.IsErr(err, errors.New("no such host")) && strings.Contains(addr, "localhost") {
 		// fall back to 127.0.0.1 if 'localhost' doesn't work
 		_, port, err := net.SplitHostPort(addr)
 		if err != nil {

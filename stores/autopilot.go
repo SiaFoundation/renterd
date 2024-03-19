@@ -34,6 +34,7 @@ func (c dbAutopilot) convert() api.Autopilot {
 func (s *SQLStore) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
 	var entities []dbAutopilot
 	err := s.db.
+		WithContext(ctx).
 		Model(&dbAutopilot{}).
 		Find(&entities).
 		Error
@@ -51,6 +52,7 @@ func (s *SQLStore) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
 func (s *SQLStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
 	var entity dbAutopilot
 	err := s.db.
+		WithContext(ctx).
 		Model(&dbAutopilot{}).
 		Where("identifier = ?", id).
 		First(&entity).
@@ -73,10 +75,12 @@ func (s *SQLStore) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error 
 	}
 
 	// upsert
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "identifier"}},
-		UpdateAll: true,
-	}).Create(&dbAutopilot{
+	return s.db.
+		WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "identifier"}},
+			UpdateAll: true,
+		}).Create(&dbAutopilot{
 		Identifier:    ap.ID,
 		Config:        ap.Config,
 		CurrentPeriod: ap.CurrentPeriod,

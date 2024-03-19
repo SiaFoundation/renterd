@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
@@ -275,7 +276,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	// min score to pass checks
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore = c.calculateMinScore(ctx, candidates, state.cfg.Contracts.Amount)
+		minScore = c.calculateMinScore(candidates, state.cfg.Contracts.Amount)
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
@@ -323,10 +324,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// calculate remaining funds
-	remaining, err := c.remainingFunds(contracts)
-	if err != nil {
-		return false, err
-	}
+	remaining := c.remainingFunds(contracts)
 
 	// calculate 'limit' amount of contracts we want to renew
 	var limit int
@@ -1003,7 +1001,7 @@ func (c *contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
 		err := w.RHPBroadcast(ctx, contract.ID)
 		cancel()
-		if err != nil && strings.Contains(err.Error(), "transaction has a file contract with an outdated revision number") {
+		if utils.IsErr(err, errors.New("transaction has a file contract with an outdated revision number")) {
 			continue // don't log - revision was already broadcasted
 		} else if err != nil {
 			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),
@@ -1139,7 +1137,7 @@ func (c *contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee,
 	return funding
 }
 
-func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.AutopilotConfig, ci contractInfo, fee types.Currency) (types.Currency, error) {
+func (c *contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contractInfo, fee types.Currency) types.Currency {
 	// refresh with 1.2x the funds
 	refreshAmount := ci.contract.TotalCost.Mul64(6).Div64(5)
 
@@ -1158,7 +1156,7 @@ func (c *contractor) refreshFundingEstimate(ctx context.Context, cfg api.Autopil
 		"fcid", ci.contract.ID,
 		"refreshAmount", refreshAmount,
 		"refreshAmountCapped", refreshAmountCapped)
-	return refreshAmountCapped, nil
+	return refreshAmountCapped
 }
 
 func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, fee types.Currency, renewing bool) (types.Currency, error) {
@@ -1248,7 +1246,7 @@ func (c *contractor) renewFundingEstimate(ctx context.Context, ci contractInfo, 
 	return cappedEstimatedCost, nil
 }
 
-func (c *contractor) calculateMinScore(ctx context.Context, candidates []scoredHost, numContracts uint64) float64 {
+func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uint64) float64 {
 	// return early if there's no hosts
 	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
@@ -1425,7 +1423,7 @@ func (c *contractor) renewContract(ctx context.Context, w Worker, ci contractInf
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if isErr(err, wallet.ErrNotEnoughFunds) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1474,11 +1472,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	// calculate the renter funds
 	var renterFunds types.Currency
 	if isOutOfFunds(state.cfg, ci.priceTable, ci.contract) {
-		renterFunds, err = c.refreshFundingEstimate(ctx, state.cfg, ci, state.fee)
-		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("could not get refresh funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-			return api.ContractMetadata{}, true, err
-		}
+		renterFunds = c.refreshFundingEstimate(state.cfg, ci, state.fee)
 	} else {
 		renterFunds = rev.ValidRenterPayout() // don't increase funds
 	}
@@ -1508,7 +1502,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 			return api.ContractMetadata{}, true, err
 		}
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if isErr(err, wallet.ErrNotEnoughFunds) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1572,7 +1566,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		if isErr(err, wallet.ErrNotEnoughFunds) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1598,7 +1592,7 @@ func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Hos
 	return formedContract, true, nil
 }
 
-func (c *contractor) tryPerformPruning(ctx context.Context, wp *workerPool) {
+func (c *contractor) tryPerformPruning(wp *workerPool) {
 	c.mu.Lock()
 	if c.pruning || c.ap.isStopped() {
 		c.mu.Unlock()
