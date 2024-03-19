@@ -1,6 +1,8 @@
 package stores
 
 import (
+	"context"
+
 	"go.sia.tech/renterd/webhooks"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -20,8 +22,8 @@ func (dbWebhook) TableName() string {
 	return "webhooks"
 }
 
-func (s *SQLStore) DeleteWebhook(wb webhooks.Webhook) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) DeleteWebhook(ctx context.Context, wb webhooks.Webhook) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		res := tx.Exec("DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?",
 			wb.Module, wb.Event, wb.URL)
 		if res.Error != nil {
@@ -33,8 +35,8 @@ func (s *SQLStore) DeleteWebhook(wb webhooks.Webhook) error {
 	})
 }
 
-func (s *SQLStore) AddWebhook(wb webhooks.Webhook) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+func (s *SQLStore) AddWebhook(ctx context.Context, wb webhooks.Webhook) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).Create(&dbWebhook{
@@ -45,9 +47,9 @@ func (s *SQLStore) AddWebhook(wb webhooks.Webhook) error {
 	})
 }
 
-func (s *SQLStore) Webhooks() ([]webhooks.Webhook, error) {
+func (s *SQLStore) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
 	var dbWebhooks []dbWebhook
-	if err := s.db.Find(&dbWebhooks).Error; err != nil {
+	if err := s.db.WithContext(ctx).Find(&dbWebhooks).Error; err != nil {
 		return nil, err
 	}
 	var whs []webhooks.Webhook

@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -299,7 +300,7 @@ func (ap *Autopilot) Run() error {
 
 			// perform maintenance
 			setChanged, err := ap.c.performContractMaintenance(ap.shutdownCtx, w)
-			if err != nil && isErr(err, context.Canceled) {
+			if err != nil && utils.IsErr(err, context.Canceled) {
 				return
 			} else if err != nil {
 				ap.logger.Errorf("contract maintenance failed, err: %v", err)
@@ -321,11 +322,11 @@ func (ap *Autopilot) Run() error {
 			}
 
 			// migration
-			ap.m.tryPerformMigrations(ap.shutdownCtx, ap.workers)
+			ap.m.tryPerformMigrations(ap.workers)
 
 			// pruning
 			if ap.state.cfg.Contracts.Prune {
-				ap.c.tryPerformPruning(ap.shutdownCtx, ap.workers)
+				ap.c.tryPerformPruning(ap.workers)
 			} else {
 				ap.logger.Debug("pruning disabled")
 			}
@@ -405,9 +406,9 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 		cancel()
 
 		// if the config was not found, or we were unable to fetch it, keep blocking
-		if isErr(err, context.Canceled) {
+		if utils.IsErr(err, context.Canceled) {
 			return
-		} else if isErr(err, api.ErrAutopilotNotFound) {
+		} else if utils.IsErr(err, api.ErrAutopilotNotFound) {
 			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
@@ -438,7 +439,7 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 		online = len(peers) > 0
 		cancel()
 
-		if isErr(err, context.Canceled) {
+		if utils.IsErr(err, context.Canceled) {
 			return
 		} else if err != nil {
 			ap.logger.Errorf("failed to get peers, err: %v", err)
@@ -472,7 +473,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		cancel()
 
 		// if an error occurred, or if we're not synced, we continue
-		if isErr(err, context.Canceled) {
+		if utils.IsErr(err, context.Canceled) {
 			return
 		} else if err != nil {
 			ap.logger.Errorf("failed to get consensus state, err: %v", err)
@@ -631,7 +632,7 @@ func (ap *Autopilot) isStopped() bool {
 
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
-	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		jc.Error(errors.New("autopilot is not configured yet"), http.StatusNotFound)
 		return
 	}
@@ -653,7 +654,7 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	// fetch the autopilot and update its config
 	var contractSetChanged bool
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
-	if err != nil && strings.Contains(err.Error(), api.ErrAutopilotNotFound.Error()) {
+	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {

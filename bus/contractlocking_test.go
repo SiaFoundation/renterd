@@ -154,7 +154,7 @@ func TestContractKeepalive(t *testing.T) {
 func TestContractRelease(t *testing.T) {
 	locks := newContractLocks()
 
-	verify := func(fcid types.FileContractID, lockID uint64, lockedUntil time.Time, delta time.Duration) {
+	verify := func(fcid types.FileContractID, lockID uint64) {
 		t.Helper()
 		lock := locks.lockForContractID(fcid, false)
 		if lock.heldByID != lockID {
@@ -168,7 +168,7 @@ func TestContractRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, lockID, time.Now().Add(time.Minute), 3*time.Second)
+	verify(fcid, lockID)
 
 	// Acquire it again but release the contract within a second.
 	var wg sync.WaitGroup
@@ -185,14 +185,14 @@ func TestContractRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify(fcid, lockID, time.Now().Add(time.Minute), 3*time.Second)
+	verify(fcid, lockID)
 
 	// Release one more time. Should decrease the references to 0 and reset
 	// fields.
 	if err := locks.Release(fcid, lockID); err != nil {
 		t.Error(err)
 	}
-	verify(fcid, 0, time.Time{}, 0)
+	verify(fcid, 0)
 
 	// Try to release lock again. Is a no-op.
 	if err := locks.Release(fcid, lockID); err != nil {

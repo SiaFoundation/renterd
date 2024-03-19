@@ -450,11 +450,11 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	if opts.ContractID == (types.FileContractID{}) && opts.HostKey == (types.PublicKey{}) {
 		// if neither contract nor host filters were set, we return the
 		// aggregate spending for each period
-		metrics, err = s.findAggregatedContractPeriods(start, n, interval)
+		metrics, err = s.findAggregatedContractPeriods(ctx, start, n, interval)
 	} else {
 		// otherwise we return the first metric for each period like we usually
 		// do
-		err = s.findPeriods(dbContractMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
+		err = s.findPeriods(ctx, dbContractMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
@@ -478,7 +478,7 @@ func (s *SQLStore) contractPruneMetrics(ctx context.Context, start time.Time, n 
 	}
 
 	var metrics []dbContractPruneMetric
-	err := s.findPeriods(dbContractPruneMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
+	err := s.findPeriods(ctx, dbContractPruneMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
@@ -498,7 +498,7 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time,
 		whereExpr = gorm.Expr("? AND reason = ?", whereExpr, opts.Reason)
 	}
 	var metrics []dbContractSetChurnMetric
-	err := s.findPeriods(dbContractSetChurnMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
+	err := s.findPeriods(ctx, dbContractSetChurnMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
 	}
@@ -515,7 +515,7 @@ func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n ui
 	}
 
 	var metrics []dbContractSetMetric
-	err := s.findPeriods(dbContractSetMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
+	err := s.findPeriods(ctx, dbContractSetMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
@@ -536,7 +536,7 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 	return unixTimeMS(time.UnixMilli(normalizedMS))
 }
 
-func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
+func (s *SQLStore) findAggregatedContractPeriods(ctx context.Context, start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
 	if n > api.MetricMaxIntervals {
 		return nil, api.ErrMaxIntervalsExceeded
 	}
@@ -548,7 +548,7 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 	}
 	var metricsWithPeriod []metricWithPeriod
 
-	err := s.dbMetrics.Transaction(func(tx *gorm.DB) error {
+	err := s.dbMetrics.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var fcids []fileContractID
 		if err := tx.Raw("SELECT DISTINCT fcid FROM contracts WHERE contracts.timestamp >= ? AND contracts.timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
 			Scan(&fcids).Error; err != nil {
@@ -604,12 +604,12 @@ func (s *SQLStore) findAggregatedContractPeriods(start time.Time, n uint64, inte
 // split into intervals and the row with the lowest timestamp for each interval
 // is returned. The result is then joined with the original table to retrieve
 // only the metrics we want.
-func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n uint64, interval time.Duration, whereExpr clause.Expr) error {
+func (s *SQLStore) findPeriods(ctx context.Context, table string, dst interface{}, start time.Time, n uint64, interval time.Duration, whereExpr clause.Expr) error {
 	if n > api.MetricMaxIntervals {
 		return api.ErrMaxIntervalsExceeded
 	}
 	end := start.Add(time.Duration(n) * interval)
-	return s.dbMetrics.Raw(fmt.Sprintf(`
+	return s.dbMetrics.WithContext(ctx).Raw(fmt.Sprintf(`
 		WITH RECURSIVE periods AS (
 			SELECT ? AS period_start
 			UNION ALL
@@ -642,7 +642,7 @@ func (s *SQLStore) findPeriods(table string, dst interface{}, start time.Time, n
 }
 
 func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
-	err = s.findPeriods(dbWalletMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))
+	err = s.findPeriods(ctx, dbWalletMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
 	}
@@ -665,7 +665,7 @@ func (s *SQLStore) performanceMetrics(ctx context.Context, start time.Time, n ui
 	}
 
 	var metrics []dbPerformanceMetric
-	err := s.findPeriods(dbPerformanceMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
+	err := s.findPeriods(ctx, dbPerformanceMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch performance metrics: %w", err)
 	}

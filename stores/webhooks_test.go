@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -23,10 +24,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Add hook.
-	if err := ss.AddWebhook(wh1); err != nil {
+	if err := ss.AddWebhook(context.Background(), wh1); err != nil {
 		t.Fatal(err)
 	}
-	whs, err := ss.Webhooks()
+	whs, err := ss.Webhooks(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 1 {
@@ -36,10 +37,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Add it again. Should be a no-op.
-	if err := ss.AddWebhook(wh1); err != nil {
+	if err := ss.AddWebhook(context.Background(), wh1); err != nil {
 		t.Fatal(err)
 	}
-	whs, err = ss.Webhooks()
+	whs, err = ss.Webhooks(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 1 {
@@ -49,10 +50,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Add another.
-	if err := ss.AddWebhook(wh2); err != nil {
+	if err := ss.AddWebhook(context.Background(), wh2); err != nil {
 		t.Fatal(err)
 	}
-	whs, err = ss.Webhooks()
+	whs, err = ss.Webhooks(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 2 {
@@ -64,10 +65,10 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// Remove one.
-	if err := ss.DeleteWebhook(wh1); err != nil {
+	if err := ss.DeleteWebhook(context.Background(), wh1); err != nil {
 		t.Fatal(err)
 	}
-	whs, err = ss.Webhooks()
+	whs, err = ss.Webhooks(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(whs) != 1 {

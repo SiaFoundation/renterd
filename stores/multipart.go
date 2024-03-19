@@ -56,7 +56,7 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 		return api.MultipartCreateResponse{}, err
 	}
 	var uploadID string
-	err = s.retryTransaction(func(tx *gorm.DB) error {
+	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		// Get bucket id.
 		var bucketID uint
 		err := tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
@@ -108,7 +108,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 			}
 		}
 	}
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		// Fetch contract set.
 		var cs dbContractSet
 		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
@@ -160,7 +160,7 @@ func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractS
 }
 
 func (s *SQLStore) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
-	err = s.retryTransaction(func(tx *gorm.DB) error {
+	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		var dbUpload dbMultipartUpload
 		err := tx.
 			Model(&dbMultipartUpload{}).
@@ -201,7 +201,7 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 		prefixExpr = gorm.Expr("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(prefix), prefix)
 	}
 
-	err = s.retryTransaction(func(tx *gorm.DB) error {
+	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		var dbUploads []dbMultipartUpload
 		err := tx.
 			Model(&dbMultipartUpload{}).
@@ -243,7 +243,7 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 		limit++
 	}
 
-	err := s.retryTransaction(func(tx *gorm.DB) error {
+	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		var dbParts []dbMultipartPart
 		err := tx.
 			Model(&dbMultipartPart{}).
@@ -277,7 +277,7 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 }
 
 func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return s.retryTransaction(func(tx *gorm.DB) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		// delete multipart upload optimistically
 		res := tx.
 			Where("upload_id", uploadID).
@@ -326,7 +326,13 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		}
 	}
 	var eTag string
-	err = s.retryTransaction(func(tx *gorm.DB) error {
+	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
+		// Delete potentially existing object.
+		_, err := s.deleteObject(tx, bucket, path)
+		if err != nil {
+			return fmt.Errorf("failed to delete object: %w", err)
+		}
+
 		// Find multipart upload.
 		var mu dbMultipartUpload
 		err = tx.Where("upload_id = ?", uploadID).
@@ -345,12 +351,6 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		// Check bucket name.
 		if mu.DBBucket.Name != bucket {
 			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
-		}
-
-		// Delete potentially existing object.
-		_, err := s.deleteObject(tx, bucket, path)
-		if err != nil {
-			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		// Sort the parts.
