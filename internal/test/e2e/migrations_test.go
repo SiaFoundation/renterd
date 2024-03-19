@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
@@ -19,27 +22,29 @@ func TestMigrations(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// create a new test cluster
+	// configure the cluster to use one extra host
+	rs := test.RedundancySettings
 	cfg := test.AutopilotConfig
-	cfg.Contracts.Amount = uint64(test.RedundancySettings.TotalShards) + 1
+	cfg.Contracts.Amount = uint64(rs.TotalShards) + 1
+
+	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		// configure the cluster to use 1 more host than the total shards in the
-		// redundancy settings.
 		autopilotSettings: &cfg,
-		hosts:             int(test.RedundancySettings.TotalShards) + 1,
+		hosts:             int(cfg.Contracts.Amount),
 	})
 	defer cluster.Shutdown()
 
+	// convenience variables
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
 	// create a helper to fetch used hosts
 	usedHosts := func(path string) map[types.PublicKey]struct{} {
-		// fetch used hosts
-		res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
-		if err != nil {
-			t.Fatal(err)
-		} else if res.Object == nil {
+		res, _ := b.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+		if res.Object == nil {
 			t.Fatal("object not found")
 		}
-
 		used := make(map[types.PublicKey]struct{})
 		for _, slab := range res.Object.Slabs {
 			for _, sector := range slab.Shards {
@@ -49,18 +54,13 @@ func TestMigrations(t *testing.T) {
 		return used
 	}
 
-	// convenience variables
-	w := cluster.Worker
-	tt := cluster.tt
-
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	path := "foo"
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, t.Name(), api.UploadObjectOptions{}))
 
 	// assert amount of hosts used
-	used := usedHosts(path)
+	used := usedHosts(t.Name())
 	if len(used) != test.RedundancySettings.TotalShards {
 		t.Fatal("unexpected amount of hosts used", len(used), test.RedundancySettings.TotalShards)
 	}
@@ -77,13 +77,12 @@ func TestMigrations(t *testing.T) {
 
 	// assert we migrated away from the bad host
 	tt.Retry(300, 100*time.Millisecond, func() error {
-		if _, used := usedHosts(path)[removed]; used {
+		if _, used := usedHosts(t.Name())[removed]; used {
 			return errors.New("host is still used")
 		}
 		return nil
 	})
-
-	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, t.Name(), api.GetObjectOptions{})
 	tt.OK(err)
 
 	// check slabs
@@ -109,8 +108,60 @@ func TestMigrations(t *testing.T) {
 			shardHosts += len(shard.Contracts)
 		}
 	}
+
 	// all shards should have 1 host except for 1. So we end up with 4 in total.
 	if shardHosts != 4 {
 		t.Fatalf("expected 4 shard hosts, got %v", shardHosts)
+	}
+
+	// create another bucket and upload an object into it
+	tt.OK(b.CreateBucket(context.Background(), "newbucket", api.CreateBucketOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), "newbucket", t.Name(), api.UploadObjectOptions{}))
+
+	// assert we currently don't have any error/crit alerts
+	ress, _ := b.Alerts(context.Background(), alerts.AlertsOpts{})
+	if ress.Totals.Error+ress.Totals.Critical != 0 {
+		t.Fatal("unexpected", ress)
+	}
+
+	// remove all hosts to ensure migrations fail
+	for _, h := range cluster.hosts {
+		cluster.RemoveHost(h)
+	}
+
+	// fetch alerts and collect object ids until we found two
+	seen := make(map[types.Hash256]struct{})
+	got := make(map[string][]string)
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		ress, _ := b.Alerts(context.Background(), alerts.AlertsOpts{})
+		if ress.Totals.Error+ress.Totals.Critical == 0 {
+			return errors.New("no migration alerts")
+		}
+		for _, alert := range ress.Alerts {
+			if _, skip := seen[alert.ID]; !skip {
+				seen[alert.ID] = struct{}{}
+				if data, ok := alert.Data["objectIDs"]; ok {
+					if data, ok := data.(map[string]interface{}); ok {
+						for bucket, ids := range data {
+							if objectIDs, ok := ids.([]interface{}); ok {
+								for _, id := range objectIDs {
+									got[bucket] = append(got[bucket], id.(string))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if len(got) < 2 {
+			return errors.New("not enought object ids")
+		}
+		return nil
+	})
+	if !reflect.DeepEqual(map[string][]string{
+		api.DefaultBucketName: {fmt.Sprintf("/%s", t.Name())},
+		"newbucket":           {fmt.Sprintf("/%s", t.Name())},
+	}, got) {
+		t.Fatal("unexpected", got)
 	}
 }
