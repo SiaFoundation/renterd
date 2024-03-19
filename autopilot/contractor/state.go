@@ -3,6 +3,7 @@ package contractor
 import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/worker"
 )
 
 type (
@@ -42,6 +43,10 @@ func (state *MaintenanceState) ContractSet() string {
 
 func (state *MaintenanceState) EndHeight() uint64 {
 	return state.AP.EndHeight()
+}
+
+func (state *MaintenanceState) GougingChecker(cs api.ConsensusState) worker.GougingChecker {
+	return worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
 }
 
 func (state *MaintenanceState) WantedContracts() uint64 {

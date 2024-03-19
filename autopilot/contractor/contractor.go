@@ -317,7 +317,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, s
 	}
 
 	// create gouging checker
-	gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+	gc := state.GougingChecker(cs)
 
 	// prepare hosts for cache
 	hostInfos := make(map[types.PublicKey]hostInfo)
@@ -699,7 +699,7 @@ LOOP:
 		}
 
 		// use a new gouging checker for every contract
-		gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+		gc := state.GougingChecker(cs)
 
 		// set the host's block height to ours to disable the height check in
 		// the gouging checks, in certain edge cases the renter might unsync and
@@ -826,7 +826,7 @@ func (c *Contractor) runContractFormations(ctx context.Context, w Worker, state 
 	lastStateUpdate := time.Now()
 
 	// prepare a gouging checker
-	gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+	gc := state.GougingChecker(cs)
 
 	// prepare an IP filter that contains all used hosts
 	ipFilter := c.newIPFilter()
@@ -866,7 +866,7 @@ LOOP:
 				c.logger.Errorf("could not fetch consensus state, err: %v", err)
 			} else {
 				cs = css
-				gc = worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+				gc = state.GougingChecker(cs)
 			}
 		}
 
@@ -1244,7 +1244,7 @@ func (c *Contractor) candidateHosts(ctx context.Context, state *MaintenanceState
 	}
 
 	// create a gouging checker
-	gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+	gc := state.GougingChecker(cs)
 
 	// select unused hosts that passed a scan
 	var unused []hostdb.HostInfo

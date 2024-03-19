@@ -7,7 +7,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
-	"go.sia.tech/renterd/worker"
 )
 
 func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, state *MaintenanceState) (api.HostHandlerResponse, error) {
@@ -34,7 +33,7 @@ func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, stat
 	minScore := c.cachedMinScore
 	c.mu.Unlock()
 
-	gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+	gc := state.GougingChecker(cs)
 
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
@@ -74,7 +73,7 @@ func (c *Contractor) hostInfoFromCache(ctx context.Context, state *MaintenanceSt
 		if err != nil {
 			c.logger.Error("failed to fetch consensus state from bus: %v", err)
 		} else {
-			gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+			gc := state.GougingChecker(cs)
 			isUsable, unusableResult := isUsableHost(state.ContractsConfig(), state.RS, gc, host, minScore, storedData)
 			hi = hostInfo{
 				Usable:         isUsable,
