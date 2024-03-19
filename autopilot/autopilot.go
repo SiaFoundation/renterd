@@ -690,8 +690,7 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	}
 
 	// TODO: remove on next major release
-	h, err := compatV105HostInfo(jc.Request.Context(), ap.State(), ap.bus, hk)
-	if jc.Check("failed to get host info", err) != nil {
+	if jc.Check("failed to get host info", compatV105HostInfo(jc.Request.Context(), ap.State(), ap.bus, hk)) != nil {
 		return
 	}
 
@@ -937,42 +936,42 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 // compatV105HostInfo performs some state checks and bus calls we no longer
 // need, but are necessary checks to make sure our API is consistent. This
 // should be considered for removal when releasing a new major version.
-func compatV105HostInfo(ctx context.Context, s state, b Bus, hk types.PublicKey) (*hostdb.HostInfo, error) {
+func compatV105HostInfo(ctx context.Context, s state, b Bus, hk types.PublicKey) error {
 	// state checks
 	if s.cfg.Contracts.Allowance.IsZero() {
-		return nil, fmt.Errorf("can not score hosts because contracts allowance is zero")
+		return fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
 	if s.cfg.Contracts.Amount == 0 {
-		return nil, fmt.Errorf("can not score hosts because contracts amount is zero")
+		return fmt.Errorf("can not score hosts because contracts amount is zero")
 	}
 	if s.cfg.Contracts.Period == 0 {
-		return nil, fmt.Errorf("can not score hosts because contract period is zero")
+		return fmt.Errorf("can not score hosts because contract period is zero")
 	}
 
 	// fetch host
-	host, err := b.Host(ctx, hk)
+	_, err := b.Host(ctx, hk)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+		return fmt.Errorf("failed to fetch requested host from bus: %w", err)
 	}
 
 	// other checks
 	_, err = b.GougingSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+		return fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
 	}
 	_, err = b.RedundancySettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+		return fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
 	}
 	_, err = b.ConsensusState(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+		return fmt.Errorf("failed to fetch consensus state from bus: %w", err)
 	}
 	_, err = b.RecommendedFee(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+		return fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
-	return &host, nil
+	return nil
 }
 
 func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
