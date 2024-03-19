@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
@@ -114,15 +115,17 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("expected 4 shard hosts, got %v", shardHosts)
 	}
 
-	// create another bucket and upload an object into it
+	// create another bucket and add an object
 	tt.OK(b.CreateBucket(context.Background(), "newbucket", api.CreateBucketOptions{}))
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), "newbucket", t.Name(), api.UploadObjectOptions{}))
 
-	// assert we currently don't have any error/crit alerts
+	// assert we currently don't have any alerts
 	ress, _ := b.Alerts(context.Background(), alerts.AlertsOpts{})
 	if ress.Totals.Error+ress.Totals.Critical != 0 {
 		t.Fatal("unexpected", ress)
 	}
+
+	// prepare
 
 	// remove all hosts to ensure migrations fail
 	for _, h := range cluster.hosts {
@@ -138,30 +141,38 @@ func TestMigrations(t *testing.T) {
 			return errors.New("no migration alerts")
 		}
 		for _, alert := range ress.Alerts {
-			if _, skip := seen[alert.ID]; !skip {
-				seen[alert.ID] = struct{}{}
-				if data, ok := alert.Data["objectIDs"]; ok {
-					if data, ok := data.(map[string]interface{}); ok {
-						for bucket, ids := range data {
-							if objectIDs, ok := ids.([]interface{}); ok {
-								for _, id := range objectIDs {
-									got[bucket] = append(got[bucket], id.(string))
-								}
-							}
+			// skip if already seen
+			if _, skip := seen[alert.ID]; skip {
+				continue
+			}
+			seen[alert.ID] = struct{}{}
+
+			// skip if not a migration alert
+			data, ok := alert.Data["objectIDs"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// collect all object ids per bucket
+			for bucket, ids := range data {
+				if objectIDs, ok := ids.([]interface{}); ok {
+					for _, id := range objectIDs {
+						got[bucket] = append(got[bucket], id.(string))
+						if len(got) == 2 {
+							return nil
 						}
 					}
 				}
 			}
 		}
-		if len(got) < 2 {
-			return errors.New("not enought object ids")
-		}
-		return nil
+		return errors.New("haven't found two migration alerts yet")
 	})
-	if !reflect.DeepEqual(map[string][]string{
+
+	// assert we found our two objects across two buckets
+	if want := map[string][]string{
 		api.DefaultBucketName: {fmt.Sprintf("/%s", t.Name())},
 		"newbucket":           {fmt.Sprintf("/%s", t.Name())},
-	}, got) {
-		t.Fatal("unexpected", got)
+	}; !reflect.DeepEqual(want, got) {
+		t.Fatal("unexpected", cmp.Diff(want, got))
 	}
 }
