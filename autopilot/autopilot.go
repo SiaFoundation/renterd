@@ -684,16 +684,56 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
-	var hostKey types.PublicKey
-	if jc.DecodeParam("hostKey", &hostKey) != nil {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostKey", &hk) != nil {
 		return
 	}
 
-	host, err := ap.bus.HostInfo(jc.Request.Context(), ap.id, hostKey)
+	// TODO: remove on next major release
+	h, err := compatV105HostInfo(jc.Request.Context(), ap.State(), ap.bus, hk)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
-	jc.Encode(host)
+
+	hi, err := ap.bus.HostInfo(jc.Request.Context(), ap.id, hk)
+	if utils.IsErr(err, api.ErrHostInfoNotFound) {
+		// TODO PJ: we used to calculate the host info here on the fly, maybe we
+		// should keep doing that but maybe we can get away with this too...
+		jc.Encode(api.HostInfoResponse{
+			Host:   h.Host,
+			Checks: nil,
+		})
+		return
+	} else if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+
+	jc.Encode(hi.ToHostInfoReponse())
+}
+
+func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
+	var req api.HostInfosRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	hosts, err := ap.bus.HostInfos(jc.Request.Context(), ap.id, api.HostInfoOptions{
+		UsabilityMode: req.UsabilityMode,
+		SearchHostOptions: api.SearchHostOptions{
+			FilterMode:      req.FilterMode,
+			AddressContains: req.AddressContains,
+			KeyIn:           req.KeyIn,
+			Offset:          req.Offset,
+			Limit:           req.Limit,
+		},
+	})
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+	resps := make([]api.HostInfoResponse, len(hosts))
+	for i, host := range hosts {
+		resps[i] = host.ToHostInfoReponse()
+	}
+	jc.Encode(resps)
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
@@ -725,41 +765,6 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 	})
-}
-
-func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.HostInfosRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	hosts, err := ap.bus.HostInfos(jc.Request.Context(), ap.id, api.HostInfoOptions{
-		UsabilityMode: req.UsabilityMode,
-		SearchHostOptions: api.SearchHostOptions{
-			FilterMode:      req.FilterMode,
-			AddressContains: req.AddressContains,
-			KeyIn:           req.KeyIn,
-			Offset:          req.Offset,
-			Limit:           req.Limit,
-		},
-	})
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-	resps := make([]api.HostHandlerResponse, len(hosts))
-	for i, host := range hosts {
-		resps[i] = api.HostHandlerResponse{
-			Host: host.Host,
-			Checks: &api.HostHandlerResponseChecks{
-				Gouging:          host.Gouging.Gouging(),
-				GougingBreakdown: host.Gouging,
-				Score:            host.Score.Score(),
-				ScoreBreakdown:   host.Score,
-				Usable:           host.Usability.Usable(),
-				UnusableReasons:  host.Usability.UnusableReasons(),
-			},
-		}
-	}
-	jc.Encode(resps)
 }
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.Host) (usables uint64) {
@@ -929,4 +934,45 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 		*field = newValue
 		nSteps++
 	}
+}
+
+// compatV105HostInfo performs some state checks and bus calls we no longer
+// need, but are necessary checks to make sure our API is consistent. This
+// should be considered for removal when releasing a new major version.
+func compatV105HostInfo(ctx context.Context, s state, b Bus, hk types.PublicKey) (*hostdb.HostInfo, error) {
+	// state checks
+	if s.cfg.Contracts.Allowance.IsZero() {
+		return nil, fmt.Errorf("can not score hosts because contracts allowance is zero")
+	}
+	if s.cfg.Contracts.Amount == 0 {
+		return nil, fmt.Errorf("can not score hosts because contracts amount is zero")
+	}
+	if s.cfg.Contracts.Period == 0 {
+		return nil, fmt.Errorf("can not score hosts because contract period is zero")
+	}
+
+	// fetch host
+	host, err := b.Host(ctx, hk)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+
+	// other checks
+	_, err = b.GougingSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	_, err = b.RedundancySettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	_, err = b.ConsensusState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	_, err = b.RecommendedFee(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	return &host, nil
 }

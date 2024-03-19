@@ -74,6 +74,23 @@ type (
 	// endpoint.
 	HostInfosRequest SearchHostsRequest
 
+	// HostInfoResponse is the response type for the /host/:hostkey endpoint.
+	//
+	// TODO: on next major release consider returning an api.HostInfo
+	HostInfoResponse struct {
+		Host   hostdb.Host `json:"host"`
+		Checks *HostChecks `json:"checks,omitempty"`
+	}
+
+	HostChecks struct {
+		Gouging          bool                 `json:"gouging"`
+		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
+		Score            float64              `json:"score"`
+		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
+		Usable           bool                 `json:"usable"`
+		UnusableReasons  []string             `json:"unusableReasons"`
+	}
+
 	// UpdateHostInfoRequest is the request type for the PUT
 	// /autopilot/:id/host/:hostkey endpoint.
 	UpdateHostInfoRequest struct {
@@ -264,6 +281,20 @@ func (ub HostUsabilityBreakdown) UnusableReasons() []string {
 		reasons = append(reasons, ErrUsabilityUnknown.Error())
 	}
 	return reasons
+}
+
+func (hi HostInfo) ToHostInfoReponse() HostInfoResponse {
+	return HostInfoResponse{
+		Host: hi.Host,
+		Checks: &HostChecks{
+			Gouging:          hi.Usability.Gouging,
+			GougingBreakdown: hi.Gouging,
+			Score:            hi.Score.Score(),
+			ScoreBreakdown:   hi.Score,
+			Usable:           hi.Usability.Usable(),
+			UnusableReasons:  hi.Usability.UnusableReasons(),
+		},
+	}
 }
 
 func (c AutopilotConfig) Validate() error {

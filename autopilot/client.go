@@ -34,13 +34,13 @@ func (c *Client) UpdateConfig(cfg api.AutopilotConfig) error {
 }
 
 // HostInfo returns information about the host with given host key.
-func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostHandlerResponse, err error) {
+func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostInfoResponse, err error) {
 	err = c.c.GET(fmt.Sprintf("/host/%s", hostKey), &resp)
 	return
 }
 
 // HostInfo returns information about all hosts.
-func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostHandlerResponse, err error) {
+func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostInfoResponse, err error) {
 	err = c.c.POST("/hosts", api.SearchHostsRequest{
 		Offset:          offset,
 		Limit:           limit,
