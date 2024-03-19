@@ -100,9 +100,6 @@ type (
 
 		pruning          bool
 		pruningLastStart time.Time
-
-		cachedDataStored map[types.PublicKey]uint64
-		cachedMinScore   float64
 	}
 
 	scoredHost struct {
@@ -275,20 +272,14 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
 
-	// update cache.
-	c.mu.Lock()
-	c.cachedDataStored = hostData
-	c.cachedMinScore = minScore
-	c.mu.Unlock()
-
 	// run host checks
-	err = c.runHostChecks(ctx, hosts)
+	err = c.runHostChecks(ctx, hosts, hostData, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run host checks, err: %v", err)
 	}
 
 	// run contract checks
-	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, contracts, isInCurrentSet, minScore)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, contracts, isInCurrentSet)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -637,7 +628,7 @@ func (c *contractor) performWalletMaintenance(ctx context.Context) error {
 	return nil
 }
 
-func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *contractor) runContractChecks(ctx context.Context, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	if c.ap.isStopped() {
 		return
 	}
@@ -695,6 +686,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 
 		// convenience variables
 		fcid := contract.ID
+		hk := contract.HostKey
 
 		// check if contract is ready to be archived.
 		if cs.BlockHeight > contract.EndHeight()-c.revisionSubmissionBuffer {
@@ -712,8 +704,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// fetch host from hostdb
-		hk := contract.HostKey
-		host, err := c.ap.bus.Host(ctx, hk)
+		host, err := c.ap.bus.HostInfo(ctx, c.ap.id, hk)
 		if err != nil {
 			c.logger.Errorw(fmt.Sprintf("missing host, err: %v", err), "hk", hk)
 			toStopUsing[fcid] = api.ErrUsabilityHostNotFound.Error()
@@ -722,42 +713,15 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		}
 
 		// if the host is blocked we ignore it, it might be unblocked later
-		if host.Blocked {
+		if host.Usability.Blocked {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", api.ErrUsabilityHostBlocked.Error())
 			toStopUsing[fcid] = api.ErrUsabilityHostBlocked.Error()
 			continue
 		}
 
-		// if the host doesn't have a valid pricetable, update it if we were
-		// able to obtain a revision
-		invalidPT := contract.Revision == nil
-		if contract.Revision != nil {
-			if err := refreshPriceTable(ctx, w, &host.Host); err != nil {
-				c.logger.Errorf("could not fetch price table for host %v: %v", host.PublicKey, err)
-				invalidPT = true
-			}
-		}
-
-		// refresh the consensus state
-		if css, err := c.ap.bus.ConsensusState(ctx); err != nil {
-			c.logger.Errorf("could not fetch consensus state, err: %v", err)
-		} else {
-			cs = css
-		}
-
-		// use a new gouging checker for every contract
-		gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-
-		// set the host's block height to ours to disable the height check in
-		// the gouging checks, in certain edge cases the renter might unsync and
-		// would therefor label all hosts as unusable and go on to create a
-		// whole new set of contracts with new hosts
-		host.PriceTable.HostBlockHeight = cs.BlockHeight
-
-		// decide whether the host is still good
-		hi := calculateHostInfo(state.cfg, state.rs, gc, host, minScore, contract.FileSize())
-		if !hi.Usability.Usable() {
-			reasons := hi.Usability.UnusableReasons()
+		// check if the host is still usable
+		if !host.Usability.Usable() {
+			reasons := host.Usability.UnusableReasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", reasons)
 			continue
@@ -778,20 +742,8 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 			continue // can't perform contract checks without revision
 		}
 
-		// if we were not able to get a valid price table for the host, but we
-		// did pass the host checks, we only want to be lenient if this contract
-		// is in the current set and only for a certain number of times,
-		// controlled by maxKeepLeeway
-		if invalidPT {
-			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
-				toStopUsing[fcid] = "no valid price table"
-				continue
-			}
-			remainingKeepLeeway-- // we let it slide
-		}
-
 		// decide whether the contract is still good
-		ci := contractInfo{contract: contract, priceTable: host.PriceTable.HostPriceTable, settings: host.Settings}
+		ci := contractInfo{contract: contract, priceTable: host.Host.PriceTable.HostPriceTable, settings: host.Host.Settings}
 		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.cfg, state, ci, cs.BlockHeight, ipFilter)
 		ci.usable = usable
 		ci.recoverable = recoverable
@@ -822,7 +774,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *contractor) runHostChecks(ctx context.Context, hosts []hostdb.HostInfo) error {
+func (c *contractor) runHostChecks(ctx context.Context, hosts []hostdb.HostInfo, hostData map[types.PublicKey]uint64, minScore float64) error {
 	// convenience variables
 	state := c.ap.State()
 
@@ -834,12 +786,6 @@ func (c *contractor) runHostChecks(ctx context.Context, hosts []hostdb.HostInfo)
 
 	// create gouging checker
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-
-	// grab min score and host data from cache
-	c.mu.Lock()
-	minScore := c.cachedMinScore
-	hostData := c.cachedDataStored
-	c.mu.Unlock()
 
 	// update host info
 	for _, h := range hosts {
