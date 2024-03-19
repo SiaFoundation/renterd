@@ -16,7 +16,6 @@ type (
 
 		Address types.Address
 		Fee     types.Currency
-		Worker  Worker
 	}
 )
 

@@ -225,10 +225,7 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	return "", false
 }
 
-func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *State) (bool, error) {
-	// convenience variables
-	w := state.Worker
-
+func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *State) (bool, error) {
 	// check if we can skip maintenance
 	if reason, skip := canSkipContractMaintenance(ctx, state.Config().Contracts); skip {
 		if reason != "" {
@@ -344,7 +341,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Stat
 	c.mu.Unlock()
 
 	// run checks
-	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, state, contracts, isInCurrentSet, minScore)
+	updatedSet, toArchive, toStopUsing, toRefresh, toRenew, err := c.runContractChecks(ctx, w, state, contracts, isInCurrentSet, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
 	}
@@ -387,7 +384,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Stat
 	var renewed []renewal
 	if limit > 0 {
 		var toKeep []api.ContractMetadata
-		renewed, toKeep = c.runContractRenewals(ctx, state, toRenew, &remaining, limit)
+		renewed, toKeep = c.runContractRenewals(ctx, w, state, toRenew, &remaining, limit)
 		for _, ri := range renewed {
 			if ri.ci.usable || ri.ci.recoverable {
 				updatedSet = append(updatedSet, ri.to)
@@ -398,7 +395,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Stat
 	}
 
 	// run contract refreshes
-	refreshed, err := c.runContractRefreshes(ctx, state, toRefresh, &remaining)
+	refreshed, err := c.runContractRefreshes(ctx, w, state, toRefresh, &remaining)
 	if err != nil {
 		c.logger.Errorf("failed to refresh contracts, err: %v", err) // continue
 	} else {
@@ -429,7 +426,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Stat
 		} else if wallet.Confirmed.IsZero() && wallet.Unconfirmed.IsZero() {
 			c.logger.Warn("contract formations skipped, wallet is empty")
 		} else {
-			formed, err = c.runContractFormations(ctx, state, candidates, usedHosts, unusableHosts, state.WantedContracts()-uint64(len(updatedSet)), &remaining)
+			formed, err = c.runContractFormations(ctx, w, state, candidates, usedHosts, unusableHosts, state.WantedContracts()-uint64(len(updatedSet)), &remaining)
 			if err != nil {
 				c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 			} else {
@@ -602,16 +599,13 @@ func (c *Contractor) computeContractSetChanged(ctx context.Context, state *State
 	return hasChanged
 }
 
-func (c *Contractor) runContractChecks(ctx context.Context, state *State, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *Contractor) runContractChecks(ctx context.Context, w Worker, state *State, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 	c.logger.Debug("running contract checks")
-
-	// convenience variables
-	w := state.Worker
 
 	// fetch consensus state
 	cs, err := c.bus.ConsensusState(ctx)
@@ -792,7 +786,7 @@ LOOP:
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *Contractor) runContractFormations(ctx context.Context, state *State, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
+func (c *Contractor) runContractFormations(ctx context.Context, w Worker, state *State, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
 	select {
 	case <-ctx.Done():
 		return nil, nil
@@ -800,7 +794,6 @@ func (c *Contractor) runContractFormations(ctx context.Context, state *State, ca
 	}
 
 	// convenience variables
-	w := state.Worker
 	shouldFilter := !state.AllowRedundantIPs()
 
 	c.logger.Debugw(
@@ -899,7 +892,7 @@ LOOP:
 			continue
 		}
 
-		formedContract, proceed, err := c.formContract(ctx, state, host, minInitialContractFunds, maxInitialContractFunds, budget)
+		formedContract, proceed, err := c.formContract(ctx, w, state, host, minInitialContractFunds, maxInitialContractFunds, budget)
 		if err == nil {
 			// add contract to contract set
 			formed = append(formed, formedContract)
@@ -982,7 +975,7 @@ func (c *Contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 	}
 }
 
-func (c *Contractor) runContractRenewals(ctx context.Context, state *State, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []api.ContractMetadata) {
+func (c *Contractor) runContractRenewals(ctx context.Context, w Worker, state *State, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []api.ContractMetadata) {
 	c.logger.Debugw(
 		"run contracts renewals",
 		"torenew", len(toRenew),
@@ -1014,7 +1007,7 @@ func (c *Contractor) runContractRenewals(ctx context.Context, state *State, toRe
 
 		// renew and add if it succeeds or if its usable
 		contract := toRenew[i].contract.ContractMetadata
-		renewed, proceed, err := c.renewContract(ctx, state, toRenew[i], budget)
+		renewed, proceed, err := c.renewContract(ctx, w, state, toRenew[i], budget)
 		if err != nil {
 			c.alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
 			if toRenew[i].usable {
@@ -1042,7 +1035,7 @@ func (c *Contractor) runContractRenewals(ctx context.Context, state *State, toRe
 	return renewals, toKeep
 }
 
-func (c *Contractor) runContractRefreshes(ctx context.Context, state *State, toRefresh []contractInfo, budget *types.Currency) (refreshed []renewal, _ error) {
+func (c *Contractor) runContractRefreshes(ctx context.Context, w Worker, state *State, toRefresh []contractInfo, budget *types.Currency) (refreshed []renewal, _ error) {
 	c.logger.Debugw(
 		"run contracts refreshes",
 		"torefresh", len(toRefresh),
@@ -1065,7 +1058,7 @@ func (c *Contractor) runContractRefreshes(ctx context.Context, state *State, toR
 		}
 
 		// refresh and add if it succeeds
-		renewed, proceed, err := c.refreshContract(ctx, state, ci, budget)
+		renewed, proceed, err := c.refreshContract(ctx, w, state, ci, budget)
 		if err == nil {
 			refreshed = append(refreshed, renewal{from: ci.contract.ContractMetadata, to: renewed, ci: ci})
 		}
@@ -1322,7 +1315,7 @@ func (c *Contractor) candidateHosts(ctx context.Context, state *State, hosts []h
 	return candidates, unusableHostResult, nil
 }
 
-func (c *Contractor) renewContract(ctx context.Context, state *State, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) renewContract(ctx context.Context, w Worker, state *State, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
@@ -1333,7 +1326,6 @@ func (c *Contractor) renewContract(ctx context.Context, state *State, ci contrac
 	fcid := contract.ID
 	rev := contract.Revision
 	hk := contract.HostKey
-	w := state.Worker
 
 	// fetch consensus state
 	cs, err := c.bus.ConsensusState(ctx)
@@ -1403,7 +1395,7 @@ func (c *Contractor) renewContract(ctx context.Context, state *State, ci contrac
 	return renewedContract, true, nil
 }
 
-func (c *Contractor) refreshContract(ctx context.Context, state *State, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) refreshContract(ctx context.Context, w Worker, state *State, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
 	}
@@ -1414,7 +1406,6 @@ func (c *Contractor) refreshContract(ctx context.Context, state *State, ci contr
 	fcid := contract.ID
 	rev := contract.Revision
 	hk := contract.HostKey
-	w := state.Worker
 
 	// fetch consensus state
 	cs, err := c.bus.ConsensusState(ctx)
@@ -1483,9 +1474,7 @@ func (c *Contractor) refreshContract(ctx context.Context, state *State, ci contr
 	return refreshedContract, true, nil
 }
 
-func (c *Contractor) formContract(ctx context.Context, state *State, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
-	w := state.Worker
-
+func (c *Contractor) formContract(ctx context.Context, w Worker, state *State, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	// convenience variables
 	hk := host.PublicKey
 
