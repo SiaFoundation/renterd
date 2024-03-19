@@ -3,12 +3,14 @@ package s3
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
 
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
@@ -87,6 +89,11 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		page.MaxKeys = maxKeysDefault
 	}
 
+	// Adjust marker
+	if page.HasMarker {
+		page.Marker = "/" + page.Marker
+	}
+
 	var objects []api.ObjectMetadata
 	var err error
 	response := gofakes3.NewObjectList()
@@ -108,7 +115,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		}
 		var res api.ObjectsResponse
 		res, err = s.b.Object(ctx, bucketName, path, opts)
-		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		if utils.IsErr(err, api.ErrBucketNotFound) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
 			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -128,7 +135,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 
 		var res api.ObjectsListResponse
 		res, err = s.b.ListObjects(ctx, bucketName, opts)
-		if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+		if utils.IsErr(err, api.ErrBucketNotFound) {
 			return nil, gofakes3.BucketNotFound(bucketName)
 		} else if err != nil {
 			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -140,6 +147,10 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
+
+	// Remove the leading slash from the marker since we also do that for the
+	// name of each object
+	response.NextMarker = strings.TrimPrefix(response.NextMarker, "/")
 
 	// Loop over the entries and add them to the response.
 	for _, object := range objects {
@@ -168,7 +179,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 // gofakes3.ErrBucketAlreadyExists MUST be returned.
 func (s *s3) CreateBucket(ctx context.Context, name string) error {
 	err := s.b.CreateBucket(ctx, name, api.CreateBucketOptions{})
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketExists.Error()) {
+	if utils.IsErr(err, api.ErrBucketExists) {
 		return gofakes3.ErrBucketAlreadyExists
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -182,7 +193,7 @@ func (s *s3) CreateBucket(ctx context.Context, name string) error {
 // TODO: backend could be improved to allow for checking specific dir in root.
 func (s *s3) BucketExists(ctx context.Context, name string) (bool, error) {
 	_, err := s.b.Bucket(ctx, name)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return false, nil
 	} else if err != nil {
 		return false, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -202,9 +213,9 @@ func (s *s3) BucketExists(ctx context.Context, name string) (bool, error) {
 // atomically checking whether a bucket is empty.
 func (s *s3) DeleteBucket(ctx context.Context, name string) error {
 	err := s.b.DeleteBucket(ctx, name)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotEmpty.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotEmpty) {
 		return gofakes3.ErrBucketNotEmpty
-	} else if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	} else if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.BucketNotFound(name)
 	} else if err != nil {
 		return gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -242,9 +253,9 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	}
 
 	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return nil, gofakes3.BucketNotFound(bucketName)
-	} else if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	} else if utils.IsErr(err, api.ErrObjectNotFound) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -268,7 +279,14 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	res.Metadata["Content-Type"] = res.ContentType
 	res.Metadata["Last-Modified"] = res.LastModified
 
+	// etag to bytes
+	etag, err := hex.DecodeString(res.Etag)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
+
 	return &gofakes3.Object{
+		Hash:     etag,
 		Name:     gofakes3.URLEncode(objectName),
 		Metadata: res.Metadata,
 		Size:     res.Size,
@@ -287,11 +305,10 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.b.Object(ctx, bucketName, objectName, api.GetObjectOptions{
-		IgnoreDelim:  true,
-		OnlyMetadata: true,
+	res, err := s.w.HeadObject(ctx, bucketName, objectName, api.HeadObjectOptions{
+		IgnoreDelim: true,
 	})
-	if err != nil && strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	if utils.IsErr(err, api.ErrObjectNotFound) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -299,18 +316,25 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 
 	// set user metadata
 	metadata := make(map[string]string)
-	for k, v := range res.Object.Metadata {
+	for k, v := range res.Metadata {
 		metadata[amazonMetadataPrefix+k] = v
 	}
 
 	// decorate metadata
-	metadata["Content-Type"] = res.Object.MimeType
-	metadata["Last-Modified"] = res.Object.LastModified()
+	metadata["Content-Type"] = res.ContentType
+	metadata["Last-Modified"] = res.LastModified
+
+	// etag to bytes
+	hash, err := hex.DecodeString(res.Etag)
+	if err != nil {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
+	}
 
 	return &gofakes3.Object{
+		Hash:     hash,
 		Name:     gofakes3.URLEncode(objectName),
 		Metadata: metadata,
-		Size:     res.Object.Size,
+		Size:     res.Size,
 		Contents: io.NopCloser(bytes.NewReader(nil)),
 	}, nil
 }
@@ -332,9 +356,9 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
 	err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
-	} else if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+	} else if utils.IsErr(err, api.ErrObjectNotFound) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
@@ -357,7 +381,7 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 	}
 
 	ur, err := s.w.UploadObject(ctx, input, bucketName, key, opts)
-	if err != nil && strings.Contains(err.Error(), api.ErrBucketNotFound.Error()) {
+	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.PutObjectResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if err != nil {
 		return gofakes3.PutObjectResult{}, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
@@ -373,7 +397,7 @@ func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...stri
 	var res gofakes3.MultiDeleteResult
 	for _, objectName := range objects {
 		err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
-		if err != nil && !strings.Contains(err.Error(), api.ErrObjectNotFound.Error()) {
+		if err != nil && !utils.IsErr(err, api.ErrObjectNotFound) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     objectName,
 				Code:    gofakes3.ErrInternal,
@@ -502,7 +526,8 @@ func (s *s3) AbortMultipartUpload(ctx context.Context, bucket, object string, id
 	return nil
 }
 
-func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
+func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string, id gofakes3.UploadID, meta map[string]string, input *gofakes3.CompleteMultipartUploadRequest) (*gofakes3.CompleteMultipartUploadResult, error) {
+	convertToSiaMetadataHeaders(meta)
 	var parts []api.MultipartCompletedPart
 	for _, part := range input.Parts {
 		parts = append(parts, api.MultipartCompletedPart{
@@ -510,7 +535,9 @@ func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string,
 			PartNumber: part.PartNumber,
 		})
 	}
-	resp, err := s.b.CompleteMultipartUpload(ctx, bucket, "/"+object, string(id), parts)
+	resp, err := s.b.CompleteMultipartUpload(ctx, bucket, "/"+object, string(id), parts, api.CompleteMultipartOptions{
+		Metadata: api.ExtractObjectUserMetadataFrom(meta),
+	})
 	if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

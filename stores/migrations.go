@@ -3,9 +3,9 @@ package stores
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/go-gormigrate/gormigrate/v2"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -32,7 +32,7 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 			ID: "00002_prune_slabs_trigger",
 			Migrate: func(tx *gorm.DB) error {
 				err := performMigration(tx, dbIdentifier, "00002_prune_slabs_trigger", logger)
-				if err != nil && strings.Contains(err.Error(), errMySQLNoSuperPrivilege.Error()) {
+				if utils.IsErr(err, errMySQLNoSuperPrivilege) {
 					logger.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
 				}
 				return err
@@ -56,13 +56,19 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, dbIdentifier, "00005_zero_size_object_health", logger)
 			},
 		},
+		{
+			ID: "00006_idx_objects_created_at",
+			Migrate: func(tx *gorm.DB) error {
+				return performMigration(tx, dbIdentifier, "00006_idx_objects_created_at", logger)
+			},
+		},
 	}
 
 	// Create migrator.
 	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
 
 	// Set init function.
-	m.InitSchema(initSchema(db, dbIdentifier, logger))
+	m.InitSchema(initSchema(dbIdentifier, logger))
 
 	// Perform migrations.
 	if err := m.Migrate(); err != nil {

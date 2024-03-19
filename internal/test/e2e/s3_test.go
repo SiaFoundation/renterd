@@ -3,6 +3,8 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -72,8 +74,12 @@ func TestS3Basic(t *testing.T) {
 
 	// add object to the bucket
 	data := frand.Bytes(10)
+	etag := md5.Sum(data)
 	uploadInfo, err := s3.PutObject(context.Background(), bucket, objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
 	tt.OK(err)
+	if uploadInfo.ETag != hex.EncodeToString(etag[:]) {
+		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), uploadInfo.ETag)
+	}
 	busObject, err := cluster.Bus.Object(context.Background(), bucket, objPath, api.GetObjectOptions{})
 	tt.OK(err)
 	if busObject.Object == nil {
@@ -92,6 +98,10 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(b, data) {
 		t.Fatal("data mismatch")
+	} else if info, err := obj.Stat(); err != nil {
+		t.Fatal(err)
+	} else if info.ETag != uploadInfo.ETag {
+		t.Fatal("unexpected ETag:", info.ETag, uploadInfo.ETag)
 	}
 
 	// stat object
@@ -99,6 +109,8 @@ func TestS3Basic(t *testing.T) {
 	tt.OK(err)
 	if info.Size != int64(len(data)) {
 		t.Fatal("size mismatch")
+	} else if info.ETag != uploadInfo.ETag {
+		t.Fatal("unexpected ETag:", info.ETag)
 	}
 
 	// add another bucket
@@ -254,6 +266,38 @@ func TestS3ObjectMetadata(t *testing.T) {
 	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, head.UserMetadata)
+
+	// upload a file using multipart upload
+	core := cluster.S3Core
+	uid, err := core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "multi", minio.PutObjectOptions{
+		UserMetadata: map[string]string{
+			"New": "1",
+		},
+	})
+	tt.OK(err)
+	data := frand.Bytes(3)
+
+	part, err := core.PutObjectPart(context.Background(), api.DefaultBucketName, "foo", uid, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+	tt.OK(err)
+	_, err = core.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "multi", uid, []minio.CompletePart{
+		{
+			PartNumber: part.PartNumber,
+			ETag:       part.ETag,
+		},
+	}, minio.PutObjectOptions{
+		UserMetadata: map[string]string{
+			"Complete": "2",
+		},
+	})
+	tt.OK(err)
+
+	// check metadata
+	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, "multi", minio.StatObjectOptions{})
+	tt.OK(err)
+	assertMetadata(map[string]string{
+		"New":      "1",
+		"Complete": "2",
+	}, head.UserMetadata)
 }
 
 func TestS3Authentication(t *testing.T) {
@@ -455,6 +499,30 @@ func TestS3List(t *testing.T) {
 		if !cmp.Equal(test.want, got) {
 			t.Errorf("test %d: unexpected response, want %v got %v", i, test.want, got)
 		}
+		for _, obj := range result.Contents {
+			if obj.ETag == "" {
+				t.Fatal("expected non-empty ETag")
+			} else if obj.LastModified.IsZero() {
+				t.Fatal("expected non-zero LastModified")
+			}
+		}
+	}
+
+	// use pagination to loop over objects one-by-one
+	marker := ""
+	expectedOrder := []string{"a/", "a/a/a", "a/b", "ab", "b", "c/a", "d", "y/", "y/y/y/y"}
+	hasMore := true
+	for i := 0; hasMore; i++ {
+		result, err := core.ListObjectsV2("bucket", "", "", marker, "", 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(result.Contents) != 1 {
+			t.Fatalf("unexpected number of objects, %d != 1", len(result.Contents))
+		} else if result.Contents[0].Key != expectedOrder[i] {
+			t.Errorf("unexpected object, %s != %s", result.Contents[0].Key, expectedOrder[i])
+		}
+		marker = result.NextContinuationToken
+		hasMore = result.IsTruncated
 	}
 }
 
@@ -548,12 +616,28 @@ func TestS3MultipartUploads(t *testing.T) {
 	}
 
 	// Download object
+	expectedData := []byte("helloworld!")
 	downloadedObj, err := s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
 	tt.OK(err)
 	if data, err := io.ReadAll(downloadedObj); err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(data, []byte("helloworld!")) {
+	} else if !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", string(data))
+	} else if info, err := downloadedObj.Stat(); err != nil {
+		t.Fatal(err)
+	} else if info.ETag != ui.ETag {
+		t.Fatal("unexpected ETag:", info.ETag)
+	} else if info.Size != int64(len(expectedData)) {
+		t.Fatal("unexpected size:", info.Size)
+	}
+
+	// Stat object
+	if info, err := s3.StatObject(context.Background(), "multipart", "foo", minio.StatObjectOptions{}); err != nil {
+		t.Fatal(err)
+	} else if info.ETag != ui.ETag {
+		t.Fatal("unexpected ETag:", info.ETag)
+	} else if info.Size != int64(len(expectedData)) {
+		t.Fatal("unexpected size:", info.Size)
 	}
 
 	// Download again with range request.

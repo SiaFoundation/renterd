@@ -19,9 +19,9 @@ var ErrWebhookNotFound = errors.New("Webhook not found")
 
 type (
 	WebhookStore interface {
-		DeleteWebhook(wh Webhook) error
-		AddWebhook(wh Webhook) error
-		Webhooks() ([]Webhook, error)
+		DeleteWebhook(ctx context.Context, wh Webhook) error
+		AddWebhook(ctx context.Context, wh Webhook) error
+		Webhooks(ctx context.Context) ([]Webhook, error)
 	}
 
 	Broadcaster interface {
@@ -122,10 +122,10 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func (m *Manager) Delete(wh Webhook) error {
+func (m *Manager) Delete(ctx context.Context, wh Webhook) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.store.DeleteWebhook(wh); errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := m.store.DeleteWebhook(ctx, wh); errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrWebhookNotFound
 	} else if err != nil {
 		return err
@@ -157,7 +157,7 @@ func (m *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
 	return hooks, queueInfos
 }
 
-func (m *Manager) Register(wh Webhook) error {
+func (m *Manager) Register(ctx context.Context, wh Webhook) error {
 	ctx, cancel := context.WithTimeout(m.shutdownCtx, webhookTimeout)
 	defer cancel()
 
@@ -170,7 +170,7 @@ func (m *Manager) Register(wh Webhook) error {
 	}
 
 	// Add Webhook.
-	if err := m.store.AddWebhook(wh); err != nil {
+	if err := m.store.AddWebhook(ctx, wh); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -214,11 +214,6 @@ func (w Webhook) String() string {
 }
 
 func NewManager(logger *zap.SugaredLogger, store WebhookStore) (*Manager, error) {
-	hooks, err := store.Webhooks()
-	if err != nil {
-		return nil, err
-	}
-
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		logger: logger.Named("webhooks"),
@@ -230,7 +225,10 @@ func NewManager(logger *zap.SugaredLogger, store WebhookStore) (*Manager, error)
 		queues:   make(map[string]*eventQueue),
 		webhooks: make(map[string]Webhook),
 	}
-
+	hooks, err := store.Webhooks(shutdownCtx)
+	if err != nil {
+		return nil, err
+	}
 	for _, hook := range hooks {
 		m.webhooks[hook.String()] = hook
 	}

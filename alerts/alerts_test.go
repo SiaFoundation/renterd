@@ -22,26 +22,28 @@ type testWebhookStore struct {
 	listed  int
 }
 
-func (s *testWebhookStore) DeleteWebhook(wb webhooks.Webhook) error {
+func (s *testWebhookStore) DeleteWebhook(_ context.Context, wb webhooks.Webhook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deleted++
 	return nil
 }
 
-func (s *testWebhookStore) AddWebhook(wb webhooks.Webhook) error {
+func (s *testWebhookStore) AddWebhook(_ context.Context, wb webhooks.Webhook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.added++
 	return nil
 }
 
-func (s *testWebhookStore) Webhooks() ([]webhooks.Webhook, error) {
+func (s *testWebhookStore) Webhooks(_ context.Context) ([]webhooks.Webhook, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listed++
 	return nil, nil
 }
+
+var _ webhooks.WebhookStore = (*testWebhookStore)(nil)
 
 func TestWebhooks(t *testing.T) {
 	store := &testWebhookStore{}
@@ -75,7 +77,7 @@ func TestWebhooks(t *testing.T) {
 	if hookID := wh.String(); hookID != fmt.Sprintf("%v.%v.%v", wh.URL, wh.Module, "") {
 		t.Fatalf("wrong result for wh.String(): %v != %v", wh.String(), hookID)
 	}
-	err = mgr.Register(wh)
+	err = mgr.Register(context.Background(), wh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +112,7 @@ func TestWebhooks(t *testing.T) {
 	}
 
 	// unregister hook
-	if err := mgr.Delete(webhooks.Webhook{
+	if err := mgr.Delete(context.Background(), webhooks.Webhook{
 		Event:  hooks[0].Event,
 		Module: hooks[0].Module,
 		URL:    hooks[0].URL,

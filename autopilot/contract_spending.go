@@ -20,7 +20,7 @@ func (c *contractor) contractSpending(ctx context.Context, contract api.Contract
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) (types.Currency, error) {
+func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) types.Currency {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -41,22 +41,19 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	for _, contract := range filtered {
 		totalAllocated = totalAllocated.Add(contract.TotalCost)
 	}
-	return totalAllocated, nil
+	return totalAllocated
 }
 
-func (c *contractor) remainingFunds(contracts []api.Contract) (types.Currency, error) {
+func (c *contractor) remainingFunds(contracts []api.Contract) types.Currency {
 	state := c.ap.State()
 
 	// find out how much we spent in the current period
-	spent, err := c.currentPeriodSpending(contracts, state.period)
-	if err != nil {
-		return types.ZeroCurrency, err
-	}
+	spent := c.currentPeriodSpending(contracts, state.period)
 
 	// figure out remaining funds
 	var remaining types.Currency
 	if state.cfg.Contracts.Allowance.Cmp(spent) > 0 {
 		remaining = state.cfg.Contracts.Allowance.Sub(spent)
 	}
-	return remaining, nil
+	return remaining
 }

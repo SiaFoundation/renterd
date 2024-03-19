@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
@@ -97,7 +98,7 @@ func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
 	return time.Duration(totalNumMS) * time.Millisecond
 }
 
-func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
+func (m *migrator) tryPerformMigrations(wp *workerPool) {
 	m.mu.Lock()
 	if m.migrating || m.ap.isStopped() {
 		m.mu.Unlock()
@@ -156,7 +157,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 
 						if err != nil {
 							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
-							skipAlert := isErr(err, api.ErrSlabNotFound)
+							skipAlert := utils.IsErr(err, api.ErrSlabNotFound)
 							if !skipAlert {
 								if res.SurchargeApplied {
 									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))

@@ -277,7 +277,7 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
 	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 				// perform gouging checks
 				gc, err := GougingCheckerFromContext(ctx, false)
 				if err != nil {
@@ -510,7 +510,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 
 func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+		return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			gc, err := GougingCheckerFromContext(ctx, false)
 			if err != nil {
 				return err
@@ -641,7 +641,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
+func (w *worker) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
 	renterKey := w.deriveRenterKey(hk)
 
 	// execute lock RPC

@@ -136,22 +136,18 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 
 	// refill accounts in separate goroutines
 	for _, c := range contracts {
-		// add logging for contracts in the set
-		_, inSet := inContractSet[c.ID]
-
 		// launch refill if not already in progress
 		if a.markRefillInProgress(workerID, c.HostKey) {
-			go func(contract api.ContractMetadata, inSet bool) {
+			go func(contract api.ContractMetadata) {
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
-				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, workerID, contract)
+				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, contract)
 				if rerr != nil {
-					if inSet || rerr.Is(errMaxDriftExceeded) {
-						// register the alert on failure if the contract is in
-						// the set or the error is errMaxDriftExceeded
+					if rerr.Is(errMaxDriftExceeded) {
+						// register the alert if error is errMaxDriftExceeded
 						a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
-						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
 					}
+					a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
 				} else {
 					// dismiss alerts on success
 					a.ap.DismissAlert(ctx, alertIDForAccount(alertAccountRefillID, accountID))
@@ -167,7 +163,7 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 				}
 
 				a.markRefillDone(workerID, contract.HostKey)
-			}(c, inSet)
+			}(c)
 		}
 	}
 }
@@ -188,7 +184,7 @@ func (err *refillError) Is(target error) bool {
 	return errors.Is(err.err, target)
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
 	wrapErr := func(err error, keysAndValues ...interface{}) *refillError {
 		if err == nil {
 			return nil

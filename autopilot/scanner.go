@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -162,9 +163,9 @@ func (s *scanner) isInterrupted() bool {
 	}
 }
 
-func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) bool {
+func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bool) {
 	if s.ap.isStopped() {
-		return false
+		return
 	}
 
 	scanType := "host scan"
@@ -184,7 +185,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		s.interruptScanChan = make(chan struct{})
 	} else if s.scanning || !s.isScanRequired() {
 		s.mu.Unlock()
-		return false
+		return
 	}
 	s.scanningLastStart = time.Now()
 	s.scanning = true
@@ -228,7 +229,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		s.logger.Debugf("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(scanType)
-	return true
+	return
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -314,7 +315,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				if err != nil {
 					break // abort
-				} else if !isErr(errors.New(scan.ScanError), errIOTimeout) && scan.Ping > 0 {
+				} else if !utils.IsErr(errors.New(scan.ScanError), errIOTimeout) && scan.Ping > 0 {
 					s.tracker.addDataPoint(time.Duration(scan.Ping))
 				}
 

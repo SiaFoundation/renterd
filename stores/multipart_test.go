@@ -91,7 +91,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatal(err)
 	} else if nSlicesBefore == 0 {
 		t.Fatal("expected some slices")
-	} else if _, err = ss.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts); err != nil {
+	} else if _, err = ss.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts, api.CompleteMultipartOptions{}); err != nil {
 		t.Fatal(err)
 	} else if err := ss.db.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
 		t.Fatal(err)

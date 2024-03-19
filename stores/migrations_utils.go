@@ -10,7 +10,7 @@ import (
 
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
-func initSchema(db *gorm.DB, name string, logger *zap.SugaredLogger) gormigrate.InitSchemaFunc {
+func initSchema(name string, logger *zap.SugaredLogger) gormigrate.InitSchemaFunc {
 	return func(tx *gorm.DB) error {
 		logger.Infof("initializing '%s' schema", name)
 

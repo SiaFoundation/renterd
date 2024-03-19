@@ -92,6 +92,7 @@ type (
 	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
 	HeadObjectResponse struct {
 		ContentType  string             `json:"contentType"`
+		Etag         string             `json:"eTag"`
 		LastModified string             `json:"lastModified"`
 		Range        *DownloadRange     `json:"range,omitempty"`
 		Size         int64              `json:"size"`
@@ -212,7 +213,8 @@ type (
 	}
 
 	HeadObjectOptions struct {
-		Range DownloadRange
+		IgnoreDelim bool
+		Range       DownloadRange
 	}
 
 	DownloadObjectOptions struct {
@@ -307,6 +309,12 @@ func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 func (opts DeleteObjectOptions) Apply(values url.Values) {
 	if opts.Batch {
 		values.Set("batch", "true")
+	}
+}
+
+func (opts HeadObjectOptions) Apply(values url.Values) {
+	if opts.IgnoreDelim {
+		values.Set("ignoreDelim", "true")
 	}
 }
 

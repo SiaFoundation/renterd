@@ -150,7 +150,7 @@ type (
 
 		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
 		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
-		CompleteMultipartUpload(ctx context.Context, bucketName, path, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
+		CompleteMultipartUpload(ctx context.Context, bucketName, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucketName, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
 		MultipartUploads(ctx context.Context, bucketName, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
@@ -189,7 +189,7 @@ type (
 	EphemeralAccountStore interface {
 		Accounts(context.Context) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown() error
+		SetUncleanShutdown(context.Context) error
 	}
 
 	MetricsStore interface {
@@ -2022,7 +2022,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	if jc.Decode(&wh) != nil {
 		return
 	}
-	err := b.hooks.Delete(wh)
+	err := b.hooks.Delete(jc.Request.Context(), wh)
 	if errors.Is(err, webhooks.ErrWebhookNotFound) {
 		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
 		return
@@ -2044,7 +2044,7 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	err := b.hooks.Register(webhooks.Webhook{
+	err := b.hooks.Register(jc.Request.Context(), webhooks.Webhook{
 		Event:  req.Event,
 		Module: req.Module,
 		URL:    req.URL,
@@ -2244,7 +2244,9 @@ func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts)
+	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts, api.CompleteMultipartOptions{
+		Metadata: req.Metadata,
+	})
 	if jc.Check("failed to complete multipart upload", err) != nil {
 		return
 	}
@@ -2410,7 +2412,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 
 	// mark the shutdown as unclean, this will be overwritten when/if the
 	// accounts are saved on shutdown
-	if err := eas.SetUncleanShutdown(); err != nil {
+	if err := eas.SetUncleanShutdown(ctx); err != nil {
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
 	return b, nil
