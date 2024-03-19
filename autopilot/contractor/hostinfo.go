@@ -10,7 +10,7 @@ import (
 	"go.sia.tech/renterd/worker"
 )
 
-func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, state *State) (api.HostHandlerResponse, error) {
+func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, state *MaintenanceState) (api.HostHandlerResponse, error) {
 	if state.ContractsConfig().Allowance.IsZero() {
 		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
@@ -53,7 +53,7 @@ func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, stat
 	}, nil
 }
 
-func (c *Contractor) hostInfoFromCache(ctx context.Context, state *State, host hostdb.HostInfo) (hi hostInfo, found bool) {
+func (c *Contractor) hostInfoFromCache(ctx context.Context, state *MaintenanceState, host hostdb.HostInfo) (hi hostInfo, found bool) {
 	// grab host details from cache
 	c.mu.Lock()
 	hi, found = c.cachedHostInfo[host.PublicKey]
@@ -91,7 +91,7 @@ func (c *Contractor) hostInfoFromCache(ctx context.Context, state *State, host h
 	return
 }
 
-func (c *Contractor) HostInfos(ctx context.Context, state *State, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerResponse, error) {
+func (c *Contractor) HostInfos(ctx context.Context, state *MaintenanceState, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerResponse, error) {
 	// declare helper to decide whether to keep a host.
 	if !isValidUsabilityFilterMode(usabilityMode) {
 		return nil, fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)

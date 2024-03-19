@@ -86,14 +86,12 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
-	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
-	Wallet(ctx context.Context) (api.WalletResponse, error)
 }
 
 type Worker interface {
@@ -225,7 +223,7 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	return "", false
 }
 
-func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *State) (bool, error) {
+func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {
 	// check if we can skip maintenance
 	if reason, skip := canSkipContractMaintenance(ctx, state.ContractsConfig()); skip {
 		if reason != "" {
@@ -417,23 +415,14 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, s
 
 	// check if we need to form contracts and add them to the contract set
 	var formed []api.ContractMetadata
-	if uint64(len(updatedSet)) < threshold {
-		// no need to try and form contracts if wallet is completely empty
-		wallet, err := c.bus.Wallet(ctx)
+	if uint64(len(updatedSet)) < threshold && !state.SkipContractFormations {
+		formed, err = c.runContractFormations(ctx, w, state, candidates, usedHosts, unusableHosts, state.WantedContracts()-uint64(len(updatedSet)), &remaining)
 		if err != nil {
-			c.logger.Errorf("failed to fetch wallet, err: %v", err)
-			return false, err
-		} else if wallet.Confirmed.IsZero() && wallet.Unconfirmed.IsZero() {
-			c.logger.Warn("contract formations skipped, wallet is empty")
+			c.logger.Errorf("failed to form contracts, err: %v", err) // continue
 		} else {
-			formed, err = c.runContractFormations(ctx, w, state, candidates, usedHosts, unusableHosts, state.WantedContracts()-uint64(len(updatedSet)), &remaining)
-			if err != nil {
-				c.logger.Errorf("failed to form contracts, err: %v", err) // continue
-			} else {
-				for _, fc := range formed {
-					updatedSet = append(updatedSet, fc)
-					contractData[fc.ID] = 0
-				}
+			for _, fc := range formed {
+				updatedSet = append(updatedSet, fc)
+				contractData[fc.ID] = 0
 			}
 		}
 	}
@@ -471,7 +460,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, s
 	return c.computeContractSetChanged(ctx, state, currentSet, updatedSet, formed, refreshed, renewed, toStopUsing, contractData), nil
 }
 
-func (c *Contractor) computeContractSetChanged(ctx context.Context, state *State, oldSet, newSet []api.ContractMetadata, formed []api.ContractMetadata, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
+func (c *Contractor) computeContractSetChanged(ctx context.Context, state *MaintenanceState, oldSet, newSet []api.ContractMetadata, formed []api.ContractMetadata, refreshed, renewed []renewal, toStopUsing map[types.FileContractID]string, contractData map[types.FileContractID]uint64) bool {
 	name := state.ContractSet()
 
 	// build set lookups
@@ -599,7 +588,7 @@ func (c *Contractor) computeContractSetChanged(ctx context.Context, state *State
 	return hasChanged
 }
 
-func (c *Contractor) runContractChecks(ctx context.Context, w Worker, state *State, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
+func (c *Contractor) runContractChecks(ctx context.Context, w Worker, state *MaintenanceState, contracts []api.Contract, inCurrentSet map[types.FileContractID]struct{}, minScore float64) (toKeep []api.ContractMetadata, toArchive, toStopUsing map[types.FileContractID]string, toRefresh, toRenew []contractInfo, _ error) {
 	select {
 	case <-ctx.Done():
 		return
@@ -786,7 +775,7 @@ LOOP:
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew, nil
 }
 
-func (c *Contractor) runContractFormations(ctx context.Context, w Worker, state *State, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
+func (c *Contractor) runContractFormations(ctx context.Context, w Worker, state *MaintenanceState, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostResult, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
 	select {
 	case <-ctx.Done():
 		return nil, nil
@@ -975,7 +964,7 @@ func (c *Contractor) runRevisionBroadcast(ctx context.Context, w Worker, allCont
 	}
 }
 
-func (c *Contractor) runContractRenewals(ctx context.Context, w Worker, state *State, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []api.ContractMetadata) {
+func (c *Contractor) runContractRenewals(ctx context.Context, w Worker, state *MaintenanceState, toRenew []contractInfo, budget *types.Currency, limit int) (renewals []renewal, toKeep []api.ContractMetadata) {
 	c.logger.Debugw(
 		"run contracts renewals",
 		"torenew", len(toRenew),
@@ -1035,7 +1024,7 @@ func (c *Contractor) runContractRenewals(ctx context.Context, w Worker, state *S
 	return renewals, toKeep
 }
 
-func (c *Contractor) runContractRefreshes(ctx context.Context, w Worker, state *State, toRefresh []contractInfo, budget *types.Currency) (refreshed []renewal, _ error) {
+func (c *Contractor) runContractRefreshes(ctx context.Context, w Worker, state *MaintenanceState, toRefresh []contractInfo, budget *types.Currency) (refreshed []renewal, _ error) {
 	c.logger.Debugw(
 		"run contracts refreshes",
 		"torefresh", len(toRefresh),
@@ -1109,7 +1098,7 @@ func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contract
 	return refreshAmountCapped
 }
 
-func (c *Contractor) renewFundingEstimate(ctx context.Context, state *State, ci contractInfo, fee types.Currency, renewing bool) (types.Currency, error) {
+func (c *Contractor) renewFundingEstimate(ctx context.Context, state *MaintenanceState, ci contractInfo, fee types.Currency, renewing bool) (types.Currency, error) {
 	// estimate the cost of the current data stored
 	dataStored := ci.contract.FileSize()
 	storageCost := sectorStorageCost(ci.priceTable, state.Period()).Mul64(bytesToSectors(dataStored))
@@ -1245,7 +1234,7 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *Contractor) candidateHosts(ctx context.Context, state *State, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
+func (c *Contractor) candidateHosts(ctx context.Context, state *MaintenanceState, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1315,7 +1304,7 @@ func (c *Contractor) candidateHosts(ctx context.Context, state *State, hosts []h
 	return candidates, unusableHostResult, nil
 }
 
-func (c *Contractor) renewContract(ctx context.Context, w Worker, state *State, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) renewContract(ctx context.Context, w Worker, state *MaintenanceState, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
@@ -1395,7 +1384,7 @@ func (c *Contractor) renewContract(ctx context.Context, w Worker, state *State, 
 	return renewedContract, true, nil
 }
 
-func (c *Contractor) refreshContract(ctx context.Context, w Worker, state *State, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) refreshContract(ctx context.Context, w Worker, state *MaintenanceState, ci contractInfo, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
 	}
@@ -1474,7 +1463,7 @@ func (c *Contractor) refreshContract(ctx context.Context, w Worker, state *State
 	return refreshedContract, true, nil
 }
 
-func (c *Contractor) formContract(ctx context.Context, w Worker, state *State, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx context.Context, w Worker, state *MaintenanceState, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	// convenience variables
 	hk := host.PublicKey
 

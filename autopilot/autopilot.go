@@ -771,7 +771,7 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	jc.Encode(hosts)
 }
 
-func (ap *Autopilot) buildState(ctx context.Context) (*contractor.State, error) {
+func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
 	// fetch the autopilot from the bus
 	autopilot, err := ap.Config(ctx)
 	if err != nil {
@@ -809,6 +809,12 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.State, error) 
 	}
 	address := wi.Address
 
+	// no need to try and form contracts if wallet is completely empty
+	skipContractFormations := wi.Confirmed.IsZero() && wi.Unconfirmed.IsZero()
+	if skipContractFormations {
+		ap.logger.Warn("contract formations skipped, wallet is empty")
+	}
+
 	// update current period if necessary
 	if cs.Synced {
 		if autopilot.CurrentPeriod == 0 {
@@ -829,12 +835,13 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.State, error) 
 		}
 	}
 
-	return &contractor.State{
+	return &contractor.MaintenanceState{
 		GS: gs,
 		RS: rs,
 		AP: autopilot,
 
-		Address: address,
-		Fee:     fee,
+		Address:                address,
+		Fee:                    fee,
+		SkipContractFormations: skipContractFormations,
 	}, nil
 }

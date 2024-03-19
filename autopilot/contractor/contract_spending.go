@@ -44,7 +44,7 @@ func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	return totalAllocated
 }
 
-func (c *Contractor) remainingFunds(contracts []api.Contract, state *State) types.Currency {
+func (c *Contractor) remainingFunds(contracts []api.Contract, state *MaintenanceState) types.Currency {
 	// find out how much we spent in the current period
 	spent := c.currentPeriodSpending(contracts, state.Period())
 
