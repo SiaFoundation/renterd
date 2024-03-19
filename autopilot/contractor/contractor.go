@@ -172,10 +172,11 @@ type (
 	}
 )
 
-func New(alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
+func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
 	logger = logger.Named("contractor")
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Contractor{
+		bus:     bus,
 		alerter: alerter,
 		churn:   newAccumulatedChurn(),
 		logger:  logger,
