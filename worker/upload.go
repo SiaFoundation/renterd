@@ -403,7 +403,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, up.rs.TotalShards, contracts, up.bh, lockPriority)
+	upload, err := mgr.newUpload(up.rs.TotalShards, contracts, up.bh, lockPriority)
 	if err != nil {
 		return false, "", err
 	}
@@ -564,7 +564,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -609,7 +609,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 	defer cancel()
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -681,7 +681,7 @@ func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (cand
 	return
 }
 
-func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
+func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 

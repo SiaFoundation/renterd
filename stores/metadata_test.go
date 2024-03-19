@@ -24,10 +24,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
+func randomMultisigUC() types.UnlockConditions {
 	uc := types.UnlockConditions{
-		PublicKeys:         make([]types.UnlockKey, n),
-		SignaturesRequired: uint64(m),
+		PublicKeys:         make([]types.UnlockKey, 2),
+		SignaturesRequired: 1,
 	}
 	for i := range uc.PublicKeys {
 		uc.PublicKeys[i].Algorithm = types.SpecifierEd25519
@@ -225,7 +225,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Create random unlock conditions for the host.
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
@@ -520,11 +520,11 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Create random unlock conditions for the hosts.
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
-	uc2 := generateMultisigUC(1, 2, "salt")
+	uc2 := randomMultisigUC()
 	uc2.PublicKeys[1].Key = hk2[:]
 	uc2.Timelock = 192837
 
@@ -874,7 +874,7 @@ func TestArchiveContracts(t *testing.T) {
 }
 
 func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.ContractRevision {
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 	return rhpv2.ContractRevision{
@@ -1868,7 +1868,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(context.Background(), ss.db, []fileContractID{fileContractID(fcid1)})
+	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3286,7 +3286,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// See if we can fetch the object by slab.
 	var ec object.EncryptionKey
-	if obj, err := ss.objectRaw(context.Background(), ss.db, b1, "/bar"); err != nil {
+	if obj, err := ss.objectRaw(ss.db, b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if err := ec.UnmarshalBinary(obj[0].SlabKey); err != nil {
 		t.Fatal(err)
@@ -3391,7 +3391,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// renew the contract.
 	fcidRenewed := types.FileContractID{2, 2, 2, 2, 2}
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	rev := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         fcidRenewed,

@@ -55,7 +55,7 @@ func (a dbAccount) convert() api.Account {
 // Accounts returns all accounts from the db.
 func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 	var dbAccounts []dbAccount
-	if err := s.db.Find(&dbAccounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Find(&dbAccounts).Error; err != nil {
 		return nil, err
 	}
 	accounts := make([]api.Account, len(dbAccounts))
@@ -69,8 +69,10 @@ func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
 // also sets the 'requires_sync' flag. That way, the autopilot will know to sync
 // all accounts after an unclean shutdown and the bus will know not to apply
 // drift.
-func (s *SQLStore) SetUncleanShutdown() error {
-	return s.db.Model(&dbAccount{}).
+func (s *SQLStore) SetUncleanShutdown(ctx context.Context) error {
+	return s.db.
+		WithContext(ctx).
+		Model(&dbAccount{}).
 		Where("TRUE").
 		Updates(map[string]interface{}{
 			"clean_shutdown": false,
@@ -95,7 +97,7 @@ func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) err
 			RequiresSync: acc.RequiresSync,
 		}
 	}
-	return s.db.Clauses(clause.OnConflict{
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "account_id"}},
 		UpdateAll: true,
 	}).Create(&dbAccounts).Error
