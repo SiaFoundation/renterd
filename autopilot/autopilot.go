@@ -933,9 +933,9 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 	}
 }
 
-// compatV105HostInfo performs some state checks and bus calls we no longer
-// need, but are necessary checks to make sure our API is consistent. This
-// should be considered for removal when releasing a new major version.
+// compatV105HostInfo performs some state checks and bus calls we no longer need
+// but are necessary checks to make sure our API is consistent. This should be
+// removed in the next major release.
 func compatV105HostInfo(ctx context.Context, s state, b Bus, hk types.PublicKey) error {
 	// state checks
 	if s.cfg.Contracts.Allowance.IsZero() {
