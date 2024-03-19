@@ -1357,13 +1357,13 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.Host, us
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
 		hi := calculateHostInfo(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
 		if hi.Usability.Usable() {
-			candidates = append(candidates, scoredHost{h, hi.Score.Score()})
+			candidates = append(candidates, scoredHost{h, hi.Score.TotalScore()})
 			continue
 		}
 
 		// keep track of unusable host results
 		unusableHosts.track(hi.Usability)
-		if hi.Score.Score() == 0 {
+		if hi.Score.TotalScore() == 0 {
 			zeros++
 		}
 		unusable++

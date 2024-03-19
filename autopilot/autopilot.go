@@ -809,9 +809,6 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 		if hi.Usability.NotCompletingScan {
 			resp.Unusable.NotScanned++
 		}
-		if hi.Usability.Unknown {
-			resp.Unusable.Unknown++
-		}
 		if hi.Gouging.ContractErr != "" {
 			resp.Unusable.Gouging.Contract++
 		}

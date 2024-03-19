@@ -100,7 +100,6 @@ type (
 		UsabilityNotAcceptingContracts bool `gorm:"index:idx_host_infos_usability_not_accepting_contracts"`
 		UsabilityNotAnnounced          bool `gorm:"index:idx_host_infos_usability_not_announced"`
 		UsabilityNotCompletingScan     bool `gorm:"index:idx_host_infos_usability_not_completing_scan"`
-		UsabilityUnknown               bool `gorm:"index:idx_host_infos_usability_unknown"`
 
 		// score
 		ScoreAge              float64 `gorm:"index:idx_host_infos_score_age"`
@@ -370,7 +369,6 @@ func (hi dbHostInfo) convert() api.HostInfo {
 			NotAcceptingContracts: hi.UsabilityNotAcceptingContracts,
 			NotAnnounced:          hi.UsabilityNotAnnounced,
 			NotCompletingScan:     hi.UsabilityNotCompletingScan,
-			Unknown:               hi.UsabilityUnknown,
 		},
 	}
 }
@@ -388,7 +386,6 @@ func convertHostInfo(apID, hID uint, gouging api.HostGougingBreakdown, score api
 		UsabilityNotAcceptingContracts: usability.NotAcceptingContracts,
 		UsabilityNotAnnounced:          usability.NotAnnounced,
 		UsabilityNotCompletingScan:     usability.NotCompletingScan,
-		UsabilityUnknown:               usability.Unknown,
 
 		ScoreAge:              score.Age,
 		ScoreCollateral:       score.Collateral,
@@ -619,11 +616,11 @@ func (ss *SQLStore) HostInfos(ctx context.Context, autopilotID string, filterMod
 		// apply usability filter
 		switch usabilityMode {
 		case api.UsabilityFilterModeUsable:
-			query = query.Where("usability_blocked = ? AND usability_offline = ? AND usability_low_score = ? AND usability_redundant_ip = ? AND usability_gouging = ? AND usability_not_accepting_contracts = ? AND usability_not_announced = ? AND usability_not_completing_scan = ? AND usability_unknown = ?",
-				false, false, false, false, false, false, false, false, false)
+			query = query.Where("usability_blocked = ? AND usability_offline = ? AND usability_low_score = ? AND usability_redundant_ip = ? AND usability_gouging = ? AND usability_not_accepting_contracts = ? AND usability_not_announced = ? AND usability_not_completing_scan = ?",
+				false, false, false, false, false, false, false, false)
 		case api.UsabilityFilterModeUnusable:
-			query = query.Where("usability_blocked = ? OR usability_offline = ? OR usability_low_score = ? OR usability_redundant_ip = ? OR usability_gouging = ? OR usability_not_accepting_contracts = ? OR usability_not_announced = ? OR usability_not_completing_scan = ? OR usability_unknown = ?",
-				true, true, true, true, true, true, true, true, true)
+			query = query.Where("usability_blocked = ? OR usability_offline = ? OR usability_low_score = ? OR usability_redundant_ip = ? OR usability_gouging = ? OR usability_not_accepting_contracts = ? OR usability_not_announced = ? OR usability_not_completing_scan = ?",
+				true, true, true, true, true, true, true, true)
 		case api.UsabilityFilterModeAll:
 			// nothing to do
 		default:

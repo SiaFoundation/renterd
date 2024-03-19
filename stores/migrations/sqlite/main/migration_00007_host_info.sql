@@ -14,7 +14,6 @@ CREATE TABLE `host_infos` (
   `usability_not_accepting_contracts` INTEGER NOT NULL DEFAULT 0,
   `usability_not_announced` INTEGER NOT NULL DEFAULT 0,
   `usability_not_completing_scan` INTEGER NOT NULL DEFAULT 0,
-  `usability_unknown` INTEGER NOT NULL DEFAULT 0,
 
   `score_age` REAL NOT NULL,
   `score_collateral` REAL NOT NULL,
@@ -44,7 +43,6 @@ CREATE INDEX `idx_host_infos_usability_gouging` ON `host_infos` (`usability_goug
 CREATE INDEX `idx_host_infos_usability_not_accepting_contracts` ON `host_infos` (`usability_not_accepting_contracts`);
 CREATE INDEX `idx_host_infos_usability_not_announced` ON `host_infos` (`usability_not_announced`);
 CREATE INDEX `idx_host_infos_usability_not_completing_scan` ON `host_infos` (`usability_not_completing_scan`);
-CREATE INDEX `idx_host_infos_usability_unknown` ON `host_infos` (`usability_unknown`);
 CREATE INDEX `idx_host_infos_score_age` ON `host_infos` (`score_age`);
 CREATE INDEX `idx_host_infos_score_collateral` ON `host_infos` (`score_collateral`);
 CREATE INDEX `idx_host_infos_score_interactions` ON `host_infos` (`score_interactions`);

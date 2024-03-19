@@ -40,7 +40,6 @@ var (
 	ErrUsabilityHostNotAcceptingContracts = errors.New("host is not accepting contracts")
 	ErrUsabilityHostNotCompletingScan     = errors.New("host is not completing scan")
 	ErrUsabilityHostNotAnnounced          = errors.New("host is not announced")
-	ErrUsabilityUnknown                   = errors.New("unknown")
 )
 
 type (
@@ -196,7 +195,6 @@ type (
 		NotAcceptingContracts bool `json:"notAcceptingContracts"`
 		NotAnnounced          bool `json:"notAnnounced"`
 		NotCompletingScan     bool `json:"notCompletingScan"`
-		Unknown               bool `json:"unknown"`
 	}
 )
 
@@ -235,7 +233,7 @@ func (hgb HostGougingBreakdown) String() string {
 	return strings.Join(reasons, ";")
 }
 
-func (sb HostScoreBreakdown) Score() float64 {
+func (sb HostScoreBreakdown) TotalScore() float64 {
 	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
 }
 
@@ -247,8 +245,7 @@ func (ub HostUsabilityBreakdown) Usable() bool {
 		!ub.Gouging &&
 		!ub.NotAcceptingContracts &&
 		!ub.NotAnnounced &&
-		!ub.NotCompletingScan &&
-		!ub.Unknown
+		!ub.NotCompletingScan
 }
 
 func (ub HostUsabilityBreakdown) UnusableReasons() []string {
@@ -277,9 +274,6 @@ func (ub HostUsabilityBreakdown) UnusableReasons() []string {
 	if ub.NotCompletingScan {
 		reasons = append(reasons, ErrUsabilityHostNotCompletingScan.Error())
 	}
-	if ub.Unknown {
-		reasons = append(reasons, ErrUsabilityUnknown.Error())
-	}
 	return reasons
 }
 
@@ -289,7 +283,7 @@ func (hi HostInfo) ToHostInfoReponse() HostInfoResponse {
 		Checks: &HostChecks{
 			Gouging:          hi.Usability.Gouging,
 			GougingBreakdown: hi.Gouging,
-			Score:            hi.Score.Score(),
+			Score:            hi.Score.TotalScore(),
 			ScoreBreakdown:   hi.Score,
 			Usable:           hi.Usability.Usable(),
 			UnusableReasons:  hi.Usability.UnusableReasons(),

@@ -438,7 +438,6 @@ CREATE TABLE `host_infos` (
   `usability_not_accepting_contracts` boolean NOT NULL DEFAULT false,
   `usability_not_announced` boolean NOT NULL DEFAULT false,
   `usability_not_completing_scan` boolean NOT NULL DEFAULT false,
-  `usability_unknown` boolean NOT NULL DEFAULT false,
 
   `score_age` double NOT NULL,
   `score_collateral` double NOT NULL,
@@ -464,7 +463,6 @@ CREATE TABLE `host_infos` (
   INDEX `idx_host_infos_usability_not_accepting_contracts` (`usability_not_accepting_contracts`),
   INDEX `idx_host_infos_usability_not_announced` (`usability_not_announced`),
   INDEX `idx_host_infos_usability_not_completing_scan` (`usability_not_completing_scan`),
-  INDEX `idx_host_infos_usability_unknown` (`usability_unknown`),
   INDEX `idx_host_infos_score_age` (`score_age`),
   INDEX `idx_host_infos_score_collateral` (`score_collateral`),
   INDEX `idx_host_infos_score_interactions` (`score_interactions`),

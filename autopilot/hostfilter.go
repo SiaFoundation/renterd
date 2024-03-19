@@ -49,7 +49,6 @@ type unusableHostsBreakdown struct {
 	notacceptingcontracts uint64
 	notannounced          uint64
 	notcompletingscan     uint64
-	unknown               uint64
 }
 
 func (u *unusableHostsBreakdown) track(ub api.HostUsabilityBreakdown) {
@@ -77,9 +76,6 @@ func (u *unusableHostsBreakdown) track(ub api.HostUsabilityBreakdown) {
 	if ub.NotCompletingScan {
 		u.notcompletingscan++
 	}
-	if ub.Unknown {
-		u.unknown++
-	}
 }
 
 func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
@@ -92,7 +88,6 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 		"notacceptingcontracts", u.notacceptingcontracts,
 		"notcompletingscan", u.notcompletingscan,
 		"notannounced", u.notannounced,
-		"unknown", u.unknown,
 	}
 	for i := 0; i < len(values); i += 2 {
 		if values[i+1].(uint64) == 0 {
@@ -143,7 +138,7 @@ func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc wo
 			// checks in its cost calculations needed to calculate the period
 			// cost
 			sb = hostScore(cfg, h, storedData, rs.Redundancy())
-			if sb.Score() < minScore {
+			if sb.TotalScore() < minScore {
 				ub.LowScore = true
 			}
 		}

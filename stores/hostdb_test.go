@@ -1240,7 +1240,6 @@ func TestHostInfo(t *testing.T) {
 	want.Usability.NotAcceptingContracts = false
 	want.Usability.NotAnnounced = false
 	want.Usability.NotCompletingScan = false
-	want.Usability.Unknown = false
 	err = ss.UpdateHostInfo(context.Background(), "foo", types.PublicKey{1}, want.Gouging, want.Score, want.Usability)
 	if err != nil {
 		t.Fatal(err)
@@ -1376,7 +1375,6 @@ func newTestHostInfo(h hostdb.Host) api.HostInfo {
 			NotAcceptingContracts: true,
 			NotAnnounced:          true,
 			NotCompletingScan:     true,
-			Unknown:               true,
 		},
 	}
 }
