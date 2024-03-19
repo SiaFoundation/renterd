@@ -54,7 +54,6 @@ type Bus interface {
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	Hosts(ctx context.Context, opts api.HostsOptions) ([]hostdb.HostInfo, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
@@ -196,7 +195,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	state := ap.State()
 
 	// fetch hosts
-	hosts, err := ap.bus.Hosts(ctx, api.HostsOptions{})
+	hosts, err := ap.bus.SearchHosts(ctx, api.DefaultSearchHostOptions())
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}

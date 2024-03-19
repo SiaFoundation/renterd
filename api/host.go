@@ -70,16 +70,16 @@ type (
 
 // Option types.
 type (
-	HostsOptions struct {
-		Offset     int
-		Limit      int
-		FilterMode string
+	GetHostsOptions struct {
+		Offset int
+		Limit  int
 	}
 	HostsForScanningOptions struct {
 		MaxLastScan TimeRFC3339
 		Limit       int
 		Offset      int
 	}
+
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
@@ -92,19 +92,16 @@ type (
 func DefaultSearchHostOptions() SearchHostOptions {
 	return SearchHostOptions{
 		Limit:      -1,
-		FilterMode: HostFilterModeAll,
+		FilterMode: HostFilterModeAllowed,
 	}
 }
 
-func (opts HostsOptions) Apply(values url.Values) {
+func (opts GetHostsOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {
 		values.Set("offset", fmt.Sprint(opts.Offset))
 	}
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if opts.FilterMode != "" {
-		values.Set("filterMode", opts.FilterMode)
 	}
 }
 
