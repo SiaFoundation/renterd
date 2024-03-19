@@ -716,6 +716,15 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
+
+	// TODO: remove on next major release
+	if jc.Check("failed to get host info", compatV105UsabilityFilterModeCheck(req.UsabilityMode)) != nil {
+		return
+	}
+
+	// TODO PJ: we used to return hosts regardless of whether they have host
+	// info if usability mode was set to "all" - it is annoying but  maybe we
+	// should keep doing that
 	hosts, err := ap.bus.HostInfos(jc.Request.Context(), ap.id, api.HostInfoOptions{
 		UsabilityMode: req.UsabilityMode,
 		SearchHostOptions: api.SearchHostOptions{
@@ -975,4 +984,16 @@ func compatV105HostInfo(ctx context.Context, s state, b Bus, hk types.PublicKey)
 		return nil, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
 	return &host, nil
+}
+
+func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
+	switch usabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	case "":
+	default:
+		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
+	}
+	return nil
 }

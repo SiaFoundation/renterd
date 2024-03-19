@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/hostdb"
 )
 
 const (

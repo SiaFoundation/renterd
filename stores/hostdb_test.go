@@ -1230,6 +1230,7 @@ func TestHostInfo(t *testing.T) {
 	} else if len(his) != 0 {
 		t.Fatal("unexpected")
 	}
+
 	// update info
 	want.Usability.Blocked = false
 	want.Usability.Offline = false
