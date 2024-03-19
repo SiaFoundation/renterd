@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -1066,11 +1065,7 @@ func TestAnnouncementMaxAge(t *testing.T) {
 }
 
 func TestHostInfo(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
-	cfg.dir = "/Users/peterjan/testing"
-	os.RemoveAll(cfg.dir)
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	// fetch info for a non-existing autopilot

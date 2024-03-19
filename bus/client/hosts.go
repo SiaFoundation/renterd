@@ -119,7 +119,7 @@ func (c *Client) UpdateHostInfo(ctx context.Context, autopilotID string, hostKey
 
 // HostInfos returns the host info for all hosts known to the autopilot with the given identifier.
 func (c *Client) HostInfos(ctx context.Context, autopilotID string, opts api.HostInfoOptions) (hostInfos []api.HostInfo, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/autopilot/%s", autopilotID), api.HostInfosRequest{
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/autopilot/%s/hosts", autopilotID), api.HostInfosRequest{
 		Offset:          opts.Offset,
 		Limit:           opts.Limit,
 		FilterMode:      opts.FilterMode,

@@ -41,7 +41,7 @@ func (c *Client) HostInfo(hostKey types.PublicKey) (resp api.HostInfoResponse, e
 
 // HostInfo returns information about all hosts.
 func (c *Client) HostInfos(ctx context.Context, filterMode, usabilityMode string, addressContains string, keyIn []types.PublicKey, offset, limit int) (resp []api.HostInfoResponse, err error) {
-	err = c.c.POST("/hosts", api.SearchHostsRequest{
+	err = c.c.POST("/hosts", api.HostInfosRequest{
 		Offset:          offset,
 		Limit:           limit,
 		FilterMode:      filterMode,
