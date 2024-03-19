@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"context"
@@ -10,50 +10,36 @@ import (
 	"go.sia.tech/renterd/worker"
 )
 
-func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api.HostHandlerResponse, error) {
-	state := c.ap.State()
-
-	if state.cfg.Contracts.Allowance.IsZero() {
+func (c *Contractor) HostInfo(ctx context.Context, hostKey types.PublicKey, state *State) (api.HostHandlerResponse, error) {
+	if state.Config().Contracts.Allowance.IsZero() {
 		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts allowance is zero")
 	}
-	if state.cfg.Contracts.Amount == 0 {
+	if state.Config().Contracts.Amount == 0 {
 		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contracts amount is zero")
 	}
-	if state.cfg.Contracts.Period == 0 {
+	if state.Period() == 0 {
 		return api.HostHandlerResponse{}, fmt.Errorf("can not score hosts because contract period is zero")
 	}
 
-	host, err := c.ap.bus.Host(ctx, hostKey)
+	host, err := c.bus.Host(ctx, hostKey)
 	if err != nil {
 		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch requested host from bus: %w", err)
 	}
-	gs, err := c.ap.bus.GougingSettings(ctx)
-	if err != nil {
-		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
-	}
-	rs, err := c.ap.bus.RedundancySettings(ctx)
-	if err != nil {
-		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
-	}
-	cs, err := c.ap.bus.ConsensusState(ctx)
+	cs, err := c.bus.ConsensusState(ctx)
 	if err != nil {
 		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch consensus state from bus: %w", err)
-	}
-	fee, err := c.ap.bus.RecommendedFee(ctx)
-	if err != nil {
-		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
 	c.mu.Lock()
 	storedData := c.cachedDataStored[hostKey]
 	minScore := c.cachedMinScore
 	c.mu.Unlock()
 
-	gc := worker.NewGougingChecker(gs, cs, fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
 
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host, minScore, storedData)
+	isUsable, unusableResult := isUsableHost(state.Config(), state.RS, gc, host, minScore, storedData)
 	return api.HostHandlerResponse{
 		Host: host.Host,
 		Checks: &api.HostHandlerResponseChecks{
@@ -67,7 +53,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo) (hi hostInfo, found bool) {
+func (c *Contractor) hostInfoFromCache(ctx context.Context, state *State, host hostdb.HostInfo) (hi hostInfo, found bool) {
 	// grab host details from cache
 	c.mu.Lock()
 	hi, found = c.cachedHostInfo[host.PublicKey]
@@ -84,13 +70,12 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo
 	// inconsistency would resolve itself but trying to update it here improves
 	// first time user experience
 	if host.Scanned && hi.UnusableResult.notcompletingscan > 0 {
-		cs, err := c.ap.bus.ConsensusState(ctx)
+		cs, err := c.bus.ConsensusState(ctx)
 		if err != nil {
 			c.logger.Error("failed to fetch consensus state from bus: %v", err)
 		} else {
-			state := c.ap.State()
-			gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, storedData)
+			gc := worker.NewGougingChecker(state.GS, cs, state.Fee, state.Period(), state.RenewWindow())
+			isUsable, unusableResult := isUsableHost(state.Config(), state.RS, gc, host, minScore, storedData)
 			hi = hostInfo{
 				Usable:         isUsable,
 				UnusableResult: unusableResult,
@@ -106,7 +91,7 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo
 	return
 }
 
-func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerResponse, error) {
+func (c *Contractor) HostInfos(ctx context.Context, state *State, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostHandlerResponse, error) {
 	// declare helper to decide whether to keep a host.
 	if !isValidUsabilityFilterMode(usabilityMode) {
 		return nil, fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
@@ -131,7 +116,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 	wanted := limit
 	for {
 		// fetch up to 'limit' hosts.
-		hosts, err := c.ap.bus.SearchHosts(ctx, api.SearchHostOptions{
+		hosts, err := c.bus.SearchHosts(ctx, api.SearchHostOptions{
 			Offset:          offset,
 			Limit:           limit,
 			FilterMode:      filterMode,
@@ -151,7 +136,7 @@ func (c *contractor) HostInfos(ctx context.Context, filterMode, usabilityMode, a
 		// decide how many of the returned hosts to keep.
 		var keptHosts int
 		for _, host := range hosts {
-			hi, cached := c.hostInfoFromCache(ctx, host)
+			hi, cached := c.hostInfoFromCache(ctx, state, host)
 			if !cached {
 				// when the filterMode is "all" we include uncached hosts and
 				// set IsChecked = false.

@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"errors"
@@ -229,7 +229,7 @@ func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *contractor) isUsableContract(cfg api.AutopilotConfig, state state, ci contractInfo, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
 	contract, s, pt := ci.contract, ci.settings, ci.priceTable
 
 	usable = true
@@ -246,7 +246,7 @@ func (c *contractor) isUsableContract(cfg api.AutopilotConfig, state state, ci c
 		refresh = false
 		renew = false
 	} else {
-		if isOutOfCollateral(cfg, state.rs, contract, s, pt) {
+		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = false
 			recoverable = true

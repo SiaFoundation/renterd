@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
@@ -210,7 +211,12 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 
 		// fetch the config right before removing offline hosts to get the most
 		// recent settings in case they were updated while scanning.
-		hostCfg := s.ap.State().cfg.Hosts
+		autopilot, err := s.ap.Config(ctx)
+		if err != nil {
+			s.logger.Errorf("tryPerformHostScan: failed to fetch autopilot config: %v", err)
+			return
+		}
+		hostCfg := autopilot.Config.Hosts
 		maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
 		minRecentScanFailures := hostCfg.MinRecentScanFailures
 
@@ -315,7 +321,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				if err != nil {
 					break // abort
-				} else if !utils.IsErr(errors.New(scan.ScanError), errIOTimeout) && scan.Ping > 0 {
+				} else if !utils.IsErr(errors.New(scan.ScanError), contractor.ErrIOTimeout) && scan.Ping > 0 {
 					s.tracker.addDataPoint(time.Duration(scan.Ping))
 				}
 

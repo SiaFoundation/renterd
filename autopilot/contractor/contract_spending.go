@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-func (c *contractor) contractSpending(ctx context.Context, contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {
-	ancestors, err := c.ap.bus.AncestorContracts(ctx, contract.ID, currentPeriod)
+func (c *Contractor) contractSpending(ctx context.Context, contract api.Contract, currentPeriod uint64) (api.ContractSpending, error) {
+	ancestors, err := c.bus.AncestorContracts(ctx, contract.ID, currentPeriod)
 	if err != nil {
 		return api.ContractSpending{}, err
 	}
@@ -20,7 +20,7 @@ func (c *contractor) contractSpending(ctx context.Context, contract api.Contract
 	return total, nil
 }
 
-func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) types.Currency {
+func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) types.Currency {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -44,16 +44,14 @@ func (c *contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	return totalAllocated
 }
 
-func (c *contractor) remainingFunds(contracts []api.Contract) types.Currency {
-	state := c.ap.State()
-
+func (c *Contractor) remainingFunds(contracts []api.Contract, state *State) types.Currency {
 	// find out how much we spent in the current period
-	spent := c.currentPeriodSpending(contracts, state.period)
+	spent := c.currentPeriodSpending(contracts, state.Period())
 
 	// figure out remaining funds
 	var remaining types.Currency
-	if state.cfg.Contracts.Allowance.Cmp(spent) > 0 {
-		remaining = state.cfg.Contracts.Allowance.Sub(spent)
+	if state.Allowance().Cmp(spent) > 0 {
+		remaining = state.Allowance().Sub(spent)
 	}
 	return remaining
 }

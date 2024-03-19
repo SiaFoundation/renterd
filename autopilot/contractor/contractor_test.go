@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"math"
@@ -8,7 +8,7 @@ import (
 )
 
 func TestCalculateMinScore(t *testing.T) {
-	c := &contractor{
+	c := &Contractor{
 		logger: zap.NewNop().Sugar(),
 	}
 

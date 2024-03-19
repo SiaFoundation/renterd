@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -86,7 +87,7 @@ func (w *mockWorker) RHPPriceTable(ctx context.Context, hostKey types.PublicKey,
 
 func TestScanner(t *testing.T) {
 	// prepare 100 hosts
-	hosts := newTestHosts(100)
+	hosts := test.NewHosts(100)
 
 	// init new scanner
 	b := &mockBus{hosts: hosts}
