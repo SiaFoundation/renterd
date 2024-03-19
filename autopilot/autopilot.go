@@ -696,15 +696,7 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	}
 
 	hi, err := ap.bus.HostInfo(jc.Request.Context(), ap.id, hk)
-	if utils.IsErr(err, api.ErrHostInfoNotFound) {
-		// TODO PJ: we used to calculate the host info here on the fly, maybe we
-		// should keep doing that but maybe we can get away with this too...
-		jc.Encode(api.HostInfoResponse{
-			Host:   h.Host,
-			Checks: nil,
-		})
-		return
-	} else if jc.Check("failed to get host info", err) != nil {
+	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
 
