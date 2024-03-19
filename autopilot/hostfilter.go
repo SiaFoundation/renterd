@@ -106,15 +106,18 @@ func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc wo
 	}
 
 	// prepare host breakdown fields
-	var ub api.HostUsabilityBreakdown
 	var gb api.HostGougingBreakdown
 	var sb api.HostScoreBreakdown
+	var ub api.HostUsabilityBreakdown
 
-	// populate host info fields
+	// blocked status does not influence what host info is calculated
+	if h.Blocked {
+		ub.Blocked = true
+	}
+
+	// calculate remaining host info fields
 	if !h.IsAnnounced() {
 		ub.NotAnnounced = true
-	} else if h.Blocked {
-		ub.Blocked = true
 	} else if !h.Scanned {
 		ub.NotCompletingScan = true
 	} else {
