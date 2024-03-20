@@ -139,7 +139,7 @@ func check(context string, err error) {
 }
 
 func mustLoadAPIPassword() {
-	if len(cfg.HTTP.Password) != 0 {
+	if cfg.HTTP.Password != "" {
 		return
 	}
 
@@ -192,7 +192,7 @@ func mustParseWorkers(workers, password string) {
 // loaded.
 func tryLoadConfig() {
 	configPath := "renterd.yml"
-	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
 		configPath = str
 	}
 

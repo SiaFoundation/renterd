@@ -79,6 +79,7 @@ type (
 		Limit       int
 		Offset      int
 	}
+
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
@@ -87,13 +88,6 @@ type (
 		Offset          int
 	}
 )
-
-func DefaultSearchHostOptions() SearchHostOptions {
-	return SearchHostOptions{
-		Limit:      -1,
-		FilterMode: HostFilterModeAll,
-	}
-}
 
 func (opts GetHostsOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {
@@ -112,6 +106,6 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 	if !opts.MaxLastScan.IsZero() {
-		values.Set("lastScan", fmt.Sprint(TimeRFC3339(opts.MaxLastScan)))
+		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
 	}
 }

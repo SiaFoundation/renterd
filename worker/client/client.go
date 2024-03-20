@@ -88,7 +88,7 @@ func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.H
 	path += "?" + values.Encode()
 
 	// TODO: support HEAD in jape client
-	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), http.NoBody)
 	if err != nil {
 		panic(err)
 	}
@@ -271,7 +271,7 @@ func (c *Client) object(ctx context.Context, bucket, path string, opts api.Downl
 	path += "?" + values.Encode()
 
 	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), http.NoBody)
 	if err != nil {
 		panic(err)
 	}

@@ -506,7 +506,8 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 		return
 	}
 	// Broadcast the txn.
-	txnSet := append(parents, txn)
+	txnSet := parents
+	txnSet = append(txnSet, txn)
 	err = w.bus.BroadcastTransaction(ctx, txnSet)
 	if jc.Check("failed to broadcast transaction", err) != nil {
 		_ = w.bus.WalletDiscard(ctx, txn)
