@@ -249,7 +249,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// fetch all hosts
-	hosts, err := c.ap.bus.SearchHosts(ctx, api.DefaultSearchHostOptions())
+	hosts, err := c.ap.bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
 	if err != nil {
 		return false, err
 	}

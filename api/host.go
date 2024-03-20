@@ -89,13 +89,6 @@ type (
 	}
 )
 
-func DefaultSearchHostOptions() SearchHostOptions {
-	return SearchHostOptions{
-		Limit:      -1,
-		FilterMode: HostFilterModeAllowed,
-	}
-}
-
 func (opts GetHostsOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {
 		values.Set("offset", fmt.Sprint(opts.Offset))

@@ -195,7 +195,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	state := ap.State()
 
 	// fetch hosts
-	hosts, err := ap.bus.SearchHosts(ctx, api.DefaultSearchHostOptions())
+	hosts, err := ap.bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}

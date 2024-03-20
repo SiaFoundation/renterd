@@ -146,7 +146,7 @@ func TestNewTestCluster(t *testing.T) {
 	})
 
 	// Get host info for every host.
-	hosts, err := cluster.Bus.SearchHosts(context.Background(), api.DefaultSearchHostOptions())
+	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	for _, host := range hosts {
 		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)

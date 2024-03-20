@@ -53,7 +53,7 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Assert it's returned
-	allHosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 0, -1)
+	allHosts, err := ss.Hosts(ctx, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,98 +158,40 @@ func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, setti
 	})
 }
 
-// TestSearchHosts is a unit tests for the SearchHosts method.
-func TestSearchHosts(t *testing.T) {
+// TestSQLHosts tests the Hosts method of the SQLHostDB type.
+func TestSQLHosts(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	ctx := context.Background()
 
-	// add 3 hosts
-	var hks []types.PublicKey
-	for i := 1; i <= 3; i++ {
-		if err := ss.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i)); err != nil {
-			t.Fatal(err)
-		}
-		hks = append(hks, types.PublicKey{byte(i)})
-	}
-	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
-
-	// assert defaults return all hosts
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 0, -1); err != nil || len(hosts) != 3 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-
-	// assert we can search using offset and limit
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 0, 1); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	} else if host := hosts[0]; host.PublicKey != hk1 {
-		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
-	}
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 1, 1); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	} else if host := hosts[0]; host.PublicKey != hk2 {
-		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
-	}
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 3, 1); err != nil || len(hosts) != 0 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-	if _, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, -1, -1); err != ErrNegativeOffset {
-		t.Fatal("unexpected error", err)
-	}
-
-	// assert we can search by address
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "1", nil, 0, -1); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-
-	// assert we can search by key
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "", []types.PublicKey{hk1, hk2}, 0, -1); err != nil || len(hosts) != 2 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-
-	// assert we can search by address and key
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "1", []types.PublicKey{hk1, hk2}, 0, -1); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-
-	// assert we can search by key and limit
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "3", []types.PublicKey{hk3}, 0, -1); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-
-	// add a custom host and block it
-	hk4 := types.PublicKey{4}
-	if err := ss.addCustomTestHost(hk4, "host4.com"); err != nil {
-		t.Fatal("unexpected", err)
-	}
-	if err := ss.UpdateHostBlocklistEntries(context.Background(), []string{"host4.com"}, nil, false); err != nil {
-		t.Fatal("unexpected", err)
-	}
-
-	// assert host filter mode is applied
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "", nil, 0, -1); err != nil || len(hosts) != 4 {
-		t.Fatal("unexpected", len(hosts), err)
-	} else if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeBlocked, "", nil, 0, -1); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
-	} else if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 0, -1); err != nil || len(hosts) != 3 {
-		t.Fatal("unexpected", len(hosts), err)
-	}
-}
-
-// TestHostsForScanning is a unit test for the HostsForScanning method.
-func TestHostsForScanning(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-	ctx := context.Background()
-
-	// add 3 hosts
 	hks, err := ss.addTestHosts(3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
-	// add a scan for every non-blocked host
+	// assert the hosts method returns the expected hosts
+	if hosts, err := ss.Hosts(ctx, 0, -1); err != nil || len(hosts) != 3 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	if hosts, err := ss.Hosts(ctx, 0, 1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	} else if host := hosts[0]; host.PublicKey != hk1 {
+		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
+	}
+	if hosts, err := ss.Hosts(ctx, 1, 1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	} else if host := hosts[0]; host.PublicKey != hk2 {
+		t.Fatal("unexpected host", hk1, hk2, hk3, host.PublicKey)
+	}
+	if hosts, err := ss.Hosts(ctx, 3, 1); err != nil || len(hosts) != 0 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	if _, err := ss.Hosts(ctx, -1, -1); err != ErrNegativeOffset {
+		t.Fatal("unexpected error", err)
+	}
+
+	// Add a scan for each host.
 	n := time.Now()
 	if err := ss.addTestScan(hk1, n.Add(-time.Minute), nil, rhpv2.HostSettings{}); err != nil {
 		t.Fatal(err)
@@ -261,32 +203,74 @@ func TestHostsForScanning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch all hosts using the HostsForScanning method
-	hostAddresses, err := ss.HostsForScanning(ctx, n, 0, -1)
+	// Fetch all hosts using the HostsForScanning method.
+	hostAddresses, err := ss.HostsForScanning(ctx, n, 0, 3)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hostAddresses) != 3 {
+	}
+	if len(hostAddresses) != 3 {
 		t.Fatal("wrong number of addresses")
-	} else if hostAddresses[0].PublicKey != hk3 ||
-		hostAddresses[1].PublicKey != hk2 ||
-		hostAddresses[2].PublicKey != hk1 {
+	}
+	if hostAddresses[0].PublicKey != hk3 {
+		t.Fatal("wrong key")
+	}
+	if hostAddresses[1].PublicKey != hk2 {
+		t.Fatal("wrong key")
+	}
+	if hostAddresses[2].PublicKey != hk1 {
 		t.Fatal("wrong key")
 	}
 
-	// fetch one host by setting the cutoff exactly to hk2
-	hostAddresses, err = ss.HostsForScanning(ctx, n.Add(-2*time.Minute), 0, -1)
+	// Fetch one host by setting the cutoff exactly to hk2.
+	hostAddresses, err = ss.HostsForScanning(ctx, n.Add(-2*time.Minute), 0, 3)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hostAddresses) != 1 {
+	}
+	if len(hostAddresses) != 1 {
 		t.Fatal("wrong number of addresses")
 	}
 
-	// fetch no hosts
-	hostAddresses, err = ss.HostsForScanning(ctx, time.Time{}, 0, -1)
+	// Fetch no hosts.
+	hostAddresses, err = ss.HostsForScanning(ctx, time.Time{}, 0, 3)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hostAddresses) != 0 {
+	}
+	if len(hostAddresses) != 0 {
 		t.Fatal("wrong number of addresses")
+	}
+}
+
+// TestSearchHosts is a unit test for SearchHosts.
+func TestSearchHosts(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+	ctx := context.Background()
+
+	// add 3 hosts
+	var hks []types.PublicKey
+	for i := 0; i < 3; i++ {
+		if err := ss.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1)); err != nil {
+			t.Fatal(err)
+		}
+		hks = append(hks, types.PublicKey{byte(i)})
+	}
+	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
+
+	// Search by address.
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "1", nil, 0, -1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by key.
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "", []types.PublicKey{hk1, hk2}, 0, -1); err != nil || len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by address and key.
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "1", []types.PublicKey{hk1, hk2}, 0, -1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
+	}
+	// Filter by key and limit results
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "3", []types.PublicKey{hk3}, 0, -1); err != nil || len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts), err)
 	}
 }
 
@@ -611,7 +595,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	numHosts := func() int {
 		t.Helper()
-		hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 0, -1)
+		hosts, err := ss.Hosts(ctx, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -783,7 +767,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	numHosts := func() int {
 		t.Helper()
-		hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, 0, -1)
+		hosts, err := ss.Hosts(ctx, 0, -1)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -23,8 +23,6 @@ func TestBlocklist(t *testing.T) {
 		hosts: 3,
 	})
 	defer cluster.Shutdown()
-
-	// convenience variables
 	b := cluster.Bus
 	tt := cluster.tt
 
@@ -119,7 +117,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert we have 4 hosts
-	hosts, err := b.SearchHosts(context.Background(), api.DefaultSearchHostOptions())
+	hosts, err := b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hosts) != 4 {
 		t.Fatal("unexpected number of hosts", len(hosts))
@@ -144,7 +142,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert all others are blocked
-	hosts, err = b.SearchHosts(context.Background(), api.DefaultSearchHostOptions())
+	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hosts) != 1 {
 		t.Fatal("unexpected number of hosts", len(hosts))
@@ -154,7 +152,7 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(b.UpdateHostAllowlist(context.Background(), nil, nil, true))
 
 	// assert no hosts are blocked
-	hosts, err = b.SearchHosts(context.Background(), api.DefaultSearchHostOptions())
+	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hosts) != 5 {
 		t.Fatal("unexpected number of hosts", len(hosts))
