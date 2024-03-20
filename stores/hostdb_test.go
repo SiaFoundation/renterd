@@ -1064,6 +1064,191 @@ func TestAnnouncementMaxAge(t *testing.T) {
 	}
 }
 
+func TestHostInfo(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// fetch info for a non-existing autopilot
+	_, err := ss.HostInfo(context.Background(), "foo", types.PublicKey{1})
+	if !errors.Is(err, api.ErrAutopilotNotFound) {
+		t.Fatal(err)
+	}
+
+	// add autopilot
+	err = ss.UpdateAutopilot(context.Background(), api.Autopilot{ID: "foo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch info for a non-existing host
+	_, err = ss.HostInfo(context.Background(), "foo", types.PublicKey{1})
+	if !errors.Is(err, api.ErrHostNotFound) {
+		t.Fatal(err)
+	}
+
+	// add host
+	err = ss.addTestHost(types.PublicKey{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := ss.Host(context.Background(), types.PublicKey{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch non-existing info
+	_, err = ss.HostInfo(context.Background(), "foo", types.PublicKey{1})
+	if !errors.Is(err, api.ErrHostInfoNotFound) {
+		t.Fatal(err)
+	}
+
+	// add host info
+	want := newTestHostInfo(h.Host)
+	err = ss.UpdateHostInfo(context.Background(), "foo", types.PublicKey{1}, want.Gouging, want.Score, want.Usability)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch info
+	got, err := ss.HostInfo(context.Background(), "foo", types.PublicKey{1})
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(got, want) {
+		t.Fatal("mismatch", cmp.Diff(got, want))
+	}
+
+	// update info
+	want.Score.Age = 0
+	err = ss.UpdateHostInfo(context.Background(), "foo", types.PublicKey{1}, want.Gouging, want.Score, want.Usability)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch info
+	got, err = ss.HostInfo(context.Background(), "foo", types.PublicKey{1})
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(got, want) {
+		t.Fatal("mismatch")
+	}
+
+	// add another host info
+	err = ss.addCustomTestHost(types.PublicKey{2}, "bar.com:1000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.UpdateHostInfo(context.Background(), "foo", types.PublicKey{2}, want.Gouging, want.Score, want.Usability)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch all infos for autopilot
+	his, err := ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 2 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{1}) || his[1].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+
+	// fetch infos using offset & limit
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 0 {
+		t.Fatal("unexpected")
+	}
+
+	// fetch infos using net addresses
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "bar", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+
+	// fetch infos using keyIn
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{{2}}, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+
+	// fetch infos using mode filters
+	err = ss.UpdateHostBlocklistEntries(context.Background(), []string{"bar.com:1000"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
+		t.Fatal("unexpected", his)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) {
+		t.Fatal("unexpected", his)
+	}
+	err = ss.UpdateHostBlocklistEntries(context.Background(), nil, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch infos using usability filters
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 0 {
+		t.Fatal("unexpected")
+	}
+
+	// update info
+	want.Usability.Blocked = false
+	want.Usability.Offline = false
+	want.Usability.LowScore = false
+	want.Usability.RedundantIP = false
+	want.Usability.Gouging = false
+	want.Usability.NotAcceptingContracts = false
+	want.Usability.NotAnnounced = false
+	want.Usability.NotCompletingScan = false
+	err = ss.UpdateHostInfo(context.Background(), "foo", types.PublicKey{1}, want.Gouging, want.Score, want.Usability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
+		t.Fatal("unexpected", his)
+	}
+}
+
 // addTestHosts adds 'n' hosts to the db and returns their keys.
 func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 	cnt, err := s.contractsCount()
@@ -1155,4 +1340,36 @@ func newTestTransaction(ha modules.HostAnnouncement, sk types.PrivateKey) stypes
 	buf.Write(encoding.Marshal(ha))
 	buf.Write(encoding.Marshal(sk.SignHash(types.Hash256(crypto.HashObject(ha)))))
 	return stypes.Transaction{ArbitraryData: [][]byte{buf.Bytes()}}
+}
+
+func newTestHostInfo(h hostdb.Host) api.HostInfo {
+	return api.HostInfo{
+		Host: h,
+		Gouging: api.HostGougingBreakdown{
+			ContractErr: "foo",
+			DownloadErr: "bar",
+			GougingErr:  "baz",
+			PruneErr:    "qux",
+			UploadErr:   "quuz",
+		},
+		Score: api.HostScoreBreakdown{
+			Age:              .1,
+			Collateral:       .2,
+			Interactions:     .3,
+			StorageRemaining: .4,
+			Uptime:           .5,
+			Version:          .6,
+			Prices:           .7,
+		},
+		Usability: api.HostUsabilityBreakdown{
+			Blocked:               true,
+			Offline:               true,
+			LowScore:              true,
+			RedundantIP:           true,
+			Gouging:               true,
+			NotAcceptingContracts: true,
+			NotAnnounced:          true,
+			NotCompletingScan:     true,
+		},
+	}
 }
