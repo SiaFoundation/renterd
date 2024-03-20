@@ -775,9 +775,9 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO: on the next major release we should:
-	// - remove api.DefaultSearchHostOptions and set defaults in the handler
-	// - validate the filter mode here and return a 400
+	// TODO: on the next major release
+	// - set defaults in handler
+	// - validate request params and return 400 if invalid
 	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
