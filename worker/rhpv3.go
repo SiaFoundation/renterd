@@ -511,7 +511,9 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	// Append the host for which to create it and the index to the
 	// corresponding sub-key.
 	subKey := a.key
-	data := append(subKey, hostKey[:]...)
+	data := make([]byte, 0, len(subKey)+len(hostKey)+1)
+	data = append(data, subKey[:]...)
+	data = append(data, hostKey[:]...)
 	data = append(data, index)
 
 	seed := types.HashBytes(data)
@@ -1078,7 +1080,8 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
 	// Add the parents to get the full txnSet.
-	txnSet = append(parents, txn)
+	txnSet = parents
+	txnSet = append(txnSet, txn)
 
 	return rhpv2.ContractRevision{
 		Revision:   noOpRevision,
