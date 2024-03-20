@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -175,7 +176,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 							}
 						} else {
 							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
-							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
+							m.ap.DismissAlert(ctx, alerts.IDForSlab(alertMigrationID, j.Key))
 							if res.SurchargeApplied {
 								// this alert confirms the user his gouging
 								// settings are working, it will be dismissed
@@ -200,7 +201,12 @@ func (m *migrator) performMigrations(p *workerPool) {
 OUTER:
 	for {
 		// fetch currently configured set
-		set := m.ap.State().cfg.Contracts.Set
+		autopilot, err := m.ap.Config(m.ap.shutdownCtx)
+		if err != nil {
+			m.logger.Errorf("failed to fetch autopilot config: %w", err)
+			return
+		}
+		set := autopilot.Config.Contracts.Set
 		if set == "" {
 			m.logger.Error("could not perform migrations, no contract set configured")
 			return

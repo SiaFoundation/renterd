@@ -10,38 +10,14 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
-	"lukechampine.com/frand"
 )
 
 var (
-	alertAccountRefillID = randomAlertID() // constant until restarted
-	alertChurnID         = randomAlertID() // constant until restarted
-	alertLostSectorsID   = randomAlertID() // constant until restarted
-	alertLowBalanceID    = randomAlertID() // constant until restarted
-	alertMigrationID     = randomAlertID() // constant until restarted
-	alertPruningID       = randomAlertID() // constant until restarted
-	alertRenewalFailedID = randomAlertID() // constant until restarted
+	alertAccountRefillID = alerts.RandomAlertID() // constant until restarted
+	alertLowBalanceID    = alerts.RandomAlertID() // constant until restarted
+	alertMigrationID     = alerts.RandomAlertID() // constant until restarted
+	alertPruningID       = alerts.RandomAlertID() // constant until restarted
 )
-
-func alertIDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
-	return types.HashBytes(append(alertID[:], id[:]...))
-}
-
-func alertIDForContract(alertID [32]byte, fcid types.FileContractID) types.Hash256 {
-	return types.HashBytes(append(alertID[:], fcid[:]...))
-}
-
-func alertIDForHost(alertID [32]byte, hk types.PublicKey) types.Hash256 {
-	return types.HashBytes(append(alertID[:], hk[:]...))
-}
-
-func alertIDForSlab(alertID [32]byte, slabKey object.EncryptionKey) types.Hash256 {
-	return types.HashBytes(append(alertID[:], []byte(slabKey.String())...))
-}
-
-func randomAlertID() types.Hash256 {
-	return frand.Entropy256()
-}
 
 func (ap *Autopilot) RegisterAlert(ctx context.Context, a alerts.Alert) {
 	if err := ap.alerts.RegisterAlert(ctx, a); err != nil {
@@ -53,20 +29,6 @@ func (ap *Autopilot) DismissAlert(ctx context.Context, ids ...types.Hash256) {
 	if err := ap.alerts.DismissAlerts(ctx, ids...); err != nil {
 		ap.logger.Errorf("failed to dismiss alert: %v", err)
 	}
-}
-
-func (ap *Autopilot) HasAlert(ctx context.Context, id types.Hash256) bool {
-	ar, err := ap.alerts.Alerts(ctx, alerts.AlertsOpts{Offset: 0, Limit: -1})
-	if err != nil {
-		ap.logger.Errorf("failed to fetch alerts: %v", err)
-		return false
-	}
-	for _, alert := range ar.Alerts {
-		if alert.ID == id {
-			return true
-		}
-	}
-	return false
 }
 
 func newAccountLowBalanceAlert(address types.Address, balance, allowance types.Currency, bh, renewWindow, endHeight uint64) alerts.Alert {
@@ -103,30 +65,10 @@ func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err 
 	}
 
 	return alerts.Alert{
-		ID:        alertIDForAccount(alertAccountRefillID, id),
+		ID:        alerts.IDForAccount(alertAccountRefillID, id),
 		Severity:  alerts.SeverityError,
 		Message:   "Ephemeral account refill failed",
 		Data:      data,
-		Timestamp: time.Now(),
-	}
-}
-
-func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bool, err error) alerts.Alert {
-	severity := alerts.SeverityWarning
-	if interrupted {
-		severity = alerts.SeverityCritical
-	}
-
-	return alerts.Alert{
-		ID:       alertIDForContract(alertRenewalFailedID, contract.ID),
-		Severity: severity,
-		Message:  "Contract renewal failed",
-		Data: map[string]interface{}{
-			"error":               err.Error(),
-			"renewalsInterrupted": interrupted,
-			"contractID":          contract.ID.String(),
-			"hostKey":             contract.HostKey.String(),
-		},
 		Timestamp: time.Now(),
 	}
 }
@@ -144,24 +86,10 @@ func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid type
 	}
 
 	return &alerts.Alert{
-		ID:        alertIDForContract(alertPruningID, fcid),
+		ID:        alerts.IDForContract(alertPruningID, fcid),
 		Severity:  alerts.SeverityWarning,
 		Message:   "Contract pruning failed",
 		Data:      data,
-		Timestamp: time.Now(),
-	}
-}
-
-func newLostSectorsAlert(hk types.PublicKey, lostSectors uint64) alerts.Alert {
-	return alerts.Alert{
-		ID:       alertIDForHost(alertLostSectorsID, hk),
-		Severity: alerts.SeverityWarning,
-		Message:  "Host has lost sectors",
-		Data: map[string]interface{}{
-			"lostSectors": lostSectors,
-			"hostKey":     hk.String(),
-			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature. If you think this was a mistake and you want to ignore this warning for now you can reset the lost sector count",
-		},
 		Timestamp: time.Now(),
 	}
 }
@@ -183,7 +111,7 @@ func newOngoingMigrationsAlert(n int, estimate time.Duration) alerts.Alert {
 
 func newCriticalMigrationSucceededAlert(slabKey object.EncryptionKey) alerts.Alert {
 	return alerts.Alert{
-		ID:       alertIDForSlab(alertMigrationID, slabKey),
+		ID:       alerts.IDForSlab(alertMigrationID, slabKey),
 		Severity: alerts.SeverityInfo,
 		Message:  "Critical migration succeeded",
 		Data: map[string]interface{}{
@@ -206,7 +134,7 @@ func newCriticalMigrationFailedAlert(slabKey object.EncryptionKey, health float6
 	}
 
 	return alerts.Alert{
-		ID:        alertIDForSlab(alertMigrationID, slabKey),
+		ID:        alerts.IDForSlab(alertMigrationID, slabKey),
 		Severity:  alerts.SeverityCritical,
 		Message:   "Critical migration failed",
 		Data:      data,
@@ -233,7 +161,7 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objec
 	}
 
 	return alerts.Alert{
-		ID:        alertIDForSlab(alertMigrationID, slabKey),
+		ID:        alerts.IDForSlab(alertMigrationID, slabKey),
 		Severity:  severity,
 		Message:   "Slab migration failed",
 		Data:      data,
@@ -243,7 +171,7 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objec
 
 func newRefreshHealthFailedAlert(err error) alerts.Alert {
 	return alerts.Alert{
-		ID:       randomAlertID(),
+		ID:       alerts.RandomAlertID(),
 		Severity: alerts.SeverityCritical,
 		Message:  "Health refresh failed",
 		Data: map[string]interface{}{

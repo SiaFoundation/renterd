@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"context"
@@ -67,21 +67,21 @@ func TestIPResolver(t *testing.T) {
 	}
 
 	// test IO timeout - no cache entry
-	r.setNextErr(errIOTimeout)
-	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, errIOTimeout) {
+	r.setNextErr(ErrIOTimeout)
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, ErrIOTimeout) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test IO timeout - expired cache entry
 	ipr.cache["example.com:1234"] = ipCacheEntry{subnets: []string{"a"}}
-	r.setNextErr(errIOTimeout)
-	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, errIOTimeout) {
+	r.setNextErr(ErrIOTimeout)
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, ErrIOTimeout) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test IO timeout - live cache entry
 	ipr.cache["example.com:1234"] = ipCacheEntry{created: time.Now(), subnets: []string{"a"}}
-	r.setNextErr(errIOTimeout)
+	r.setNextErr(ErrIOTimeout)
 	if subnets, err := ipr.lookup("example.com:1234"); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if len(subnets) != 1 || subnets[0] != "a" {

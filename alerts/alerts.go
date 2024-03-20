@@ -9,8 +9,11 @@ import (
 	"sync"
 	"time"
 
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -82,6 +85,26 @@ type (
 		} `json:"totals"`
 	}
 )
+
+func IDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
+	return types.HashBytes(append(alertID[:], id[:]...))
+}
+
+func IDForContract(alertID [32]byte, fcid types.FileContractID) types.Hash256 {
+	return types.HashBytes(append(alertID[:], fcid[:]...))
+}
+
+func IDForHost(alertID [32]byte, hk types.PublicKey) types.Hash256 {
+	return types.HashBytes(append(alertID[:], hk[:]...))
+}
+
+func IDForSlab(alertID [32]byte, slabKey object.EncryptionKey) types.Hash256 {
+	return types.HashBytes(append(alertID[:], []byte(slabKey.String())...))
+}
+
+func RandomAlertID() types.Hash256 {
+	return frand.Entropy256()
+}
 
 func (ar AlertsResponse) Total() int {
 	return ar.Totals.Info + ar.Totals.Warning + ar.Totals.Error + ar.Totals.Critical

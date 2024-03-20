@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import "lukechampine.com/frand"
 

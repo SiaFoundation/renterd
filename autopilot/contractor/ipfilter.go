@@ -1,11 +1,10 @@
-package autopilot
+package contractor
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -28,7 +27,7 @@ const (
 )
 
 var (
-	errIOTimeout         = errors.New("i/o timeout")
+	ErrIOTimeout         = errors.New("i/o timeout")
 	errServerMisbehaving = errors.New("server misbehaving")
 	errTooManyAddresses  = errors.New("host has more than two addresses, or two of the same type")
 	errUnparsableAddress = errors.New("host address could not be parsed to a subnet")
@@ -43,7 +42,7 @@ type (
 	}
 )
 
-func (c *contractor) newIPFilter() *ipFilter {
+func (c *Contractor) newIPFilter() *ipFilter {
 	c.resolver.pruneCache()
 	return &ipFilter{
 		subnetToHostKey: make(map[string]string),
@@ -57,7 +56,7 @@ func (f *ipFilter) IsRedundantIP(hostIP string, hostKey types.PublicKey) bool {
 	// perform lookup
 	subnets, err := f.resolver.lookup(hostIP)
 	if err != nil {
-		if !strings.Contains(err.Error(), errNoSuchHost.Error()) {
+		if !utils.IsErr(err, utils.ErrNoSuchHost) {
 			f.logger.Errorf("failed to check for redundant IP, treating host %v with IP %v as redundant, err: %v", hostKey, hostIP, err)
 		}
 		return true
@@ -138,7 +137,7 @@ func (r *ipResolver) lookup(hostIP string) ([]string, error) {
 	addrs, err := r.resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		// check the cache if it's an i/o timeout or server misbehaving error
-		if utils.IsErr(err, errIOTimeout) || utils.IsErr(err, errServerMisbehaving) {
+		if utils.IsErr(err, ErrIOTimeout) || utils.IsErr(err, errServerMisbehaving) {
 			if entry, found := r.cache[hostIP]; found && time.Since(entry.created) < ipCacheEntryValidity {
 				r.logger.Debugf("using cached IP addresses for %v, err: %v", hostIP, err)
 				return entry.subnets, nil
