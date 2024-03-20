@@ -154,15 +154,23 @@ func (m *migrator) performMigrations(p *workerPool) {
 						start := time.Now()
 						res, err := j.execute(ctx, w)
 						m.statsSlabMigrationSpeedMS.Track(float64(time.Since(start).Milliseconds()))
-
 						if err != nil {
 							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
 							skipAlert := utils.IsErr(err, api.ErrSlabNotFound)
 							if !skipAlert {
-								if res.SurchargeApplied {
-									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
+								// fetch all object IDs for the slab we failed to migrate
+								var objectIds map[string][]string
+								if res, err := m.objectIDsForSlabKey(ctx, j.Key); err != nil {
+									m.logger.Errorf("failed to fetch object ids for slab key; %w", err)
 								} else {
-									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
+									objectIds = res
+								}
+
+								// register the alert
+								if res.SurchargeApplied {
+									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, objectIds, err))
+								} else {
+									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, objectIds, err))
 								}
 							}
 						} else {
@@ -273,4 +281,35 @@ OUTER:
 
 		return
 	}
+}
+
+func (m *migrator) objectIDsForSlabKey(ctx context.Context, key object.EncryptionKey) (map[string][]string, error) {
+	// fetch all buckets
+	//
+	// NOTE:at the time of writing the bus does not support fetching objects by
+	// slab key across all buckets at once, therefor we have to list all buckets
+	// and loop over them, revisit on the next major release
+	buckets, err := m.ap.bus.ListBuckets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w; failed to list buckets", err)
+	}
+
+	// fetch all objects per bucket
+	idsPerBucket := make(map[string][]string)
+	for _, bucket := range buckets {
+		objects, err := m.ap.bus.ObjectsBySlabKey(ctx, bucket.Name, key)
+		if err != nil {
+			m.logger.Errorf("failed to fetch objects for slab key in bucket %v; %w", bucket, err)
+			continue
+		} else if len(objects) == 0 {
+			continue
+		}
+
+		idsPerBucket[bucket.Name] = make([]string, len(objects))
+		for i, object := range objects {
+			idsPerBucket[bucket.Name][i] = object.Name
+		}
+	}
+
+	return idsPerBucket, nil
 }

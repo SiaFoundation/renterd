@@ -63,6 +63,9 @@ type Bus interface {
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
+	// buckets
+	ListBuckets(ctx context.Context) ([]api.Bucket, error)
+
 	// objects
 	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
 	RefreshHealth(ctx context.Context) error
