@@ -161,7 +161,7 @@ func collateralScore(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, allocatio
 	cutoffMultiplier := uint64(4)
 
 	if expectedCollateral.Cmp(cutoff) < 0 {
-		return 0 // expectedCollateral <= cutoff -> score is 0
+		return math.SmallestNonzeroFloat64 // expectedCollateral <= cutoff -> score is basically 0
 	} else if expectedCollateral.Cmp(cutoff.Mul64(cutoffMultiplier)) >= 0 {
 		return 1 // expectedCollateral is 10x cutoff -> score is 1
 	} else {
