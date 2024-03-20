@@ -56,61 +56,23 @@ linters-settings:
       - style
     disabled-checks:
       # diagnostic
-      - badRegexp
-      - badSorting
-      - badSyncOnceFunc
-      - builtinShadowDecl
       - commentedOutCode
-      - dynamicFmtString
-      - emptyDecl
-      - evalOrder
-      - externalErrorReassign
-      - filepathJoin
-      - regexpPattern
-      - returnAfterHttpError
-      - sloppyReassign
-      - sortSlice
-      - sprintfQuotedString
-      - sqlQuery
-      - syncMapLoadAndDelete
-      - truncateCmp
       - uncheckedInlineErr
-      - unnecessaryDefer
 
       # style
-      - commentedOutImport
-      - deferUnlambda
-      - docStub
-      - dupImport
-      - emptyStringTest
       - exitAfterDefer
-      - exposedSyncMutex
-      - httpNoBody
       - ifElseChain
       - importShadow
-      - initClause
-      - methodExprCall
-      - nestingReduce
       - octalLiteral
       - paramTypeCombine
-      - preferFilepathJoin
       - ptrToRefParam
-      - redundantSprint
-      - regexpSimplify
-      - ruleguard
-      - stringConcatSimplify
       - stringsCompare
-      - timeExprSimplify
-      - todoCommentWithoutDetail
       - tooManyResultsChecker
-      - typeAssertChain
       - typeDefFirst
       - typeUnparen
       - unlabelStmt
       - unnamedResult
-      - unnecessaryBlock
       - whyNoLint
-      - yodaStyleExpr
   revive:
     ignore-generated-header: true
     rules:

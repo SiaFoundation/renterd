@@ -63,7 +63,7 @@ func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey,
 		panic(err)
 	}
 	u.RawQuery = values.Encode()
-	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), http.NoBody)
 	if err != nil {
 		panic(err)
 	}

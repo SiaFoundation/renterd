@@ -125,7 +125,7 @@ func (c *Client) PruneMetrics(ctx context.Context, metric string, cutoff time.Ti
 		panic(err)
 	}
 	u.RawQuery = values.Encode()
-	req, err := http.NewRequestWithContext(ctx, "DELETE", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u.String(), http.NoBody)
 	if err != nil {
 		panic(err)
 	}
@@ -180,7 +180,7 @@ func (c *Client) metric(ctx context.Context, key string, values url.Values, res 
 		panic(err)
 	}
 	u.RawQuery = values.Encode()
-	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), http.NoBody)
 	if err != nil {
 		panic(err)
 	}

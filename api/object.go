@@ -368,7 +368,7 @@ func (opts SearchObjectOptions) Apply(values url.Values) {
 }
 
 func FormatETag(eTag string) string {
-	return fmt.Sprintf("\"%s\"", eTag)
+	return fmt.Sprintf("%q", eTag)
 }
 
 func ObjectPathEscape(path string) string {

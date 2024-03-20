@@ -155,11 +155,11 @@ func (rs RedundancySettings) Validate() error {
 // valid.
 func (s3as S3AuthenticationSettings) Validate() error {
 	for accessKeyID, secretAccessKey := range s3as.V4Keypairs {
-		if len(accessKeyID) == 0 {
+		if accessKeyID == "" {
 			return fmt.Errorf("AccessKeyID cannot be empty")
 		} else if len(accessKeyID) < S3MinAccessKeyLen || len(accessKeyID) > S3MaxAccessKeyLen {
 			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(accessKeyID))
-		} else if len(secretAccessKey) == 0 {
+		} else if secretAccessKey == "" {
 			return fmt.Errorf("SecretAccessKey cannot be empty")
 		} else if len(secretAccessKey) != S3SecretKeyLen {
 			return fmt.Errorf("SecretAccessKey must be %d characters long but was %d", S3SecretKeyLen, len(secretAccessKey))
