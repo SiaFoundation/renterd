@@ -106,6 +106,6 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 	if !opts.MaxLastScan.IsZero() {
-		values.Set("lastScan", fmt.Sprint(TimeRFC3339(opts.MaxLastScan)))
+		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
 	}
 }

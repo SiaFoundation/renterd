@@ -38,7 +38,7 @@ func ForEachAnnouncement(b types.Block, height uint64, fn func(types.PublicKey, 
 			// verify signature
 			var hostKey types.PublicKey
 			copy(hostKey[:], ha.PublicKey.Key)
-			annHash := types.Hash256(crypto.HashObject(ha.HostAnnouncement)) // TODO
+			annHash := types.Hash256(crypto.HashObject(ha.HostAnnouncement))
 			if !hostKey.VerifyHash(annHash, ha.Signature) {
 				continue
 			}
