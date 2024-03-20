@@ -117,16 +117,16 @@ type (
 
 // Option types.
 type (
-	HostsOptions struct {
-		Offset     int
-		Limit      int
-		FilterMode string
+	GetHostsOptions struct {
+		Offset int
+		Limit  int
 	}
 	HostsForScanningOptions struct {
 		MaxLastScan TimeRFC3339
 		Limit       int
 		Offset      int
 	}
+
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
@@ -134,21 +134,19 @@ type (
 		Limit           int
 		Offset          int
 	}
+
 	HostInfoOptions struct {
 		SearchHostOptions
 		UsabilityMode string
 	}
 )
 
-func (opts HostsOptions) Apply(values url.Values) {
+func (opts GetHostsOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {
 		values.Set("offset", fmt.Sprint(opts.Offset))
 	}
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if opts.FilterMode != "" {
-		values.Set("filterMode", opts.FilterMode)
 	}
 }
 
@@ -160,7 +158,7 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 	if !opts.MaxLastScan.IsZero() {
-		values.Set("lastScan", fmt.Sprint(TimeRFC3339(opts.MaxLastScan)))
+		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
 	}
 }
 

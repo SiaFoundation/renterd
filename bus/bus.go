@@ -92,7 +92,6 @@ type (
 	// A HostDB stores information about hosts.
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-		Hosts(ctx context.Context, filterMode string, offset, limit int) ([]hostdb.HostInfo, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
@@ -293,7 +292,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 
-		"GET    /hosts":                          b.hostsHandlerGET,
+		"GET    /hosts":                          b.hostsHandlerGETDeprecated,
 		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
 		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
@@ -763,26 +762,15 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *bus) hostsHandlerGET(jc jape.Context) {
+func (b *bus) hostsHandlerGETDeprecated(jc jape.Context) {
 	offset := 0
 	limit := -1
-	filterMode := api.HostFilterModeAllowed
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("filterMode", &filterMode) != nil {
-		return
-	}
-
-	// validate filterMode
-	switch filterMode {
-	case api.HostFilterModeAllowed:
-	case api.HostFilterModeBlocked:
-	case api.HostFilterModeAll:
-	default:
-		jc.Error(errors.New("invalid filter mode"), http.StatusBadRequest)
+	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
 
 	// fetch hosts
-	hosts, err := b.hdb.Hosts(jc.Request.Context(), filterMode, offset, limit)
+	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), api.HostFilterModeAllowed, "", nil, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
@@ -794,6 +782,10 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
+
+	// TODO: on the next major release
+	// - set defaults in handler
+	// - validate request params and return 400 if invalid
 	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return

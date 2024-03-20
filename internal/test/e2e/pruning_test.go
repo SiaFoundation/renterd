@@ -84,7 +84,7 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// assert the host was not pruned
-	hostss, err := b.Hosts(context.Background(), api.HostsOptions{})
+	hostss, err := b.Hosts(context.Background(), api.GetHostsOptions{})
 	tt.OK(err)
 	if len(hostss) != 1 {
 		t.Fatal("host was pruned")
@@ -96,7 +96,7 @@ func TestHostPruning(t *testing.T) {
 
 	// assert the host was pruned
 	tt.Retry(10, time.Second, func() error {
-		hostss, err = b.Hosts(context.Background(), api.HostsOptions{})
+		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
 			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)

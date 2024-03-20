@@ -4538,7 +4538,7 @@ func TestTypeCurrency(t *testing.T) {
 		var result bool
 		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
 		if !isSQLite(ss.db) {
-			query = strings.Replace(query, "?", "HEX(?)", -1)
+			query = strings.ReplaceAll(query, "?", "HEX(?)")
 		}
 		if err := ss.db.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
 			t.Fatal(err)

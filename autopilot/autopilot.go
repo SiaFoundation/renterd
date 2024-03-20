@@ -54,7 +54,6 @@ type Bus interface {
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	Hosts(ctx context.Context, opts api.HostsOptions) ([]hostdb.HostInfo, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
@@ -66,6 +65,9 @@ type Bus interface {
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
+
+	// buckets
+	ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 	// objects
 	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
@@ -200,7 +202,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	state := ap.State()
 
 	// fetch hosts
-	hosts, err := ap.bus.Hosts(ctx, api.HostsOptions{})
+	hosts, err := ap.bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -833,7 +835,6 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 			// these are not optimised, so we keep the same values as the user
 			// provided
-			MinMaxCollateral:              gs.MinMaxCollateral,
 			HostBlockHeightLeeway:         gs.HostBlockHeightLeeway,
 			MinPriceTableValidity:         gs.MinPriceTableValidity,
 			MinAccountExpiry:              gs.MinAccountExpiry,

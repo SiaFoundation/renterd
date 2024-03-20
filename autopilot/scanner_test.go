@@ -19,7 +19,7 @@ type mockBus struct {
 	reqs  []string
 }
 
-func (b *mockBus) Hosts(ctx context.Context, opts api.HostsOptions) ([]hostdb.HostInfo, error) {
+func (b *mockBus) SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error) {
 	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
 
 	start := opts.Offset
@@ -40,7 +40,7 @@ func (b *mockBus) Hosts(ctx context.Context, opts api.HostsOptions) ([]hostdb.Ho
 }
 
 func (b *mockBus) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error) {
-	hosts, err := b.Hosts(ctx, api.HostsOptions{
+	hosts, err := b.SearchHosts(ctx, api.SearchHostOptions{
 		Offset: opts.Offset,
 		Limit:  opts.Limit,
 	})

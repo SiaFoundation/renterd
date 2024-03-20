@@ -171,14 +171,6 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 		return fmt.Errorf("contract price exceeds max: %v > %v", hs.ContractPrice, gs.MaxContractPrice)
 	}
 
-	// check max collateral
-	if hs.MaxCollateral.IsZero() {
-		return errors.New("MaxCollateral of host is 0")
-	}
-	if hs.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
-		return fmt.Errorf("MaxCollateral is below minimum: %v < %v", hs.MaxCollateral, gs.MinMaxCollateral)
-	}
-
 	// check max EA balance
 	if hs.MaxEphemeralAccountBalance.Cmp(gs.MinMaxEphemeralAccountBalance) < 0 {
 		return fmt.Errorf("'MaxEphemeralAccountBalance' is less than the allowed minimum value, %v < %v", hs.MaxEphemeralAccountBalance, gs.MinMaxEphemeralAccountBalance)
@@ -219,10 +211,6 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	if pt.MaxCollateral.IsZero() {
 		return errors.New("MaxCollateral of host is 0")
 	}
-	if pt.MaxCollateral.Cmp(gs.MinMaxCollateral) < 0 {
-		return fmt.Errorf("MaxCollateral is below minimum: %v < %v", pt.MaxCollateral, gs.MinMaxCollateral)
-	}
-
 	// check ReadLengthCost - should be 1H as it's unused by hosts
 	if types.NewCurrency64(1).Cmp(pt.ReadLengthCost) < 0 {
 		return fmt.Errorf("ReadLengthCost of host is %v but should be %v", pt.ReadLengthCost, types.NewCurrency64(1))

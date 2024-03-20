@@ -14,8 +14,8 @@ type (
 	dbSetting struct {
 		Model
 
-		Key   string `gorm:"unique;index;NOT NULL"`
-		Value string `gorm:"NOT NULL"`
+		Key   string  `gorm:"unique;index;NOT NULL"`
+		Value setting `gorm:"NOT NULL"`
 	}
 )
 
@@ -52,8 +52,8 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	} else if err != nil {
 		return "", err
 	}
-	s.settings[key] = entry.Value
-	return entry.Value, nil
+	s.settings[key] = string(entry.Value)
+	return string(entry.Value), nil
 }
 
 // Settings implements the bus.SettingStore interface.
@@ -74,7 +74,7 @@ func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
 	}).Create(&dbSetting{
 		Key:   key,
-		Value: value,
+		Value: setting(value),
 	}).Error
 	if err != nil {
 		return err

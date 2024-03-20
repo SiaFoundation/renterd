@@ -194,22 +194,37 @@ func newCriticalMigrationSucceededAlert(slabKey object.EncryptionKey) alerts.Ale
 	}
 }
 
-func newCriticalMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
+func newCriticalMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objectIds map[string][]string, err error) alerts.Alert {
+	data := map[string]interface{}{
+		"error":   err.Error(),
+		"health":  health,
+		"slabKey": slabKey.String(),
+		"hint":    "If migrations of low-health slabs fail, it might be necessary to increase the MigrationSurchargeMultiplier in the gouging settings to ensure it has every chance of succeeding.",
+	}
+	if objectIds != nil {
+		data["objectIDs"] = objectIds
+	}
+
 	return alerts.Alert{
-		ID:       alertIDForSlab(alertMigrationID, slabKey),
-		Severity: alerts.SeverityCritical,
-		Message:  "Critical migration failed",
-		Data: map[string]interface{}{
-			"error":   err.Error(),
-			"health":  health,
-			"slabKey": slabKey.String(),
-			"hint":    "If migrations of low-health slabs fail, it might be necessary to increase the MigrationSurchargeMultiplier in the gouging settings to ensure it has every chance of succeeding.",
-		},
+		ID:        alertIDForSlab(alertMigrationID, slabKey),
+		Severity:  alerts.SeverityCritical,
+		Message:   "Critical migration failed",
+		Data:      data,
 		Timestamp: time.Now(),
 	}
 }
 
-func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err error) alerts.Alert {
+func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objectIds map[string][]string, err error) alerts.Alert {
+	data := map[string]interface{}{
+		"error":   err.Error(),
+		"health":  health,
+		"slabKey": slabKey.String(),
+		"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
+	}
+	if objectIds != nil {
+		data["objectIDs"] = objectIds
+	}
+
 	severity := alerts.SeverityError
 	if health < 0.25 {
 		severity = alerts.SeverityCritical
@@ -218,15 +233,10 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, err e
 	}
 
 	return alerts.Alert{
-		ID:       alertIDForSlab(alertMigrationID, slabKey),
-		Severity: severity,
-		Message:  "Slab migration failed",
-		Data: map[string]interface{}{
-			"error":   err.Error(),
-			"health":  health,
-			"slabKey": slabKey.String(),
-			"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
-		},
+		ID:        alertIDForSlab(alertMigrationID, slabKey),
+		Severity:  severity,
+		Message:   "Slab migration failed",
+		Data:      data,
 		Timestamp: time.Now(),
 	}
 }

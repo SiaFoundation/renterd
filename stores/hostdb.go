@@ -808,8 +808,8 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 }
 
 // Hosts returns non-blocked hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, filterMode string, offset, limit int) ([]hostdb.HostInfo, error) {
-	return ss.SearchHosts(ctx, filterMode, "", nil, offset, limit)
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.HostInfo, error) {
+	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {

@@ -30,7 +30,7 @@ func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err err
 }
 
 // Hosts returns 'limit' hosts at given 'offset'.
-func (c *Client) Hosts(ctx context.Context, opts api.HostsOptions) (hosts []hostdb.HostInfo, err error) {
+func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []hostdb.HostInfo, err error) {
 	values := url.Values{}
 	opts.Apply(values)
 	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
