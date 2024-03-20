@@ -17,13 +17,6 @@ jobs:
       - name: Configure Windows
         if: matrix.os == 'windows-latest'
         run: git config --global core.autocrlf false # fixes go lint fmt error
-      - name: Configure MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: mirromutth/mysql-action@v1.1
-        with:
-          host port: 3800
-          mysql version: '8'
-          mysql root password: test
       - name: Checkout
         uses: actions/checkout@v3
       - name: Setup Go
@@ -43,6 +36,13 @@ jobs:
             autopilot
             bus bus/client
             worker worker/client
+      - name: Configure MySQL
+        if: matrix.os == 'ubuntu-latest'
+        uses: mirromutth/mysql-action@v1.1
+        with:
+          host port: 3800
+          mysql version: '8'
+          mysql root password: test
       - name: Test
         uses: n8maninger/action-golang-test@v1
         with:

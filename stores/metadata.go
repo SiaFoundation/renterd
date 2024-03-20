@@ -1210,6 +1210,11 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		offset = 0
 	}
 
+	indexHint := ""
+	if !isSQLite(s.db) {
+		indexHint = "USE INDEX (idx_object_bucket, idx_objects_created_at)"
+	}
+
 	onameExpr := fmt.Sprintf("CASE INSTR(SUBSTR(object_id, ?), '/') WHEN 0 THEN %s ELSE %s END",
 		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
 		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
@@ -1226,13 +1231,14 @@ FROM (
 	SUM(size) AS Size,
 	MIN(health) as Health,
 	ANY_VALUE(mime_type) as MimeType
-	FROM objects
+	FROM objects %s
 	INNER JOIN buckets b ON objects.db_bucket_id = b.id
 	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
 	GROUP BY oname
 ) baseQuery
 `,
 		onameExpr,
+		indexHint,
 		onameExpr,
 		onameExpr,
 	)
