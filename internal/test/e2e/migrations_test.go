@@ -125,28 +125,18 @@ func TestMigrations(t *testing.T) {
 		t.Fatal("unexpected", ress)
 	}
 
-	// prepare
-
 	// remove all hosts to ensure migrations fail
 	for _, h := range cluster.hosts {
 		cluster.RemoveHost(h)
 	}
 
 	// fetch alerts and collect object ids until we found two
-	seen := make(map[types.Hash256]struct{})
-	got := make(map[string][]string)
+	var got map[string][]string
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		ress, _ := b.Alerts(context.Background(), alerts.AlertsOpts{})
-		if ress.Totals.Error+ress.Totals.Critical == 0 {
-			return errors.New("no migration alerts")
-		}
+		got = make(map[string][]string)
+		ress, err := b.Alerts(context.Background(), alerts.AlertsOpts{})
+		tt.OK(err)
 		for _, alert := range ress.Alerts {
-			// skip if already seen
-			if _, skip := seen[alert.ID]; skip {
-				continue
-			}
-			seen[alert.ID] = struct{}{}
-
 			// skip if not a migration alert
 			data, ok := alert.Data["objectIDs"].(map[string]interface{})
 			if !ok {
@@ -158,14 +148,14 @@ func TestMigrations(t *testing.T) {
 				if objectIDs, ok := ids.([]interface{}); ok {
 					for _, id := range objectIDs {
 						got[bucket] = append(got[bucket], id.(string))
-						if len(got) == 2 {
-							return nil
-						}
 					}
 				}
 			}
 		}
-		return errors.New("haven't found two migration alerts yet")
+		if len(got) != 2 {
+			return errors.New("unexpected number of buckets")
+		}
+		return nil
 	})
 
 	// assert we found our two objects across two buckets
