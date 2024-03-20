@@ -79,6 +79,7 @@ type (
 		Limit       int
 		Offset      int
 	}
+
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
@@ -87,13 +88,6 @@ type (
 		Offset          int
 	}
 )
-
-func DefaultSearchHostOptions() SearchHostOptions {
-	return SearchHostOptions{
-		Limit:      -1,
-		FilterMode: HostFilterModeAll,
-	}
-}
 
 func (opts GetHostsOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {
