@@ -375,7 +375,7 @@ func newObjectStoreMock(bucket string) *objectStoreMock {
 	return os
 }
 
-func (os *objectStoreMock) AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (os *objectStoreMock) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	return nil
 }
 

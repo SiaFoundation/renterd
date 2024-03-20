@@ -217,8 +217,14 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
-	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
-	signedTxnSet := append(resp.Parents, append(parents, txn)...)
+	txn.Signatures = make([]types.TransactionSignature, 0, len(renterContractSignatures)+len(hostSigs.ContractSignatures))
+	txn.Signatures = append(txn.Signatures, renterContractSignatures...)
+	txn.Signatures = append(txn.Signatures, hostSigs.ContractSignatures...)
+
+	signedTxnSet := make([]types.Transaction, 0, len(resp.Parents)+len(parents)+1)
+	signedTxnSet = append(signedTxnSet, resp.Parents...)
+	signedTxnSet = append(signedTxnSet, parents...)
+	signedTxnSet = append(signedTxnSet, txn)
 	return rhpv2.ContractRevision{
 		Revision: initRevision,
 		Signatures: [2]types.TransactionSignature{
