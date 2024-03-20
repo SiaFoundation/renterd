@@ -648,7 +648,6 @@ func (ss *SQLStore) HostInfos(ctx context.Context, autopilotID string, filterMod
 		// fetch host info
 		var infos []dbHostInfo
 		if err := query.
-			Debug().
 			Offset(offset).
 			Limit(limit).
 			Find(&infos).

@@ -1247,6 +1247,37 @@ func TestHostInfo(t *testing.T) {
 	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
 		t.Fatal("unexpected", his)
 	}
+
+	// assert cascade delete on host
+	err = ss.db.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.HostInfos(context.Background(), "foo", api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 0 {
+		t.Fatal("unexpected")
+	}
+
+	// assert cascade delete on autopilot
+	var cnt uint64
+	err = ss.db.Raw("SELECT COUNT(*) FROM host_infos").Scan(&cnt).Error
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt == 0 {
+		t.Fatal("unexpected", cnt)
+	}
+	err = ss.db.Exec("DELETE FROM autopilots WHERE identifier = ?", "foo").Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.db.Raw("SELECT COUNT(*) FROM host_infos").Scan(&cnt).Error
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 0 {
+		t.Fatal("unexpected", cnt)
+	}
 }
 
 // addTestHosts adds 'n' hosts to the db and returns their keys.
