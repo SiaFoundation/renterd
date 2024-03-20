@@ -105,7 +105,7 @@ func (t *TimeRFC3339) UnmarshalText(b []byte) error {
 
 // MarshalJSON implements json.Marshaler.
 func (t TimeRFC3339) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%s"`, (time.Time)(t).UTC().Format(time.RFC3339Nano))), nil
+	return []byte(fmt.Sprintf("%q", (time.Time)(t).UTC().Format(time.RFC3339Nano))), nil
 }
 
 // String implements fmt.Stringer.

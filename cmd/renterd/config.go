@@ -376,7 +376,7 @@ func cmdBuildConfig() {
 
 	// write the config file
 	configPath := "renterd.yml"
-	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
 		configPath = str
 	}
 

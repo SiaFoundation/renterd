@@ -2062,6 +2062,9 @@ func TestMultipartUploads(t *testing.T) {
 	etag1 := putPart(1, 0, data1)
 	etag3 := putPart(3, len(data1)+len(data2), data3)
 	size := int64(len(data1) + len(data2) + len(data3))
+	expectedData := data1
+	expectedData = append(expectedData, data2...)
+	expectedData = append(expectedData, data3...)
 
 	// List parts
 	mup, err := b.MultipartUploadParts(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, 0, 0)
@@ -2118,7 +2121,7 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal("unexpected size:", gor.Size)
 	} else if data, err := io.ReadAll(gor.Content); err != nil {
 		t.Fatal(err)
-	} else if expectedData := append(data1, append(data2, data3...)...); !bytes.Equal(data, expectedData) {
+	} else if !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
 	}
 
@@ -2417,6 +2420,11 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	})
 	tt.OK(err)
 
+	// combine all parts data
+	expectedData := part1Data
+	expectedData = append(expectedData, part2Data...)
+	expectedData = append(expectedData, part3Data...)
+
 	// finish the upload
 	tt.OKAll(b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
 		{
@@ -2436,7 +2444,6 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	// download the object and verify its integrity
 	dst := new(bytes.Buffer)
 	tt.OK(w.DownloadObject(context.Background(), dst, api.DefaultBucketName, objPath, api.DownloadObjectOptions{}))
-	expectedData := append(part1Data, append(part2Data, part3Data...)...)
 	receivedData := dst.Bytes()
 	if len(receivedData) != len(expectedData) {
 		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))

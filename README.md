@@ -250,7 +250,6 @@ updated using the settings API:
 	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TiB
 	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
 	"minAccountExpiry": 86400000000000,                           // 1 day
-	"minMaxCollateral": "10000000000000000000000000",             // at least up to 10 SC per contract
 	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
 	"minPriceTableValidity": 300000000000                         // 5 minutes
 }

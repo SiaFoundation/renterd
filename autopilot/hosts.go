@@ -33,7 +33,7 @@ func (hosts scoredHosts) randSelectByScore(n int) (selected []scoredHost) {
 			total += h.score
 		}
 		for i := range candidates {
-			candidates[i].score = candidates[i].score / total
+			candidates[i].score /= total
 		}
 
 		// select
