@@ -616,9 +616,11 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 	}
 
 	// track the upload in the bus
+	logger := mgr.logger.With("uploadID", hex.EncodeToString(upload.id[:]))
 	if err := mgr.os.TrackUpload(ctx, upload.id); err != nil {
 		return fmt.Errorf("failed to track upload '%v', err: %w", upload.id, err)
 	}
+	logger.Debug("tracking upload")
 
 	// defer a function that finishes the upload
 	defer func() {
@@ -626,6 +628,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
 		}
+		logger.Debug("finished upload")
 		cancel()
 	}()
 

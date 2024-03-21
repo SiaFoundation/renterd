@@ -147,7 +147,9 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 						// register the alert if error is errMaxDriftExceeded
 						a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
 					}
-					a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+					if _, inSet := inContractSet[contract.ID]; inSet {
+						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+					}
 				} else {
 					// dismiss alerts on success
 					a.ap.DismissAlert(ctx, alertIDForAccount(alertAccountRefillID, accountID))

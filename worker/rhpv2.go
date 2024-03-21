@@ -15,6 +15,8 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/crypto"
+	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -285,6 +287,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 			return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 				logger := w.logger.
+					With("id", frand.Entropy128()).
 					With("hostKey", hostKey).
 					With("hostVersion", settings.Version).
 					With("fcid", fcid).
@@ -312,6 +315,12 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 				if err != nil {
 					return err
 				}
+				for _, root := range pending {
+					logger.With("root", root).Debug("pending root")
+				}
+				for _, root := range want {
+					logger.With("root", root).Debug("wanted root")
+				}
 				keep := make(map[types.Hash256]struct{})
 				for _, root := range append(want, pending...) {
 					keep[root] = struct{}{}
@@ -332,7 +341,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 				}
 
 				// delete the roots from the contract
-				deleted, err = w.deleteContractRoots(t, &rev, settings, indices)
+				deleted, err = w.deleteContractRoots(t, &rev, settings, logger, indices)
 				if deleted < uint64(len(indices)) {
 					remaining = uint64(len(indices)) - deleted
 				}
@@ -347,14 +356,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 	return
 }
 
-func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
-	logger := w.logger.
-		With("hostKey", t.HostKey()).
-		With("hostVersion", settings.Version).
-		With("fcid", rev.Revision.ParentID).
-		With("revisionNumber", rev.Revision.RevisionNumber).
-		Named("deleteContractRoots")
-
+func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, logger *zap.SugaredLogger, indices []uint64) (deleted uint64, err error) {
 	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
