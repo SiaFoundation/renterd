@@ -32,15 +32,11 @@ func (b *mockBus) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (
 		end = len(b.hosts)
 	}
 
-	his := make([]api.Host, len(b.hosts[start:end]))
+	hosts := make([]api.Host, len(b.hosts[start:end]))
 	for i, h := range b.hosts[start:end] {
-		his[i] = api.Host{
-			HostInfo: hostdb.HostInfo{
-				Host: h,
-			},
-		}
+		hosts[i] = api.Host{Host: h}
 	}
-	return his, nil
+	return hosts, nil
 }
 
 func (b *mockBus) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error) {

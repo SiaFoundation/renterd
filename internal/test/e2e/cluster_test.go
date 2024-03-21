@@ -166,7 +166,7 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, hostdb.Host{}) {
 			t.Fatal("host wasn't set")
 		}
 	}
@@ -188,7 +188,7 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, hostdb.Host{}) {
 			t.Fatal("host wasn't set")
 		}
 		allHosts[hi.Host.PublicKey] = struct{}{}

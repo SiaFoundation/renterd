@@ -267,11 +267,9 @@ func newHostMock(hk types.PublicKey) *hostMock {
 	return &hostMock{
 		hk: hk,
 		hi: api.Host{
-			HostInfo: hostdb.HostInfo{
-				Host: hostdb.Host{
-					PublicKey: hk,
-					Scanned:   true,
-				},
+			Host: hostdb.Host{
+				PublicKey: hk,
+				Scanned:   true,
 			},
 		},
 	}

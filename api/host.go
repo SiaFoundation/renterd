@@ -120,8 +120,9 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 
 type (
 	Host struct {
-		hostdb.HostInfo
-		Checks map[string]HostCheck `json:"checks"`
+		hostdb.Host
+		Blocked bool                 `json:"blocked"`
+		Checks  map[string]HostCheck `json:"checks"`
 	}
 
 	HostCheck struct {

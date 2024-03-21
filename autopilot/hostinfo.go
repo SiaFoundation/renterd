@@ -52,7 +52,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host.HostInfo, minScore, storedData)
+	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host, minScore, storedData)
 	return api.HostHandlerResponse{
 		Host: host.Host,
 		Checks: &api.HostHandlerResponseChecks{
@@ -89,7 +89,7 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host api.Host) (hi h
 		} else {
 			state := c.ap.State()
 			gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.HostInfo, minScore, storedData)
+			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, storedData)
 			hi = hostInfo{
 				Usable:         isUsable,
 				UnusableResult: unusableResult,

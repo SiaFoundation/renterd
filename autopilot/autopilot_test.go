@@ -17,33 +17,33 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	var hosts []api.Host
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, api.Host{
-			HostInfo: hostdb.HostInfo{
-				Host: hostdb.Host{
-					KnownSince: time.Unix(0, 0),
-					PriceTable: hostdb.HostPriceTable{
-						HostPriceTable: rhpv3.HostPriceTable{
-							CollateralCost: types.Siacoins(1),
-							MaxCollateral:  types.Siacoins(1000),
-						},
+
+			Host: hostdb.Host{
+				KnownSince: time.Unix(0, 0),
+				PriceTable: hostdb.HostPriceTable{
+					HostPriceTable: rhpv3.HostPriceTable{
+						CollateralCost: types.Siacoins(1),
+						MaxCollateral:  types.Siacoins(1000),
 					},
-					Settings: rhpv2.HostSettings{
-						AcceptingContracts: true,
-						Collateral:         types.Siacoins(1),
-						MaxCollateral:      types.Siacoins(1000),
-						Version:            "1.6.0",
-					},
-					Interactions: hostdb.Interactions{
-						Uptime:                  time.Hour * 1000,
-						LastScan:                time.Now(),
-						LastScanSuccess:         true,
-						SecondToLastScanSuccess: true,
-						TotalScans:              100,
-					},
-					LastAnnouncement: time.Unix(0, 0),
-					Scanned:          true,
 				},
-				Blocked: false,
+				Settings: rhpv2.HostSettings{
+					AcceptingContracts: true,
+					Collateral:         types.Siacoins(1),
+					MaxCollateral:      types.Siacoins(1000),
+					Version:            "1.6.0",
+				},
+				Interactions: hostdb.Interactions{
+					Uptime:                  time.Hour * 1000,
+					LastScan:                time.Now(),
+					LastScanSuccess:         true,
+					SecondToLastScanSuccess: true,
+					TotalScans:              100,
+				},
+				LastAnnouncement: time.Unix(0, 0),
+				Scanned:          true,
 			},
+			Blocked: false,
+			Checks:  nil,
 		})
 	}
 

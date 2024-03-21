@@ -322,33 +322,31 @@ func (h dbHost) convert(blocked bool) api.Host {
 		checks[check.DBAutopilot.Identifier] = check.convert()
 	}
 	return api.Host{
-		HostInfo: hostdb.HostInfo{
-			Host: hostdb.Host{
-				KnownSince:       h.CreatedAt,
-				LastAnnouncement: h.LastAnnouncement,
-				NetAddress:       h.NetAddress,
-				Interactions: hostdb.Interactions{
-					TotalScans:              h.TotalScans,
-					LastScan:                lastScan,
-					LastScanSuccess:         h.LastScanSuccess,
-					SecondToLastScanSuccess: h.SecondToLastScanSuccess,
-					Uptime:                  h.Uptime,
-					Downtime:                h.Downtime,
-					SuccessfulInteractions:  h.SuccessfulInteractions,
-					FailedInteractions:      h.FailedInteractions,
-					LostSectors:             h.LostSectors,
-				},
-				PriceTable: hostdb.HostPriceTable{
-					HostPriceTable: h.PriceTable.convert(),
-					Expiry:         h.PriceTableExpiry.Time,
-				},
-				PublicKey: types.PublicKey(h.PublicKey),
-				Scanned:   h.Scanned,
-				Settings:  h.Settings.convert(),
+		Host: hostdb.Host{
+			KnownSince:       h.CreatedAt,
+			LastAnnouncement: h.LastAnnouncement,
+			NetAddress:       h.NetAddress,
+			Interactions: hostdb.Interactions{
+				TotalScans:              h.TotalScans,
+				LastScan:                lastScan,
+				LastScanSuccess:         h.LastScanSuccess,
+				SecondToLastScanSuccess: h.SecondToLastScanSuccess,
+				Uptime:                  h.Uptime,
+				Downtime:                h.Downtime,
+				SuccessfulInteractions:  h.SuccessfulInteractions,
+				FailedInteractions:      h.FailedInteractions,
+				LostSectors:             h.LostSectors,
 			},
-			Blocked: blocked,
+			PriceTable: hostdb.HostPriceTable{
+				HostPriceTable: h.PriceTable.convert(),
+				Expiry:         h.PriceTableExpiry.Time,
+			},
+			PublicKey: types.PublicKey(h.PublicKey),
+			Scanned:   h.Scanned,
+			Settings:  h.Settings.convert(),
 		},
-		Checks: checks,
+		Blocked: blocked,
+		Checks:  checks,
 	}
 }
 
