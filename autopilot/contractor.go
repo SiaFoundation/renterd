@@ -220,8 +220,10 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	if err != nil {
 		return false, err
 	}
-	if resp.Error != "" {
-		c.logger.Error(resp.Error)
+	if resp.Errors != nil {
+		for pk, err := range resp.Errors {
+			c.logger.With("hostKey", pk).With("error", err).Warn("failed to fetch revision")
+		}
 	}
 	contracts := resp.Contracts
 	c.logger.Infof("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))

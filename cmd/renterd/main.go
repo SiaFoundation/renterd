@@ -492,7 +492,7 @@ func main() {
 		dbLogCfg = cfg.Database.Log
 	}
 	busCfg.DBLogger = zapgorm2.Logger{
-		ZapLogger:                 logger,
+		ZapLogger:                 logger.Named("SQL"),
 		LogLevel:                  level,
 		SlowThreshold:             dbLogCfg.SlowThreshold,
 		SkipCallerLookup:          false,
