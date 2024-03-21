@@ -260,13 +260,13 @@ var errSectorOutOfBounds = errors.New("sector out of bounds")
 
 type hostMock struct {
 	hk types.PublicKey
-	hi api.HostInfo
+	hi api.Host
 }
 
 func newHostMock(hk types.PublicKey) *hostMock {
 	return &hostMock{
 		hk: hk,
-		hi: api.HostInfo{
+		hi: api.Host{
 			HostInfo: hostdb.HostInfo{
 				Host: hostdb.Host{
 					PublicKey: hk,
@@ -289,13 +289,13 @@ func newHostStoreMock() *hostStoreMock {
 	return &hostStoreMock{hosts: make(map[types.PublicKey]*hostMock)}
 }
 
-func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (api.HostInfo, error) {
+func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 
 	h, ok := hs.hosts[hostKey]
 	if !ok {
-		return api.HostInfo{}, api.ErrHostNotFound
+		return api.Host{}, api.ErrHostNotFound
 	}
 	return h.hi, nil
 }

@@ -24,10 +24,6 @@ var (
 	// ErrHostNotFound is returned when a host can't be retrieved from the
 	// database.
 	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
-
-	// ErrHostInfoNotFound is returned when host info can't be retrieved from
-	// the database.
-	ErrHostInfoNotFound = errors.New("host info doesn't exist in hostdb")
 )
 
 type (
@@ -47,11 +43,14 @@ type (
 		MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 	}
 
+	// HostsRequest is the request type for the /api/autopilot/hosts endpoint.
 	HostsRequest struct {
 		UsabilityMode string `json:"usabilityMode"`
 		SearchHostsRequest
 	}
 
+	// SearchHostsRequest is the request type for the /api/bus/search/hosts
+	// endpoint.
 	SearchHostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
@@ -92,7 +91,6 @@ type (
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
-		UsabilityMode   string
 		KeyIn           []types.PublicKey
 		Limit           int
 		Offset          int
@@ -121,7 +119,7 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 }
 
 type (
-	HostInfo struct {
+	Host struct {
 		hostdb.HostInfo
 		Checks map[string]HostCheck `json:"checks"`
 	}

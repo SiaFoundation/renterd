@@ -312,7 +312,7 @@ func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
 func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
 
 // convert converts a host into a api.HostInfo
-func (h dbHost) convert(blocked bool) api.HostInfo {
+func (h dbHost) convert(blocked bool) api.Host {
 	var lastScan time.Time
 	if h.LastScan > 0 {
 		lastScan = time.Unix(0, h.LastScan)
@@ -321,7 +321,7 @@ func (h dbHost) convert(blocked bool) api.HostInfo {
 	for _, check := range h.Checks {
 		checks[check.DBAutopilot.Identifier] = check.convert()
 	}
-	return api.HostInfo{
+	return api.Host{
 		HostInfo: hostdb.HostInfo{
 			Host: hostdb.Host{
 				KnownSince:       h.CreatedAt,
@@ -488,7 +488,7 @@ func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.HostInfo, error) {
+func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
 	var h dbHost
 
 	tx := ss.db.
@@ -498,45 +498,12 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 		Preload("Blocklist").
 		Take(&h)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return api.HostInfo{}, api.ErrHostNotFound
+		return api.Host{}, api.ErrHostNotFound
 	} else if tx.Error != nil {
-		return api.HostInfo{}, tx.Error
+		return api.Host{}, tx.Error
 	}
 
 	return h.convert(ss.isBlocked(h)), nil
-}
-
-func (ss *SQLStore) HostInfo(ctx context.Context, autopilotID string, hk types.PublicKey) (hi api.HostInfo, err error) {
-	err = ss.db.Transaction(func(tx *gorm.DB) error {
-		var entity dbHostCheck
-		if err := tx.
-			Model(&dbHostCheck{}).
-			Where("db_autopilot_id = (?)", gorm.Expr("SELECT id FROM autopilots WHERE identifier = ?", autopilotID)).
-			Where("db_host_id = (?)", gorm.Expr("SELECT id FROM hosts WHERE public_key = ?", publicKey(hk))).
-			Preload("DBHost").
-			First(&entity).
-			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := tx.
-				Model(&dbAutopilot{}).
-				Where("identifier = ?", autopilotID).
-				First(nil).
-				Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				return api.ErrAutopilotNotFound
-			} else if err := tx.
-				Model(&dbHost{}).
-				Where("public_key = ?", publicKey(hk)).
-				First(nil).
-				Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				return api.ErrHostNotFound
-			}
-			return api.ErrHostInfoNotFound
-		} else if err != nil {
-			return err
-		}
-		// hi = entity.convert()
-		return nil
-	})
-	return
 }
 
 func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
@@ -640,7 +607,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostInfo, error) {
+func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -658,10 +625,10 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 	query := ss.db.
 		Model(&dbHost{}).
 		Scopes(
-			hostFilter(filterMode, ss.hasAllowlist(), ss.hasBlocklist(), "hosts"),
+			hostFilter(filterMode, ss.hasAllowlist(), ss.hasBlocklist()),
 			hostNetAddress(addressContains),
 			hostPublicKey(keyIn),
-		).Preload("Checks.DBAutopilot")
+		)
 
 	// preload allowlist and blocklist
 	if filterMode == api.HostFilterModeAll {
@@ -670,7 +637,10 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 			Preload("Blocklist")
 	}
 
-	var hosts []api.HostInfo
+	// preload host checks
+	query = query.Preload("Checks.DBAutopilot")
+
+	var hosts []api.Host
 	var fullHosts []dbHost
 	err := query.
 		Offset(offset).
@@ -695,7 +665,7 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 }
 
 // Hosts returns non-blocked hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.HostInfo, error) {
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
 	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
 }
 
@@ -1119,22 +1089,22 @@ func hostPublicKey(keyIn []types.PublicKey) func(*gorm.DB) *gorm.DB {
 
 // hostFilter can be used as a scope to filter hosts based on their filter mode,
 // returning either all, allowed or blocked hosts.
-func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool, hostTableAlias string) func(*gorm.DB) *gorm.DB {
+func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		switch filterMode {
 		case api.HostFilterModeAllowed:
 			if hasAllowlist {
-				db = db.Where(fmt.Sprintf("EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = %s.id)", hostTableAlias))
+				db = db.Where("EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 			}
 			if hasBlocklist {
-				db = db.Where(fmt.Sprintf("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = %s.id)", hostTableAlias))
+				db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 			}
 		case api.HostFilterModeBlocked:
 			if hasAllowlist {
-				db = db.Where(fmt.Sprintf("NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = %s.id)", hostTableAlias))
+				db = db.Where("NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 			}
 			if hasBlocklist {
-				db = db.Where(fmt.Sprintf("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = %s.id)", hostTableAlias))
+				db = db.Where("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
 			}
 			if !hasAllowlist && !hasBlocklist {
 				// if neither an allowlist nor a blocklist exist, all hosts are allowed

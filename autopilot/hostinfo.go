@@ -66,7 +66,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) hostInfoFromCache(ctx context.Context, host api.HostInfo) (hi hostInfo, found bool) {
+func (c *contractor) hostInfoFromCache(ctx context.Context, host api.Host) (hi hostInfo, found bool) {
 	// grab host details from cache
 	c.mu.Lock()
 	hi, found = c.cachedHostInfo[host.PublicKey]
