@@ -440,12 +440,12 @@ func TestContractsForHost(t *testing.T) {
 	}
 
 	contracts, _ := contractsForHost(ss.db, hosts[0])
-	if len(contracts) != 1 || contracts[0].Host.convert().PublicKey.String() != hosts[0].convert().PublicKey.String() {
+	if len(contracts) != 1 || types.PublicKey(contracts[0].Host.PublicKey).String() != types.PublicKey(hosts[0].PublicKey).String() {
 		t.Fatal("unexpected", len(contracts), contracts)
 	}
 
 	contracts, _ = contractsForHost(ss.db, hosts[1])
-	if len(contracts) != 1 || contracts[0].Host.convert().PublicKey.String() != hosts[1].convert().PublicKey.String() {
+	if len(contracts) != 1 || types.PublicKey(contracts[0].Host.PublicKey).String() != types.PublicKey(hosts[1].PublicKey).String() {
 		t.Fatalf("unexpected contracts, %+v", contracts)
 	}
 }

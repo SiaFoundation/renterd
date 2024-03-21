@@ -47,11 +47,15 @@ type (
 		MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 	}
 
+	HostsRequest struct {
+		UsabilityMode string `json:"usabilityMode"`
+		SearchHostsRequest
+	}
+
 	SearchHostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
 		FilterMode      string            `json:"filterMode"`
-		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
 	}
@@ -88,6 +92,7 @@ type (
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
+		UsabilityMode   string
 		KeyIn           []types.PublicKey
 		Limit           int
 		Offset          int
@@ -117,7 +122,11 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 
 type (
 	HostInfo struct {
-		Host      hostdb.Host            `json:"host"`
+		hostdb.HostInfo
+		Checks map[string]HostCheck `json:"checks"`
+	}
+
+	HostCheck struct {
 		Gouging   HostGougingBreakdown   `json:"gouging"`
 		Score     HostScoreBreakdown     `json:"score"`
 		Usability HostUsabilityBreakdown `json:"usability"`

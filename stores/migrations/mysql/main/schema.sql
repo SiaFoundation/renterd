@@ -422,8 +422,8 @@ CREATE TABLE `object_user_metadata` (
   CONSTRAINT `fk_multipart_upload_user_metadata` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbHostInfo
-CREATE TABLE `host_infos` (
+-- dbHostCheck
+CREATE TABLE `host_checks` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
 
@@ -454,25 +454,25 @@ CREATE TABLE `host_infos` (
   `gouging_upload_err` text,
 
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_host_infos_id` (`db_autopilot_id`, `db_host_id`),
-  INDEX `idx_host_infos_usability_blocked` (`usability_blocked`),
-  INDEX `idx_host_infos_usability_offline` (`usability_offline`),
-  INDEX `idx_host_infos_usability_low_score` (`usability_low_score`),
-  INDEX `idx_host_infos_usability_redundant_ip` (`usability_redundant_ip`),
-  INDEX `idx_host_infos_usability_gouging` (`usability_gouging`),
-  INDEX `idx_host_infos_usability_not_accepting_contracts` (`usability_not_accepting_contracts`),
-  INDEX `idx_host_infos_usability_not_announced` (`usability_not_announced`),
-  INDEX `idx_host_infos_usability_not_completing_scan` (`usability_not_completing_scan`),
-  INDEX `idx_host_infos_score_age` (`score_age`),
-  INDEX `idx_host_infos_score_collateral` (`score_collateral`),
-  INDEX `idx_host_infos_score_interactions` (`score_interactions`),
-  INDEX `idx_host_infos_score_storage_remaining` (`score_storage_remaining`),
-  INDEX `idx_host_infos_score_uptime` (`score_uptime`),
-  INDEX `idx_host_infos_score_version` (`score_version`),
-  INDEX `idx_host_infos_score_prices` (`score_prices`),
+  UNIQUE KEY `idx_host_checks_id` (`db_autopilot_id`, `db_host_id`),
+  INDEX `idx_host_checks_usability_blocked` (`usability_blocked`),
+  INDEX `idx_host_checks_usability_offline` (`usability_offline`),
+  INDEX `idx_host_checks_usability_low_score` (`usability_low_score`),
+  INDEX `idx_host_checks_usability_redundant_ip` (`usability_redundant_ip`),
+  INDEX `idx_host_checks_usability_gouging` (`usability_gouging`),
+  INDEX `idx_host_checks_usability_not_accepting_contracts` (`usability_not_accepting_contracts`),
+  INDEX `idx_host_checks_usability_not_announced` (`usability_not_announced`),
+  INDEX `idx_host_checks_usability_not_completing_scan` (`usability_not_completing_scan`),
+  INDEX `idx_host_checks_score_age` (`score_age`),
+  INDEX `idx_host_checks_score_collateral` (`score_collateral`),
+  INDEX `idx_host_checks_score_interactions` (`score_interactions`),
+  INDEX `idx_host_checks_score_storage_remaining` (`score_storage_remaining`),
+  INDEX `idx_host_checks_score_uptime` (`score_uptime`),
+  INDEX `idx_host_checks_score_version` (`score_version`),
+  INDEX `idx_host_checks_score_prices` (`score_prices`),
 
-  CONSTRAINT `fk_host_infos_autopilot` FOREIGN KEY (`db_autopilot_id`) REFERENCES `autopilots` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_host_infos_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_host_checks_autopilot` FOREIGN KEY (`db_autopilot_id`) REFERENCES `autopilots` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_host_checks_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- create default bucket

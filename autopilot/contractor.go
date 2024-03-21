@@ -295,7 +295,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	for _, h := range hosts {
 		// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, h, minScore, hostData[h.PublicKey])
+		isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, h.HostInfo, minScore, hostData[h.PublicKey])
 		hostInfos[h.PublicKey] = hostInfo{
 			Usable:         isUsable,
 			UnusableResult: unusableResult,
@@ -777,7 +777,7 @@ func (c *contractor) runContractChecks(ctx context.Context, w Worker, contracts 
 		host.PriceTable.HostBlockHeight = cs.BlockHeight
 
 		// decide whether the host is still good
-		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, contract.FileSize())
+		usable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.HostInfo, minScore, contract.FileSize())
 		if !usable {
 			reasons := unusableResult.reasons()
 			toStopUsing[fcid] = strings.Join(reasons, ",")
@@ -1297,7 +1297,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []api.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1311,7 +1311,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// select unused hosts that passed a scan
-	var unused []hostdb.HostInfo
+	var unused []api.HostInfo
 	var excluded, notcompletedscan int
 	for _, h := range hosts {
 		// filter out used hosts
@@ -1346,7 +1346,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		usable, result := isUsableHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
+		usable, result := isUsableHost(state.cfg, state.rs, gc, h.HostInfo, minScore, storedData[h.PublicKey])
 		if usable {
 			candidates = append(candidates, scoredHost{h.Host, result.scoreBreakdown.Score()})
 			continue
@@ -1612,7 +1612,7 @@ func (c *contractor) tryPerformPruning(wp *workerPool) {
 	}()
 }
 
-func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host hostdb.HostInfo, metadata api.ContractMetadata, err error) {
+func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host api.HostInfo, metadata api.ContractMetadata, err error) {
 	// fetch the contract
 	metadata, err = c.ap.bus.Contract(ctx, fcid)
 	if err != nil {

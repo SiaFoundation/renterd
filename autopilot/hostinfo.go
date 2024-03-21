@@ -6,7 +6,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 )
 
@@ -53,7 +52,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host, minScore, storedData)
+	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host.HostInfo, minScore, storedData)
 	return api.HostHandlerResponse{
 		Host: host.Host,
 		Checks: &api.HostHandlerResponseChecks{
@@ -67,7 +66,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	}, nil
 }
 
-func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo) (hi hostInfo, found bool) {
+func (c *contractor) hostInfoFromCache(ctx context.Context, host api.HostInfo) (hi hostInfo, found bool) {
 	// grab host details from cache
 	c.mu.Lock()
 	hi, found = c.cachedHostInfo[host.PublicKey]
@@ -90,7 +89,7 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo
 		} else {
 			state := c.ap.State()
 			gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, storedData)
+			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host.HostInfo, minScore, storedData)
 			hi = hostInfo{
 				Usable:         isUsable,
 				UnusableResult: unusableResult,
