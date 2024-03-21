@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -74,10 +76,6 @@ var (
 		},
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
-			Log: config.DatabaseLog{
-				IgnoreRecordNotFoundError: true,
-				SlowThreshold:             100 * time.Millisecond,
-			},
 			MySQL: config.MySQL{
 				Database:        "renterd",
 				User:            "renterd",
@@ -85,7 +83,23 @@ var (
 			},
 		},
 		Log: config.Log{
-			Level: "warn",
+			Path:  "", // deprecated. included for compatibility.
+			Level: "info",
+			File: config.LogFile{
+				Enabled: true,
+				Format:  "json",
+				Path:    os.Getenv("RENTERD_LOG_FILE"),
+			},
+			StdOut: config.StdOut{
+				Enabled:    true,
+				Format:     "human",
+				EnableANSI: runtime.GOOS != "windows",
+			},
+			Database: config.DatabaseLog{
+				Enabled:                   true,
+				IgnoreRecordNotFoundError: true,
+				SlowThreshold:             100 * time.Millisecond,
+			},
 		},
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
@@ -248,21 +262,34 @@ func main() {
 	// overwrite anything set in the config file.
 	tryLoadConfig()
 
+	// deprecated - these go first so that they can be overwritten by the non-deprecated flags
+	flag.StringVar(&cfg.Log.Database.Level, "db.logger.logLevel", cfg.Log.Level, "(deprecated) Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
+	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "(deprecated) Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
+	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "(deprecated) Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
+	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "(deprecated) Path to directory for logs (overrides with RENTERD_LOG_PATH)")
+
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
-	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "Path for logs (overrides with RENTERD_LOG_PATH)")
+
+	// logger
+	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
+	flag.BoolVar(&cfg.Log.File.Enabled, "log.file.enabled", cfg.Log.File.Enabled, "Enables logging to disk. Defaults to 'true'. (overrides with RENTERD_LOG_FILE_ENABLED)")
+	flag.StringVar(&cfg.Log.File.Format, "log.file.format", cfg.Log.File.Format, "Format of log file (json|human). Defaults to 'json' (overrides with RENTERD_LOG_FILE_FORMAT)")
+	flag.StringVar(&cfg.Log.File.Path, "log.file.path", cfg.Log.File.Path, "Path of log file. Defaults to 'renterd.log' within the renterd directory. (overrides with RENTERD_LOG_FILE_PATH)")
+	flag.BoolVar(&cfg.Log.StdOut.Enabled, "log.stdout.enabled", cfg.Log.StdOut.Enabled, "Enables logging to stdout. Defaults to 'true'. (overrides with RENTERD_LOG_STDOUT_ENABLED)")
+	flag.StringVar(&cfg.Log.StdOut.Format, "log.stdout.format", cfg.Log.StdOut.Format, "Format of log output (json|human). Defaults to 'human' (overrides with RENTERD_LOG_STDOUT_FORMAT)")
+	flag.BoolVar(&cfg.Log.StdOut.EnableANSI, "log.stdout.enableANSI", cfg.Log.StdOut.EnableANSI, "Enables ANSI color codes in log output. Defaults to 'true' on non-Windows systems. (overrides with RENTERD_LOG_STDOUT_ENABLE_ANSI)")
+	flag.BoolVar(&cfg.Log.Database.Enabled, "log.database.enabled", cfg.Log.Database.Enabled, "Enable logging database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_ENABLED)")
+	flag.StringVar(&cfg.Log.Database.Level, "log.database.level", cfg.Log.Database.Level, "Logger level for database queries (info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_DATABASE_LEVEL)")
+	flag.BoolVar(&cfg.Log.Database.IgnoreRecordNotFoundError, "log.database.ignoreRecordNotFoundError", cfg.Log.Database.IgnoreRecordNotFoundError, "Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR)")
+	flag.DurationVar(&cfg.Log.Database.SlowThreshold, "log.database.slowThreshold", cfg.Log.Database.SlowThreshold, "Threshold for slow queries in logger. Defaults to 100ms (overrides with RENTERD_LOG_DATABASE_SLOW_THRESHOLD)")
 
 	// db
 	flag.StringVar(&cfg.Database.MySQL.URI, "db.uri", cfg.Database.MySQL.URI, "Database URI for the bus (overrides with RENTERD_DB_URI)")
 	flag.StringVar(&cfg.Database.MySQL.User, "db.user", cfg.Database.MySQL.User, "Database username for the bus (overrides with RENTERD_DB_USER)")
 	flag.StringVar(&cfg.Database.MySQL.Database, "db.name", cfg.Database.MySQL.Database, "Database name for the bus (overrides with RENTERD_DB_NAME)")
 	flag.StringVar(&cfg.Database.MySQL.MetricsDatabase, "db.metricsName", cfg.Database.MySQL.MetricsDatabase, "Database for metrics (overrides with RENTERD_DB_METRICS_NAME)")
-
-	// db logger
-	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
-	flag.StringVar(&cfg.Log.Level, "db.logger.logLevel", cfg.Log.Level, "Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
-	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
 
 	// bus
 	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
@@ -371,6 +398,18 @@ func main() {
 	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
 
+	parseEnvVar("RENTERD_LOG_LEVEL", &cfg.Log.Level)
+	parseEnvVar("RENTERD_LOG_FILE_ENABLED", &cfg.Log.File.Enabled)
+	parseEnvVar("RENTERD_LOG_FILE_FORMAT", &cfg.Log.File.Format)
+	parseEnvVar("RENTERD_LOG_FILE_PATH", &cfg.Log.File.Path)
+	parseEnvVar("RENTERD_LOG_STDOUT_ENABLED", &cfg.Log.StdOut.Enabled)
+	parseEnvVar("RENTERD_LOG_STDOUT_FORMAT", &cfg.Log.StdOut.Format)
+	parseEnvVar("RENTERD_LOG_STDOUT_ENABLE_ANSI", &cfg.Log.StdOut.EnableANSI)
+	parseEnvVar("RENTERD_LOG_DATABASE_ENABLED", &cfg.Log.Database.Enabled)
+	parseEnvVar("RENTERD_LOG_DATABASE_LEVEL", &cfg.Log.Database.Level)
+	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
+	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
+
 	if cfg.S3.Enabled {
 		var keyPairsV4 string
 		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
@@ -411,10 +450,13 @@ func main() {
 		)
 	}
 
+	// Log level for db
+	lvlStr := cfg.Log.Level
+	if cfg.Log.Database.Level != "" {
+		lvlStr = cfg.Log.Database.Level
+	}
 	var level logger.LogLevel
-	switch strings.ToLower(cfg.Log.Level) {
-	case "silent":
-		level = logger.Silent
+	switch strings.ToLower(lvlStr) {
 	case "error":
 		level = logger.Error
 	case "warn":
@@ -424,13 +466,12 @@ func main() {
 	default:
 		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
 	}
+	if !cfg.Log.Database.Enabled {
+		level = logger.Silent
+	}
 
 	// Create logger.
-	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
-	if cfg.Log.Path != "" {
-		renterdLog = cfg.Log.Path
-	}
-	logger, closeFn, err := node.NewLogger(renterdLog)
+	logger, closeFn, err := NewLogger(cfg.Directory, cfg.Log)
 	if err != nil {
 		log.Fatalln("failed to create logger:", err)
 	}
@@ -438,10 +479,18 @@ func main() {
 
 	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", build.NetworkName()), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
 
-	busCfg.DBLoggerConfig = stores.LoggerConfig{
+	// configure database logger
+	dbLogCfg := cfg.Log.Database
+	if cfg.Database.Log != (config.DatabaseLog{}) {
+		dbLogCfg = cfg.Database.Log
+	}
+	busCfg.DBLogger = zapgorm2.Logger{
+		ZapLogger:                 logger,
 		LogLevel:                  level,
-		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
-		SlowThreshold:             cfg.Database.Log.SlowThreshold,
+		SlowThreshold:             dbLogCfg.SlowThreshold,
+		SkipCallerLookup:          false,
+		IgnoreRecordNotFoundError: dbLogCfg.IgnoreRecordNotFoundError,
+		Context:                   nil,
 	}
 
 	type shutdownFn struct {
