@@ -263,7 +263,7 @@ func main() {
 	tryLoadConfig()
 
 	// deprecated - these go first so that they can be overwritten by the non-deprecated flags
-	flag.StringVar(&cfg.Log.Database.Level, "db.logger.logLevel", cfg.Log.Level, "(deprecated) Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
+	flag.StringVar(&cfg.Log.Database.Level, "db.logger.logLevel", cfg.Log.Database.Level, "(deprecated) Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
 	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "(deprecated) Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
 	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "(deprecated) Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
 	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "(deprecated) Path to directory for logs (overrides with RENTERD_LOG_PATH)")
@@ -273,7 +273,7 @@ func main() {
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
 
 	// logger
-	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
+	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
 	flag.BoolVar(&cfg.Log.File.Enabled, "log.file.enabled", cfg.Log.File.Enabled, "Enables logging to disk. Defaults to 'true'. (overrides with RENTERD_LOG_FILE_ENABLED)")
 	flag.StringVar(&cfg.Log.File.Format, "log.file.format", cfg.Log.File.Format, "Format of log file (json|human). Defaults to 'json' (overrides with RENTERD_LOG_FILE_FORMAT)")
 	flag.StringVar(&cfg.Log.File.Path, "log.file.path", cfg.Log.File.Path, "Path of log file. Defaults to 'renterd.log' within the renterd directory. (overrides with RENTERD_LOG_FILE_PATH)")
@@ -462,6 +462,8 @@ func main() {
 	case "warn":
 		level = logger.Warn
 	case "info":
+		level = logger.Info
+	case "debug":
 		level = logger.Info
 	default:
 		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
