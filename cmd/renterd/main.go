@@ -84,7 +84,7 @@ var (
 		},
 		Log: config.Log{
 			Path:  "", // deprecated. included for compatibility.
-			Level: "info",
+			Level: "",
 			File: config.LogFile{
 				Enabled: true,
 				Format:  "json",
@@ -281,7 +281,7 @@ func main() {
 	flag.StringVar(&cfg.Log.StdOut.Format, "log.stdout.format", cfg.Log.StdOut.Format, "Format of log output (json|human). Defaults to 'human' (overrides with RENTERD_LOG_STDOUT_FORMAT)")
 	flag.BoolVar(&cfg.Log.StdOut.EnableANSI, "log.stdout.enableANSI", cfg.Log.StdOut.EnableANSI, "Enables ANSI color codes in log output. Defaults to 'true' on non-Windows systems. (overrides with RENTERD_LOG_STDOUT_ENABLE_ANSI)")
 	flag.BoolVar(&cfg.Log.Database.Enabled, "log.database.enabled", cfg.Log.Database.Enabled, "Enable logging database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_ENABLED)")
-	flag.StringVar(&cfg.Log.Database.Level, "log.database.level", cfg.Log.Database.Level, "Logger level for database queries (info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_DATABASE_LEVEL)")
+	flag.StringVar(&cfg.Log.Database.Level, "log.database.level", cfg.Log.Database.Level, "Logger level for database queries (info|warn|error). Defaults to 'warn' (overrides with RENTERD_LOG_LEVEL and RENTERD_LOG_DATABASE_LEVEL)")
 	flag.BoolVar(&cfg.Log.Database.IgnoreRecordNotFoundError, "log.database.ignoreRecordNotFoundError", cfg.Log.Database.IgnoreRecordNotFoundError, "Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR)")
 	flag.DurationVar(&cfg.Log.Database.SlowThreshold, "log.database.slowThreshold", cfg.Log.Database.SlowThreshold, "Threshold for slow queries in logger. Defaults to 100ms (overrides with RENTERD_LOG_DATABASE_SLOW_THRESHOLD)")
 
@@ -457,6 +457,8 @@ func main() {
 	}
 	var level logger.LogLevel
 	switch strings.ToLower(lvlStr) {
+	case "":
+		level = logger.Warn // default to 'warn' if not set
 	case "error":
 		level = logger.Error
 	case "warn":
@@ -473,6 +475,9 @@ func main() {
 	}
 
 	// Create logger.
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info" // default to 'info' if not set
+	}
 	logger, closeFn, err := NewLogger(cfg.Directory, cfg.Log)
 	if err != nil {
 		log.Fatalln("failed to create logger:", err)
