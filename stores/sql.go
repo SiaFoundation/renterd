@@ -104,8 +104,8 @@ type (
 
 		wg           sync.WaitGroup
 		mu           sync.Mutex
-		hasAllowlist bool
-		hasBlocklist bool
+		allowListCnt uint64
+		blockListCnt uint64
 		closed       bool
 
 		knownContracts map[types.FileContractID]struct{}
@@ -258,8 +258,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
 		persistInterval:        cfg.PersistInterval,
-		hasAllowlist:           allowlistCnt > 0,
-		hasBlocklist:           blocklistCnt > 0,
+		allowListCnt:           uint64(allowlistCnt),
+		blockListCnt:           uint64(blocklistCnt),
 		settings:               make(map[string]string),
 		slabPruneSigChan:       make(chan struct{}, 1),
 		unappliedContractState: make(map[types.FileContractID]contractState),
@@ -299,6 +299,12 @@ func isSQLite(db *gorm.DB) bool {
 	}
 }
 
+func (ss *SQLStore) hasAllowlist() bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.allowListCnt > 0
+}
+
 func (ss *SQLStore) updateHasAllowlist(err *error) {
 	if *err != nil {
 		return
@@ -311,8 +317,14 @@ func (ss *SQLStore) updateHasAllowlist(err *error) {
 	}
 
 	ss.mu.Lock()
-	ss.hasAllowlist = cnt > 0
+	ss.allowListCnt = uint64(cnt)
 	ss.mu.Unlock()
+}
+
+func (ss *SQLStore) hasBlocklist() bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.blockListCnt > 0
 }
 
 func (ss *SQLStore) updateHasBlocklist(err *error) {
@@ -327,7 +339,7 @@ func (ss *SQLStore) updateHasBlocklist(err *error) {
 	}
 
 	ss.mu.Lock()
-	ss.hasBlocklist = cnt > 0
+	ss.blockListCnt = uint64(cnt)
 	ss.mu.Unlock()
 }
 
