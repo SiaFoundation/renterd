@@ -215,7 +215,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		minRecentScanFailures := hostCfg.MinRecentScanFailures
 
 		if !interrupted && maxDowntime > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
+			s.logger.Infof("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
 			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
 			if err != nil {
 				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
@@ -226,7 +226,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 
 		s.mu.Lock()
 		s.scanning = false
-		s.logger.Debugf("%s finished after %v", st, time.Since(s.scanningLastStart))
+		s.logger.Infof("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(scanType)
 	return
@@ -241,12 +241,12 @@ func (s *scanner) tryUpdateTimeout() {
 
 	updated := s.tracker.timeout()
 	if updated < s.timeoutMinTimeout {
-		s.logger.Debugf("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
+		s.logger.Infof("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
 		updated = s.timeoutMinTimeout
 	}
 
 	if s.timeout != updated {
-		s.logger.Debugf("updated timeout %v->%v", s.timeout, updated)
+		s.logger.Infof("updated timeout %v->%v", s.timeout, updated)
 		s.timeout = updated
 	}
 	s.timeoutLastUpdate = time.Now()
@@ -281,7 +281,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 				exhausted = true
 			}
 
-			s.logger.Debugf("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
+			s.logger.Infof("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
 			offset += int(s.scanBatchSize)
 
 			// add batch to scan queue

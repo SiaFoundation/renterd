@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"lukechampine.com/frand"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -206,11 +207,7 @@ func newTestLogger() logger.Interface {
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
-	return NewSQLLogger(l, LoggerConfig{
-		IgnoreRecordNotFoundError: false,
-		LogLevel:                  logger.Warn,
-		SlowThreshold:             100 * time.Millisecond,
-	})
+	return zapgorm2.New(l)
 }
 
 func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, error) {
