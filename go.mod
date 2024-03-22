@@ -27,6 +27,7 @@ require (
 	gorm.io/driver/sqlite v1.5.5
 	gorm.io/gorm v1.25.7
 	lukechampine.com/frand v1.4.2
+	moul.io/zapgorm2 v1.3.0
 )
 
 require (

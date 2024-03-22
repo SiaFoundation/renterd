@@ -30,12 +30,14 @@ type (
 	}
 
 	DatabaseLog struct {
+		Enabled                   bool          `yaml:"enabled,omitempty"`
+		Level                     string        `yaml:"level,omitempty"`
 		IgnoreRecordNotFoundError bool          `yaml:"ignoreRecordNotFoundError,omitempty"`
 		SlowThreshold             time.Duration `yaml:"slowThreshold,omitempty"`
 	}
 
 	Database struct {
-		Log DatabaseLog `yaml:"log,omitempty"`
+		Log DatabaseLog `yaml:"log,omitempty"` // deprecated. included for compatibility.
 		// optional fields depending on backend
 		MySQL MySQL `yaml:"mysql,omitempty"`
 	}
@@ -52,10 +54,29 @@ type (
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
 	}
 
-	// Log contains the configuration for the logger.
+	// LogFile configures the file output of the logger.
+	LogFile struct {
+		Enabled bool   `yaml:"enabled,omitempty"`
+		Level   string `yaml:"level,omitempty"` // override the file log level
+		Format  string `yaml:"format,omitempty"`
+		// Path is the path of the log file.
+		Path string `yaml:"path,omitempty"`
+	}
+
+	// StdOut configures the standard output of the logger.
+	StdOut struct {
+		Level      string `yaml:"level,omitempty"` // override the stdout log level
+		Enabled    bool   `yaml:"enabled,omitempty"`
+		Format     string `yaml:"format,omitempty"`
+		EnableANSI bool   `yaml:"enableANSI,omitempty"` //nolint:tagliatelle
+	}
+
 	Log struct {
-		Path  string `yaml:"path,omitempty"`
-		Level string `yaml:"level,omitempty"`
+		Path     string      `yaml:"path,omitempty"`  // deprecated. included for compatibility.
+		Level    string      `yaml:"level,omitempty"` // global log level
+		StdOut   StdOut      `yaml:"stdout,omitempty"`
+		File     LogFile     `yaml:"file,omitempty"`
+		Database DatabaseLog `yaml:"database,omitempty"`
 	}
 
 	// MySQL contains the configuration for an optional MySQL database.
