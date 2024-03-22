@@ -113,6 +113,12 @@ func TestS3Basic(t *testing.T) {
 		t.Fatal("unexpected ETag:", info.ETag)
 	}
 
+	// stat object that doesn't exist
+	_, err = s3.StatObject(context.Background(), bucket, "nonexistent", minio.StatObjectOptions{})
+	if err == nil || !strings.Contains(err.Error(), "The specified key does not exist") {
+		t.Fatal(err)
+	}
+
 	// add another bucket
 	tt.OK(s3.MakeBucket(context.Background(), bucket+"2", minio.MakeBucketOptions{}))
 
