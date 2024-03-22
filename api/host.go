@@ -43,18 +43,13 @@ type (
 		MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 	}
 
-	// HostsRequest is the request type for the /api/autopilot/hosts endpoint.
-	HostsRequest struct {
-		UsabilityMode string `json:"usabilityMode"`
-		SearchHostsRequest
-	}
-
 	// SearchHostsRequest is the request type for the /api/bus/search/hosts
 	// endpoint.
 	SearchHostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
 		FilterMode      string            `json:"filterMode"`
+		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
 	}

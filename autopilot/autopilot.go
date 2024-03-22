@@ -726,7 +726,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.HostsRequest
+	var req api.SearchHostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
