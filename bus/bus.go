@@ -253,7 +253,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
 		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
 
-		"PUT    /autopilot/:id/host/:hostkey/checks": b.autopilotHostChecksHandlerPUT,
+		"PUT    /autopilot/:id/host/:hostkey/check": b.autopilotHostCheckHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -1969,7 +1969,7 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
 }
 
-func (b *bus) autopilotHostChecksHandlerPUT(jc jape.Context) {
+func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return

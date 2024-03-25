@@ -106,6 +106,6 @@ func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, 
 // UpdateHostCheck updates the host with the most recent check performed by the
 // autopilot with given id.
 func (c *Client) UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s/host/%s", autopilotID, hostKey), hostCheck)
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s/host/%s/check", autopilotID, hostKey), hostCheck)
 	return
 }
