@@ -56,9 +56,10 @@ func TestSQLHostDB(t *testing.T) {
 	tx := ss.db.Where("net_address = ?", "address").Find(&h)
 	if tx.Error != nil {
 		t.Fatal(tx.Error)
-	}
-	if types.PublicKey(h.PublicKey) != hk {
+	} else if types.PublicKey(h.PublicKey) != hk {
 		t.Fatal("wrong host returned")
+	} else if h.LastAnnouncement.IsZero() {
+		t.Fatal("last announcement not set")
 	}
 
 	// Same thing again but with hosts.

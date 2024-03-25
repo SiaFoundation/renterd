@@ -15,18 +15,23 @@ var _ chain.ChainStore = (*SQLStore)(nil)
 // ApplyChainUpdate implements the ChainStore interface and applies a given
 // chain update to the database. This includes host announcements, contract
 // updates and all wallet related updates.
-func (s *SQLStore) ApplyChainUpdate(ctx context.Context, cu chain.Update) error {
+func (s *SQLStore) ApplyChainUpdate(ctx context.Context, cu *chain.Update) error {
 	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// add hosts
-		if err := addHosts(tx, cu.HostAnnouncements); err != nil {
-			return fmt.Errorf("%w; failed to add hosts", err)
-		}
-
 		// apply contract updates
 		for fcid, contractUpdate := range cu.ContractUpdates {
 			if err := updateContract(tx, fcid, *contractUpdate); err != nil {
 				return fmt.Errorf("%w; failed to update contract %v", err, fcid)
 			}
+		}
+
+		// mark failed contracts
+		if err := markFailedContracts(tx, cu.Index.Height); err != nil {
+			return fmt.Errorf("%w; failed to mark failed contracts", err)
+		}
+
+		// apply host updates
+		if err := updateHosts(tx, cu.HostUpdates); err != nil {
+			return fmt.Errorf("%w; failed to add hosts", err)
 		}
 
 		// apply wallet event updates
@@ -48,15 +53,11 @@ func (s *SQLStore) ApplyChainUpdate(ctx context.Context, cu chain.Update) error 
 			return fmt.Errorf("%w; failed to update chain index", err)
 		}
 
-		// mark failed contracts
-		if err := markFailedContracts(tx, cu.Index.Height); err != nil {
-			return fmt.Errorf("%w; failed to mark failed contracts", err)
-		}
 		return nil
 	})
 }
 
-func addHosts(tx *gorm.DB, ann map[types.PublicKey]chain.HostAnnouncement) error {
+func updateHosts(tx *gorm.DB, ann map[types.PublicKey]chain.HostUpdate) error {
 	if len(ann) == 0 {
 		return nil
 	}

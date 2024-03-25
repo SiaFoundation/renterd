@@ -6,7 +6,10 @@ import (
 	"go.sia.tech/coreutils/chain"
 )
 
-type Manager = chain.Manager
+type (
+	Manager          = chain.Manager
+	HostAnnouncement = chain.HostAnnouncement
+)
 
 func TestnetZen() (*consensus.Network, types.Block) {
 	return chain.TestnetZen()

@@ -14,7 +14,7 @@ type (
 		Index types.ChainIndex
 
 		ContractUpdates     map[types.FileContractID]*ContractUpdate
-		HostAnnouncements   map[types.PublicKey]HostAnnouncement
+		HostUpdates         map[types.PublicKey]HostUpdate
 		WalletOutputUpdates map[types.Hash256]WalletOutputUpdate
 		WalletEventUpdates  []WalletEventUpdate
 	}
@@ -28,7 +28,7 @@ type (
 		RevisionNumber *uint64
 	}
 
-	HostAnnouncement struct {
+	HostUpdate struct {
 		Announcement chain.HostAnnouncement
 		BlockHeight  uint64
 		BlockID      types.BlockID
@@ -52,7 +52,7 @@ func NewChainUpdate(index types.ChainIndex) *Update {
 	return &Update{
 		Index:               index,
 		ContractUpdates:     make(map[types.FileContractID]*ContractUpdate),
-		HostAnnouncements:   make(map[types.PublicKey]HostAnnouncement),
+		HostUpdates:         make(map[types.PublicKey]HostUpdate),
 		WalletOutputUpdates: make(map[types.Hash256]WalletOutputUpdate),
 	}
 }
@@ -70,7 +70,7 @@ func (cu *Update) ContractUpdate(fcid types.FileContractID, state api.ContractSt
 // HasUpdates returns true if the ChainUpdate contains any updates.
 func (cu *Update) HasUpdates() bool {
 	return len(cu.ContractUpdates) > 0 ||
-		len(cu.HostAnnouncements) > 0 ||
+		len(cu.HostUpdates) > 0 ||
 		len(cu.WalletOutputUpdates) > 0 ||
 		len(cu.WalletEventUpdates) > 0
 }

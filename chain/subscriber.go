@@ -22,7 +22,7 @@ type (
 	}
 
 	ChainStore interface {
-		ApplyChainUpdate(ctx context.Context, cu Update) error
+		ApplyChainUpdate(ctx context.Context, cu *Update) error
 		ChainIndex() (types.ChainIndex, error)
 	}
 
@@ -208,7 +208,7 @@ func (cs *Subscriber) TriggerSync() {
 }
 
 func (cs *Subscriber) commit() error {
-	if err := cs.cs.ApplyChainUpdate(context.Background(), *cs.nextUpdate); err != nil {
+	if err := cs.cs.ApplyChainUpdate(context.Background(), cs.nextUpdate); err != nil {
 		return fmt.Errorf("failed to apply chain update: %w", err)
 	}
 	cs.lastSave = time.Now()
@@ -254,7 +254,7 @@ func (cs *Subscriber) processChainApplyUpdateHostDB(cau chain.ApplyUpdate) {
 		if ha.NetAddress == "" {
 			return // ignore
 		}
-		cs.nextUpdate.HostAnnouncements[hk] = HostAnnouncement{
+		cs.nextUpdate.HostUpdates[hk] = HostUpdate{
 			Announcement: ha,
 			BlockHeight:  cau.State.Index.Height,
 			BlockID:      b.ID(),
