@@ -408,32 +408,28 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if cnt != 3 {
-		t.Fatal("unexpected", cnt)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected", len(his))
 	}
 
-	// assert h1 and h2 have the expected checks
+	// assert h1 has the expected checks
 	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
 		t.Fatal("unexpected", c1, ok)
-	} else if _, ok := his[1].Checks[ap1]; ok {
-		t.Fatal("unexpected", ok)
-	} else if _, ok := his[1].Checks[ap2]; ok {
-		t.Fatal("unexpected")
 	}
 
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if cnt != 3 {
-		t.Fatal("unexpected", cnt)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected", len(his))
+	} else if his[0].Host.PublicKey != hk2 {
+		t.Fatal("unexpected")
 	}
 
-	// assert h1 and h2 have the expected checks
-	if _, ok := his[0].Checks[ap1]; ok {
+	// assert only ap1 check is there
+	if _, ok := his[0].Checks[ap1]; !ok {
 		t.Fatal("unexpected")
-	} else if c2, ok := his[1].Checks[ap1]; !ok || c2 != h2c1 {
-		t.Fatal("unexpected", ok)
-	} else if _, ok := his[1].Checks[ap2]; ok {
+	} else if _, ok := his[0].Checks[ap2]; ok {
 		t.Fatal("unexpected")
 	}
 
