@@ -2,8 +2,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
@@ -136,64 +134,7 @@ type (
 		Usable           bool                 `json:"usable"`
 		UnusableReasons  []string             `json:"unusableReasons"`
 	}
-
-	HostGougingBreakdown struct {
-		ContractErr string `json:"contractErr"`
-		DownloadErr string `json:"downloadErr"`
-		GougingErr  string `json:"gougingErr"`
-		PruneErr    string `json:"pruneErr"`
-		UploadErr   string `json:"uploadErr"`
-	}
-
-	HostScoreBreakdown struct {
-		Age              float64 `json:"age"`
-		Collateral       float64 `json:"collateral"`
-		Interactions     float64 `json:"interactions"`
-		StorageRemaining float64 `json:"storageRemaining"`
-		Uptime           float64 `json:"uptime"`
-		Version          float64 `json:"version"`
-		Prices           float64 `json:"prices"`
-	}
 )
-
-func (sb HostScoreBreakdown) String() string {
-	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
-}
-
-func (hgb HostGougingBreakdown) Gouging() bool {
-	for _, err := range []string{
-		hgb.ContractErr,
-		hgb.DownloadErr,
-		hgb.GougingErr,
-		hgb.PruneErr,
-		hgb.UploadErr,
-	} {
-		if err != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func (hgb HostGougingBreakdown) String() string {
-	var reasons []string
-	for _, errStr := range []string{
-		hgb.ContractErr,
-		hgb.DownloadErr,
-		hgb.GougingErr,
-		hgb.PruneErr,
-		hgb.UploadErr,
-	} {
-		if errStr != "" {
-			reasons = append(reasons, errStr)
-		}
-	}
-	return strings.Join(reasons, ";")
-}
-
-func (sb HostScoreBreakdown) Score() float64 {
-	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
-}
 
 func (c AutopilotConfig) Validate() error {
 	if c.Hosts.MaxDowntimeHours > 99*365*24 {

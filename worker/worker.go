@@ -110,7 +110,7 @@ type (
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	}
 
 	ObjectStore interface {
