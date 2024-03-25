@@ -11,7 +11,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
 )
 
@@ -32,10 +31,10 @@ func TestHostPruning(t *testing.T) {
 	now := time.Now()
 	recordFailedInteractions := func(n int, hk types.PublicKey) {
 		t.Helper()
-		his := make([]hostdb.HostScan, n)
+		his := make([]api.HostScan, n)
 		for i := 0; i < n; i++ {
 			now = now.Add(time.Hour).Add(time.Minute) // 1m leeway
-			his[i] = hostdb.HostScan{
+			his[i] = api.HostScan{
 				HostKey:   hk,
 				Timestamp: now,
 				Success:   false,

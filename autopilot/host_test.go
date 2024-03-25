@@ -8,7 +8,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
 )
 
@@ -40,20 +40,20 @@ func TestHost(t *testing.T) {
 	}
 }
 
-func newTestHosts(n int) []hostdb.Host {
-	hosts := make([]hostdb.Host, n)
+func newTestHosts(n int) []api.Host {
+	hosts := make([]api.Host, n)
 	for i := 0; i < n; i++ {
 		hosts[i] = newTestHost(randomHostKey(), newTestHostPriceTable(), newTestHostSettings())
 	}
 	return hosts
 }
 
-func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings) hostdb.Host {
-	return hostdb.Host{
+func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSettings) api.Host {
+	return api.Host{
 		NetAddress:       randomIP().String(),
 		KnownSince:       time.Now(),
 		LastAnnouncement: time.Now(),
-		Interactions: hostdb.Interactions{
+		Interactions: api.HostInteractions{
 			TotalScans:              2,
 			LastScan:                time.Now().Add(-time.Minute),
 			LastScanSuccess:         true,
@@ -65,7 +65,7 @@ func newTestHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.Hos
 			FailedInteractions:     0,
 		},
 		PublicKey:  hk,
-		PriceTable: hostdb.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
+		PriceTable: api.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
 		Settings:   settings,
 		Scanned:    true,
 	}
