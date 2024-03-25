@@ -24,10 +24,6 @@ var (
 	// ErrHostNotFound is returned when a host can't be retrieved from the
 	// database.
 	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
-
-	// ErrHostInfoNotFound is returned when host info can't be retrieved from
-	// the database.
-	ErrHostInfoNotFound = errors.New("host info doesn't exist in hostdb")
 )
 
 var (
@@ -71,11 +67,8 @@ type (
 		KeyIn           []types.PublicKey `json:"keyIn"`
 	}
 
-	// HostsRequest is the request type for the POST /autopilot/:id/hosts
-	// endpoint.
-	HostsRequest SearchHostsRequest
-
-	// HostResponse is the response type for the /host/:hostkey endpoint.
+	// HostResponse is the response type for the GET
+	// /api/autopilot/host/:hostkey endpoint.
 	HostResponse struct {
 		Host   hostdb.Host `json:"host"`
 		Checks *HostChecks `json:"checks,omitempty"`
@@ -120,6 +113,7 @@ type (
 	}
 
 	SearchHostOptions struct {
+		AutopilotID     string
 		AddressContains string
 		FilterMode      string
 		UsabilityMode   string

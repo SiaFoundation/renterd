@@ -705,6 +705,13 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	var req api.SearchHostOptions
 	if jc.Decode(&req) != nil {
 		return
+	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
+		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
+		return
+	} else {
+		// TODO: on next major release we should not re-use options between bus
+		// and autopilot API if we don't support all fields in both
+		req.AutopilotID = ap.id
 	}
 
 	// TODO: remove on next major release

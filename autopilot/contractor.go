@@ -713,9 +713,19 @@ func (c *contractor) runContractChecks(ctx context.Context, contracts []api.Cont
 		// fetch host from hostdb
 		host, err := c.ap.bus.Host(ctx, hk)
 		if err != nil {
-			c.logger.Errorw(fmt.Sprintf("missing host, err: %v", err), "hk", hk)
+			c.logger.Warn(fmt.Sprintf("missing host, err: %v", err), "hk", hk)
 			toStopUsing[fcid] = api.ErrUsabilityHostNotFound.Error()
 			notfound++
+			continue
+		}
+
+		// fetch host checks
+		check, ok := host.Checks[c.ap.id]
+		if !ok {
+			// this is only possible due to developer error, if there is no
+			// check the host would have been missing, so we treat it the same
+			c.logger.Warnw("missing host check", "hk", hk)
+			toStopUsing[fcid] = api.ErrUsabilityHostNotFound.Error()
 			continue
 		}
 
@@ -723,13 +733,6 @@ func (c *contractor) runContractChecks(ctx context.Context, contracts []api.Cont
 		if host.Blocked {
 			c.logger.Infow("unusable host", "hk", hk, "fcid", fcid, "reasons", api.ErrUsabilityHostBlocked.Error())
 			toStopUsing[fcid] = api.ErrUsabilityHostBlocked.Error()
-			continue
-		}
-
-		// grab the host check
-		check, ok := host.Checks[c.ap.id]
-		if !ok {
-			c.logger.Errorw("missing host check", "hk", hk)
 			continue
 		}
 

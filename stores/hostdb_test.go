@@ -382,6 +382,61 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal("unexpected", c3, ok)
 	}
 
+	// assert autopilot filter is taken into account
+	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// assert h1 and h2 have the expected checks
+	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
+		t.Fatal("unexpected", c1, ok)
+	} else if c2, ok := his[1].Checks[ap1]; !ok || c2 != h2c1 {
+		t.Fatal("unexpected", c2, ok)
+	} else if _, ok := his[1].Checks[ap2]; ok {
+		t.Fatal("unexpected")
+	}
+
+	// assert usability filter is taken into account
+	h2c1.Usability.RedundantIP = true
+	err = ss.UpdateHostCheck(context.Background(), ap1, hk2, h2c1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// assert h1 and h2 have the expected checks
+	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
+		t.Fatal("unexpected", c1, ok)
+	} else if _, ok := his[1].Checks[ap1]; ok {
+		t.Fatal("unexpected", ok)
+	} else if _, ok := his[1].Checks[ap2]; ok {
+		t.Fatal("unexpected")
+	}
+
+	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// assert h1 and h2 have the expected checks
+	if _, ok := his[0].Checks[ap1]; ok {
+		t.Fatal("unexpected")
+	} else if c2, ok := his[1].Checks[ap1]; !ok || c2 != h2c1 {
+		t.Fatal("unexpected", ok)
+	} else if _, ok := his[1].Checks[ap2]; ok {
+		t.Fatal("unexpected")
+	}
+
 	// assert cascade delete on host
 	err = ss.db.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
 	if err != nil {
@@ -1310,14 +1365,14 @@ func newTestHostCheck() api.HostCheck {
 			Prices:           .7,
 		},
 		Usability: api.HostUsabilityBreakdown{
-			Blocked:               true,
-			Offline:               true,
-			LowScore:              true,
-			RedundantIP:           true,
-			Gouging:               true,
-			NotAcceptingContracts: true,
-			NotAnnounced:          true,
-			NotCompletingScan:     true,
+			Blocked:               false,
+			Offline:               false,
+			LowScore:              false,
+			RedundantIP:           false,
+			Gouging:               false,
+			NotAcceptingContracts: false,
+			NotAnnounced:          false,
+			NotCompletingScan:     false,
 		},
 	}
 }

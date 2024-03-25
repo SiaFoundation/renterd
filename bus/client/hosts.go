@@ -80,9 +80,11 @@ func (c *Client) ResetLostSectors(ctx context.Context, hostKey types.PublicKey) 
 // SearchHosts returns all hosts that match certain search criteria.
 func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []api.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
+		AutopilotID:     opts.AutopilotID,
 		Offset:          opts.Offset,
 		Limit:           opts.Limit,
 		FilterMode:      opts.FilterMode,
+		UsabilityMode:   opts.UsabilityMode,
 		AddressContains: opts.AddressContains,
 		KeyIn:           opts.KeyIn,
 	}, &hosts)

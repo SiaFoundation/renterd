@@ -627,9 +627,11 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 	query := ss.db.
 		Model(&dbHost{}).
 		Scopes(
+			autopilotFilter(autopilotID),
 			hostFilter(filterMode, ss.hasAllowlist(), ss.hasBlocklist()),
 			hostNetAddress(addressContains),
 			hostPublicKey(keyIn),
+			usabilityFilter(usabilityMode),
 		)
 
 	// preload allowlist and blocklist
@@ -639,12 +641,23 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 			Preload("Blocklist")
 	}
 
-	// preload host checks
-	query = query.Preload("Checks.DBAutopilot")
+	// filter checks
+	if autopilotID != "" {
+		query = query.Preload("Checks.DBAutopilot", "identifier = ?", autopilotID)
+	} else {
+		query = query.Preload("Checks.DBAutopilot")
+	}
+	// query = query.
+	// 	Preload("Checks.DBAutopilot").
+	// 	Scopes(
+	// 		autopilotFilter(autopilotID),
+	// 		usabilityFilter(usabilityMode),
+	// 	)
 
 	var hosts []api.Host
 	var fullHosts []dbHost
 	err := query.
+		Debug().
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
@@ -1089,6 +1102,17 @@ func hostPublicKey(keyIn []types.PublicKey) func(*gorm.DB) *gorm.DB {
 	}
 }
 
+// autopilotFilter can be used as a scope to filter host checks based on their
+// autopilot
+func autopilotFilter(autopilotID string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if autopilotID == "" {
+			return db.Preload("Checks.DBAutopilot")
+		}
+		return db.Preload("Checks.DBAutopilot", "identifier = ?", autopilotID)
+	}
+}
+
 // hostFilter can be used as a scope to filter hosts based on their filter mode,
 // returning either all, allowed or blocked hosts.
 func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.DB) *gorm.DB {
@@ -1114,6 +1138,20 @@ func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.D
 				db = db.Where("1 = 0")
 			}
 		case api.HostFilterModeAll:
+			// do nothing
+		}
+		return db
+	}
+}
+
+func usabilityFilter(usabilityMode string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		switch usabilityMode {
+		case api.UsabilityFilterModeUsable:
+			db = db.Preload("Checks", "usability_blocked = ? AND usability_offline = ? AND usability_low_score = ? AND usability_redundant_ip = ? AND usability_gouging = ? AND usability_not_accepting_contracts = ? AND usability_not_announced = ? AND usability_not_completing_scan = ?", false, false, false, false, false, false, false, false)
+		case api.UsabilityFilterModeUnusable:
+			db = db.Preload("Checks", "usability_blocked = ? OR usability_offline = ? OR usability_low_score = ? OR usability_redundant_ip = ? OR usability_gouging = ? OR usability_not_accepting_contracts = ? OR usability_not_announced = ? OR usability_not_completing_scan = ?", true, true, true, true, true, true, true, true)
+		case api.UsabilityFilterModeAll:
 			// do nothing
 		}
 		return db

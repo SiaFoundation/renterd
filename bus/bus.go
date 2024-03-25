@@ -253,9 +253,7 @@ func (b *bus) Handler() http.Handler {
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
 		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
 
-		"GET    /autopilot/:id/host/:hostkey": b.autopilotHostHandlerGET,
-		"PUT    /autopilot/:id/host/:hostkey": b.autopilotHostHandlerPUT,
-		"POST   /autopilot/:id/hosts":         b.autopilotHostsHandlerGET,
+		"PUT    /autopilot/:id/host/:hostkey/checks": b.autopilotHostChecksHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -780,8 +778,9 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 	}
 
 	// TODO: on the next major release:
-	// - properly default search params
-	// - properly validate and return 400
+	// - properly default search params (currenlty no defaults are set)
+	// - properly validate and return 400 (currently validation is done in autopilot and the store)
+
 	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
@@ -1970,27 +1969,7 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
 }
 
-func (b *bus) autopilotHostHandlerGET(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
-		return
-	}
-
-	hi, err := b.hdb.Host(jc.Request.Context(), hk)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch host info", err) != nil {
-		return
-	}
-	jc.Encode(hi)
-}
-
-func (b *bus) autopilotHostHandlerPUT(jc jape.Context) {
+func (b *bus) autopilotHostChecksHandlerPUT(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -2011,49 +1990,6 @@ func (b *bus) autopilotHostHandlerPUT(jc jape.Context) {
 	} else if jc.Check("failed to update host", err) != nil {
 		return
 	}
-}
-
-func (b *bus) autopilotHostsHandlerGET(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.HostsRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	// validate filter mode
-	if fm := req.FilterMode; fm != "" {
-		if fm != api.HostFilterModeAll &&
-			fm != api.HostFilterModeAllowed &&
-			fm != api.HostFilterModeBlocked {
-			jc.Error(fmt.Errorf("invalid filter mode: '%v', allowed values are '%s', '%s', '%s'", fm, api.HostFilterModeAll, api.HostFilterModeAllowed, api.HostFilterModeBlocked), http.StatusBadRequest)
-			return
-		}
-	}
-
-	// validate usability mode
-	if um := req.UsabilityMode; um != "" {
-		if um != api.UsabilityFilterModeUsable &&
-			um != api.UsabilityFilterModeUnusable &&
-			um != api.UsabilityFilterModeAll {
-			jc.Error(fmt.Errorf("invalid usability mode: '%v', allowed values are '%s', '%s', '%s'", um, api.UsabilityFilterModeAll, api.UsabilityFilterModeUsable, api.UsabilityFilterModeUnusable), http.StatusBadRequest)
-			return
-		} else if id == "" {
-			jc.Error(errors.New("usability mode requires autopilot id"), http.StatusBadRequest)
-			return
-		}
-	}
-
-	his, err := b.hdb.SearchHosts(jc.Request.Context(), id, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch host infos", err) != nil {
-		return
-	}
-	jc.Encode(his)
 }
 
 func (b *bus) contractTaxHandlerGET(jc jape.Context) {
