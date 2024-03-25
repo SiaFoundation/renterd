@@ -11,15 +11,10 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"gorm.io/gorm"
 )
-
-func (s *SQLStore) insertTestAnnouncement(a announcement) error {
-	return insertAnnouncements(s.db, []announcement{a})
-}
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
 // SQLite DB.
@@ -51,16 +46,14 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert an announcement for the host and another one for an unknown
 	// host.
-	a := newTestAnnouncement(hk, "address")
-	err = ss.insertTestAnnouncement(a)
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Read the host and verify that the announcement related fields were
-	// set.
+	// Fetch the host
 	var h dbHost
-	tx := ss.db.Where("last_announcement = ? AND net_address = ?", a.timestamp, a.NetAddress).Find(&h)
+	tx := ss.db.Where("net_address = ?", "address").Find(&h)
 	if tx.Error != nil {
 		t.Fatal(tx.Error)
 	}
@@ -96,17 +89,16 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Insert another announcement for an unknown host.
-	unknownKeyAnn := a
-	unknownKeyAnn.hk = types.PublicKey{1, 4, 7}
-	err = ss.insertTestAnnouncement(unknownKeyAnn)
+	randomHK := types.PublicKey{1, 4, 7}
+	_, err = ss.announceHost(types.PublicKey{1, 4, 7}, "na")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h3, err := ss.Host(ctx, unknownKeyAnn.hk)
+	h3, err := ss.Host(ctx, randomHK)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h3.NetAddress != unknownKeyAnn.NetAddress {
+	if h3.NetAddress != "na" {
 		t.Fatal("wrong net address")
 	}
 	if h3.KnownSince.IsZero() {
@@ -462,77 +454,6 @@ func TestRemoveHosts(t *testing.T) {
 	// assert host is removed from the database
 	if _, err = hostByPubKey(ss.db, hk); err != gorm.ErrRecordNotFound {
 		t.Fatal("expected record not found error")
-	}
-}
-
-// TestInsertAnnouncements is a test for insertAnnouncements.
-func TestInsertAnnouncements(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// Create announcements for 3 hosts.
-	ann1 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "foo.bar:1000")
-	ann2 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
-	ann3 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
-
-	// Insert the first one and check that all fields are set.
-	if err := insertAnnouncements(ss.db, []announcement{ann1}); err != nil {
-		t.Fatal(err)
-	}
-	var ann dbAnnouncement
-	if err := ss.db.Find(&ann).Error; err != nil {
-		t.Fatal(err)
-	}
-	ann.Model = Model{} // ignore
-	expectedAnn := dbAnnouncement{
-		HostKey:     publicKey(ann1.hk),
-		BlockHeight: ann1.blockHeight,
-		BlockID:     ann1.blockID.String(),
-		NetAddress:  "foo.bar:1000",
-	}
-	if ann != expectedAnn {
-		t.Fatal("mismatch", cmp.Diff(ann, expectedAnn))
-	}
-	// Insert the first and second one.
-	if err := insertAnnouncements(ss.db, []announcement{ann1, ann2}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert the first one twice. The second one again and the third one.
-	if err := insertAnnouncements(ss.db, []announcement{ann1, ann2, ann1, ann3}); err != nil {
-		t.Fatal(err)
-	}
-
-	// There should be 3 hosts in the db.
-	hosts, err := ss.hosts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 3 {
-		t.Fatal("invalid number of hosts")
-	}
-
-	// There should be 7 announcements total.
-	var announcements []dbAnnouncement
-	if err := ss.db.Find(&announcements).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(announcements) != 7 {
-		t.Fatal("invalid number of announcements")
-	}
-
-	// Add an entry to the blocklist to block host 1
-	entry1 := "foo.bar"
-	err = ss.UpdateHostBlocklistEntries(context.Background(), []string{entry1}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert multiple announcements for host 1 - this asserts that the UNIQUE
-	// constraint on the blocklist table isn't triggered when inserting multiple
-	// announcements for a host that's on the blocklist
-	if err := insertAnnouncements(ss.db, []announcement{ann1, ann1}); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -989,41 +910,6 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 	}
 }
 
-// TestAnnouncementMaxAge verifies old announcements are ignored.
-func TestAnnouncementMaxAge(t *testing.T) {
-	db := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer db.Close()
-
-	// assert we don't have any announcements
-	if len(db.cs.announcements) != 0 {
-		t.Fatal("expected 0 announcements")
-	}
-
-	// fabricate two blocks with announcements, one before the cutoff and one after
-	b1 := types.Block{
-		Transactions: []types.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1000"))},
-		Timestamp:    time.Now().Add(-db.cs.announcementMaxAge).Add(-time.Second),
-	}
-	b2 := types.Block{
-		Transactions: []types.Transaction{newTestTransaction(newTestHostAnnouncement("foo.com:1001"))},
-		Timestamp:    time.Now().Add(-db.cs.announcementMaxAge).Add(time.Second),
-	}
-
-	// process b1, expect no announcements
-	db.cs.processChainApplyUpdateHostDB(&chain.ApplyUpdate{Block: b1})
-	if len(db.cs.announcements) != 0 {
-		t.Fatal("expected 0 announcements")
-	}
-
-	// process b2, expect 1 announcement
-	db.cs.processChainApplyUpdateHostDB(&chain.ApplyUpdate{Block: b2})
-	if len(db.cs.announcements) != 1 {
-		t.Fatal("expected 1 announcement")
-	} else if db.cs.announcements[0].HostAnnouncement.NetAddress != "foo.com:1001" {
-		t.Fatal("unexpected announcement")
-	}
-}
-
 // addTestHosts adds 'n' hosts to the db and returns their keys.
 func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 	cnt, err := s.contractsCount()
@@ -1047,15 +933,58 @@ func (s *SQLStore) addTestHost(hk types.PublicKey) error {
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
-	// NOTE: insert through subscriber to ensure allowlist/blocklist get updated
-	s.cs.announcements = append(s.cs.announcements, announcement{
-		blockHeight:      s.cs.tip.Height,
-		blockID:          s.cs.tip.ID,
-		hk:               hk,
-		timestamp:        time.Now().UTC().Round(time.Second),
-		HostAnnouncement: chain.HostAnnouncement{NetAddress: na},
+	// announce the host
+	host, err := s.announceHost(hk, na)
+	if err != nil {
+		return err
+	}
+
+	// fetch blocklists
+	allowlist, blocklist, err := getBlocklists(s.db)
+	if err != nil {
+		return err
+	}
+
+	// update host allowlist
+	var dbAllowlist []dbAllowlistEntry
+	for _, entry := range allowlist {
+		if entry.Entry == host.PublicKey {
+			dbAllowlist = append(dbAllowlist, entry)
+		}
+	}
+	if err := s.db.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
+		return err
+	}
+
+	// update host blocklist
+	var dbBlocklist []dbBlocklistEntry
+	for _, entry := range blocklist {
+		if entry.blocks(host) {
+			dbBlocklist = append(dbBlocklist, entry)
+		}
+	}
+	return s.db.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
+}
+
+// announceHost adds a host announcement to the database.
+func (s *SQLStore) announceHost(hk types.PublicKey, na string) (host dbHost, err error) {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		host = dbHost{
+			PublicKey:        publicKey(hk),
+			LastAnnouncement: time.Now().UTC().Round(time.Second),
+			NetAddress:       na,
+		}
+		if err := s.db.Create(&host).Error; err != nil {
+			return err
+		}
+		return s.db.Create(&dbAnnouncement{
+			HostKey:     publicKey(hk),
+			BlockHeight: 42,
+			BlockID:     types.BlockID{1, 2, 3}.String(),
+			NetAddress:  na,
+		}).Error
 	})
-	return s.cs.commit()
+	return
 }
 
 // hosts returns all hosts in the db. Only used in testing since preloading all
@@ -1084,34 +1013,4 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 		Timestamp: scanTime,
 		Settings:  settings,
 	}
-}
-
-func newTestPK() (types.PublicKey, types.PrivateKey) {
-	sk := types.GeneratePrivateKey()
-	pk := sk.PublicKey()
-	return pk, sk
-}
-
-func newTestAnnouncement(hk types.PublicKey, na string) announcement {
-	return announcement{
-		blockHeight: 42,
-		blockID:     types.BlockID{1, 2, 3},
-		hk:          hk,
-		timestamp:   time.Now().UTC().Round(time.Second),
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: na,
-		},
-	}
-}
-
-func newTestHostAnnouncement(na string) (chain.HostAnnouncement, types.PrivateKey) {
-	_, sk := newTestPK()
-	a := chain.HostAnnouncement{
-		NetAddress: na,
-	}
-	return a, sk
-}
-
-func newTestTransaction(ha chain.HostAnnouncement, sk types.PrivateKey) types.Transaction {
-	return types.Transaction{ArbitraryData: [][]byte{ha.ToArbitraryData(sk)}}
 }

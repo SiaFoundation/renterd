@@ -73,6 +73,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
+	cluster.MineBlocks(1)
 
 	// Wait for the contract to be renewed.
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -81,7 +82,7 @@ func TestNewTestCluster(t *testing.T) {
 			return err
 		}
 		if len(contracts) != 1 {
-			return errors.New("no renewed contract")
+			return fmt.Errorf("unexpected number of contracts %d != 1", len(contracts))
 		}
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
@@ -127,7 +128,7 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		ac = archivedContracts[0]
 		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
-			return fmt.Errorf("revision information is wrong: %v %v", ac.RevisionHeight, ac.RevisionNumber)
+			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
 		if ac.ProofHeight != 0 {
 			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")

@@ -16,6 +16,8 @@ const (
 	ContractStateFailed   = "failed"
 )
 
+type ContractState string
+
 const (
 	ContractArchivalReasonHostPruned = "hostpruned"
 	ContractArchivalReasonRemoved    = "removed"

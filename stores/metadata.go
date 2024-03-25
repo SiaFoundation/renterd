@@ -14,10 +14,12 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -39,13 +41,6 @@ const (
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
-var (
-	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
-	errShardRootChanged      = errors.New("shard root changed")
-
-	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
-)
-
 const (
 	contractStateInvalid contractState = iota
 	contractStatePending
@@ -54,9 +49,51 @@ const (
 	contractStateFailed
 )
 
-type (
-	contractState uint8
+var (
+	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	errShardRootChanged      = errors.New("shard root changed")
 
+	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
+)
+
+type contractState uint8
+
+func (s *contractState) LoadString(state string) error {
+	switch strings.ToLower(state) {
+	case api.ContractStateInvalid:
+		*s = contractStateInvalid
+	case api.ContractStatePending:
+		*s = contractStatePending
+	case api.ContractStateActive:
+		*s = contractStateActive
+	case api.ContractStateComplete:
+		*s = contractStateComplete
+	case api.ContractStateFailed:
+		*s = contractStateFailed
+	default:
+		*s = contractStateInvalid
+	}
+	return nil
+}
+
+func (s contractState) String() string {
+	switch s {
+	case contractStateInvalid:
+		return api.ContractStateInvalid
+	case contractStatePending:
+		return api.ContractStatePending
+	case contractStateActive:
+		return api.ContractStateActive
+	case contractStateComplete:
+		return api.ContractStateComplete
+	case contractStateFailed:
+		return api.ContractStateFailed
+	default:
+		return api.ContractStateUnknown
+	}
+}
+
+type (
 	dbArchivedContract struct {
 		Model
 
@@ -242,41 +279,6 @@ type (
 		Size     int64
 	}
 )
-
-func (s *contractState) LoadString(state string) error {
-	switch strings.ToLower(state) {
-	case api.ContractStateInvalid:
-		*s = contractStateInvalid
-	case api.ContractStatePending:
-		*s = contractStatePending
-	case api.ContractStateActive:
-		*s = contractStateActive
-	case api.ContractStateComplete:
-		*s = contractStateComplete
-	case api.ContractStateFailed:
-		*s = contractStateFailed
-	default:
-		*s = contractStateInvalid
-	}
-	return nil
-}
-
-func (s contractState) String() string {
-	switch s {
-	case contractStateInvalid:
-		return api.ContractStateInvalid
-	case contractStatePending:
-		return api.ContractStatePending
-	case contractStateActive:
-		return api.ContractStateActive
-	case contractStateComplete:
-		return api.ContractStateComplete
-	case contractStateFailed:
-		return api.ContractStateFailed
-	default:
-		return api.ContractStateUnknown
-	}
-}
 
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
@@ -718,8 +720,50 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 		return
 	}
 
-	s.cs.addKnownContract(types.FileContractID(added.FCID))
+	s.notifyNewContractID(c.ID())
 	return added.convert(), nil
+}
+
+func (s *SQLStore) AddSubscriber(ctx context.Context, cs chain.ContractStoreSubscriber) (map[types.FileContractID]api.ContractState, func(), error) {
+	// fetch all ids
+	type row struct {
+		FCID  fileContractID
+		State contractState
+	}
+	var active, archived []row
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.db.Model(&dbContract{}).
+			Select("fcid, state").
+			Find(&active).Error; err != nil {
+			return err
+		}
+		if err := s.db.Model(&dbArchivedContract{}).
+			Select("fcid, state").
+			Find(&archived).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
+	}
+
+	// convert to map
+	fcids := make(map[types.FileContractID]api.ContractState)
+	for _, row := range append(active, archived...) {
+		fcids[types.FileContractID(row.FCID)] = api.ContractState(row.State.String())
+	}
+
+	// add subscriber
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := frand.Entropy128()
+	s.subscribers[key] = cs
+
+	return fcids, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.subscribers, key)
+	}, nil
 }
 
 func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
@@ -840,13 +884,13 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		s.cs.addKnownContract(c.ID())
 		renewed = newContract
 		return nil
 	}); err != nil {
 		return api.ContractMetadata{}, err
 	}
 
+	s.notifyNewContractID(c.ID())
 	return renewed.convert(), nil
 }
 
@@ -2891,6 +2935,14 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		NextMarker: nextMarker,
 		Objects:    objects,
 	}, nil
+}
+
+func (s *SQLStore) notifyNewContractID(fcid types.FileContractID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sub := range s.subscribers {
+		sub.NewContractID(fcid)
+	}
 }
 
 func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string) (markerExpr clause.Expr, orderBy clause.OrderBy, err error) {

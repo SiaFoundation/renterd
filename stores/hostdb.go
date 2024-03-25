@@ -12,7 +12,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
 	"gorm.io/gorm"
@@ -105,15 +104,6 @@ type (
 		BlockHeight uint64
 		BlockID     string
 		NetAddress  string
-	}
-
-	// announcement describes an announcement for a single host.
-	announcement struct {
-		chain.HostAnnouncement
-		blockHeight uint64
-		blockID     types.BlockID
-		hk          types.PublicKey
-		timestamp   time.Time
 	}
 )
 
@@ -948,79 +938,33 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 	return
 }
 
-func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {
-	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-		Model: Model{
-			ID: consensusInfoID,
-		},
-	}).Updates(map[string]interface{}{
-		"height":   newTip.Height,
-		"block_id": hash256(newTip.ID),
-	}).Error
-}
-
-func insertAnnouncements(tx *gorm.DB, as []announcement) error {
-	var hosts []dbHost
-	var announcements []dbAnnouncement
-	for _, a := range as {
-		hosts = append(hosts, dbHost{
-			PublicKey:        publicKey(a.hk),
-			LastAnnouncement: a.timestamp.UTC(),
-			NetAddress:       a.NetAddress,
-		})
-		announcements = append(announcements, dbAnnouncement{
-			HostKey:     publicKey(a.hk),
-			BlockHeight: a.blockHeight,
-			BlockID:     a.blockID.String(),
-			NetAddress:  a.NetAddress,
-		})
-	}
-	if err := tx.Create(&announcements).Error; err != nil {
-		return err
-	}
-	return tx.Create(&hosts).Error
-}
-
-func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpdate) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"revision_height": rev.height,
-		"revision_number": fmt.Sprint(rev.number),
-		"size":            rev.size,
+func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Model(&dbHost{}).
+			Where("public_key", publicKey(hk)).
+			Update("lost_sectors", 0).
+			Error
 	})
 }
 
-func updateContractState(db *gorm.DB, fcid types.FileContractID, cs contractState) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"state": cs,
-	})
-}
-
-func markFailedContracts(db *gorm.DB, height uint64) error {
-	if err := db.Model(&dbContract{}).
-		Where("state = ? AND ? > window_end", contractStateActive, height).
-		Update("state", contractStateFailed).Error; err != nil {
-		return fmt.Errorf("failed to mark failed contracts: %w", err)
+func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) {
+	var allowlist []dbAllowlistEntry
+	if err := tx.
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
+		Error; err != nil {
+		return nil, nil, err
 	}
-	return nil
-}
 
-func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"proof_height": blockHeight,
-	})
-}
-
-func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
-	err1 := tx.Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Updates(updates).Error
-	err2 := tx.Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Updates(updates).Error
-	if err1 != nil || err2 != nil {
-		return fmt.Errorf("%s; %s", err1, err2)
+	var blocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		return nil, nil, err
 	}
-	return nil
+
+	return allowlist, blocklist, nil
 }
 
 func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
@@ -1053,13 +997,4 @@ func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEnt
 		}
 	}
 	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
-}
-
-func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Model(&dbHost{}).
-			Where("public_key", publicKey(hk)).
-			Update("lost_sectors", 0).
-			Error
-	})
 }

@@ -14,7 +14,7 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.1
-	go.sia.tech/coreutils v0.0.4-0.20240313143809-01b5d444a630
+	go.sia.tech/coreutils v0.0.4-0.20240318195004-c73e571336f7
 	go.sia.tech/gofakes3 v0.0.1
 	go.sia.tech/hostd v1.0.3
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640

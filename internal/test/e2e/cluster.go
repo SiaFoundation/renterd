@@ -18,12 +18,12 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
@@ -66,6 +66,7 @@ type TestCluster struct {
 
 	network *consensus.Network
 	cm      *chain.Manager
+	cs      *chain.Subscriber
 	apID    string
 	dbName  string
 	dir     string
@@ -301,7 +302,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, cs, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -357,6 +358,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		logger:  logger,
 		network: busCfg.Network,
 		cm:      cm,
+		cs:      cs,
 		tt:      tt,
 		wk:      wk,
 
@@ -545,6 +547,7 @@ func (c *TestCluster) MineBlocks(n uint64) {
 	if len(c.hosts) == 0 {
 		c.tt.OK(c.mineBlocks(wallet.Address, n))
 		c.Sync()
+		c.cs.TriggerSync()
 		return
 	}
 
@@ -559,6 +562,8 @@ func (c *TestCluster) MineBlocks(n uint64) {
 		c.Sync()
 		mined += toMine
 	}
+
+	c.cs.TriggerSync()
 }
 
 func (c *TestCluster) WaitForAccounts() []api.Account {
@@ -837,9 +842,8 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 
 func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
 	for i := uint64(0); i < n; i++ {
-		if block, found := coreutils.MineBlock(c.cm, addr, time.Second); !found {
-			return errors.New("failed to find block")
-		} else if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
+		block := testutil.MineBlock(c.cm, addr)
+		if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
 			return err
 		}
 	}

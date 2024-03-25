@@ -1,13 +1,17 @@
 package stores
 
 import (
+	"errors"
 	"math"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+)
+
+var (
+	_ wallet.SingleAddressStore = (*SQLStore)(nil)
 )
 
 type (
@@ -43,16 +47,6 @@ type (
 		Height  uint64  `gorm:"index:idx_wallet_outputs_height"`
 		BlockID hash256 `gorm:"size:32"`
 	}
-
-	outputChange struct {
-		addition bool
-		se       dbWalletOutput
-	}
-
-	eventChange struct {
-		addition bool
-		event    dbWalletEvent
-	}
 )
 
 // TableName implements the gorm.Tabler interface.
@@ -82,7 +76,18 @@ func (se dbWalletOutput) Index() types.ChainIndex {
 // Tip returns the consensus change ID and block height of the last wallet
 // change.
 func (s *SQLStore) Tip() (types.ChainIndex, error) {
-	return s.cs.Tip(), nil
+	var cs dbConsensusInfo
+	if err := s.db.
+		Model(&dbConsensusInfo{}).
+		First(&cs).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return types.ChainIndex{}, nil
+	} else if err != nil {
+		return types.ChainIndex{}, err
+	}
+	return types.ChainIndex{
+		Height: cs.Height,
+		ID:     types.BlockID(cs.BlockID),
+	}, nil
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
@@ -158,32 +163,4 @@ func (s *SQLStore) WalletEventCount() (uint64, error) {
 		return 0, err
 	}
 	return uint64(count), nil
-}
-
-func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbWalletOutput) error {
-	return tx.
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-			Columns:   []clause.Column{{Name: "output_id"}},
-		}).Create(&sco).Error
-}
-
-func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
-	return tx.Where("output_id", oid).
-		Delete(&dbWalletOutput{}).
-		Error
-}
-
-func applyUnappliedEventAdditions(tx *gorm.DB, event dbWalletEvent) error {
-	return tx.
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-			Columns:   []clause.Column{{Name: "event_id"}},
-		}).Create(&event).Error
-}
-
-func applyUnappliedEventRemovals(tx *gorm.DB, eventID hash256) error {
-	return tx.Where("event_id", eventID).
-		Delete(&dbWalletEvent{}).
-		Error
 }

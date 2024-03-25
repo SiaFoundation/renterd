@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -60,6 +61,11 @@ type (
 		RecommendedFee() types.Currency
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
+	}
+
+	// ChainStore stores chain state.
+	ChainStore interface {
+		ApplyChainUpdate(ctx context.Context, cu chain.Update) error
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
@@ -1770,7 +1776,6 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 
 func (b *bus) consensusState() api.ConsensusState {
 	cs := b.cm.TipState()
-
 	var synced bool
 	if block, ok := b.cm.Block(cs.Index.ID); ok && time.Since(block.Timestamp) < 2*cs.BlockInterval() {
 		synced = true
@@ -2396,7 +2401,7 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
