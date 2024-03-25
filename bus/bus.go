@@ -65,7 +65,7 @@ type (
 
 	// ChainStore stores chain state.
 	ChainStore interface {
-		ApplyChainUpdate(ctx context.Context, cu chain.Update) error
+		ApplyChainUpdate(ctx context.Context, cu *chain.Update) error
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
