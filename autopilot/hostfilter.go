@@ -254,8 +254,8 @@ func (c *contractor) isUsableContract(cfg api.AutopilotConfig, state state, ci c
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			usable = false
-			recoverable = true
+			usable = usable && c.shouldForgiveFailedRefresh(contract.ID)
+			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
 		}

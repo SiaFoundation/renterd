@@ -33,6 +33,10 @@ const (
 	// contract.
 	estimatedFileContractTransactionSetSize = 2048
 
+	// failedRenewalForgivenessPeriod is the amount of time we wait before
+	// punishing a contract for not being able to refresh
+	failedRefreshForgivenessPeriod = 24 * time.Hour
+
 	// leewayPctCandidateHosts is the leeway we apply when fetching candidate
 	// hosts, we fetch ~10% more than required
 	leewayPctCandidateHosts = 1.1
@@ -95,6 +99,8 @@ type (
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
 		revisionSubmissionBuffer  uint64
+
+		firstRefreshFailure map[types.FileContractID]time.Time
 
 		mu sync.Mutex
 
@@ -162,6 +168,8 @@ func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroad
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
+		firstRefreshFailure: make(map[types.FileContractID]time.Time),
+
 		resolver: newIPResolver(ap.shutdownCtx, resolverLookupTimeout, ap.logger.Named("resolver")),
 	}
 }
@@ -225,6 +233,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	contracts := resp.Contracts
 	c.logger.Infof("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
+
+	// prune contract refresh failure map
+	c.pruneContractRefreshFailures(contracts)
 
 	// run revision broadcast
 	c.runRevisionBroadcast(ctx, w, contracts, isInCurrentSet)
@@ -1622,6 +1633,28 @@ func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContrac
 	// fetch the host
 	host, err = c.ap.bus.Host(ctx, metadata.HostKey)
 	return
+}
+
+func (c *contractor) pruneContractRefreshFailures(contracts []api.Contract) {
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range contracts {
+		contractMap[contract.ID] = struct{}{}
+	}
+	for fcid := range c.firstRefreshFailure {
+		if _, ok := contractMap[fcid]; !ok {
+			delete(c.firstRefreshFailure, fcid)
+		}
+	}
+}
+
+func (c *contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool {
+	lastFailure, exists := c.firstRefreshFailure[fcid]
+	if !exists {
+		lastFailure = time.Now()
+		c.firstRefreshFailure[fcid] = lastFailure
+	}
+	fmt.Println(time.Since(lastFailure))
+	return time.Since(lastFailure) < failedRefreshForgivenessPeriod
 }
 
 func addLeeway(n uint64, pct float64) uint64 {

@@ -3,8 +3,12 @@ package autopilot
 import (
 	"math"
 	"testing"
+	"time"
 
+	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 func TestCalculateMinScore(t *testing.T) {
@@ -33,5 +37,32 @@ func TestCalculateMinScore(t *testing.T) {
 	minScore = c.calculateMinScore(candidates, 300)
 	if minScore != math.SmallestNonzeroFloat64 {
 		t.Fatalf("expected minScore to be math.SmallestNonzeroFLoat64 but was %v", minScore)
+	}
+}
+
+func TestShouldForgiveFailedRenewal(t *testing.T) {
+	var fcid types.FileContractID
+	frand.Read(fcid[:])
+	c := &contractor{
+		firstRefreshFailure: make(map[types.FileContractID]time.Time),
+	}
+
+	// try twice since the first time will set the failure time
+	if !c.shouldForgiveFailedRefresh(fcid) {
+		t.Fatal("should forgive")
+	} else if !c.shouldForgiveFailedRefresh(fcid) {
+		t.Fatal("should forgive")
+	}
+
+	// set failure to be a full period in the past
+	c.firstRefreshFailure[fcid] = time.Now().Add(-failedRefreshForgivenessPeriod - time.Second)
+	if c.shouldForgiveFailedRefresh(fcid) {
+		t.Fatal("should not forgive")
+	}
+
+	// prune map
+	c.pruneContractRefreshFailures([]api.Contract{})
+	if len(c.firstRefreshFailure) != 0 {
+		t.Fatal("expected no failures")
 	}
 }
