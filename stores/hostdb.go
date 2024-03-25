@@ -505,7 +505,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 }
 
 func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
-	err = ss.db.Transaction(func(tx *gorm.DB) error {
+	err = ss.retryTransaction(ctx, (func(tx *gorm.DB) error {
 		// fetch ap id
 		var apID uint
 		if err := tx.
@@ -566,7 +566,7 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 				GougingUploadErr:   hc.Gouging.UploadErr,
 			}).
 			Error
-	})
+	}))
 	return
 }
 
