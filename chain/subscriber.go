@@ -100,6 +100,9 @@ func (cs *Subscriber) Close() error {
 		default:
 		}
 	}
+	if cs.nextUpdate != nil && cs.nextUpdate.HasUpdates() {
+		return cs.commit()
+	}
 	return nil
 }
 
