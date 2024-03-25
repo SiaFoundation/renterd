@@ -1461,6 +1461,7 @@ func TestWalletTransactions(t *testing.T) {
 	cluster.MineBlocks(1)
 	time.Sleep(time.Second)
 	cluster.MineBlocks(1)
+	time.Sleep(testBusPersistInterval)
 
 	// Get all transactions of the wallet.
 	allTxns, err := b.WalletTransactions(context.Background())
@@ -1478,7 +1479,7 @@ func TestWalletTransactions(t *testing.T) {
 	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
 	tt.OK(err)
 	if !reflect.DeepEqual(txns, allTxns[2:]) {
-		t.Fatal("transactions don't match")
+		t.Fatal("transactions don't match", cmp.Diff(txns, allTxns[2:]))
 	}
 
 	// Find the first index that has a different timestamp than the first.
