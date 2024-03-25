@@ -778,7 +778,7 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 	}
 
 	// TODO: on the next major release:
-	// - properly default search params (currenlty no defaults are set)
+	// - properly default search params (currently no defaults are set)
 	// - properly validate and return 400 (currently validation is done in autopilot and the store)
 
 	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
