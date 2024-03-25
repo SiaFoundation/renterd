@@ -422,7 +422,7 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(his) != 1 {
 		t.Fatal("unexpected", len(his))
-	} else if his[0].Host.PublicKey != hk2 {
+	} else if his[0].PublicKey != hk2 {
 		t.Fatal("unexpected")
 	}
 
