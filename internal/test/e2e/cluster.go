@@ -40,7 +40,7 @@ import (
 
 const (
 	testBusFlushInterval   = 100 * time.Millisecond
-	testBusPersistInterval = 2 * time.Second
+	testBusPersistInterval = 100 * time.Millisecond
 )
 
 var (

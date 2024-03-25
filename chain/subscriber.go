@@ -289,8 +289,12 @@ func (cs *Subscriber) processChainApplyUpdateContracts(cau chain.ApplyUpdate) {
 		defer func() { cs.knownContracts[fcid] = cu.State }()
 
 		// set contract update
-		cu.Size = &rev.fileSize
-		cu.RevisionNumber = &rev.revisionNumber
+		if rev.fileSize > 0 {
+			cu.Size = &rev.fileSize
+		}
+		if rev.revisionNumber > 0 {
+			cu.RevisionNumber = &rev.revisionNumber
+		}
 		cu.RevisionHeight = &cau.State.Index.Height
 
 		// update state from 'pending' -> 'active'
