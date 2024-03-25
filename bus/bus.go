@@ -91,22 +91,18 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
+		HostBlocklist(ctx context.Context) ([]string, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.HostInfo, error)
-
-		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
-		HostBlocklist(ctx context.Context) ([]string, error)
+		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
-
-		HostInfo(ctx context.Context, autopilotID string, hk types.PublicKey) (api.HostInfo, error)
-		HostInfos(ctx context.Context, autopilotID string, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.HostInfo, error)
-		UpdateHostInfo(ctx context.Context, autopilotID string, hk types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) error
+		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -257,9 +253,9 @@ func (b *bus) Handler() http.Handler {
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
 		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
 
-		"GET    /autopilot/:id/host/:hostkey": b.autopilotHostInfoHandlerGET,
-		"PUT    /autopilot/:id/host/:hostkey": b.autopilotHostInfoHandlerPUT,
-		"POST   /autopilot/:id/hosts":         b.autopilotHostInfosHandlerPOST,
+		"GET    /autopilot/:id/host/:hostkey": b.autopilotHostHandlerGET,
+		"PUT    /autopilot/:id/host/:hostkey": b.autopilotHostHandlerPUT,
+		"POST   /autopilot/:id/hosts":         b.autopilotHostsHandlerGET,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -770,7 +766,7 @@ func (b *bus) hostsHandlerGETDeprecated(jc jape.Context) {
 	}
 
 	// fetch hosts
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), api.HostFilterModeAllowed, "", nil, offset, limit)
+	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
@@ -783,10 +779,10 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO: on the next major release
-	// - set defaults in handler
-	// - validate request params and return 400 if invalid
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	// TODO: on the next major release:
+	// - properly default search params
+	// - properly validate and return 400
+	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
@@ -1974,17 +1970,17 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
 }
 
-func (b *bus) autopilotHostInfoHandlerGET(jc jape.Context) {
+func (b *bus) autopilotHostHandlerGET(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var hostKey types.PublicKey
-	if jc.DecodeParam("hostkey", &hostKey) != nil {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
 
-	hi, err := b.hdb.HostInfo(jc.Request.Context(), id, hostKey)
+	hi, err := b.hdb.Host(jc.Request.Context(), hk)
 	if errors.Is(err, api.ErrAutopilotNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1994,35 +1990,35 @@ func (b *bus) autopilotHostInfoHandlerGET(jc jape.Context) {
 	jc.Encode(hi)
 }
 
-func (b *bus) autopilotHostInfoHandlerPUT(jc jape.Context) {
+func (b *bus) autopilotHostHandlerPUT(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var hostKey types.PublicKey
-	if jc.DecodeParam("hostkey", &hostKey) != nil {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	var hir api.UpdateHostInfoRequest
-	if jc.Check("failed to decode host info", jc.Decode(&hir)) != nil {
+	var hc api.HostCheck
+	if jc.Check("failed to decode host check", jc.Decode(&hc)) != nil {
 		return
 	}
 
-	err := b.hdb.UpdateHostInfo(jc.Request.Context(), id, hostKey, hir.Gouging, hir.Score, hir.Usability)
+	err := b.hdb.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
 	if errors.Is(err, api.ErrAutopilotNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	} else if jc.Check("failed to update host info", err) != nil {
+	} else if jc.Check("failed to update host", err) != nil {
 		return
 	}
 }
 
-func (b *bus) autopilotHostInfosHandlerPOST(jc jape.Context) {
+func (b *bus) autopilotHostsHandlerGET(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var req api.HostInfosRequest
+	var req api.HostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
@@ -2044,10 +2040,13 @@ func (b *bus) autopilotHostInfosHandlerPOST(jc jape.Context) {
 			um != api.UsabilityFilterModeAll {
 			jc.Error(fmt.Errorf("invalid usability mode: '%v', allowed values are '%s', '%s', '%s'", um, api.UsabilityFilterModeAll, api.UsabilityFilterModeUsable, api.UsabilityFilterModeUnusable), http.StatusBadRequest)
 			return
+		} else if id == "" {
+			jc.Error(errors.New("usability mode requires autopilot id"), http.StatusBadRequest)
+			return
 		}
 	}
 
-	his, err := b.hdb.HostInfos(jc.Request.Context(), id, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	his, err := b.hdb.SearchHosts(jc.Request.Context(), id, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if errors.Is(err, api.ErrAutopilotNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return

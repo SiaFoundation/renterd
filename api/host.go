@@ -59,24 +59,24 @@ type (
 		MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 	}
 
-	// SearchHostsRequest is the request type for the /hosts endpoint.
+	// SearchHostsRequest is the request type for the /api/bus/search/hosts
+	// endpoint.
 	SearchHostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
+		AutopilotID     string            `json:"autopilotID"`
 		FilterMode      string            `json:"filterMode"`
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
 	}
 
-	// HostInfosRequest is the request type for the POST /autopilot/:id/hosts
+	// HostsRequest is the request type for the POST /autopilot/:id/hosts
 	// endpoint.
-	HostInfosRequest SearchHostsRequest
+	HostsRequest SearchHostsRequest
 
-	// HostInfoResponse is the response type for the /host/:hostkey endpoint.
-	//
-	// TODO: on next major release consider returning an api.HostInfo
-	HostInfoResponse struct {
+	// HostResponse is the response type for the /host/:hostkey endpoint.
+	HostResponse struct {
 		Host   hostdb.Host `json:"host"`
 		Checks *HostChecks `json:"checks,omitempty"`
 	}
@@ -88,14 +88,6 @@ type (
 		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
 		Usable           bool                 `json:"usable"`
 		UnusableReasons  []string             `json:"unusableReasons"`
-	}
-
-	// UpdateHostInfoRequest is the request type for the PUT
-	// /autopilot/:id/host/:hostkey endpoint.
-	UpdateHostInfoRequest struct {
-		Gouging   HostGougingBreakdown   `json:"gouging"`
-		Score     HostScoreBreakdown     `json:"score"`
-		Usability HostUsabilityBreakdown `json:"usability"`
 	}
 )
 
@@ -130,14 +122,10 @@ type (
 	SearchHostOptions struct {
 		AddressContains string
 		FilterMode      string
+		UsabilityMode   string
 		KeyIn           []types.PublicKey
 		Limit           int
 		Offset          int
-	}
-
-	HostInfoOptions struct {
-		SearchHostOptions
-		UsabilityMode string
 	}
 )
 
@@ -163,8 +151,13 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 }
 
 type (
-	HostInfo struct {
-		Host      hostdb.Host            `json:"host"`
+	Host struct {
+		hostdb.Host
+		Blocked bool                 `json:"blocked"`
+		Checks  map[string]HostCheck `json:"checks"`
+	}
+
+	HostCheck struct {
 		Gouging   HostGougingBreakdown   `json:"gouging"`
 		Score     HostScoreBreakdown     `json:"score"`
 		Usability HostUsabilityBreakdown `json:"usability"`
@@ -235,19 +228,12 @@ func (hgb HostGougingBreakdown) String() string {
 	return strings.Join(reasons, ";")
 }
 
-func (sb HostScoreBreakdown) TotalScore() float64 {
+func (sb HostScoreBreakdown) Score() float64 {
 	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
 }
 
-func (ub HostUsabilityBreakdown) Usable() bool {
-	return !ub.Blocked &&
-		!ub.Offline &&
-		!ub.LowScore &&
-		!ub.RedundantIP &&
-		!ub.Gouging &&
-		!ub.NotAcceptingContracts &&
-		!ub.NotAnnounced &&
-		!ub.NotCompletingScan
+func (ub HostUsabilityBreakdown) IsUsable() bool {
+	return !ub.Blocked && !ub.Offline && !ub.LowScore && !ub.RedundantIP && !ub.Gouging && !ub.NotAcceptingContracts && !ub.NotAnnounced && !ub.NotCompletingScan
 }
 
 func (ub HostUsabilityBreakdown) UnusableReasons() []string {
@@ -279,23 +265,21 @@ func (ub HostUsabilityBreakdown) UnusableReasons() []string {
 	return reasons
 }
 
-func (hi HostInfo) ToHostInfoReponse() HostInfoResponse {
-	return HostInfoResponse{
-		Host: hi.Host,
+func (h Host) ToHostResponse(autopilotID string) HostResponse {
+	check, ok := h.Checks[autopilotID]
+	if !ok {
+		return HostResponse{Host: h.Host}
+	}
+
+	return HostResponse{
+		Host: h.Host,
 		Checks: &HostChecks{
-			Gouging:          hi.Usability.Gouging,
-			GougingBreakdown: hi.Gouging,
-			Score:            hi.Score.TotalScore(),
-			ScoreBreakdown:   hi.Score,
-			Usable:           hi.Usability.Usable(),
-			UnusableReasons:  hi.Usability.UnusableReasons(),
+			Gouging:          check.Gouging.Gouging(),
+			GougingBreakdown: check.Gouging,
+			Score:            check.Score.Score(),
+			ScoreBreakdown:   check.Score,
+			Usable:           check.Usability.IsUsable(),
+			UnusableReasons:  check.Usability.UnusableReasons(),
 		},
 	}
-}
-
-func (c AutopilotConfig) Validate() error {
-	if c.Hosts.MaxDowntimeHours > 99*365*24 {
-		return ErrMaxDowntimeHoursTooHigh
-	}
-	return nil
 }

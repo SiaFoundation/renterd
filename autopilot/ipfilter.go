@@ -140,7 +140,7 @@ func (r *ipResolver) lookup(hostIP string) ([]string, error) {
 		// check the cache if it's an i/o timeout or server misbehaving error
 		if utils.IsErr(err, errIOTimeout) || utils.IsErr(err, errServerMisbehaving) {
 			if entry, found := r.cache[hostIP]; found && time.Since(entry.created) < ipCacheEntryValidity {
-				r.logger.Debugf("using cached IP addresses for %v, err: %v", hostIP, err)
+				r.logger.Infof("using cached IP addresses for %v, err: %v", hostIP, err)
 				return entry.subnets, nil
 			}
 		}

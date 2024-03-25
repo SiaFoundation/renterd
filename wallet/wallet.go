@@ -583,7 +583,7 @@ func (w *SingleAddressWallet) ReceiveUpdatedUnconfirmedTransactions(diff *module
 				if !ok {
 					// note: happens during deep reorgs. Possibly a race
 					// condition in siad. Log and skip.
-					w.log.Debug("tpool transaction unknown utxo", zap.Stringer("outputID", sci.ParentID), zap.Stringer("txnID", txn.ID()))
+					w.log.Info("tpool transaction unknown utxo", zap.Stringer("outputID", sci.ParentID), zap.Stringer("txnID", txn.ID()))
 					continue txnLoop
 				}
 				processed.Outflow = processed.Outflow.Add(output.Value)

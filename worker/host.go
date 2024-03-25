@@ -163,7 +163,7 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	if err == nil {
 		pt = &hpt.HostPriceTable
 	} else {
-		h.logger.Debugf("unable to fetch price table for renew: %v", err)
+		h.logger.Infof("unable to fetch price table for renew: %v", err)
 	}
 
 	var contractPrice types.Currency

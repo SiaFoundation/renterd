@@ -12,7 +12,7 @@ import (
 )
 
 // Host returns information about a particular host known to the server.
-func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hostdb.HostInfo, err error) {
+func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h api.Host, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/host/%s", hostKey), &h)
 	return
 }
@@ -30,7 +30,7 @@ func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err err
 }
 
 // Hosts returns 'limit' hosts at given 'offset'.
-func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []hostdb.HostInfo, err error) {
+func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []api.Host, err error) {
 	values := url.Values{}
 	opts.Apply(values)
 	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
@@ -78,7 +78,7 @@ func (c *Client) ResetLostSectors(ctx context.Context, hostKey types.PublicKey) 
 }
 
 // SearchHosts returns all hosts that match certain search criteria.
-func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []hostdb.HostInfo, err error) {
+func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []api.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
 		Offset:          opts.Offset,
 		Limit:           opts.Limit,
@@ -101,31 +101,9 @@ func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, 
 	return
 }
 
-// HostInfo returns the host info for a given host and autopilot identifier.
-func (c *Client) HostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey) (hostInfo api.HostInfo, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/autopilot/%s/host/%s", autopilotID, hostKey), &hostInfo)
-	return
-}
-
-// UpdateHostInfo updates the host info for a given host and autopilot identifier.
-func (c *Client) UpdateHostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s/host/%s", autopilotID, hostKey), api.UpdateHostInfoRequest{
-		Gouging:   gouging,
-		Score:     score,
-		Usability: usability,
-	})
-	return
-}
-
-// HostInfos returns the host info for all hosts known to the autopilot with the given identifier.
-func (c *Client) HostInfos(ctx context.Context, autopilotID string, opts api.HostInfoOptions) (hostInfos []api.HostInfo, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/autopilot/%s/hosts", autopilotID), api.HostInfosRequest{
-		Offset:          opts.Offset,
-		Limit:           opts.Limit,
-		FilterMode:      opts.FilterMode,
-		UsabilityMode:   opts.UsabilityMode,
-		AddressContains: opts.AddressContains,
-		KeyIn:           opts.KeyIn,
-	}, &hostInfos)
+// UpdateHostCheck updates the host with the most recent check performed by the
+// autopilot with given id.
+func (c *Client) UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s/host/%s", autopilotID, hostKey), hostCheck)
 	return
 }

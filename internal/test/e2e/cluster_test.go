@@ -153,7 +153,7 @@ func TestNewTestCluster(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hi.Checks.ScoreBreakdown.TotalScore() == 0 {
+		if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
@@ -166,7 +166,7 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, hostdb.Host{}) {
 			t.Fatal("host wasn't set")
 		}
 	}
@@ -175,7 +175,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if hi.Checks.ScoreBreakdown.TotalScore() == 0 {
+		if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
 		}
@@ -188,7 +188,7 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, hostdb.Host{}) {
 			t.Fatal("host wasn't set")
 		}
 		allHosts[hi.Host.PublicKey] = struct{}{}

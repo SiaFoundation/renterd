@@ -10,7 +10,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 )
 
@@ -98,9 +97,8 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 	return values
 }
 
-// calculateHostInfo returns the host info for the given host. This function will
-func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) api.HostInfo {
-	// sanity check redundancy settings
+// checkHost performs a series of checks on the host.
+func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) *api.HostCheck {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -143,14 +141,13 @@ func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc wo
 			// checks in its cost calculations needed to calculate the period
 			// cost
 			sb = hostScore(cfg, h.Host, storedData, rs.Redundancy())
-			if sb.TotalScore() < minScore {
+			if sb.Score() < minScore {
 				ub.LowScore = true
 			}
 		}
 	}
 
-	return api.HostInfo{
-		Host:      h.Host,
+	return &api.HostCheck{
 		Usability: ub,
 		Gouging:   gb,
 		Score:     sb,

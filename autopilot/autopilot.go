@@ -53,14 +53,11 @@ type Bus interface {
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 
 	// hostdb
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
-
-	HostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey) (api.HostInfo, error)
-	HostInfos(ctx context.Context, autopilotID string, opts api.HostInfoOptions) ([]api.HostInfo, error)
-	UpdateHostInfo(ctx context.Context, autopilotID string, hostKey types.PublicKey, gouging api.HostGougingBreakdown, score api.HostScoreBreakdown, usability api.HostUsabilityBreakdown) error
+	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
+	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
@@ -322,7 +319,7 @@ func (ap *Autopilot) Run() error {
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Debug("account refills loop launched")
+					ap.logger.Info("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
 			}
@@ -334,7 +331,7 @@ func (ap *Autopilot) Run() error {
 			if ap.state.cfg.Contracts.Prune {
 				ap.c.tryPerformPruning(ap.workers)
 			} else {
-				ap.logger.Debug("pruning disabled")
+				ap.logger.Info("pruning disabled")
 			}
 		})
 
@@ -692,20 +689,20 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	}
 
 	// TODO: remove on next major release
-	if jc.Check("failed to get host info", compatV105HostInfo(jc.Request.Context(), ap.State(), ap.bus, hk)) != nil {
+	if jc.Check("failed to get host", compatV105Host(jc.Request.Context(), ap.State(), ap.bus, hk)) != nil {
 		return
 	}
 
-	hi, err := ap.bus.HostInfo(jc.Request.Context(), ap.id, hk)
+	hi, err := ap.bus.Host(jc.Request.Context(), hk)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
 
-	jc.Encode(hi.ToHostInfoReponse())
+	jc.Encode(hi.ToHostResponse(ap.id))
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.HostInfosRequest
+	var req api.SearchHostOptions
 	if jc.Decode(&req) != nil {
 		return
 	}
@@ -715,25 +712,13 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO PJ: we used to return hosts regardless of whether they have host
-	// info if usability mode was set to "all" - it is annoying but  maybe we
-	// should keep doing that
-	hosts, err := ap.bus.HostInfos(jc.Request.Context(), ap.id, api.HostInfoOptions{
-		UsabilityMode: req.UsabilityMode,
-		SearchHostOptions: api.SearchHostOptions{
-			FilterMode:      req.FilterMode,
-			AddressContains: req.AddressContains,
-			KeyIn:           req.KeyIn,
-			Offset:          req.Offset,
-			Limit:           req.Limit,
-		},
-	})
+	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), req)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
-	resps := make([]api.HostInfoResponse, len(hosts))
+	resps := make([]api.HostResponse, len(hosts))
 	for i, host := range hosts {
-		resps[i] = host.ToHostInfoReponse()
+		resps[i] = host.ToHostResponse(ap.id)
 	}
 	jc.Encode(resps)
 }
@@ -769,11 +754,11 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	})
 }
 
-func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
+func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		hi := calculateHostInfo(cfg, rs, gc, host, smallestValidScore, 0)
-		if hi.Usability.Usable() {
+		hc := checkHost(cfg, rs, gc, host, smallestValidScore, 0)
+		if hc.Usability.IsUsable() {
 			usables++
 		}
 	}
@@ -783,38 +768,38 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // evaluateConfig evaluates the given configuration and if the gouging settings
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
-func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
+func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
-		hi := calculateHostInfo(cfg, rs, gc, host, 0, 0)
-		if hi.Usability.Usable() {
+		hc := checkHost(cfg, rs, gc, host, 0, 0)
+		if hc.Usability.IsUsable() {
 			resp.Usable++
 			continue
 		}
-		if hi.Usability.Blocked {
+		if hc.Usability.Blocked {
 			resp.Unusable.Blocked++
 		}
-		if hi.Usability.NotAcceptingContracts {
+		if hc.Usability.NotAcceptingContracts {
 			resp.Unusable.NotAcceptingContracts++
 		}
-		if hi.Usability.NotCompletingScan {
+		if hc.Usability.NotCompletingScan {
 			resp.Unusable.NotScanned++
 		}
-		if hi.Gouging.ContractErr != "" {
+		if hc.Gouging.ContractErr != "" {
 			resp.Unusable.Gouging.Contract++
 		}
-		if hi.Gouging.DownloadErr != "" {
+		if hc.Gouging.DownloadErr != "" {
 			resp.Unusable.Gouging.Download++
 		}
-		if hi.Gouging.GougingErr != "" {
+		if hc.Gouging.GougingErr != "" {
 			resp.Unusable.Gouging.Gouging++
 		}
-		if hi.Gouging.PruneErr != "" {
+		if hc.Gouging.PruneErr != "" {
 			resp.Unusable.Gouging.Pruning++
 		}
-		if hi.Gouging.UploadErr != "" {
+		if hc.Gouging.UploadErr != "" {
 			resp.Unusable.Gouging.Upload++
 		}
 	}
@@ -895,7 +880,7 @@ func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 // optimiseGougingSetting tries to optimise one field of the gouging settings to
 // try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.HostInfo) bool {
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []api.Host) bool {
 	if cfg.Contracts.Amount == 0 {
 		return true // nothing to do
 	}
@@ -934,10 +919,10 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 	}
 }
 
-// compatV105HostInfo performs some state checks and bus calls we no longer need
-// but are necessary checks to make sure our API is consistent. This should be
+// compatV105Host performs some state checks and bus calls we no longer need but
+// are necessary checks to make sure our API is consistent. This should be
 // removed in the next major release.
-func compatV105HostInfo(ctx context.Context, s state, b Bus, hk types.PublicKey) error {
+func compatV105Host(ctx context.Context, s state, b Bus, hk types.PublicKey) error {
 	// state checks
 	if s.cfg.Contracts.Allowance.IsZero() {
 		return fmt.Errorf("can not score hosts because contracts allowance is zero")
