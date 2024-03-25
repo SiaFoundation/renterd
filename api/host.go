@@ -258,22 +258,3 @@ func (ub HostUsabilityBreakdown) UnusableReasons() []string {
 	}
 	return reasons
 }
-
-func (h Host) ToHostResponse(autopilotID string) HostResponse {
-	check, ok := h.Checks[autopilotID]
-	if !ok {
-		return HostResponse{Host: h.Host}
-	}
-
-	return HostResponse{
-		Host: h.Host,
-		Checks: &HostChecks{
-			Gouging:          check.Gouging.Gouging(),
-			GougingBreakdown: check.Gouging,
-			Score:            check.Score.Score(),
-			ScoreBreakdown:   check.Score,
-			Usable:           check.Usability.IsUsable(),
-			UnusableReasons:  check.Usability.UnusableReasons(),
-		},
-	}
-}

@@ -698,20 +698,32 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(hi.ToHostResponse(ap.id))
+	check, ok := hi.Checks[ap.id]
+	if ok {
+		jc.Encode(api.HostResponse{
+			Host: hi.Host,
+			Checks: &api.HostChecks{
+				Gouging:          check.Gouging.Gouging(),
+				GougingBreakdown: check.Gouging,
+				Score:            check.Score.Score(),
+				ScoreBreakdown:   check.Score,
+				Usable:           check.Usability.IsUsable(),
+				UnusableReasons:  check.Usability.UnusableReasons(),
+			},
+		})
+		return
+	}
+
+	jc.Encode(api.HostResponse{Host: hi.Host})
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostOptions
+	var req api.SearchHostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
 		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
 		return
-	} else {
-		// TODO: on next major release we should not re-use options between bus
-		// and autopilot API if we don't support all fields in both
-		req.AutopilotID = ap.id
 	}
 
 	// TODO: remove on next major release
@@ -719,13 +731,35 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), req)
+	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), api.SearchHostOptions{
+		AutopilotID:     ap.id,
+		Offset:          req.Offset,
+		Limit:           req.Limit,
+		FilterMode:      req.FilterMode,
+		UsabilityMode:   req.UsabilityMode,
+		AddressContains: req.AddressContains,
+		KeyIn:           req.KeyIn,
+	})
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
 	resps := make([]api.HostResponse, len(hosts))
 	for i, host := range hosts {
-		resps[i] = host.ToHostResponse(ap.id)
+		if check, ok := host.Checks[ap.id]; ok {
+			resps[i] = api.HostResponse{
+				Host: host.Host,
+				Checks: &api.HostChecks{
+					Gouging:          check.Gouging.Gouging(),
+					GougingBreakdown: check.Gouging,
+					Score:            check.Score.Score(),
+					ScoreBreakdown:   check.Score,
+					Usable:           check.Usability.IsUsable(),
+					UnusableReasons:  check.Usability.UnusableReasons(),
+				},
+			}
+		} else {
+			resps[i] = api.HostResponse{Host: host.Host}
+		}
 	}
 	jc.Encode(resps)
 }
