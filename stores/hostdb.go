@@ -485,21 +485,14 @@ func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 
 // Host returns information about a host.
 func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
-	var h dbHost
-
-	tx := ss.db.
-		WithContext(ctx).
-		Where(&dbHost{PublicKey: publicKey(hostKey)}).
-		Preload("Allowlist").
-		Preload("Blocklist").
-		Take(&h)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+	hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
+	if err != nil {
+		return api.Host{}, err
+	} else if len(hosts) == 0 {
 		return api.Host{}, api.ErrHostNotFound
-	} else if tx.Error != nil {
-		return api.Host{}, tx.Error
+	} else {
+		return hosts[0], nil
 	}
-
-	return h.convert(ss.isBlocked(h)), nil
 }
 
 func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
@@ -608,10 +601,6 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 		return nil, ErrNegativeOffset
 	}
 
-	// TODO PJ: use
-	_ = autopilotID
-	_ = usabilityMode
-
 	// validate filterMode
 	switch filterMode {
 	case api.HostFilterModeAllowed:
@@ -629,7 +618,7 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 			hostFilter(filterMode, ss.hasAllowlist(), ss.hasBlocklist()),
 			hostNetAddress(addressContains),
 			hostPublicKey(keyIn),
-			usabilityFilter(usabilityMode),
+			usabilityFilter(autopilotID, usabilityMode),
 		)
 
 	// preload allowlist and blocklist
@@ -639,23 +628,9 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 			Preload("Blocklist")
 	}
 
-	// filter checks
-	if autopilotID != "" {
-		query = query.Preload("Checks.DBAutopilot", "identifier = ?", autopilotID)
-	} else {
-		query = query.Preload("Checks.DBAutopilot")
-	}
-	// query = query.
-	// 	Preload("Checks.DBAutopilot").
-	// 	Scopes(
-	// 		autopilotFilter(autopilotID),
-	// 		usabilityFilter(usabilityMode),
-	// 	)
-
 	var hosts []api.Host
 	var fullHosts []dbHost
 	err := query.
-		Debug().
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
@@ -1142,13 +1117,19 @@ func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.D
 	}
 }
 
-func usabilityFilter(usabilityMode string) func(*gorm.DB) *gorm.DB {
+func usabilityFilter(autopilotID, usabilityMode string) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		switch usabilityMode {
 		case api.UsabilityFilterModeUsable:
-			db = db.Preload("Checks", "usability_blocked = ? AND usability_offline = ? AND usability_low_score = ? AND usability_redundant_ip = ? AND usability_gouging = ? AND usability_not_accepting_contracts = ? AND usability_not_announced = ? AND usability_not_completing_scan = ?", false, false, false, false, false, false, false, false)
+			db = db.
+				Joins("INNER JOIN host_checks hc on hc.db_host_id = hosts.id").
+				Joins("INNER JOIN autopilots a on a.id = hc.db_autopilot_id AND a.identifier = ?", autopilotID).
+				Where("hc.usability_blocked = ? AND hc.usability_offline = ? AND hc.usability_low_score = ? AND hc.usability_redundant_ip = ? AND hc.usability_gouging = ? AND hc.usability_not_accepting_contracts = ? AND hc.usability_not_announced = ? AND hc.usability_not_completing_scan = ?", false, false, false, false, false, false, false, false)
 		case api.UsabilityFilterModeUnusable:
-			db = db.Preload("Checks", "usability_blocked = ? OR usability_offline = ? OR usability_low_score = ? OR usability_redundant_ip = ? OR usability_gouging = ? OR usability_not_accepting_contracts = ? OR usability_not_announced = ? OR usability_not_completing_scan = ?", true, true, true, true, true, true, true, true)
+			db = db.
+				Joins("INNER JOIN host_checks hc on hc.db_host_id = hosts.id").
+				Joins("INNER JOIN autopilots a on a.id = hc.db_autopilot_id AND a.identifier = ?", autopilotID).
+				Where("hc.usability_blocked = ? OR hc.usability_offline = ? OR hc.usability_low_score = ? OR hc.usability_redundant_ip = ? OR hc.usability_gouging = ? OR hc.usability_not_accepting_contracts = ? OR hc.usability_not_announced = ? OR hc.usability_not_completing_scan = ?", true, true, true, true, true, true, true, true)
 		case api.UsabilityFilterModeAll:
 			// do nothing
 		}

@@ -719,7 +719,7 @@ func (c *contractor) runContractChecks(ctx context.Context, contracts []api.Cont
 		}
 
 		// fetch host checks
-		check, ok := host.Checks[c.ap.id]
+		check, ok := hostChecks[hk]
 		if !ok {
 			// this is only possible due to developer error, if there is no
 			// check the host would have been missing, so we treat it the same
