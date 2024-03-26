@@ -2941,7 +2941,7 @@ func (s *SQLStore) notifyNewContractID(fcid types.FileContractID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, sub := range s.css {
-		sub.NewContractID(fcid)
+		sub.AddContractID(fcid)
 	}
 }
 

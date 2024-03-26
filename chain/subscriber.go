@@ -14,6 +14,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// updatesBatchSize is the maximum number of updates to fetch in a single
+	// call to the chain manager when we request updates since a given index.
+	updatesBatchSize = 1000
+)
+
 type (
 	ChainManager interface {
 		Tip() types.ChainIndex
@@ -31,7 +37,7 @@ type (
 	}
 
 	ContractStoreSubscriber interface {
-		NewContractID(fcid types.FileContractID)
+		AddContractID(fcid types.FileContractID)
 	}
 
 	Subscriber struct {
@@ -40,28 +46,25 @@ type (
 		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
-		persistInterval    time.Duration
 		walletAddress      types.Address
 
-		mu      sync.Mutex
-		closed  bool
-		syncing bool
+		syncInterval    time.Duration
+		syncSig         chan struct{}
+		csUnsubscribeFn func()
 
-		// known contracts state
+		mu             sync.Mutex
+		closedChan     chan struct{}
+		syncTicker     *time.Ticker
 		knownContracts map[types.FileContractID]api.ContractState
-		unsubscribeFn  func()
-
-		// chain state
-		lastSave     time.Time
-		persistTimer *time.Timer
-		nextUpdate   *Update
 	}
 )
 
-func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, walletAddress types.Address, announcementMaxAge, persistInterval time.Duration, logger *zap.SugaredLogger) (_ *Subscriber, err error) {
-	// sanity check announcement max age
+func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, walletAddress types.Address, announcementMaxAge, syncInterval time.Duration, logger *zap.SugaredLogger) (_ *Subscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
+	}
+	if syncInterval == 0 {
+		return nil, errors.New("syncInterval must be non-zero")
 	}
 
 	// create chain subscriber
@@ -71,15 +74,16 @@ func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, wall
 		logger: logger,
 
 		announcementMaxAge: announcementMaxAge,
-		persistInterval:    persistInterval,
 		walletAddress:      walletAddress,
 
-		// locked
-		lastSave: time.Now(),
+		syncInterval: syncInterval,
+		syncSig:      make(chan struct{}, 1),
+
+		closedChan: make(chan struct{}),
 	}
 
-	// subscribe to contract id updates
-	subscriber.knownContracts, subscriber.unsubscribeFn, err = contracts.AddContractStoreSubscriber(context.Background(), subscriber)
+	// subscribe ourselves to receive new contract ids
+	subscriber.knownContracts, subscriber.csUnsubscribeFn, err = contracts.AddContractStoreSubscriber(context.Background(), subscriber)
 	if err != nil {
 		return nil, err
 	}
@@ -87,86 +91,36 @@ func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, wall
 	return subscriber, nil
 }
 
-func (cs *Subscriber) Close() error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	cs.closed = true
-	cs.unsubscribeFn()
-	if cs.persistTimer != nil {
-		cs.persistTimer.Stop()
-		select {
-		case <-cs.persistTimer.C:
-		default:
-		}
-	}
-	if cs.nextUpdate != nil && cs.nextUpdate.HasUpdates() {
-		return cs.commit()
-	}
-	return nil
-}
-
-func (cs *Subscriber) NewContractID(id types.FileContractID) {
+func (cs *Subscriber) AddContractID(id types.FileContractID) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cs.knownContracts[id] = api.ContractStatePending
 }
 
-func (cs *Subscriber) ProcessChainApplyUpdate(cau chain.ApplyUpdate) error {
+func (cs *Subscriber) Close() error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	// check for shutdown, ideally this never happens since the subscriber is
-	// unsubscribed first and then closed
-	if cs.closed {
-		return errors.New("shutting down")
+	// signal we are closing
+	close(cs.closedChan)
+
+	// unsubscribe from chain manager
+	cs.csUnsubscribeFn()
+
+	// stop ticker
+	if cs.syncTicker != nil {
+		cs.syncTicker.Stop()
+		select {
+		case <-cs.syncTicker.C:
+		default:
+		}
 	}
 
-	// set the tip
-	if cs.nextUpdate == nil {
-		cs.nextUpdate = NewChainUpdate(cau.State.Index)
-	} else {
-		cs.nextUpdate.Index = cau.State.Index
-	}
-
-	// process chain updates
-	cs.processChainApplyUpdateHostDB(cau)
-	cs.processChainApplyUpdateContracts(cau)
-	if err := cs.processChainApplyUpdateWallet(cau); err != nil {
-		return err
-	}
-
-	return cs.tryCommit()
+	return nil
 }
 
-func (cs *Subscriber) ProcessChainRevertUpdate(cru chain.RevertUpdate) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	// check for shutdown, ideally this never happens since the subscriber is
-	// unsubscribed first and then closed
-	if cs.closed {
-		return errors.New("shutting down")
-	}
-
-	// set the tip
-	if cs.nextUpdate == nil {
-		cs.nextUpdate = NewChainUpdate(cru.State.Index)
-	} else {
-		cs.nextUpdate.Index = cru.State.Index
-	}
-
-	// process chain updates
-	cs.processChainRevertUpdateHostDB(cru)
-	cs.processChainRevertUpdateContracts(cru)
-	if err := cs.processChainRevertUpdateWallet(cru); err != nil {
-		return err
-	}
-
-	return cs.tryCommit()
-}
-
-func (cs *Subscriber) Subscribe() (func(), error) {
+func (cs *Subscriber) Run() (func(), error) {
+	// perform an initial sync
 	index, err := cs.cs.ChainIndex()
 	if err != nil {
 		return nil, err
@@ -175,102 +129,48 @@ func (cs *Subscriber) Subscribe() (func(), error) {
 		return nil, fmt.Errorf("failed to subscribe to chain manager: %w", err)
 	}
 
-	reorgChan := make(chan types.ChainIndex, 1)
+	// start trigger loop
+	cs.syncTicker = time.NewTicker(cs.syncInterval)
 	go func() {
-		for range reorgChan {
-			lastTip, err := cs.cs.ChainIndex()
+		for {
+			select {
+			case <-cs.closedChan:
+				return
+			case <-cs.syncTicker.C:
+			}
+			cs.triggerSync()
+		}
+	}()
+
+	// start sync loop
+	go func() {
+		for {
+			select {
+			case <-cs.closedChan:
+				return
+			case <-cs.syncSig:
+			}
+
+			ci, err := cs.cs.ChainIndex()
 			if err != nil {
-				cs.logger.Error("failed to get last committed index", zap.Error(err))
+				cs.logger.Errorf("failed to get chain index: %v", err)
 				continue
 			}
-			if err := cs.sync(lastTip); err != nil {
-				cs.logger.Error("failed to sync store", zap.Error(err))
+			err = cs.sync(ci)
+			if err != nil {
+				cs.logger.Errorf("failed to sync: %v", err)
 			}
 		}
 	}()
 
-	return cs.cm.OnReorg(func(index types.ChainIndex) {
-		select {
-		case reorgChan <- index:
-		default:
-		}
-	}), nil
+	// trigger initial sync
+	cs.triggerSync()
+
+	// trigger a sync on reorgs
+	return cs.cm.OnReorg(func(_ types.ChainIndex) { cs.triggerSync() }), nil
 }
 
-func (cs *Subscriber) TriggerSync() {
-	go func() {
-		index, err := cs.cs.ChainIndex()
-		if err != nil {
-			cs.logger.Errorw("failed to get last committed index", zap.Error(err))
-		}
-
-		if err := cs.sync(index); err != nil {
-			cs.logger.Errorw("failed to sync chain", zap.Error(err))
-		}
-	}()
-}
-
-func (cs *Subscriber) commit() error {
-	if err := cs.cs.ApplyChainUpdate(context.Background(), cs.nextUpdate); err != nil {
-		return fmt.Errorf("failed to apply chain update: %w", err)
-	}
-	cs.lastSave = time.Now()
-	cs.nextUpdate = nil
-	return nil
-}
-
-func (cs *Subscriber) tryCommit() error {
-	// commit if we can/should
-	if !cs.nextUpdate.HasUpdates() && time.Since(cs.lastSave) < cs.persistInterval {
-		return nil
-	} else if err := cs.commit(); err != nil {
-		cs.logger.Errorw("failed to commit chain update", zap.Error(err))
-		return err
-	}
-
-	// force a persist if no block has been received for some time
-	if cs.persistTimer != nil {
-		cs.persistTimer.Stop()
-		select {
-		case <-cs.persistTimer.C:
-		default:
-		}
-	}
-	cs.persistTimer = time.AfterFunc(10*time.Second, func() {
-		cs.mu.Lock()
-		defer cs.mu.Unlock()
-		if cs.closed || cs.syncing || cs.nextUpdate == nil || !cs.nextUpdate.HasUpdates() {
-			return
-		} else if err := cs.commit(); err != nil {
-			cs.logger.Errorw("failed to commit delayed chain update", zap.Error(err))
-		}
-	})
-	return nil
-}
-
-func (cs *Subscriber) processChainApplyUpdateHostDB(cau chain.ApplyUpdate) {
-	b := cau.Block
-	if time.Since(b.Timestamp) > cs.announcementMaxAge {
-		return // ignore old announcements
-	}
-	chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
-		if ha.NetAddress == "" {
-			return // ignore
-		}
-		cs.nextUpdate.HostUpdates[hk] = HostUpdate{
-			Announcement: ha,
-			BlockHeight:  cau.State.Index.Height,
-			BlockID:      b.ID(),
-			Timestamp:    b.Timestamp,
-		}
-	})
-}
-
-func (cs *Subscriber) processChainRevertUpdateHostDB(cru chain.RevertUpdate) {
-	// nothing to do, we are not unannouncing hosts
-}
-
-func (cs *Subscriber) processChainApplyUpdateContracts(cau chain.ApplyUpdate) {
+func (cs *Subscriber) applyContractUpdates(cu *Update, cau chain.ApplyUpdate) {
 	type revision struct {
 		revisionNumber uint64
 		fileSize       uint64
@@ -285,21 +185,21 @@ func (cs *Subscriber) processChainApplyUpdateContracts(cau chain.ApplyUpdate) {
 		}
 
 		// convenience variables
-		cu := cs.nextUpdate.ContractUpdate(fcid, state)
-		defer func() { cs.knownContracts[fcid] = cu.State }()
+		c := cu.ContractUpdate(fcid, state)
+		defer func() { cs.knownContracts[fcid] = c.State }()
 
 		// set contract update
 		if rev.fileSize > 0 {
-			cu.Size = &rev.fileSize
+			c.Size = &rev.fileSize
 		}
 		if rev.revisionNumber > 0 {
-			cu.RevisionNumber = &rev.revisionNumber
+			c.RevisionNumber = &rev.revisionNumber
 		}
-		cu.RevisionHeight = &cau.State.Index.Height
+		c.RevisionHeight = &cau.State.Index.Height
 
 		// update state from 'pending' -> 'active'
-		if cu.State == api.ContractStatePending || state == api.ContractStateUnknown {
-			cu.State = api.ContractStateActive // 'pending' -> 'active'
+		if c.State == api.ContractStatePending || state == api.ContractStateUnknown {
+			c.State = api.ContractStateActive // 'pending' -> 'active'
 			cs.logger.Infow("contract state changed: pending -> active",
 				"fcid", fcid,
 				"reason", "contract confirmed")
@@ -307,7 +207,7 @@ func (cs *Subscriber) processChainApplyUpdateContracts(cau chain.ApplyUpdate) {
 
 		// renewed: 'active' -> 'complete'
 		if rev.revisionNumber == types.MaxRevisionNumber && rev.fileSize == 0 {
-			cu.State = api.ContractStateComplete // renewed: 'active' -> 'complete'
+			c.State = api.ContractStateComplete // renewed: 'active' -> 'complete'
 			cs.logger.Infow("contract state changed: active -> complete",
 				"fcid", fcid,
 				"reason", "final revision confirmed")
@@ -315,14 +215,14 @@ func (cs *Subscriber) processChainApplyUpdateContracts(cau chain.ApplyUpdate) {
 
 		// storage proof: 'active' -> 'complete/failed'
 		if resolved {
-			cu.ProofHeight = &cau.State.Index.Height
+			c.ProofHeight = &cau.State.Index.Height
 			if valid {
-				cu.State = api.ContractStateComplete
+				c.State = api.ContractStateComplete
 				cs.logger.Infow("contract state changed: active -> complete",
 					"fcid", fcid,
 					"reason", "storage proof valid")
 			} else {
-				cu.State = api.ContractStateFailed
+				c.State = api.ContractStateFailed
 				cs.logger.Infow("contract state changed: active -> failed",
 					"fcid", fcid,
 					"reason", "storage proof missed")
@@ -374,7 +274,29 @@ func (cs *Subscriber) processChainApplyUpdateContracts(cau chain.ApplyUpdate) {
 	})
 }
 
-func (cs *Subscriber) processChainRevertUpdateContracts(cru chain.RevertUpdate) {
+func (cs *Subscriber) applyHostUpdates(cu *Update, cau chain.ApplyUpdate) {
+	b := cau.Block
+	if time.Since(b.Timestamp) > cs.announcementMaxAge {
+		return // ignore old announcements
+	}
+	chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
+		if ha.NetAddress == "" {
+			return // ignore
+		}
+		cu.HostUpdates[hk] = HostUpdate{
+			Announcement: ha,
+			BlockHeight:  cau.State.Index.Height,
+			BlockID:      b.ID(),
+			Timestamp:    b.Timestamp,
+		}
+	})
+}
+
+func (cs *Subscriber) applyWalletUpdate(cu *Update, cau chain.ApplyUpdate) error {
+	return wallet.ApplyChainUpdates(cu, cs.walletAddress, []chain.ApplyUpdate{cau})
+}
+
+func (cs *Subscriber) revertContractUpdate(cu *Update, cru chain.RevertUpdate) {
 	type revision struct {
 		revisionNumber uint64
 		fileSize       uint64
@@ -389,21 +311,21 @@ func (cs *Subscriber) processChainRevertUpdateContracts(cru chain.RevertUpdate) 
 		}
 
 		// convenience variables
-		cu := cs.nextUpdate.ContractUpdate(fcid, state)
-		defer func() { cs.knownContracts[fcid] = cu.State }()
+		c := cu.ContractUpdate(fcid, state)
+		defer func() { cs.knownContracts[fcid] = c.State }()
 
 		// update state from 'active' -> 'pending'
 		if rev == nil {
-			cu.State = api.ContractStatePending
+			c.State = api.ContractStatePending
 		}
 
 		// reverted renewal: 'complete' -> 'active'
 		if rev != nil {
-			cu.RevisionHeight = &cru.State.Index.Height
-			cu.RevisionNumber = &prevRev.revisionNumber
-			cu.Size = &prevRev.fileSize
-			if cu.State == api.ContractStateComplete {
-				cu.State = api.ContractStateActive
+			c.RevisionHeight = &cru.State.Index.Height
+			c.RevisionNumber = &prevRev.revisionNumber
+			c.Size = &prevRev.fileSize
+			if c.State == api.ContractStateComplete {
+				c.State = api.ContractStateActive
 				cs.logger.Infow("contract state changed: complete -> active",
 					"fcid", fcid,
 					"reason", "final revision reverted")
@@ -412,7 +334,7 @@ func (cs *Subscriber) processChainRevertUpdateContracts(cru chain.RevertUpdate) 
 
 		// reverted storage proof: 'complete/failed' -> 'active'
 		if resolved {
-			cu.State = api.ContractStateActive // revert from 'complete' to 'active'
+			c.State = api.ContractStateActive // revert from 'complete' to 'active'
 			if valid {
 				cs.logger.Infow("contract state changed: complete -> active",
 					"fcid", fcid,
@@ -472,46 +394,58 @@ func (cs *Subscriber) processChainRevertUpdateContracts(cru chain.RevertUpdate) 
 	})
 }
 
-func (cs *Subscriber) processChainApplyUpdateWallet(cau chain.ApplyUpdate) error {
-	return wallet.ApplyChainUpdates(cs.nextUpdate, cs.walletAddress, []chain.ApplyUpdate{cau})
-}
-
-func (cs *Subscriber) processChainRevertUpdateWallet(cru chain.RevertUpdate) error {
-	return wallet.RevertChainUpdate(cs.nextUpdate, cs.walletAddress, cru)
+func (cs *Subscriber) revertWalletUpdate(cu *Update, cru chain.RevertUpdate) error {
+	return wallet.RevertChainUpdate(cu, cs.walletAddress, cru)
 }
 
 func (cs *Subscriber) sync(index types.ChainIndex) error {
-	cs.mu.Lock()
-	if cs.syncing {
-		cs.mu.Unlock()
-		return nil
-	}
-	cs.syncing = true
-	cs.mu.Unlock()
-
-	defer func() {
-		cs.mu.Lock()
-		cs.syncing = false
-		cs.mu.Unlock()
-	}()
-
 	for index != cs.cm.Tip() {
-		crus, caus, err := cs.cm.UpdatesSince(index, 1000)
+		crus, caus, err := cs.cm.UpdatesSince(index, updatesBatchSize)
 		if err != nil {
-			return fmt.Errorf("failed to subscribe to chain manager: %w", err)
+			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
+
+		// aggregate updates into one chain update
+		cu := NewChainUpdate()
+
+		// lock the subscriber while we apply the updates
+		cs.mu.Lock()
+
+		// revert chain updates
 		for _, cru := range crus {
-			if err := cs.ProcessChainRevertUpdate(cru); err != nil {
-				return fmt.Errorf("failed to process revert update: %w", err)
+			cs.revertContractUpdate(cu, cru)
+			if err := cs.revertWalletUpdate(cu, cru); err != nil {
+				cs.mu.Unlock()
+				return fmt.Errorf("failed to revert wallet update: %w", err)
 			}
 			index = cru.State.Index
 		}
+
+		// apply chain updates
 		for _, cau := range caus {
-			if err := cs.ProcessChainApplyUpdate(cau); err != nil {
-				return fmt.Errorf("failed to process apply update: %w", err)
+			cs.applyContractUpdates(cu, cau)
+			cs.applyHostUpdates(cu, cau)
+			if err := cs.applyWalletUpdate(cu, cau); err != nil {
+				cs.mu.Unlock()
+				return fmt.Errorf("failed to apply wallet update: %w", err)
 			}
 			index = cau.State.Index
 		}
+
+		cs.mu.Unlock()
+
+		// update the index
+		cu.Index = index
+		if err := cs.cs.ApplyChainUpdate(context.Background(), cu); err != nil {
+			return fmt.Errorf("failed to apply chain update: %w", err)
+		}
 	}
 	return nil
+}
+
+func (cs *Subscriber) triggerSync() {
+	select {
+	case cs.syncSig <- struct{}{}:
+	default:
+	}
 }

@@ -20,13 +20,14 @@ func TestApplyChainUpdate(t *testing.T) {
 	// prepare chain update
 	hk := types.PublicKey{1}
 	want := types.ChainIndex{Height: 1, ID: types.BlockID{1}}
-	cu := chain.NewChainUpdate(want)
+	cu := chain.NewChainUpdate()
 	cu.HostUpdates[hk] = chain.HostUpdate{
 		Announcement: chain.HostAnnouncement{NetAddress: "foo.com:1000"},
 		BlockHeight:  want.Height,
 		BlockID:      want.ID,
 		Timestamp:    time.Now().UTC().Round(time.Second),
 	}
+	cu.Index = want
 
 	// assert announcements are processed
 	err := db.ApplyChainUpdate(context.Background(), cu)
@@ -54,7 +55,8 @@ func TestApplyChainUpdate(t *testing.T) {
 	}
 
 	// update the contract
-	cu = chain.NewChainUpdate(types.ChainIndex{Height: 2, ID: types.BlockID{2}})
+	cu = chain.NewChainUpdate()
+	cu.Index = types.ChainIndex{Height: 2, ID: types.BlockID{2}}
 	cu.ContractUpdates[types.FileContractID{1}] = &chain.ContractUpdate{State: api.ContractStateActive}
 	err = db.ApplyChainUpdate(context.Background(), cu)
 	if err != nil {
@@ -70,7 +72,8 @@ func TestApplyChainUpdate(t *testing.T) {
 	}
 
 	// add wallet output & event
-	cu = chain.NewChainUpdate(types.ChainIndex{Height: 3, ID: types.BlockID{3}})
+	cu = chain.NewChainUpdate()
+	cu.Index = types.ChainIndex{Height: 3, ID: types.BlockID{3}}
 	cu.WalletOutputUpdates[types.Hash256{1}] = chain.WalletOutputUpdate{Addition: true, Element: wallet.SiacoinElement{
 		SiacoinElement: types.SiacoinElement{
 			StateElement: types.StateElement{

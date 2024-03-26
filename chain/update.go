@@ -48,9 +48,8 @@ type (
 )
 
 // NewChainUpdate returns a new ChainUpdate.
-func NewChainUpdate(index types.ChainIndex) *Update {
+func NewChainUpdate() *Update {
 	return &Update{
-		Index:               index,
 		ContractUpdates:     make(map[types.FileContractID]*ContractUpdate),
 		HostUpdates:         make(map[types.PublicKey]HostUpdate),
 		WalletOutputUpdates: make(map[types.Hash256]WalletOutputUpdate),
@@ -58,21 +57,13 @@ func NewChainUpdate(index types.ChainIndex) *Update {
 }
 
 // ContractUpdate returns the ContractUpdate for the given file contract ID. If
-// it doesn't exist, it is created.
+// it doesn't exist we initialize one with the given state.
 func (cu *Update) ContractUpdate(fcid types.FileContractID, state api.ContractState) *ContractUpdate {
 	_, ok := cu.ContractUpdates[fcid]
 	if !ok {
 		cu.ContractUpdates[fcid] = &ContractUpdate{State: state}
 	}
 	return cu.ContractUpdates[fcid]
-}
-
-// HasUpdates returns true if the ChainUpdate contains any updates.
-func (cu *Update) HasUpdates() bool {
-	return len(cu.ContractUpdates) > 0 ||
-		len(cu.HostUpdates) > 0 ||
-		len(cu.WalletOutputUpdates) > 0 ||
-		len(cu.WalletEventUpdates) > 0
 }
 
 // AddEvents is called with all relevant events added in the update.
