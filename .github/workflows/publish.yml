@@ -1,13 +1,13 @@
 name: Publish
 
-# Controls when the action will run. 
+# Controls when the action will run.
 on:
   # Triggers the workflow on new SemVer tags
   push:
     branches:
       - master
       - dev
-    tags: 
+    tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-**'
 
@@ -116,7 +116,7 @@ jobs:
         with:
           name: renterd
           path: release/
-  build-mac: 
+  build-mac:
     runs-on: macos-latest
     strategy:
       matrix:
@@ -212,7 +212,7 @@ jobs:
         with:
           name: renterd
           path: release/
-  build-windows: 
+  build-windows:
     runs-on: windows-latest
     strategy:
       matrix:
@@ -253,23 +253,21 @@ jobs:
         with:
           name: renterd
           path: release/
-  dispatch:
+
+  dispatch-homebrew: # only runs on full releases
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
     needs: [docker, build-linux, build-mac, build-windows]
-    strategy:
-        matrix:
-            repo: ['siafoundation/homebrew-sia', 'siafoundation/linux']
     runs-on: ubuntu-latest
     steps:
       - name: Extract Tag Name
         id: get_tag
         run: echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Repository Dispatch
+      - name: Dispatch
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.PAT_REPOSITORY_DISPATCH }}
-          repository: ${{ matrix.repo }}
+          repository: siafoundation/homebrew-sia
           event-type: release-tagged
           client-payload: >
             {
@@ -278,3 +276,39 @@ jobs:
               "project": "renterd",
               "workflow_id": "${{ github.run_id }}"
             }
+  dispatch-linux: # run on full releases, release candidates, and master branch
+    if: startsWith(github.ref, 'refs/tags/v') || endsWith(github.ref, 'master')
+    needs: [docker, build-linux, build-mac, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Dispatch Payload
+        id: get_payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isRelease = context.ref.startsWith('refs/tags/v'),
+              isBeta = isRelease && context.ref.includes('-beta'),
+              tag = isRelease ? context.ref.replace('refs/tags/', '') : 'master';
+
+            let component = 'nightly';
+            if (isBeta) {
+              component = 'beta';
+            } else if (isRelease) {
+              component = 'main';
+            }
+
+            return {
+              description: "renterd: The Next-Gen Sia Renter",
+              tag: tag,
+              project: "renterd",
+              workflow_id: context.runId,
+              component: component
+            };
+
+      - name: Dispatch
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PAT_REPOSITORY_DISPATCH }}
+          repository: siafoundation/linux
+          event-type: release-tagged
+          client-payload: ${{ steps.get_payload.outputs.result }}
