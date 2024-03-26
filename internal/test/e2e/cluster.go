@@ -547,7 +547,6 @@ func (c *TestCluster) MineBlocks(n uint64) {
 	if len(c.hosts) == 0 {
 		c.tt.OK(c.mineBlocks(wallet.Address, n))
 		c.Sync()
-		// c.cs.TriggerSync() // TODO PJ
 		return
 	}
 
@@ -562,8 +561,6 @@ func (c *TestCluster) MineBlocks(n uint64) {
 		c.Sync()
 		mined += toMine
 	}
-
-	// c.cs.TriggerSync() // TODO PJ
 }
 
 func (c *TestCluster) WaitForAccounts() []api.Account {

@@ -73,7 +73,6 @@ func TestNewTestCluster(t *testing.T) {
 
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
-	cluster.MineBlocks(1)
 
 	// Wait for the contract to be renewed.
 	tt.Retry(100, 100*time.Millisecond, func() error {
