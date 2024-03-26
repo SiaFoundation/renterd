@@ -83,7 +83,7 @@ type (
 		shutdownCtxCancel context.CancelFunc
 
 		mu           sync.Mutex
-		subscribers  map[[16]byte]chain.ContractStoreSubscriber
+		css          map[[16]byte]chain.ContractStoreSubscriber
 		hasAllowlist bool
 		hasBlocklist bool
 		closed       bool
@@ -200,7 +200,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		dbMetrics:    dbMetrics,
 		logger:       l,
 		settings:     make(map[string]string),
-		subscribers:  make(map[[16]byte]chain.ContractStoreSubscriber),
+		css:          make(map[[16]byte]chain.ContractStoreSubscriber),
 		hasAllowlist: allowlistCnt > 0,
 		hasBlocklist: blocklistCnt > 0,
 

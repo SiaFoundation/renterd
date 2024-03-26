@@ -724,7 +724,7 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 	return added.convert(), nil
 }
 
-func (s *SQLStore) AddSubscriber(ctx context.Context, cs chain.ContractStoreSubscriber) (map[types.FileContractID]api.ContractState, func(), error) {
+func (s *SQLStore) AddContractStoreSubscriber(ctx context.Context, cs chain.ContractStoreSubscriber) (map[types.FileContractID]api.ContractState, func(), error) {
 	// fetch all ids
 	type row struct {
 		FCID  fileContractID
@@ -757,12 +757,12 @@ func (s *SQLStore) AddSubscriber(ctx context.Context, cs chain.ContractStoreSubs
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := frand.Entropy128()
-	s.subscribers[key] = cs
+	s.css[key] = cs
 
 	return fcids, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		delete(s.subscribers, key)
+		delete(s.css, key)
 	}, nil
 }
 
@@ -2940,7 +2940,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 func (s *SQLStore) notifyNewContractID(fcid types.FileContractID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, sub := range s.subscribers {
+	for _, sub := range s.css {
 		sub.NewContractID(fcid)
 	}
 }

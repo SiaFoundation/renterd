@@ -27,7 +27,7 @@ type (
 	}
 
 	ContractStore interface {
-		AddSubscriber(context.Context, ContractStoreSubscriber) (map[types.FileContractID]api.ContractState, func(), error)
+		AddContractStoreSubscriber(context.Context, ContractStoreSubscriber) (map[types.FileContractID]api.ContractState, func(), error)
 	}
 
 	ContractStoreSubscriber interface {
@@ -79,7 +79,7 @@ func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, wall
 	}
 
 	// subscribe to contract id updates
-	subscriber.knownContracts, subscriber.unsubscribeFn, err = contracts.AddSubscriber(context.Background(), subscriber)
+	subscriber.knownContracts, subscriber.unsubscribeFn, err = contracts.AddContractStoreSubscriber(context.Background(), subscriber)
 	if err != nil {
 		return nil, err
 	}
