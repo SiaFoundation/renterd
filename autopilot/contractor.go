@@ -286,9 +286,6 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 
 	// run contract checks
 	updatedSet, toArchive, toStopUsing, toRefresh, toRenew := c.runContractChecks(ctx, contracts, isInCurrentSet, checks, cs.BlockHeight)
-	if err != nil {
-		return false, fmt.Errorf("failed to run contract checks, err: %v", err)
-	}
 
 	// update host checks
 	for hk, check := range checks {
