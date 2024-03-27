@@ -80,7 +80,7 @@ type (
 		Score            float64              `json:"score"`
 		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
 		Usable           bool                 `json:"usable"`
-		UnusableReasons  []string             `json:"unusableReasons"`
+		UnusableReasons  []string             `json:"unusableReasons,omitempty"`
 	}
 )
 
