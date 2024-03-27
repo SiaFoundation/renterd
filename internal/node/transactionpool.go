@@ -2,6 +2,7 @@ package node
 
 import (
 	"errors"
+	"slices"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/bus"
@@ -60,15 +61,22 @@ func unconfirmedParents(txn types.Transaction, pool []types.Transaction) []types
 		}
 	}
 	var parents []types.Transaction
+	txnsToCheck := []*types.Transaction{&txn}
 	seen := make(map[types.TransactionID]bool)
-	for _, sci := range txn.SiacoinInputs {
-		if parent, ok := outputToParent[sci.ParentID]; ok {
-			if txid := parent.ID(); !seen[txid] {
-				seen[txid] = true
-				parents = append(parents, *parent)
+	for len(txnsToCheck) > 0 {
+		nextTxn := txnsToCheck[0]
+		txnsToCheck = txnsToCheck[1:]
+		for _, sci := range nextTxn.SiacoinInputs {
+			if parent, ok := outputToParent[sci.ParentID]; ok {
+				if txid := parent.ID(); !seen[txid] {
+					seen[txid] = true
+					parents = append(parents, *parent)
+					txnsToCheck = append(txnsToCheck, parent)
+				}
 			}
 		}
 	}
+	slices.Reverse(parents)
 	return parents
 }
 
