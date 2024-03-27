@@ -390,6 +390,21 @@ func (os *objectStoreMock) TrackUpload(ctx context.Context, uID api.UploadID) er
 func (os *objectStoreMock) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
 
 func (os *objectStoreMock) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	for _, objects := range os.objects {
+		for _, object := range objects {
+			for _, slab := range object.Slabs {
+				for _, shard := range slab.Slab.Shards {
+					if shard.Root == root {
+						delete(shard.Contracts, hk)
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -505,10 +520,33 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 
 	os.forEachObject(func(bucket, path string, o object.Object) {
 		for i, slab := range o.Slabs {
-			if slab.Key.String() == s.Key.String() {
-				os.objects[bucket][path].Slabs[i].Slab = s
-				return
+			if slab.Key.String() != s.Key.String() {
+				continue
 			}
+			// update slab
+			shards := os.objects[bucket][path].Slabs[i].Slab.Shards
+			for sI := range shards {
+				// overwrite latest host
+				shards[sI].LatestHost = s.Shards[sI].LatestHost
+
+				// merge contracts for each shard
+				existingContracts := make(map[types.FileContractID]struct{})
+				for _, fcids := range shards[sI].Contracts {
+					for _, fcid := range fcids {
+						existingContracts[fcid] = struct{}{}
+					}
+				}
+				for hk, fcids := range s.Shards[sI].Contracts {
+					for _, fcid := range fcids {
+						if _, exists := existingContracts[fcid]; exists {
+							continue
+						}
+						shards[sI].Contracts[hk] = append(shards[sI].Contracts[hk], fcids...)
+					}
+				}
+			}
+			os.objects[bucket][path].Slabs[i].Slab.Shards = shards
+			return
 		}
 	})
 
