@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/hostdb"
 )
 
 const (
@@ -41,12 +43,12 @@ var (
 type (
 	// HostsScanRequest is the request type for the /hosts/scans endpoint.
 	HostsScanRequest struct {
-		Scans []hostdb.HostScan `json:"scans"`
+		Scans []HostScan `json:"scans"`
 	}
 
 	// HostsPriceTablesRequest is the request type for the /hosts/pricetables endpoint.
 	HostsPriceTablesRequest struct {
-		PriceTableUpdates []hostdb.PriceTableUpdate `json:"priceTableUpdates"`
+		PriceTableUpdates []HostPriceTableUpdate `json:"priceTableUpdates"`
 	}
 
 	// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
@@ -70,7 +72,7 @@ type (
 	// HostResponse is the response type for the GET
 	// /api/autopilot/host/:hostkey endpoint.
 	HostResponse struct {
-		Host   hostdb.Host `json:"host"`
+		Host   Host        `json:"host"`
 		Checks *HostChecks `json:"checks,omitempty"`
 	}
 
@@ -146,9 +148,54 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 
 type (
 	Host struct {
-		hostdb.Host
-		Blocked bool                 `json:"blocked"`
-		Checks  map[string]HostCheck `json:"checks"`
+		KnownSince       time.Time            `json:"knownSince"`
+		LastAnnouncement time.Time            `json:"lastAnnouncement"`
+		PublicKey        types.PublicKey      `json:"publicKey"`
+		NetAddress       string               `json:"netAddress"`
+		PriceTable       HostPriceTable       `json:"priceTable"`
+		Settings         rhpv2.HostSettings   `json:"settings"`
+		Interactions     HostInteractions     `json:"interactions"`
+		Scanned          bool                 `json:"scanned"`
+		Blocked          bool                 `json:"blocked"`
+		Checks           map[string]HostCheck `json:"checks"`
+	}
+
+	HostAddress struct {
+		PublicKey  types.PublicKey `json:"publicKey"`
+		NetAddress string          `json:"netAddress"`
+	}
+
+	HostInteractions struct {
+		TotalScans              uint64        `json:"totalScans"`
+		LastScan                time.Time     `json:"lastScan"`
+		LastScanSuccess         bool          `json:"lastScanSuccess"`
+		LostSectors             uint64        `json:"lostSectors"`
+		SecondToLastScanSuccess bool          `json:"secondToLastScanSuccess"`
+		Uptime                  time.Duration `json:"uptime"`
+		Downtime                time.Duration `json:"downtime"`
+
+		SuccessfulInteractions float64 `json:"successfulInteractions"`
+		FailedInteractions     float64 `json:"failedInteractions"`
+	}
+
+	HostScan struct {
+		HostKey    types.PublicKey `json:"hostKey"`
+		Success    bool
+		Timestamp  time.Time
+		Settings   rhpv2.HostSettings
+		PriceTable rhpv3.HostPriceTable
+	}
+
+	HostPriceTable struct {
+		rhpv3.HostPriceTable
+		Expiry time.Time `json:"expiry"`
+	}
+
+	HostPriceTableUpdate struct {
+		HostKey    types.PublicKey `json:"hostKey"`
+		Success    bool
+		Timestamp  time.Time
+		PriceTable HostPriceTable
 	}
 
 	HostCheck struct {
@@ -186,6 +233,21 @@ type (
 		NotCompletingScan     bool `json:"notCompletingScan"`
 	}
 )
+
+// IsAnnounced returns whether the host has been announced.
+func (h Host) IsAnnounced() bool {
+	return !h.LastAnnouncement.IsZero()
+}
+
+// IsOnline returns whether a host is considered online.
+func (h Host) IsOnline() bool {
+	if h.Interactions.TotalScans == 0 {
+		return false
+	} else if h.Interactions.TotalScans == 1 {
+		return h.Interactions.LastScanSuccess
+	}
+	return h.Interactions.LastScanSuccess || h.Interactions.SecondToLastScanSuccess
+}
 
 func (sb HostScoreBreakdown) String() string {
 	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)

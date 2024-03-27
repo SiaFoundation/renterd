@@ -140,7 +140,7 @@ func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.Gou
 			// not gouging, this because the core package does not have overflow
 			// checks in its cost calculations needed to calculate the period
 			// cost
-			sb = hostScore(cfg, h.Host, storedData, rs.Redundancy())
+			sb = hostScore(cfg, h, storedData, rs.Redundancy())
 			if sb.Score() < minScore {
 				ub.LowScore = true
 			}

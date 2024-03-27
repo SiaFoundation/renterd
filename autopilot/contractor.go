@@ -15,7 +15,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
@@ -103,7 +102,7 @@ type (
 	}
 
 	scoredHost struct {
-		host  hostdb.Host
+		host  api.Host
 		score float64
 	}
 
@@ -758,7 +757,7 @@ func (c *contractor) runContractChecks(ctx context.Context, contracts []api.Cont
 		}
 
 		// decide whether the contract is still good
-		ci := contractInfo{contract: contract, priceTable: host.Host.PriceTable.HostPriceTable, settings: host.Host.Settings}
+		ci := contractInfo{contract: contract, priceTable: host.PriceTable.HostPriceTable, settings: host.Settings}
 		usable, recoverable, refresh, renew, reasons := c.isUsableContract(state.cfg, state, ci, bh, ipFilter)
 		ci.usable = usable
 		ci.recoverable = recoverable
@@ -1320,7 +1319,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []api.Host, usedH
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
 		hc := checkHost(state.cfg, state.rs, gc, h, minScore, storedData[h.PublicKey])
 		if hc.Usability.IsUsable() {
-			candidates = append(candidates, scoredHost{h.Host, hc.Score.Score()})
+			candidates = append(candidates, scoredHost{h, hc.Score.Score()})
 			continue
 		}
 
@@ -1502,7 +1501,7 @@ func (c *contractor) refreshContract(ctx context.Context, w Worker, ci contractI
 	return refreshedContract, true, nil
 }
 
-func (c *contractor) formContract(ctx context.Context, w Worker, host hostdb.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *contractor) formContract(ctx context.Context, w Worker, host api.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
 	// convenience variables
 	state := c.ap.State()
 	hk := host.PublicKey
@@ -1629,7 +1628,7 @@ func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, 
 	return
 }
 
-func refreshPriceTable(ctx context.Context, w Worker, host *hostdb.Host) error {
+func refreshPriceTable(ctx context.Context, w Worker, host *api.Host) error {
 	// return early if the host's pricetable is not expired yet
 	if time.Now().Before(host.PriceTable.Expiry) {
 		return nil
