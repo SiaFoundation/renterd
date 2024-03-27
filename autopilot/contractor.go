@@ -1653,7 +1653,6 @@ func (c *contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool 
 		lastFailure = time.Now()
 		c.firstRefreshFailure[fcid] = lastFailure
 	}
-	fmt.Println(time.Since(lastFailure))
 	return time.Since(lastFailure) < failedRefreshForgivenessPeriod
 }
 
