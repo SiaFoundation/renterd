@@ -41,7 +41,18 @@ func (tp txpool) AcceptTransactionSet(txns []types.Transaction) error {
 }
 
 func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
-	pool := tp.Transactions()
+	return unconfirmedParents(txn, tp.Transactions()), nil
+}
+
+func (tp txpool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
+	tp.tp.TransactionPoolSubscribe(subscriber)
+}
+
+func (tp txpool) Close() error {
+	return tp.tp.Close()
+}
+
+func unconfirmedParents(txn types.Transaction, pool []types.Transaction) []types.Transaction {
 	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
 	for i, txn := range pool {
 		for j := range txn.SiacoinOutputs {
@@ -58,15 +69,7 @@ func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction,
 			}
 		}
 	}
-	return parents, nil
-}
-
-func (tp txpool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
-	tp.tp.TransactionPoolSubscribe(subscriber)
-}
-
-func (tp txpool) Close() error {
-	return tp.tp.Close()
+	return parents
 }
 
 func NewTransactionPool(tp modules.TransactionPool) bus.TransactionPool {
