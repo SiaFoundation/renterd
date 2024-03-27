@@ -146,14 +146,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	syncInterval := time.Minute // TODO PJ: handle persistInterval <-> syncInterval
-	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, syncInterval, logger.Named("subscriber").Sugar())
+	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, cfg.SyncInterval, logger.Named("subscriber").Sugar())
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	unsubscribeFn, err := cs.Run()
-	if err != nil {
+	// start the chain subscriber
+	if err := cs.Run(); err != nil {
 		return nil, nil, nil, nil, err
 	}
 
@@ -186,7 +185,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	go s.Run()
 
 	shutdownFn := func(ctx context.Context) error {
-		unsubscribeFn()
 		return errors.Join(
 			cs.Close(),
 			l.Close(),
