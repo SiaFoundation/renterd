@@ -48,7 +48,6 @@ type (
 		RemoteAddr                    string        `yaml:"remoteAddr,omitempty"`
 		RemotePassword                string        `yaml:"remotePassword,omitempty"`
 		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"`
-		SyncInterval                  time.Duration `yaml:"syncInterval,omitempty"`
 		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry,omitempty"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
 	}

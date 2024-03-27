@@ -41,7 +41,6 @@ import (
 const (
 	testBusFlushInterval   = 100 * time.Millisecond
 	testBusPersistInterval = 100 * time.Millisecond
-	testBusSyncInterval    = time.Second
 )
 
 var (
@@ -893,7 +892,6 @@ func testBusCfg() node.BusConfig {
 			Bootstrap:                     false,
 			GatewayAddr:                   "127.0.0.1:0",
 			PersistInterval:               testBusPersistInterval,
-			SyncInterval:                  testBusSyncInterval,
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},

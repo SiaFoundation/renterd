@@ -48,23 +48,18 @@ type (
 		announcementMaxAge time.Duration
 		walletAddress      types.Address
 
-		syncInterval    time.Duration
 		syncSig         chan struct{}
 		csUnsubscribeFn func()
 
 		mu             sync.Mutex
 		closedChan     chan struct{}
-		syncTicker     *time.Ticker
 		knownContracts map[types.FileContractID]api.ContractState
 	}
 )
 
-func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, walletAddress types.Address, announcementMaxAge, syncInterval time.Duration, logger *zap.SugaredLogger) (_ *Subscriber, err error) {
+func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.SugaredLogger) (_ *Subscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
-	}
-	if syncInterval == 0 {
-		return nil, errors.New("syncInterval must be non-zero")
 	}
 
 	// create chain subscriber
@@ -76,8 +71,7 @@ func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, wall
 		announcementMaxAge: announcementMaxAge,
 		walletAddress:      walletAddress,
 
-		syncInterval: syncInterval,
-		syncSig:      make(chan struct{}, 1),
+		syncSig: make(chan struct{}, 1),
 
 		closedChan: make(chan struct{}),
 	}
@@ -107,15 +101,6 @@ func (cs *Subscriber) Close() error {
 	// unsubscribe from chain manager
 	cs.csUnsubscribeFn()
 
-	// stop ticker
-	if cs.syncTicker != nil {
-		cs.syncTicker.Stop()
-		select {
-		case <-cs.syncTicker.C:
-		default:
-		}
-	}
-
 	return nil
 }
 
@@ -128,19 +113,6 @@ func (cs *Subscriber) Run() (func(), error) {
 	if err := cs.sync(index); err != nil {
 		return nil, fmt.Errorf("failed to subscribe to chain manager: %w", err)
 	}
-
-	// start trigger loop
-	cs.syncTicker = time.NewTicker(cs.syncInterval)
-	go func() {
-		for {
-			select {
-			case <-cs.closedChan:
-				return
-			case <-cs.syncTicker.C:
-			}
-			cs.triggerSync()
-		}
-	}()
 
 	// start sync loop
 	go func() {

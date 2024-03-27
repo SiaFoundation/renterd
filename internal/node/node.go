@@ -146,7 +146,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, cfg.SyncInterval, logger.Named("subscriber").Sugar())
+	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("subscriber").Sugar())
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
