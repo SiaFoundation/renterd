@@ -357,7 +357,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		ID:            types.FileContractID(c.FCID),
 		HostIP:        c.Host.NetAddress,
 		HostKey:       types.PublicKey(c.Host.PublicKey),
-		SiamuxAddr:    c.Host.Settings.convert().SiamuxAddr(),
+		SiamuxAddr:    rhpv2.HostSettings(c.Host.Settings).SiamuxAddr(),
 
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
