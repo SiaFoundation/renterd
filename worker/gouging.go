@@ -272,7 +272,10 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	}
 
 	// check LatestRevisionCost - expect sane value
-	maxRevisionCost := gs.MaxRPCPrice.Add(gs.MaxDownloadPrice.Div64(1 << 40).Mul64(2048))
+	maxRevisionCost, overflow := gs.MaxRPCPrice.AddWithOverflow(gs.MaxDownloadPrice.Div64(1 << 40).Mul64(2048))
+	if overflow {
+		maxRevisionCost = types.MaxCurrency
+	}
 	if pt.LatestRevisionCost.Cmp(maxRevisionCost) > 0 {
 		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.LatestRevisionCost, maxRevisionCost)
 	}
