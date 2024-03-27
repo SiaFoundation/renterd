@@ -32,6 +32,7 @@ import (
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
+	"golang.org/x/sys/cpu"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm/logger"
@@ -485,6 +486,9 @@ func main() {
 	defer closeFn(context.Background())
 
 	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", build.NetworkName()), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
+	if runtime.GOARCH == "amd64" && !cpu.X86.HasAVX2 {
+		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
+	}
 
 	// configure database logger
 	dbLogCfg := cfg.Log.Database
