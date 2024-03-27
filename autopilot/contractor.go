@@ -1299,7 +1299,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []api.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1313,7 +1313,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// select unused hosts that passed a scan
-	var unused []hostdb.HostInfo
+	var unused []api.Host
 	var excluded, notcompletedscan int
 	for _, h := range hosts {
 		// filter out used hosts
@@ -1614,7 +1614,7 @@ func (c *contractor) tryPerformPruning(wp *workerPool) {
 	}()
 }
 
-func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host hostdb.HostInfo, metadata api.ContractMetadata, err error) {
+func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
 	// fetch the contract
 	metadata, err = c.ap.bus.Contract(ctx, fcid)
 	if err != nil {

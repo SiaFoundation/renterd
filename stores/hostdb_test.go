@@ -248,29 +248,162 @@ func TestSearchHosts(t *testing.T) {
 
 	// add 3 hosts
 	var hks []types.PublicKey
-	for i := 0; i < 3; i++ {
-		if err := ss.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("-%v-", i+1)); err != nil {
+	for i := 1; i <= 3; i++ {
+		if err := ss.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("foo.com:100%d", i)); err != nil {
 			t.Fatal(err)
 		}
 		hks = append(hks, types.PublicKey{byte(i)})
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
-	// Search by address.
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "1", nil, 0, -1); err != nil || len(hosts) != 1 {
+	// search all hosts
+	his, err := ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 3 {
+		t.Fatal("unexpected")
+	}
+
+	// assert offset & limit are taken into account
+	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	}
+	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 2 {
+		t.Fatal("unexpected")
+	}
+	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 3, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 0 {
+		t.Fatal("unexpected")
+	}
+
+	// assert address and key filters are taken into account
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "com:1001", nil, 0, -1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	// Filter by key.
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "", []types.PublicKey{hk1, hk2}, 0, -1); err != nil || len(hosts) != 2 {
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	// Filter by address and key.
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "1", []types.PublicKey{hk1, hk2}, 0, -1); err != nil || len(hosts) != 1 {
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "com:1002", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	// Filter by key and limit results
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "3", []types.PublicKey{hk3}, 0, -1); err != nil || len(hosts) != 1 {
+	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "com:1002", []types.PublicKey{hk1}, 0, -1); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
+	}
+
+	// assert host filter mode is taken into account
+	err = ss.UpdateHostBlocklistEntries(context.Background(), []string{"foo.com:1001"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAllowed, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 2 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{2}) || his[1].Host.PublicKey != (types.PublicKey{3}) {
+		t.Fatal("unexpected", his[0].Host.PublicKey, his[1].Host.PublicKey)
+	}
+	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeBlocked, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected")
+	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
+		t.Fatal("unexpected", his)
+	}
+	err = ss.UpdateHostBlocklistEntries(context.Background(), nil, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add two autopilots
+	ap1 := "ap1"
+	err = ss.UpdateAutopilot(context.Background(), api.Autopilot{ID: ap1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ap2 := "ap2"
+	err = ss.UpdateAutopilot(context.Background(), api.Autopilot{ID: ap2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add host checks, h1 gets ap1 and h2 gets both, h3 gets none
+	h1c := newTestHostCheck()
+	h1c.Score.Age = .1
+	err = ss.UpdateHostCheck(context.Background(), ap1, hk1, h1c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2c1 := newTestHostCheck()
+	h2c1.Score.Age = .21
+	err = ss.UpdateHostCheck(context.Background(), ap1, hk2, h2c1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2c2 := newTestHostCheck()
+	h2c2.Score.Age = .22
+	err = ss.UpdateHostCheck(context.Background(), ap2, hk2, h2c2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there are currently 3 checks
+	var cnt int64
+	err = ss.db.Model(&dbHostCheck{}).Count(&cnt).Error
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// fetch all hosts
+	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// assert h1 and h2 have the expected checks
+	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
+		t.Fatal("unexpected", c1, ok)
+	} else if c2, ok := his[1].Checks[ap1]; !ok || c2 != h2c1 {
+		t.Fatal("unexpected", c2, ok)
+	} else if c3, ok := his[1].Checks[ap2]; !ok || c3 != h2c2 {
+		t.Fatal("unexpected", c3, ok)
+	}
+
+	// assert cascade delete on host
+	err = ss.db.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.db.Model(&dbHostCheck{}).Count(&cnt).Error
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 2 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// assert cascade delete on autopilot
+	err = ss.db.Exec("DELETE FROM autopilots WHERE identifier IN (?,?)", ap1, ap2).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.db.Model(&dbHostCheck{}).Count(&cnt).Error
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 0 {
+		t.Fatal("unexpected", cnt)
 	}
 }
 
@@ -1155,4 +1288,36 @@ func newTestTransaction(ha modules.HostAnnouncement, sk types.PrivateKey) stypes
 	buf.Write(encoding.Marshal(ha))
 	buf.Write(encoding.Marshal(sk.SignHash(types.Hash256(crypto.HashObject(ha)))))
 	return stypes.Transaction{ArbitraryData: [][]byte{buf.Bytes()}}
+}
+
+func newTestHostCheck() api.HostCheck {
+	return api.HostCheck{
+
+		Gouging: api.HostGougingBreakdown{
+			ContractErr: "foo",
+			DownloadErr: "bar",
+			GougingErr:  "baz",
+			PruneErr:    "qux",
+			UploadErr:   "quuz",
+		},
+		Score: api.HostScoreBreakdown{
+			Age:              .1,
+			Collateral:       .2,
+			Interactions:     .3,
+			StorageRemaining: .4,
+			Uptime:           .5,
+			Version:          .6,
+			Prices:           .7,
+		},
+		Usability: api.HostUsabilityBreakdown{
+			Blocked:               true,
+			Offline:               true,
+			LowScore:              true,
+			RedundantIP:           true,
+			Gouging:               true,
+			NotAcceptingContracts: true,
+			NotAnnounced:          true,
+			NotCompletingScan:     true,
+		},
+	}
 }
