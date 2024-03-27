@@ -31,7 +31,7 @@ type (
 		// a bit, we currently use inline interfaces to avoid having to update the
 		// scanner tests with every interface change
 		bus interface {
-			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
+			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
 			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}

@@ -11,7 +11,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 )
 
@@ -176,7 +175,7 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 
 // isUsableHost returns whether the given host is usable along with a list of
 // reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) (bool, unusableHostResult) {
+func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) (bool, unusableHostResult) {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -255,8 +254,8 @@ func (c *contractor) isUsableContract(cfg api.AutopilotConfig, state state, ci c
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			usable = false
-			recoverable = true
+			usable = usable && c.shouldForgiveFailedRefresh(contract.ID)
+			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
 		}

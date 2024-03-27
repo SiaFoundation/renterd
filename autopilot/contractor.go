@@ -33,6 +33,10 @@ const (
 	// contract.
 	estimatedFileContractTransactionSetSize = 2048
 
+	// failedRenewalForgivenessPeriod is the amount of time we wait before
+	// punishing a contract for not being able to refresh
+	failedRefreshForgivenessPeriod = 24 * time.Hour
+
 	// leewayPctCandidateHosts is the leeway we apply when fetching candidate
 	// hosts, we fetch ~10% more than required
 	leewayPctCandidateHosts = 1.1
@@ -95,6 +99,8 @@ type (
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
 		revisionSubmissionBuffer  uint64
+
+		firstRefreshFailure map[types.FileContractID]time.Time
 
 		mu sync.Mutex
 
@@ -162,6 +168,8 @@ func newContractor(ap *Autopilot, revisionSubmissionBuffer uint64, revisionBroad
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
+		firstRefreshFailure: make(map[types.FileContractID]time.Time),
+
 		resolver: newIPResolver(ap.shutdownCtx, resolverLookupTimeout, ap.logger.Named("resolver")),
 	}
 }
@@ -227,6 +235,9 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 	contracts := resp.Contracts
 	c.logger.Infof("fetched %d contracts from the worker, took %v", len(resp.Contracts), time.Since(start))
+
+	// prune contract refresh failure map
+	c.pruneContractRefreshFailures(contracts)
 
 	// run revision broadcast
 	c.runRevisionBroadcast(ctx, w, contracts, isInCurrentSet)
@@ -1299,7 +1310,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
+func (c *contractor) candidateHosts(ctx context.Context, hosts []api.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostResult, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1313,7 +1324,7 @@ func (c *contractor) candidateHosts(ctx context.Context, hosts []hostdb.HostInfo
 	gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// select unused hosts that passed a scan
-	var unused []hostdb.HostInfo
+	var unused []api.Host
 	var excluded, notcompletedscan int
 	for _, h := range hosts {
 		// filter out used hosts
@@ -1614,7 +1625,7 @@ func (c *contractor) tryPerformPruning(wp *workerPool) {
 	}()
 }
 
-func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host hostdb.HostInfo, metadata api.ContractMetadata, err error) {
+func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
 	// fetch the contract
 	metadata, err = c.ap.bus.Contract(ctx, fcid)
 	if err != nil {
@@ -1624,6 +1635,27 @@ func (c *contractor) hostForContract(ctx context.Context, fcid types.FileContrac
 	// fetch the host
 	host, err = c.ap.bus.Host(ctx, metadata.HostKey)
 	return
+}
+
+func (c *contractor) pruneContractRefreshFailures(contracts []api.Contract) {
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range contracts {
+		contractMap[contract.ID] = struct{}{}
+	}
+	for fcid := range c.firstRefreshFailure {
+		if _, ok := contractMap[fcid]; !ok {
+			delete(c.firstRefreshFailure, fcid)
+		}
+	}
+}
+
+func (c *contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool {
+	lastFailure, exists := c.firstRefreshFailure[fcid]
+	if !exists {
+		lastFailure = time.Now()
+		c.firstRefreshFailure[fcid] = lastFailure
+	}
+	return time.Since(lastFailure) < failedRefreshForgivenessPeriod
 }
 
 func addLeeway(n uint64, pct float64) uint64 {

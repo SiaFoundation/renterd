@@ -114,12 +114,6 @@ type HostPriceTable struct {
 	Expiry time.Time `json:"expiry"`
 }
 
-// HostInfo extends the host type with a field indicating whether it is blocked or not.
-type HostInfo struct {
-	Host
-	Blocked bool `json:"blocked"`
-}
-
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {
 	return !h.LastAnnouncement.IsZero()

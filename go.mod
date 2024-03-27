@@ -4,7 +4,7 @@ go 1.21.6
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3
-	github.com/go-gormigrate/gormigrate/v2 v2.1.1
+	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.19.0
 	github.com/klauspost/reedsolomon v1.12.1
@@ -23,9 +23,9 @@ require (
 	golang.org/x/crypto v0.21.0
 	golang.org/x/term v0.18.0
 	gopkg.in/yaml.v3 v3.0.1
-	gorm.io/driver/mysql v1.5.4
+	gorm.io/driver/mysql v1.5.6
 	gorm.io/driver/sqlite v1.5.5
-	gorm.io/gorm v1.25.7
+	gorm.io/gorm v1.25.8
 	lukechampine.com/frand v1.4.2
 	moul.io/zapgorm2 v1.3.0
 )

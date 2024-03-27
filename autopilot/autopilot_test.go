@@ -14,9 +14,10 @@ import (
 
 func TestOptimiseGougingSetting(t *testing.T) {
 	// create 10 hosts that should all be usable
-	var hosts []hostdb.HostInfo
+	var hosts []api.Host
 	for i := 0; i < 10; i++ {
-		hosts = append(hosts, hostdb.HostInfo{
+		hosts = append(hosts, api.Host{
+
 			Host: hostdb.Host{
 				KnownSince: time.Unix(0, 0),
 				PriceTable: hostdb.HostPriceTable{
@@ -42,6 +43,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 				Scanned:          true,
 			},
 			Blocked: false,
+			Checks:  nil,
 		})
 	}
 

@@ -91,13 +91,13 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.HostInfo, error)
+		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -775,9 +775,9 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO: on the next major release
-	// - set defaults in handler
-	// - validate request params and return 400 if invalid
+	// TODO: on the next major release:
+	// - properly default search params
+	// - properly validate and return 400
 	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return

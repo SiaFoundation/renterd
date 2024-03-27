@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/hostdb"
@@ -42,6 +43,8 @@ type (
 		MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
 	}
 
+	// SearchHostsRequest is the request type for the /api/bus/search/hosts
+	// endpoint.
 	SearchHostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
@@ -108,4 +111,86 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 	if !opts.MaxLastScan.IsZero() {
 		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
 	}
+}
+
+type (
+	Host struct {
+		hostdb.Host
+		Blocked bool                 `json:"blocked"`
+		Checks  map[string]HostCheck `json:"checks"`
+	}
+
+	HostCheck struct {
+		Gouging   HostGougingBreakdown   `json:"gouging"`
+		Score     HostScoreBreakdown     `json:"score"`
+		Usability HostUsabilityBreakdown `json:"usability"`
+	}
+
+	HostGougingBreakdown struct {
+		ContractErr string `json:"contractErr"`
+		DownloadErr string `json:"downloadErr"`
+		GougingErr  string `json:"gougingErr"`
+		PruneErr    string `json:"pruneErr"`
+		UploadErr   string `json:"uploadErr"`
+	}
+
+	HostScoreBreakdown struct {
+		Age              float64 `json:"age"`
+		Collateral       float64 `json:"collateral"`
+		Interactions     float64 `json:"interactions"`
+		StorageRemaining float64 `json:"storageRemaining"`
+		Uptime           float64 `json:"uptime"`
+		Version          float64 `json:"version"`
+		Prices           float64 `json:"prices"`
+	}
+
+	HostUsabilityBreakdown struct {
+		Blocked               bool `json:"blocked"`
+		Offline               bool `json:"offline"`
+		LowScore              bool `json:"lowScore"`
+		RedundantIP           bool `json:"redundantIP"`
+		Gouging               bool `json:"gouging"`
+		NotAcceptingContracts bool `json:"notAcceptingContracts"`
+		NotAnnounced          bool `json:"notAnnounced"`
+		NotCompletingScan     bool `json:"notCompletingScan"`
+	}
+)
+
+func (sb HostScoreBreakdown) String() string {
+	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
+}
+
+func (hgb HostGougingBreakdown) Gouging() bool {
+	for _, err := range []string{
+		hgb.ContractErr,
+		hgb.DownloadErr,
+		hgb.GougingErr,
+		hgb.PruneErr,
+		hgb.UploadErr,
+	} {
+		if err != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (hgb HostGougingBreakdown) String() string {
+	var reasons []string
+	for _, errStr := range []string{
+		hgb.ContractErr,
+		hgb.DownloadErr,
+		hgb.GougingErr,
+		hgb.PruneErr,
+		hgb.UploadErr,
+	} {
+		if errStr != "" {
+			reasons = append(reasons, errStr)
+		}
+	}
+	return strings.Join(reasons, ";")
+}
+
+func (sb HostScoreBreakdown) Score() float64 {
+	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
 }
