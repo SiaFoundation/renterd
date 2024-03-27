@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -231,13 +230,9 @@ func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
 	}
 
 	// update the bus
-	logger := u.logger.With("uploadID", hex.EncodeToString(req.uploadID[:])).
-		With("root", req.sector.root).
-		With("fcid", fcid)
 	if err := u.os.AddUploadingSector(ctx, req.uploadID, fcid, req.sector.root); err != nil {
 		return 0, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
 	}
-	logger.Debug("added uploading sector")
 
 	// upload the sector
 	start := time.Now()
