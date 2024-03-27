@@ -152,7 +152,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 
 	// start the chain subscriber
-	if err := cs.Run(); err != nil {
+	unsubscribeFn, err := cs.Run()
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
@@ -185,6 +186,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	go s.Run()
 
 	shutdownFn := func(ctx context.Context) error {
+		unsubscribeFn()
 		return errors.Join(
 			cs.Close(),
 			l.Close(),

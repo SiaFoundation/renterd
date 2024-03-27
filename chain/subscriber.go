@@ -23,6 +23,7 @@ const (
 type (
 	ChainManager interface {
 		Tip() types.ChainIndex
+		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
 	}
 
@@ -118,14 +119,14 @@ func (cs *Subscriber) Close() error {
 	return nil
 }
 
-func (cs *Subscriber) Run() error {
+func (cs *Subscriber) Run() (func(), error) {
 	// perform an initial sync
 	index, err := cs.cs.ChainIndex()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := cs.sync(index); err != nil {
-		return fmt.Errorf("failed to subscribe to chain manager: %w", err)
+		return nil, fmt.Errorf("failed to subscribe to chain manager: %w", err)
 	}
 
 	// start trigger loop
@@ -166,7 +167,7 @@ func (cs *Subscriber) Run() error {
 	cs.triggerSync()
 
 	// trigger a sync on reorgs
-	return nil
+	return cs.cm.OnReorg(func(_ types.ChainIndex) { cs.triggerSync() }), nil
 }
 
 func (cs *Subscriber) applyContractUpdates(cu *Update, cau chain.ApplyUpdate) {
