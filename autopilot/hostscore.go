@@ -9,13 +9,12 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/siad/build"
 )
 
 const smallestValidScore = math.SmallestNonzeroFloat64
 
-func hostScore(cfg api.AutopilotConfig, h hostdb.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
 	// every single host.
@@ -92,7 +91,7 @@ func storageRemainingScore(h rhpv2.HostSettings, storedData uint64, allocationPe
 	return math.Pow(storageRatio, 2.0)
 }
 
-func ageScore(h hostdb.Host) float64 {
+func ageScore(h api.Host) float64 {
 	// sanity check
 	if h.KnownSince.IsZero() {
 		return 0
@@ -179,14 +178,14 @@ func collateralScore(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, allocatio
 	}
 }
 
-func interactionScore(h hostdb.Host) float64 {
+func interactionScore(h api.Host) float64 {
 	success, fail := 30.0, 1.0
 	success += h.Interactions.SuccessfulInteractions
 	fail += h.Interactions.FailedInteractions
 	return math.Pow(success/(success+fail), 10)
 }
 
-func uptimeScore(h hostdb.Host) float64 {
+func uptimeScore(h api.Host) float64 {
 	secondToLastScanSuccess := h.Interactions.SecondToLastScanSuccess
 	lastScanSuccess := h.Interactions.LastScanSuccess
 	uptime := h.Interactions.Uptime
@@ -258,7 +257,7 @@ func versionScore(settings rhpv2.HostSettings) float64 {
 // contractPriceForScore returns the contract price of the host used for
 // scoring. Since we don't know whether rhpv2 or rhpv3 are used, we return the
 // bigger one for a pesimistic score.
-func contractPriceForScore(h hostdb.Host) types.Currency {
+func contractPriceForScore(h api.Host) types.Currency {
 	cp := h.Settings.ContractPrice
 	if cp.Cmp(h.PriceTable.ContractPrice) > 0 {
 		cp = h.PriceTable.ContractPrice
@@ -285,26 +284,26 @@ func sectorUploadCost(pt rhpv3.HostPriceTable, duration uint64) types.Currency {
 	return uploadSectorCostRHPv3
 }
 
-func uploadCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+func uploadCostForScore(cfg api.AutopilotConfig, h api.Host, bytes uint64) types.Currency {
 	uploadSectorCostRHPv3 := sectorUploadCost(h.PriceTable.HostPriceTable, cfg.Contracts.Period)
 	numSectors := bytesToSectors(bytes)
 	return uploadSectorCostRHPv3.Mul64(numSectors)
 }
 
-func downloadCostForScore(h hostdb.Host, bytes uint64) types.Currency {
+func downloadCostForScore(h api.Host, bytes uint64) types.Currency {
 	rsc := h.PriceTable.BaseCost().Add(h.PriceTable.ReadSectorCost(rhpv2.SectorSize))
 	downloadSectorCostRHPv3, _ := rsc.Total()
 	numSectors := bytesToSectors(bytes)
 	return downloadSectorCostRHPv3.Mul64(numSectors)
 }
 
-func storageCostForScore(cfg api.AutopilotConfig, h hostdb.Host, bytes uint64) types.Currency {
+func storageCostForScore(cfg api.AutopilotConfig, h api.Host, bytes uint64) types.Currency {
 	storeSectorCostRHPv3 := sectorStorageCost(h.PriceTable.HostPriceTable, cfg.Contracts.Period)
 	numSectors := bytesToSectors(bytes)
 	return storeSectorCostRHPv3.Mul64(numSectors)
 }
 
-func hostPeriodCostForScore(h hostdb.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
+func hostPeriodCostForScore(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
 	// compute how much data we upload, download and store.
 	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
 	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))

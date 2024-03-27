@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
@@ -54,7 +53,7 @@ type Bus interface {
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
-	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
+	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
@@ -701,7 +700,7 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	check, ok := hi.Checks[ap.id]
 	if ok {
 		jc.Encode(api.HostResponse{
-			Host: hi.Host,
+			Host: hi,
 			Checks: &api.HostChecks{
 				Gouging:          check.Gouging.Gouging(),
 				GougingBreakdown: check.Gouging,
@@ -714,7 +713,7 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(api.HostResponse{Host: hi.Host})
+	jc.Encode(api.HostResponse{Host: hi})
 }
 
 func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
@@ -747,7 +746,7 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 	for i, host := range hosts {
 		if check, ok := host.Checks[ap.id]; ok {
 			resps[i] = api.HostResponse{
-				Host: host.Host,
+				Host: host,
 				Checks: &api.HostChecks{
 					Gouging:          check.Gouging.Gouging(),
 					GougingBreakdown: check.Gouging,
@@ -758,7 +757,7 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 				},
 			}
 		} else {
-			resps[i] = api.HostResponse{Host: host.Host}
+			resps[i] = api.HostResponse{Host: host}
 		}
 	}
 	jc.Encode(resps)

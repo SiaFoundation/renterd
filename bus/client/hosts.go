@@ -8,7 +8,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 )
 
 // Host returns information about a particular host known to the server.
@@ -39,7 +38,7 @@ func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []a
 
 // HostsForScanning returns 'limit' host addresses at given 'offset' which
 // haven't been scanned after lastScan.
-func (c *Client) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) (hosts []hostdb.HostAddress, err error) {
+func (c *Client) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) (hosts []api.HostAddress, err error) {
 	values := url.Values{}
 	opts.Apply(values)
 	err = c.c.WithContext(ctx).GET("/hosts/scanning?"+values.Encode(), &hosts)
@@ -47,7 +46,7 @@ func (c *Client) HostsForScanning(ctx context.Context, opts api.HostsForScanning
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) (err error) {
+func (c *Client) RecordHostScans(ctx context.Context, scans []api.HostScan) (err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/scans", api.HostsScanRequest{
 		Scans: scans,
 	}, nil)
@@ -55,7 +54,7 @@ func (c *Client) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) (
 }
 
 // RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordPriceTables(ctx context.Context, priceTableUpdates []hostdb.PriceTableUpdate) (err error) {
+func (c *Client) RecordPriceTables(ctx context.Context, priceTableUpdates []api.HostPriceTableUpdate) (err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/pricetables", api.HostsPriceTablesRequest{
 		PriceTableUpdates: priceTableUpdates,
 	}, nil)

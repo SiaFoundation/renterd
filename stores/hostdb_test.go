@@ -148,7 +148,7 @@ func TestSQLHostDB(t *testing.T) {
 }
 
 func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
-	return s.RecordHostScans(context.Background(), []hostdb.HostScan{
+	return s.RecordHostScans(context.Background(), []api.HostScan{
 		{
 			HostKey:   hk,
 			Settings:  settings,
@@ -308,15 +308,15 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(his) != 2 {
 		t.Fatal("unexpected")
-	} else if his[0].Host.PublicKey != (types.PublicKey{2}) || his[1].Host.PublicKey != (types.PublicKey{3}) {
-		t.Fatal("unexpected", his[0].Host.PublicKey, his[1].Host.PublicKey)
+	} else if his[0].PublicKey != (types.PublicKey{2}) || his[1].PublicKey != (types.PublicKey{3}) {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey)
 	}
 	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
 		t.Fatal("unexpected")
-	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
+	} else if his[0].PublicKey != (types.PublicKey{1}) {
 		t.Fatal("unexpected", his)
 	}
 	err = ss.UpdateHostBlocklistEntries(context.Background(), nil, nil, true)
@@ -422,7 +422,7 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(his) != 1 {
 		t.Fatal("unexpected", len(his))
-	} else if his[0].Host.PublicKey != hk2 {
+	} else if his[0].PublicKey != hk2 {
 		t.Fatal("unexpected")
 	}
 
@@ -476,7 +476,7 @@ func TestRecordScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.Interactions != (hostdb.Interactions{}) {
+	if host.Interactions != (api.HostInteractions{}) {
 		t.Fatal("mismatch")
 	}
 	if host.Settings != (rhpv2.HostSettings{}) {
@@ -495,7 +495,7 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
-	if err := ss.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -510,7 +510,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("wrong time")
 	}
 	host.Interactions.LastScan = time.Time{}
-	if expected := (hostdb.Interactions{
+	if expected := (api.HostInteractions{
 		TotalScans:              1,
 		LastScan:                time.Time{},
 		LastScanSuccess:         true,
@@ -528,7 +528,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := ss.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -540,7 +540,7 @@ func TestRecordScan(t *testing.T) {
 	}
 	host.Interactions.LastScan = time.Time{}
 	uptime += secondScanTime.Sub(firstScanTime)
-	if host.Interactions != (hostdb.Interactions{
+	if host.Interactions != (api.HostInteractions{
 		TotalScans:              2,
 		LastScan:                time.Time{},
 		LastScanSuccess:         true,
@@ -555,7 +555,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -567,7 +567,7 @@ func TestRecordScan(t *testing.T) {
 	}
 	host.Interactions.LastScan = time.Time{}
 	downtime += thirdScanTime.Sub(secondScanTime)
-	if host.Interactions != (hostdb.Interactions{
+	if host.Interactions != (api.HostInteractions{
 		TotalScans:              3,
 		LastScan:                time.Time{},
 		LastScanSuccess:         false,
@@ -617,7 +617,7 @@ func TestRemoveHosts(t *testing.T) {
 	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, false)
 
 	// record interactions
-	if err := ss.RecordHostScans(context.Background(), []hostdb.HostScan{hi1, hi2}); err != nil {
+	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -645,7 +645,7 @@ func TestRemoveHosts(t *testing.T) {
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
 	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, false)
-	if err := ss.RecordHostScans(context.Background(), []hostdb.HostScan{hi3}); err != nil {
+	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1299,8 +1299,8 @@ func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) hostdb.HostScan {
-	return hostdb.HostScan{
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) api.HostScan {
+	return api.HostScan{
 		HostKey:   hk,
 		Success:   success,
 		Timestamp: scanTime,

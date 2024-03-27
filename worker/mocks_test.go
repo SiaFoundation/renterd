@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -267,10 +266,8 @@ func newHostMock(hk types.PublicKey) *hostMock {
 	return &hostMock{
 		hk: hk,
 		hi: api.Host{
-			Host: hostdb.Host{
-				PublicKey: hk,
-				Scanned:   true,
-			},
+			PublicKey: hk,
+			Scanned:   true,
 		},
 	}
 }
@@ -298,11 +295,11 @@ func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (api
 	return h.hi, nil
 }
 
-func (hs *hostStoreMock) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error {
+func (hs *hostStoreMock) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
 	return nil
 }
 
-func (hs *hostStoreMock) RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+func (hs *hostStoreMock) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
 	return nil
 }
 
