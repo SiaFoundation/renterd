@@ -148,7 +148,7 @@ func TestSQLHostDB(t *testing.T) {
 }
 
 func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
-	return s.RecordHostScans(context.Background(), []hostdb.HostScan{
+	return s.RecordHostScans(context.Background(), []api.HostScan{
 		{
 			HostKey:   hk,
 			Settings:  settings,
@@ -257,7 +257,7 @@ func TestSearchHosts(t *testing.T) {
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// search all hosts
-	his, err := ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
+	his, err := ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 3 {
@@ -265,19 +265,19 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert offset & limit are taken into account
-	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, 1)
+	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
 		t.Fatal("unexpected")
 	}
-	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 1, 2)
+	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 2 {
 		t.Fatal("unexpected")
 	}
-	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 3, 1)
+	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 3, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 0 {
@@ -285,16 +285,16 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert address and key filters are taken into account
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "com:1001", nil, 0, -1); err != nil || len(hosts) != 1 {
+	if hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "com:1001", nil, 0, -1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 2 {
+	if hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "com:1002", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 1 {
+	if hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "com:1002", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := ss.SearchHosts(ctx, api.HostFilterModeAll, "com:1002", []types.PublicKey{hk1}, 0, -1); err != nil || len(hosts) != 0 {
+	if hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "com:1002", []types.PublicKey{hk1}, 0, -1); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
 
@@ -303,20 +303,20 @@ func TestSearchHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAllowed, "", nil, 0, -1)
+	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 2 {
 		t.Fatal("unexpected")
-	} else if his[0].Host.PublicKey != (types.PublicKey{2}) || his[1].Host.PublicKey != (types.PublicKey{3}) {
-		t.Fatal("unexpected", his[0].Host.PublicKey, his[1].Host.PublicKey)
+	} else if his[0].PublicKey != (types.PublicKey{2}) || his[1].PublicKey != (types.PublicKey{3}) {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey)
 	}
-	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeBlocked, "", nil, 0, -1)
+	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
 		t.Fatal("unexpected")
-	} else if his[0].Host.PublicKey != (types.PublicKey{1}) {
+	} else if his[0].PublicKey != (types.PublicKey{1}) {
 		t.Fatal("unexpected", his)
 	}
 	err = ss.UpdateHostBlocklistEntries(context.Background(), nil, nil, true)
@@ -366,7 +366,7 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// fetch all hosts
-	his, err = ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
+	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if cnt != 3 {
@@ -380,6 +380,57 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal("unexpected", c2, ok)
 	} else if c3, ok := his[1].Checks[ap2]; !ok || c3 != h2c2 {
 		t.Fatal("unexpected", c3, ok)
+	}
+
+	// assert autopilot filter is taken into account
+	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatal("unexpected", cnt)
+	}
+
+	// assert h1 and h2 have the expected checks
+	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
+		t.Fatal("unexpected", c1, ok)
+	} else if c2, ok := his[1].Checks[ap1]; !ok || c2 != h2c1 {
+		t.Fatal("unexpected", c2, ok)
+	} else if _, ok := his[1].Checks[ap2]; ok {
+		t.Fatal("unexpected")
+	}
+
+	// assert usability filter is taken into account
+	h2c1.Usability.RedundantIP = true
+	err = ss.UpdateHostCheck(context.Background(), ap1, hk2, h2c1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected", len(his))
+	}
+
+	// assert h1 has the expected checks
+	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
+		t.Fatal("unexpected", c1, ok)
+	}
+
+	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 1 {
+		t.Fatal("unexpected", len(his))
+	} else if his[0].PublicKey != hk2 {
+		t.Fatal("unexpected")
+	}
+
+	// assert only ap1 check is there
+	if _, ok := his[0].Checks[ap1]; !ok {
+		t.Fatal("unexpected")
+	} else if _, ok := his[0].Checks[ap2]; ok {
+		t.Fatal("unexpected")
 	}
 
 	// assert cascade delete on host
@@ -425,7 +476,7 @@ func TestRecordScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.Interactions != (hostdb.Interactions{}) {
+	if host.Interactions != (api.HostInteractions{}) {
 		t.Fatal("mismatch")
 	}
 	if host.Settings != (rhpv2.HostSettings{}) {
@@ -444,7 +495,7 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
-	if err := ss.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -459,7 +510,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("wrong time")
 	}
 	host.Interactions.LastScan = time.Time{}
-	if expected := (hostdb.Interactions{
+	if expected := (api.HostInteractions{
 		TotalScans:              1,
 		LastScan:                time.Time{},
 		LastScanSuccess:         true,
@@ -477,7 +528,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := ss.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -489,7 +540,7 @@ func TestRecordScan(t *testing.T) {
 	}
 	host.Interactions.LastScan = time.Time{}
 	uptime += secondScanTime.Sub(firstScanTime)
-	if host.Interactions != (hostdb.Interactions{
+	if host.Interactions != (api.HostInteractions{
 		TotalScans:              2,
 		LastScan:                time.Time{},
 		LastScanSuccess:         true,
@@ -504,7 +555,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []hostdb.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -516,7 +567,7 @@ func TestRecordScan(t *testing.T) {
 	}
 	host.Interactions.LastScan = time.Time{}
 	downtime += thirdScanTime.Sub(secondScanTime)
-	if host.Interactions != (hostdb.Interactions{
+	if host.Interactions != (api.HostInteractions{
 		TotalScans:              3,
 		LastScan:                time.Time{},
 		LastScanSuccess:         false,
@@ -566,7 +617,7 @@ func TestRemoveHosts(t *testing.T) {
 	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, false)
 
 	// record interactions
-	if err := ss.RecordHostScans(context.Background(), []hostdb.HostScan{hi1, hi2}); err != nil {
+	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -594,7 +645,7 @@ func TestRemoveHosts(t *testing.T) {
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
 	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, false)
-	if err := ss.RecordHostScans(context.Background(), []hostdb.HostScan{hi3}); err != nil {
+	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -812,21 +863,21 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	assertSearch := func(total, allowed, blocked int) error {
 		t.Helper()
-		hosts, err := ss.SearchHosts(context.Background(), api.HostFilterModeAll, "", nil, 0, -1)
+		hosts, err := ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 		if err != nil {
 			return err
 		}
 		if len(hosts) != total {
 			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
 		}
-		hosts, err = ss.SearchHosts(context.Background(), api.HostFilterModeAllowed, "", nil, 0, -1)
+		hosts, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
 		if err != nil {
 			return err
 		}
 		if len(hosts) != allowed {
 			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
 		}
-		hosts, err = ss.SearchHosts(context.Background(), api.HostFilterModeBlocked, "", nil, 0, -1)
+		hosts, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
 		if err != nil {
 			return err
 		}
@@ -1248,8 +1299,8 @@ func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) hostdb.HostScan {
-	return hostdb.HostScan{
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) api.HostScan {
+	return api.HostScan{
 		HostKey:   hk,
 		Success:   success,
 		Timestamp: scanTime,
@@ -1310,14 +1361,14 @@ func newTestHostCheck() api.HostCheck {
 			Prices:           .7,
 		},
 		Usability: api.HostUsabilityBreakdown{
-			Blocked:               true,
-			Offline:               true,
-			LowScore:              true,
-			RedundantIP:           true,
-			Gouging:               true,
-			NotAcceptingContracts: true,
-			NotAnnounced:          true,
-			NotCompletingScan:     true,
+			Blocked:               false,
+			Offline:               false,
+			LowScore:              false,
+			RedundantIP:           false,
+			Gouging:               false,
+			NotAcceptingContracts: false,
+			NotAnnounced:          false,
+			NotCompletingScan:     false,
 		},
 	}
 }

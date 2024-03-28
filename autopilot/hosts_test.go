@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
 )
 
@@ -18,7 +18,7 @@ func TestScoredHostsRandSelectByScore(t *testing.T) {
 
 	var hosts scoredHosts
 	for hk, score := range hostToScores {
-		hosts = append(hosts, scoredHost{score: score, host: hostdb.Host{PublicKey: hk}})
+		hosts = append(hosts, scoredHost{score: score, host: api.Host{PublicKey: hk}})
 	}
 
 	for i := 0; i < 1000; i++ {
@@ -55,8 +55,8 @@ func TestScoredHostsRandSelectByScore(t *testing.T) {
 	// assert select is random on equal inputs
 	counts := make([]int, 2)
 	hosts = scoredHosts{
-		{score: .1, host: hostdb.Host{PublicKey: types.PublicKey{1}}},
-		{score: .1, host: hostdb.Host{PublicKey: types.PublicKey{2}}},
+		{score: .1, host: api.Host{PublicKey: types.PublicKey{1}}},
+		{score: .1, host: api.Host{PublicKey: types.PublicKey{2}}},
 	}
 	for i := 0; i < 100; i++ {
 		if hosts.randSelectByScore(1)[0].host.PublicKey == (types.PublicKey{1}) {

@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -106,8 +105,8 @@ type (
 	}
 
 	HostStore interface {
-		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
+		RecordHostScans(ctx context.Context, scans []api.HostScan) error
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -355,9 +354,9 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 
 	// defer interaction recording
 	var err error
-	var hpt hostdb.HostPriceTable
+	var hpt api.HostPriceTable
 	defer func() {
-		w.bus.RecordPriceTables(ctx, []hostdb.PriceTableUpdate{
+		w.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
 			{
 				HostKey:    rptr.HostKey,
 				Success:    isSuccessfulInteraction(err),
@@ -1545,7 +1544,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// record scans that timed out.
 	recordCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	scanErr := w.bus.RecordHostScans(recordCtx, []hostdb.HostScan{
+	scanErr := w.bus.RecordHostScans(recordCtx, []api.HostScan{
 		{
 			HostKey:    hostKey,
 			Success:    isSuccessfulInteraction(err),

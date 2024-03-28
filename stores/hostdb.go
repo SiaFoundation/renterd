@@ -41,7 +41,7 @@ var (
 )
 
 type (
-	// dbHost defines a hostdb.Interaction as persisted in the DB. Deleting a
+	// dbHost defines a api.Interaction as persisted in the DB. Deleting a
 	// host from the db will cascade the deletion and also delete the
 	// corresponding announcements and interactions with that host.
 	//
@@ -265,31 +265,29 @@ func (h dbHost) convert(blocked bool) api.Host {
 		checks[check.DBAutopilot.Identifier] = check.convert()
 	}
 	return api.Host{
-		Host: hostdb.Host{
-			KnownSince:       h.CreatedAt,
-			LastAnnouncement: h.LastAnnouncement,
-			NetAddress:       h.NetAddress,
-			Interactions: hostdb.Interactions{
-				TotalScans:              h.TotalScans,
-				LastScan:                lastScan,
-				LastScanSuccess:         h.LastScanSuccess,
-				SecondToLastScanSuccess: h.SecondToLastScanSuccess,
-				Uptime:                  h.Uptime,
-				Downtime:                h.Downtime,
-				SuccessfulInteractions:  h.SuccessfulInteractions,
-				FailedInteractions:      h.FailedInteractions,
-				LostSectors:             h.LostSectors,
-			},
-			PriceTable: hostdb.HostPriceTable{
-				HostPriceTable: h.PriceTable.convert(),
-				Expiry:         h.PriceTableExpiry.Time,
-			},
-			PublicKey: types.PublicKey(h.PublicKey),
-			Scanned:   h.Scanned,
-			Settings:  rhpv2.HostSettings(h.Settings),
+		KnownSince:       h.CreatedAt,
+		LastAnnouncement: h.LastAnnouncement,
+		NetAddress:       h.NetAddress,
+		Interactions: api.HostInteractions{
+			TotalScans:              h.TotalScans,
+			LastScan:                lastScan,
+			LastScanSuccess:         h.LastScanSuccess,
+			SecondToLastScanSuccess: h.SecondToLastScanSuccess,
+			Uptime:                  h.Uptime,
+			Downtime:                h.Downtime,
+			SuccessfulInteractions:  h.SuccessfulInteractions,
+			FailedInteractions:      h.FailedInteractions,
+			LostSectors:             h.LostSectors,
 		},
-		Blocked: blocked,
-		Checks:  checks,
+		PriceTable: api.HostPriceTable{
+			HostPriceTable: h.PriceTable.convert(),
+			Expiry:         h.PriceTableExpiry.Time,
+		},
+		PublicKey: types.PublicKey(h.PublicKey),
+		Scanned:   h.Scanned,
+		Settings:  rhpv2.HostSettings(h.Settings),
+		Blocked:   blocked,
+		Checks:    checks,
 	}
 }
 
@@ -430,25 +428,18 @@ func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 
 // Host returns information about a host.
 func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
-	var h dbHost
-
-	tx := ss.db.
-		WithContext(ctx).
-		Where(&dbHost{PublicKey: publicKey(hostKey)}).
-		Preload("Allowlist").
-		Preload("Blocklist").
-		Take(&h)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+	hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
+	if err != nil {
+		return api.Host{}, err
+	} else if len(hosts) == 0 {
 		return api.Host{}, api.ErrHostNotFound
-	} else if tx.Error != nil {
-		return api.Host{}, tx.Error
+	} else {
+		return hosts[0], nil
 	}
-
-	return h.convert(ss.isBlocked(h)), nil
 }
 
 func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
-	err = ss.db.Transaction(func(tx *gorm.DB) error {
+	err = ss.retryTransaction(ctx, (func(tx *gorm.DB) error {
 		// fetch ap id
 		var apID uint
 		if err := tx.
@@ -509,12 +500,12 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 				GougingUploadErr:   hc.Gouging.UploadErr,
 			}).
 			Error
-	})
+	}))
 	return
 }
 
 // HostsForScanning returns the address of hosts for scanning.
-func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -523,7 +514,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 		PublicKey  publicKey `gorm:"unique;index;NOT NULL"`
 		NetAddress string
 	}
-	var hostAddresses []hostdb.HostAddress
+	var hostAddresses []api.HostAddress
 
 	err := ss.db.
 		WithContext(ctx).
@@ -534,7 +525,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 		Order("last_scan ASC").
 		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, h := range hosts {
-				hostAddresses = append(hostAddresses, hostdb.HostAddress{
+				hostAddresses = append(hostAddresses, api.HostAddress{
 					PublicKey:  types.PublicKey(h.PublicKey),
 					NetAddress: h.NetAddress,
 				})
@@ -548,7 +539,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -566,9 +557,11 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 	query := ss.db.
 		Model(&dbHost{}).
 		Scopes(
+			autopilotFilter(autopilotID),
 			hostFilter(filterMode, ss.hasAllowlist(), ss.hasBlocklist()),
 			hostNetAddress(addressContains),
 			hostPublicKey(keyIn),
+			usabilityFilter(autopilotID, usabilityMode),
 		)
 
 	// preload allowlist and blocklist
@@ -577,9 +570,6 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 			Preload("Allowlist").
 			Preload("Blocklist")
 	}
-
-	// preload host checks
-	query = query.Preload("Checks.DBAutopilot")
 
 	var hosts []api.Host
 	var fullHosts []dbHost
@@ -607,7 +597,7 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 
 // Hosts returns non-blocked hosts at given offset and limit.
 func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
-	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
+	return ss.SearchHosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
@@ -770,7 +760,7 @@ func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err 
 	return
 }
 
-func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error {
+func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
 	if len(scans) == 0 {
 		return nil // nothing to do
 	}
@@ -891,7 +881,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 	})
 }
 
-func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
 	if len(priceTableUpdate) == 0 {
 		return nil // nothing to do
 	}
@@ -1028,6 +1018,17 @@ func hostPublicKey(keyIn []types.PublicKey) func(*gorm.DB) *gorm.DB {
 	}
 }
 
+// autopilotFilter can be used as a scope to filter host checks based on their
+// autopilot
+func autopilotFilter(autopilotID string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if autopilotID == "" {
+			return db.Preload("Checks.DBAutopilot")
+		}
+		return db.Preload("Checks.DBAutopilot", "identifier = ?", autopilotID)
+	}
+}
+
 // hostFilter can be used as a scope to filter hosts based on their filter mode,
 // returning either all, allowed or blocked hosts.
 func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.DB) *gorm.DB {
@@ -1053,6 +1054,26 @@ func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.D
 				db = db.Where("1 = 0")
 			}
 		case api.HostFilterModeAll:
+			// do nothing
+		}
+		return db
+	}
+}
+
+func usabilityFilter(autopilotID, usabilityMode string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		switch usabilityMode {
+		case api.UsabilityFilterModeUsable:
+			db = db.
+				Joins("INNER JOIN host_checks hc on hc.db_host_id = hosts.id").
+				Joins("INNER JOIN autopilots a on a.id = hc.db_autopilot_id AND a.identifier = ?", autopilotID).
+				Where("hc.usability_blocked = ? AND hc.usability_offline = ? AND hc.usability_low_score = ? AND hc.usability_redundant_ip = ? AND hc.usability_gouging = ? AND hc.usability_not_accepting_contracts = ? AND hc.usability_not_announced = ? AND hc.usability_not_completing_scan = ?", false, false, false, false, false, false, false, false)
+		case api.UsabilityFilterModeUnusable:
+			db = db.
+				Joins("INNER JOIN host_checks hc on hc.db_host_id = hosts.id").
+				Joins("INNER JOIN autopilots a on a.id = hc.db_autopilot_id AND a.identifier = ?", autopilotID).
+				Where("hc.usability_blocked = ? OR hc.usability_offline = ? OR hc.usability_low_score = ? OR hc.usability_redundant_ip = ? OR hc.usability_gouging = ? OR hc.usability_not_accepting_contracts = ? OR hc.usability_not_announced = ? OR hc.usability_not_completing_scan = ?", true, true, true, true, true, true, true, true)
+		case api.UsabilityFilterModeAll:
 			// do nothing
 		}
 		return db
