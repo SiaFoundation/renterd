@@ -160,63 +160,6 @@ type (
 )
 
 // convert converts hostSettings to rhp.HostSettings
-func (s hostSettings) convert() rhpv2.HostSettings {
-	return rhpv2.HostSettings{
-		AcceptingContracts:         s.AcceptingContracts,
-		MaxDownloadBatchSize:       s.MaxDownloadBatchSize,
-		MaxDuration:                s.MaxDuration,
-		MaxReviseBatchSize:         s.MaxReviseBatchSize,
-		NetAddress:                 s.NetAddress,
-		RemainingStorage:           s.RemainingStorage,
-		SectorSize:                 s.SectorSize,
-		TotalStorage:               s.TotalStorage,
-		Address:                    s.Address,
-		WindowSize:                 s.WindowSize,
-		Collateral:                 s.Collateral,
-		MaxCollateral:              s.MaxCollateral,
-		BaseRPCPrice:               s.BaseRPCPrice,
-		ContractPrice:              s.ContractPrice,
-		DownloadBandwidthPrice:     s.DownloadBandwidthPrice,
-		SectorAccessPrice:          s.SectorAccessPrice,
-		StoragePrice:               s.StoragePrice,
-		UploadBandwidthPrice:       s.UploadBandwidthPrice,
-		EphemeralAccountExpiry:     s.EphemeralAccountExpiry,
-		MaxEphemeralAccountBalance: s.MaxEphemeralAccountBalance,
-		RevisionNumber:             s.RevisionNumber,
-		Version:                    s.Version,
-		SiaMuxPort:                 s.SiaMuxPort,
-	}
-}
-
-func convertHostSettings(settings rhpv2.HostSettings) hostSettings {
-	return hostSettings{
-		AcceptingContracts:         settings.AcceptingContracts,
-		MaxDownloadBatchSize:       settings.MaxDownloadBatchSize,
-		MaxDuration:                settings.MaxDuration,
-		MaxReviseBatchSize:         settings.MaxReviseBatchSize,
-		NetAddress:                 settings.NetAddress,
-		RemainingStorage:           settings.RemainingStorage,
-		SectorSize:                 settings.SectorSize,
-		TotalStorage:               settings.TotalStorage,
-		Address:                    settings.Address,
-		WindowSize:                 settings.WindowSize,
-		Collateral:                 settings.Collateral,
-		MaxCollateral:              settings.MaxCollateral,
-		BaseRPCPrice:               settings.BaseRPCPrice,
-		ContractPrice:              settings.ContractPrice,
-		DownloadBandwidthPrice:     settings.DownloadBandwidthPrice,
-		SectorAccessPrice:          settings.SectorAccessPrice,
-		StoragePrice:               settings.StoragePrice,
-		UploadBandwidthPrice:       settings.UploadBandwidthPrice,
-		EphemeralAccountExpiry:     settings.EphemeralAccountExpiry,
-		MaxEphemeralAccountBalance: settings.MaxEphemeralAccountBalance,
-		RevisionNumber:             settings.RevisionNumber,
-		Version:                    settings.Version,
-		SiaMuxPort:                 settings.SiaMuxPort,
-	}
-}
-
-// convert converts hostSettings to rhp.HostSettings
 func (pt hostPriceTable) convert() rhpv3.HostPriceTable {
 	return rhpv3.HostPriceTable{
 		UID:                          pt.UID,
@@ -342,7 +285,7 @@ func (h dbHost) convert(blocked bool) api.Host {
 		},
 		PublicKey: types.PublicKey(h.PublicKey),
 		Scanned:   h.Scanned,
-		Settings:  h.Settings.convert(),
+		Settings:  rhpv2.HostSettings(h.Settings),
 		Blocked:   blocked,
 		Checks:    checks,
 	}
@@ -876,7 +819,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) e
 				// overwrite the NetAddress in the settings with the one we
 				// received through the host announcement
 				scan.Settings.NetAddress = host.NetAddress
-				host.Settings = convertHostSettings(scan.Settings)
+				host.Settings = hostSettings(scan.Settings)
 
 				// scans can only update the price table if the current
 				// pricetable is expired anyway, ensuring scans never

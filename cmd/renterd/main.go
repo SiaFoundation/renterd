@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -68,8 +69,9 @@ Usage:
 
 var (
 	cfg = config.Config{
-		Directory: ".",
-		Seed:      os.Getenv("RENTERD_SEED"),
+		Directory:     ".",
+		Seed:          os.Getenv("RENTERD_SEED"),
+		AutoOpenWebUI: true,
 		HTTP: config.HTTP{
 			Address:  build.DefaultAPIAddress,
 			Password: os.Getenv("RENTERD_API_PASSWORD"),
@@ -143,14 +145,8 @@ var (
 			KeypairsV4:  nil,
 		},
 	}
-	seed types.PrivateKey
+	disableStdin bool
 )
-
-func check(context string, err error) {
-	if err != nil {
-		log.Fatalf("%v: %v", context, err)
-	}
-}
 
 func mustLoadAPIPassword() {
 	if cfg.HTTP.Password != "" {
@@ -164,25 +160,6 @@ func mustLoadAPIPassword() {
 		log.Fatal(err)
 	}
 	cfg.HTTP.Password = string(pw)
-}
-
-func getSeed() types.PrivateKey {
-	if seed == nil {
-		phrase := cfg.Seed
-		if phrase == "" {
-			fmt.Print("Enter seed: ")
-			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-			check("Could not read seed phrase:", err)
-			fmt.Println()
-			phrase = string(pw)
-		}
-		var rawSeed [32]byte
-		if err := wallet.SeedFromPhrase(&rawSeed, phrase); err != nil {
-			panic(err)
-		}
-		seed = wallet.KeyFromSeed(&rawSeed, 0)
-	}
-	return seed
 }
 
 func mustParseWorkers(workers, password string) {
@@ -271,6 +248,8 @@ func main() {
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
+	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
+	flag.BoolVar(&cfg.AutoOpenWebUI, "openui", cfg.AutoOpenWebUI, "automatically open the web UI on startup")
 
 	// logger
 	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
@@ -410,6 +389,30 @@ func main() {
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
 
+	// check that the API password is set
+	if cfg.HTTP.Password == "" {
+		if disableStdin {
+			stdoutFatalError("API password must be set via environment variable or config file when --env flag is set")
+			return
+		}
+		setAPIPassword()
+	}
+
+	// check that the seed is set
+	if cfg.Seed == "" {
+		if disableStdin {
+			stdoutFatalError("Seed must be set via environment variable or config file when --env flag is set")
+			return
+		}
+		setSeedPhrase()
+	}
+
+	var rawSeed [32]byte
+	if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
+		log.Fatal("failed to load wallet", zap.Error(err))
+	}
+	seed := wallet.KeyFromSeed(&rawSeed, 0)
+
 	if cfg.S3.Enabled {
 		var keyPairsV4 string
 		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
@@ -541,7 +544,7 @@ func main() {
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, fn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
@@ -566,7 +569,7 @@ func main() {
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, fn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
+			w, fn, err := node.NewWorker(cfg.Worker, bc, seed, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
@@ -682,6 +685,16 @@ func main() {
 		}
 	}
 
+	if cfg.AutoOpenWebUI {
+		time.Sleep(time.Millisecond) // give the web server a chance to start
+		_, port, err := net.SplitHostPort(l.Addr().String())
+		if err != nil {
+			logger.Debug("failed to parse API address", zap.Error(err))
+		} else if err := openBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
+			logger.Debug("failed to open browser", zap.Error(err))
+		}
+	}
+
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	select {
@@ -712,6 +725,19 @@ func main() {
 	}
 	logger.Info("Shutdown complete")
 	os.Exit(exitCode)
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform %q", runtime.GOOS)
+	}
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {

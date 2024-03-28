@@ -2,6 +2,7 @@ package node
 
 import (
 	"errors"
+	"slices"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/bus"
@@ -41,24 +42,7 @@ func (tp txpool) AcceptTransactionSet(txns []types.Transaction) error {
 }
 
 func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
-	pool := tp.Transactions()
-	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
-	for i, txn := range pool {
-		for j := range txn.SiacoinOutputs {
-			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
-		}
-	}
-	var parents []types.Transaction
-	seen := make(map[types.TransactionID]bool)
-	for _, sci := range txn.SiacoinInputs {
-		if parent, ok := outputToParent[sci.ParentID]; ok {
-			if txid := parent.ID(); !seen[txid] {
-				seen[txid] = true
-				parents = append(parents, *parent)
-			}
-		}
-	}
-	return parents, nil
+	return unconfirmedParents(txn, tp.Transactions()), nil
 }
 
 func (tp txpool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
@@ -67,6 +51,33 @@ func (tp txpool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
 
 func (tp txpool) Close() error {
 	return tp.tp.Close()
+}
+
+func unconfirmedParents(txn types.Transaction, pool []types.Transaction) []types.Transaction {
+	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
+	for i, txn := range pool {
+		for j := range txn.SiacoinOutputs {
+			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
+		}
+	}
+	var parents []types.Transaction
+	txnsToCheck := []*types.Transaction{&txn}
+	seen := make(map[types.TransactionID]bool)
+	for len(txnsToCheck) > 0 {
+		nextTxn := txnsToCheck[0]
+		txnsToCheck = txnsToCheck[1:]
+		for _, sci := range nextTxn.SiacoinInputs {
+			if parent, ok := outputToParent[sci.ParentID]; ok {
+				if txid := parent.ID(); !seen[txid] {
+					seen[txid] = true
+					parents = append(parents, *parent)
+					txnsToCheck = append(txnsToCheck, parent)
+				}
+			}
+		}
+	}
+	slices.Reverse(parents)
+	return parents
 }
 
 func NewTransactionPool(tp modules.TransactionPool) bus.TransactionPool {

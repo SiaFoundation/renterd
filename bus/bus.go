@@ -1019,7 +1019,7 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		// adjust the amount of prunable data with the pending uploads, due to
 		// how we record contract spending a contract's size might already
 		// include pending sectors
-		pending := b.uploadingSectors.pending(fcid)
+		pending := b.uploadingSectors.Pending(fcid)
 		if pending > size.Prunable {
 			size.Prunable = 0
 		} else {
@@ -1066,7 +1066,7 @@ func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	// adjust the amount of prunable data with the pending uploads, due to how
 	// we record contract spending a contract's size might already include
 	// pending sectors
-	pending := b.uploadingSectors.pending(id)
+	pending := b.uploadingSectors.Pending(id)
 	if pending > size.Prunable {
 		size.Prunable = 0
 	} else {
@@ -1143,6 +1143,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
+	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
 }
 
 func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1155,7 +1156,7 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
 		jc.Encode(api.ContractRootsResponse{
 			Roots:     roots,
-			Uploading: b.uploadingSectors.sectors(id),
+			Uploading: b.uploadingSectors.Sectors(id),
 		})
 	}
 }
@@ -2016,7 +2017,7 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		jc.Check("failed to track upload", b.uploadingSectors.trackUpload(id))
+		jc.Check("failed to track upload", b.uploadingSectors.StartUpload(id))
 	}
 }
 
@@ -2029,13 +2030,13 @@ func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	jc.Check("failed to add sector", b.uploadingSectors.addUploadingSector(id, req.ContractID, req.Root))
+	jc.Check("failed to add sector", b.uploadingSectors.AddSector(id, req.ContractID, req.Root))
 }
 
 func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		b.uploadingSectors.finishUpload(id)
+		b.uploadingSectors.FinishUpload(id)
 	}
 }
 
