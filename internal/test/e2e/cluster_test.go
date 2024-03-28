@@ -169,6 +169,9 @@ func TestNewTestCluster(t *testing.T) {
 		if reflect.DeepEqual(hi.Host, hostdb.Host{}) {
 			t.Fatal("host wasn't set")
 		}
+		if hi.Host.Settings.Release == "" {
+			t.Fatal("release should be set")
+		}
 	}
 	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	tt.OK(err)
