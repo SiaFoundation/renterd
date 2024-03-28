@@ -12,7 +12,15 @@ import (
 	"go.sia.tech/siad/build"
 )
 
-const smallestValidScore = math.SmallestNonzeroFloat64
+const (
+	// MinProtocolVersion is the minimum protocol version of a host that we
+	// accept.
+	minProtocolVersion = "1.5.9"
+
+	// smallestValidScore is the smallest score that a host can have before
+	// being ignored.
+	smallestValidScore = math.SmallestNonzeroFloat64
+)
 
 func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
 	// idealDataPerHost is the amount of data that we would have to put on each
@@ -37,7 +45,7 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedR
 		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
 		StorageRemaining: storageRemainingScore(h.Settings, storedData, allocationPerHost),
 		Uptime:           uptimeScore(h),
-		Version:          versionScore(h.Settings),
+		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
 	}
 }
 
@@ -237,13 +245,22 @@ func uptimeScore(h api.Host) float64 {
 	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
 }
 
-func versionScore(settings rhpv2.HostSettings) float64 {
+func versionScore(settings rhpv2.HostSettings, minVersion string) float64 {
+	if minVersion == "" {
+		minVersion = minProtocolVersion
+	}
 	versions := []struct {
 		version string
 		penalty float64
 	}{
-		{"1.6.0", 0.99},
-		{"1.5.9", 0.00},
+		// latest protocol version
+		{"1.6.0", 0.10},
+
+		// user-defined minimum
+		{minVersion, 0.00},
+
+		// absolute minimum
+		{minProtocolVersion, 0.00},
 	}
 	weight := 1.0
 	for _, v := range versions {
