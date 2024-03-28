@@ -1298,6 +1298,10 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()
+		resp.Errors = make(map[types.PublicKey]string)
+		for pk, err := range errs {
+			resp.Errors[pk] = err.Error()
+		}
 	}
 	jc.Encode(resp)
 }

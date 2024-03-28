@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/crypto"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -339,7 +341,15 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 }
 
 func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
-	w.logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
+	id := frand.Entropy128()
+	logger := w.logger.
+		With("id", hex.EncodeToString(id[:])).
+		With("hostKey", rev.HostKey()).
+		With("hostVersion", settings.Version).
+		With("fcid", rev.ID()).
+		With("revisionNumber", rev.Revision.RevisionNumber).
+		Named("deleteContractRoots")
+	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
 	if len(indices) == 0 {
@@ -380,9 +390,9 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 		if err = func() error {
 			var cost types.Currency
 			start := time.Now()
-			w.logger.Infow(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
+			logger.Infow(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
 			defer func() {
-				w.logger.Infow(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
+				logger.Infow(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
 			}()
 
 			numSectors := rev.NumSectors()
@@ -462,7 +472,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 				return err
 			} else if err := t.ReadResponse(&merkleResp, minMessageSize+responseSize); err != nil {
 				err := fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
-				w.logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
+				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				return err
 			}
 
@@ -472,7 +482,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
 			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
 				err := fmt.Errorf("couldn't verify delete proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
-				w.logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
+				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				t.WriteResponseErr(err)
 				return err
 			}
