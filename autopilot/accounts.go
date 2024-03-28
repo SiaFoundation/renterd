@@ -149,6 +149,8 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 					}
 					if _, inSet := inContractSet[contract.ID]; inSet {
 						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+					} else {
+						a.l.Debugw(rerr.err.Error(), rerr.keysAndValues...)
 					}
 				} else {
 					// dismiss alerts on success

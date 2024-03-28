@@ -49,8 +49,8 @@ type (
 
 	// ContractsResponse is the response type for the /rhp/contracts endpoint.
 	ContractsResponse struct {
-		Contracts []Contract `json:"contracts"`
-		Errors    map[types.PublicKey]string
+		Contracts []Contract                 `json:"contracts"`
+		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
 
 		// deprecated
 		Error string `json:"error,omitempty"`
