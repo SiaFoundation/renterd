@@ -2226,6 +2226,12 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
+					} else {
+						s.logger.Warn("missing contract for shard",
+							"contract", fcid,
+							"root", shard.Root,
+							"latest_host", shard.LatestHost,
+						)
 					}
 				}
 			}
