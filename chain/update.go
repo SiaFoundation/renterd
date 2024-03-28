@@ -11,12 +11,13 @@ import (
 
 type (
 	Update struct {
-		Index types.ChainIndex
-
+		Index               types.ChainIndex
+		StateElements       map[types.Hash256]types.StateElement
 		ContractUpdates     map[types.FileContractID]*ContractUpdate
 		HostUpdates         map[types.PublicKey]HostUpdate
 		WalletOutputUpdates map[types.Hash256]WalletOutputUpdate
 		WalletEventUpdates  []WalletEventUpdate
+		RevertIndices       []types.ChainIndex
 	}
 
 	ContractUpdate struct {
@@ -48,8 +49,9 @@ type (
 )
 
 // NewChainUpdate returns a new ChainUpdate.
-func NewChainUpdate() *Update {
+func NewChainUpdate(elements map[types.Hash256]types.StateElement) *Update {
 	return &Update{
+		StateElements:       elements,
 		ContractUpdates:     make(map[types.FileContractID]*ContractUpdate),
 		HostUpdates:         make(map[types.PublicKey]HostUpdate),
 		WalletOutputUpdates: make(map[types.Hash256]WalletOutputUpdate),
@@ -105,12 +107,17 @@ func (cu *Update) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
 // WalletStateElements returns all state elements in the database. It is used
 // to update the proofs of all state elements affected by the update.
 func (cu *Update) WalletStateElements() (elements []types.StateElement, _ error) {
+	// copy the output updates to the state
 	for id, el := range cu.WalletOutputUpdates {
-		elements = append(elements, types.StateElement{
+		cu.StateElements[id] = types.StateElement{
 			ID:          id,
 			LeafIndex:   el.Element.LeafIndex,
 			MerkleProof: el.Element.MerkleProof,
-		})
+		}
+	}
+	// loop over the state
+	for _, se := range cu.StateElements {
+		elements = append(elements, se)
 	}
 	return
 }
@@ -146,5 +153,7 @@ func (cu *Update) RevertIndex(index types.ChainIndex) error {
 		}
 	}
 
+	// add the index to the list of reverted indices
+	cu.RevertIndices = append(cu.RevertIndices, index)
 	return nil
 }

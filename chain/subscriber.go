@@ -30,6 +30,7 @@ type (
 	ChainStore interface {
 		ApplyChainUpdate(ctx context.Context, cu *Update) error
 		ChainIndex() (types.ChainIndex, error)
+		WalletStateElements(ctx context.Context) ([]types.StateElement, error)
 	}
 
 	ContractStore interface {
@@ -51,9 +52,10 @@ type (
 		syncSig         chan struct{}
 		csUnsubscribeFn func()
 
-		mu             sync.Mutex
-		closedChan     chan struct{}
-		knownContracts map[types.FileContractID]api.ContractState
+		mu                 sync.Mutex
+		closedChan         chan struct{}
+		knownContracts     map[types.FileContractID]api.ContractState
+		knownStateElements map[types.Hash256]types.StateElement
 	}
 )
 
@@ -73,13 +75,27 @@ func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, wall
 
 		syncSig: make(chan struct{}, 1),
 
-		closedChan: make(chan struct{}),
+		closedChan:         make(chan struct{}),
+		knownStateElements: make(map[types.Hash256]types.StateElement),
 	}
 
+	// make sure we don't hang
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	// subscribe ourselves to receive new contract ids
-	subscriber.knownContracts, subscriber.csUnsubscribeFn, err = contracts.AddContractStoreSubscriber(context.Background(), subscriber)
+	subscriber.knownContracts, subscriber.csUnsubscribeFn, err = contracts.AddContractStoreSubscriber(ctx, subscriber)
 	if err != nil {
 		return nil, err
+	}
+
+	// fetch all state elements from the database
+	elements, err := cs.WalletStateElements(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, el := range elements {
+		subscriber.knownStateElements[types.Hash256(el.ID)] = el
 	}
 
 	return subscriber, nil
@@ -377,11 +393,11 @@ func (cs *Subscriber) sync(index types.ChainIndex) error {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
 
-		// aggregate updates into one chain update
-		cu := NewChainUpdate()
-
 		// lock the subscriber while we apply the updates
 		cs.mu.Lock()
+
+		// aggregate updates into one chain update
+		cu := NewChainUpdate(cs.knownStateElements)
 
 		// revert chain updates
 		for _, cru := range crus {

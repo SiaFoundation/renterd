@@ -48,6 +48,13 @@ func (s *SQLStore) ApplyChainUpdate(ctx context.Context, cu *chain.Update) error
 			}
 		}
 
+		// process reverts
+		for _, reverted := range cu.RevertIndices {
+			if err := revertIndex(tx, reverted); err != nil {
+				return fmt.Errorf("%w; failed to revert index %d", err, reverted.Height)
+			}
+		}
+
 		// update chain index
 		if err := updateChainIndex(tx, cu.Index); err != nil {
 			return fmt.Errorf("%w; failed to update chain index", err)
@@ -55,6 +62,33 @@ func (s *SQLStore) ApplyChainUpdate(ctx context.Context, cu *chain.Update) error
 
 		return nil
 	})
+}
+
+// WalletStateElements implements the ChainStore interface and returns all state
+// elements in the database.
+func (s *SQLStore) WalletStateElements(ctx context.Context) ([]types.StateElement, error) {
+	type row struct {
+		ID          hash256
+		LeafIndex   uint64
+		MerkleProof merkleProof
+	}
+	var rows []row
+	if err := s.db.WithContext(ctx).
+		Model(&dbWalletOutput{}).
+		Select("output_id AS id", "leaf_index", "merkle_proof").
+		Find(&rows).
+		Error; err != nil {
+		return nil, err
+	}
+	elements := make([]types.StateElement, 0, len(rows))
+	for _, r := range rows {
+		elements = append(elements, types.StateElement{
+			ID:          types.Hash256(r.ID),
+			LeafIndex:   r.LeafIndex,
+			MerkleProof: r.MerkleProof.proof,
+		})
+	}
+	return elements, nil
 }
 
 func updateHosts(tx *gorm.DB, ann map[types.PublicKey]chain.HostUpdate) error {
@@ -206,4 +240,11 @@ func updateWalletEvent(tx *gorm.DB, weu chain.WalletEventUpdate) error {
 		Where("event_id", hash256(weu.Event.ID)).
 		Delete(&dbWalletEvent{}).
 		Error
+}
+
+func revertIndex(tx *gorm.DB, index types.ChainIndex) error {
+	if err := tx.Model(&dbWalletEvent{}).Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).Delete(&dbWalletEvent{}).Error; err != nil {
+		return err
+	}
+	return tx.Model(&dbWalletOutput{}).Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).Delete(&dbWalletOutput{}).Error
 }
