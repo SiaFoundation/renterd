@@ -81,7 +81,7 @@ func TestNewTestCluster(t *testing.T) {
 			return err
 		}
 		if len(contracts) != 1 {
-			return errors.New("no renewed contract")
+			return fmt.Errorf("unexpected number of contracts %d != 1", len(contracts))
 		}
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
@@ -127,7 +127,7 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		ac = archivedContracts[0]
 		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
-			return fmt.Errorf("revision information is wrong: %v %v", ac.RevisionHeight, ac.RevisionNumber)
+			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
 		if ac.ProofHeight != 0 {
 			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
@@ -1460,6 +1460,7 @@ func TestWalletTransactions(t *testing.T) {
 	cluster.MineBlocks(1)
 	time.Sleep(time.Second)
 	cluster.MineBlocks(1)
+	time.Sleep(testBusPersistInterval)
 
 	// Get all transactions of the wallet.
 	allTxns, err := b.WalletTransactions(context.Background())
@@ -1477,7 +1478,7 @@ func TestWalletTransactions(t *testing.T) {
 	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
 	tt.OK(err)
 	if !reflect.DeepEqual(txns, allTxns[2:]) {
-		t.Fatal("transactions don't match")
+		t.Fatal("transactions don't match", cmp.Diff(txns, allTxns[2:]))
 	}
 
 	// Find the first index that has a different timestamp than the first.

@@ -486,7 +486,7 @@ func main() {
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, shutdown, _, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, shutdown, _, _, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}

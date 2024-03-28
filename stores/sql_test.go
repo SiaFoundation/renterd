@@ -111,7 +111,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
 	}
 
-	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
 	sqlStore, err := NewSQLStore(Config{
 		Conn:                          conn,
@@ -119,9 +118,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		Alerts:                        alerts,
 		PartialSlabDir:                dir,
 		Migrate:                       !cfg.skipMigrate,
-		AnnouncementMaxAge:            time.Hour,
-		PersistInterval:               time.Second,
-		WalletAddress:                 walletAddrs,
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop().Sugar(),
 		GormLogger:                    newTestLogger(),
