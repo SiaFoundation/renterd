@@ -112,3 +112,43 @@ func TestGouging(t *testing.T) {
 		return err
 	})
 }
+
+func TestHostMinVersion(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a new test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:  int(test.AutopilotConfig.Contracts.Amount),
+		logger: newTestLoggerCustom(zapcore.ErrorLevel),
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	// check number of contracts
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
+		ContractSet: test.AutopilotConfig.Contracts.Set,
+	})
+	tt.OK(err)
+	if len(contracts) != int(test.AutopilotConfig.Contracts.Amount) {
+		t.Fatalf("expected %v contracts, got %v", test.AutopilotConfig.Contracts.Amount, len(contracts))
+	}
+
+	// set min version to a high value
+	cfg := test.AutopilotConfig
+	cfg.Hosts.MinProtocolVersion = "99.99.99"
+	cluster.UpdateAutopilotConfig(context.Background(), cfg)
+
+	// contracts in set should drop to 0
+	tt.Retry(100, time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
+			ContractSet: test.AutopilotConfig.Contracts.Set,
+		})
+		tt.OK(err)
+		if len(contracts) != int(test.AutopilotConfig.Contracts.Amount) {
+			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
+		}
+		return nil
+	})
+}
