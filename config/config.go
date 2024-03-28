@@ -7,8 +7,9 @@ import (
 type (
 	// Config contains the configuration for a renterd node
 	Config struct {
-		Seed      string `yaml:"seed,omitempty"`
-		Directory string `yaml:"directory,omitempty"`
+		Seed          string `yaml:"seed,omitempty"`
+		Directory     string `yaml:"directory,omitempty"`
+		AutoOpenWebUI bool   `yaml:"autoOpenWebUI,omitempty"`
 
 		ShutdownTimeout time.Duration `yaml:"shutdownTimeout,omitempty"`
 
