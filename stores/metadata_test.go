@@ -4097,24 +4097,29 @@ func TestSlabCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(100 * time.Millisecond)
 
 	// check slice count
 	var slabCntr int64
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 1 {
-		t.Fatalf("expected 1 slabs, got %v", slabCntr)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 1 {
+			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 
 	// delete second object
 	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(100 * time.Millisecond)
 
 	ss.Retry(100, 100*time.Millisecond, func() error {
 		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			t.Fatal(err)
+			return err
 		} else if slabCntr != 0 {
 			return fmt.Errorf("expected 0 slabs, got %v", slabCntr)
 		}
@@ -4159,11 +4164,16 @@ func TestSlabCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 1 {
-		t.Fatalf("expected 1 slabs, got %v", slabCntr)
-	}
+	time.Sleep(100 * time.Millisecond)
+
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 1 {
+			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 }
 
 func TestUpsertSectors(t *testing.T) {
