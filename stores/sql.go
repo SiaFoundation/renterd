@@ -250,6 +250,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
+	slabPruneOngoing := make(chan struct{})
+	close(slabPruneOngoing)
 	ss := &SQLStore{
 		alerts:                 cfg.Alerts,
 		db:                     db,
@@ -285,7 +287,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
-	ss.initSlabPruning()
+	if err := ss.initSlabPruning(); err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
 	return ss, ccid, nil
 }
 
@@ -306,13 +310,16 @@ func (ss *SQLStore) hasAllowlist() bool {
 	return ss.allowListCnt > 0
 }
 
-func (s *SQLStore) initSlabPruning() {
+func (s *SQLStore) initSlabPruning() error {
+	// start pruning loop
 	s.wg.Add(1)
 	go func() {
 		s.pruneSlabsLoop()
 		s.wg.Done()
 	}()
-	s.pruneSlabs()
+
+	// prune once to guarantee consistency on startup
+	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {

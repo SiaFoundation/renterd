@@ -2728,14 +2728,7 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Exec(`
-				DELETE
-				FROM slabs
-				WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
-				AND slabs.db_buffered_slab_id IS NULL
-				`).Error
-		})
+		err := s.retryTransaction(ctx, pruneSlabs)
 		if err != nil {
 			s.logger.Errorw("failed to prune slabs", zap.Error(err))
 			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
@@ -2755,7 +2748,16 @@ func (s *SQLStore) pruneSlabsLoop() {
 	}
 }
 
-func (s *SQLStore) pruneSlabs() {
+func pruneSlabs(tx *gorm.DB) error {
+	return tx.Exec(`
+DELETE
+FROM slabs
+WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
+AND slabs.db_buffered_slab_id IS NULL
+`).Error
+}
+
+func (s *SQLStore) triggerSlabPruning() {
 	select {
 	case s.slabPruneSigChan <- struct{}{}:
 	default:
@@ -2789,7 +2791,7 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	}
-	s.pruneSlabs()
+	s.triggerSlabPruning()
 	return numDeleted, nil
 }
 
@@ -2822,7 +2824,7 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
 			if rowsAffected > 0 {
-				s.pruneSlabs()
+				s.triggerSlabPruning()
 			}
 			duration = time.Since(start)
 			return nil
