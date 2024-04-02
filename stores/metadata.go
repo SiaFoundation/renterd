@@ -2713,14 +2713,35 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 	return nil
 }
 
-func pruneSlabs(tx *gorm.DB) error {
-	// delete slabs without any associated slices or buffers
-	return tx.Exec(`
-DELETE
-FROM slabs
-WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
-AND slabs.db_buffered_slab_id IS NULL
-`).Error
+func (s *SQLStore) pruneSlabsLoop() {
+	for {
+		select {
+		case <-s.slabPruneSigChan:
+		case <-s.shutdownCtx.Done():
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
+			return tx.Exec(`
+				DELETE
+				FROM slabs
+				WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
+				AND slabs.db_buffered_slab_id IS NULL
+				`).Error
+		})
+		if err != nil {
+			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+		}
+		cancel()
+	}
+}
+
+func (s *SQLStore) pruneSlabs() {
+	select {
+	case s.slabPruneSigChan <- struct{}{}:
+	default:
+	}
 }
 
 // deleteObject deletes an object from the store and prunes all slabs which are
@@ -2749,9 +2770,8 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 	numDeleted := tx.RowsAffected
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
-	} else if err := pruneSlabs(tx); err != nil {
-		return numDeleted, err
 	}
+	s.pruneSlabs()
 	return numDeleted, nil
 }
 
@@ -2784,7 +2804,7 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
 			if rowsAffected > 0 {
-				return pruneSlabs(tx)
+				s.pruneSlabs()
 			}
 			duration = time.Since(start)
 			return nil

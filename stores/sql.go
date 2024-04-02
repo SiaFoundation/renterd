@@ -285,6 +285,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+	ss.initSlabPruning()
 	return ss, ccid, nil
 }
 
@@ -303,6 +304,15 @@ func (ss *SQLStore) hasAllowlist() bool {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	return ss.allowListCnt > 0
+}
+
+func (s *SQLStore) initSlabPruning() {
+	s.wg.Add(1)
+	go func() {
+		s.pruneSlabsLoop()
+		s.wg.Done()
+	}()
+	s.pruneSlabs()
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
