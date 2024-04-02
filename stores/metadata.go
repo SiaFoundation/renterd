@@ -13,12 +13,18 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lukechampine.com/frand"
+)
+
+var (
+	pruneSlabsAlertID = frand.Entropy256()
 )
 
 const (
@@ -2732,6 +2738,18 @@ func (s *SQLStore) pruneSlabsLoop() {
 		})
 		if err != nil {
 			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
+				ID:        pruneSlabsAlertID,
+				Severity:  alerts.SeverityWarning,
+				Message:   "Failed to prune slabs from database",
+				Timestamp: time.Now(),
+				Data: map[string]interface{}{
+					"error": err.Error(),
+					"hint":  "This might happen when your database is under a lot of load due to deleting objects rapidly. This alert will disappear the next time slabs are pruned successfully.",
+				},
+			})
+		} else {
+			s.alerts.DismissAlerts(s.shutdownCtx, pruneSlabsAlertID)
 		}
 		cancel()
 	}
