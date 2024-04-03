@@ -21,7 +21,8 @@ type (
 	testHost struct {
 		*hostMock
 		*contractMock
-		hptFn func() api.HostPriceTable
+		hptFn       func() api.HostPriceTable
+		uploadDelay time.Duration
 	}
 
 	testHostManager struct {
@@ -91,7 +92,10 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 }
 
 func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
-	h.AddSector(sector)
+	h.AddSector(sectorRoot, sector)
+	if h.uploadDelay > 0 {
+		time.Sleep(h.uploadDelay)
+	}
 	return nil
 }
 

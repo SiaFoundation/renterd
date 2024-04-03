@@ -952,7 +952,7 @@ loop:
 func (s *slabUpload) canOverdrive(overdriveTimeout time.Duration) bool {
 	// overdrive is not kicking in yet
 	remaining := s.numSectors - s.numUploaded
-	if remaining >= s.maxOverdrive {
+	if remaining > s.maxOverdrive {
 		return false
 	}
 
@@ -1055,7 +1055,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 
 	// redundant sectors can't complete the upload
-	if sector.uploaded.Root != (types.Hash256{}) {
+	if sector.isUploaded() {
 		return false, false
 	}
 
@@ -1069,10 +1069,11 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	// update uploaded sectors
 	s.numUploaded++
 
-	// release all other candidates for this sector
+	// release the candidate if the upload was redundant
 	for _, candidate := range s.candidates {
-		if candidate.req != nil && candidate.req != req && candidate.req.sector.index == sector.index {
+		if candidate.req == req && sector.isUploaded() {
 			candidate.req = nil
+			break
 		}
 	}
 
