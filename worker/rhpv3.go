@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
@@ -623,36 +622,36 @@ func processPayment(s *streamV3, payment rhpv3.PaymentMethod) error {
 type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error)
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ hostdb.HostPriceTable, err error) {
+func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ api.HostPriceTable, err error) {
 	defer wrapErr(&err, "PriceTable")
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return hostdb.HostPriceTable{}, err
+		return api.HostPriceTable{}, err
 	}
 	defer s.Close()
 
 	var pt rhpv3.HostPriceTable
 	var ptr rhpv3.RPCUpdatePriceTableResponse
 	if err := s.WriteRequest(rhpv3.RPCUpdatePriceTableID, nil); err != nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w", err)
+		return api.HostPriceTable{}, fmt.Errorf("couldn't send RPCUpdatePriceTableID: %w", err)
 	} else if err := s.ReadResponse(&ptr, maxPriceTableSize); err != nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w", err)
+		return api.HostPriceTable{}, fmt.Errorf("couldn't read RPCUpdatePriceTableResponse: %w", err)
 	} else if err := json.Unmarshal(ptr.PriceTableJSON, &pt); err != nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w", err)
+		return api.HostPriceTable{}, fmt.Errorf("couldn't unmarshal price table: %w", err)
 	} else if payment, err := paymentFunc(pt); err != nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w", err)
+		return api.HostPriceTable{}, fmt.Errorf("couldn't create payment: %w", err)
 	} else if payment == nil {
-		return hostdb.HostPriceTable{
+		return api.HostPriceTable{
 			HostPriceTable: pt,
 			Expiry:         time.Now(),
 		}, nil // intended not to pay
 	} else if err := processPayment(s, payment); err != nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w", err)
+		return api.HostPriceTable{}, fmt.Errorf("couldn't process payment: %w", err)
 	} else if err := s.ReadResponse(&rhpv3.RPCPriceTableResponse{}, 0); err != nil {
-		return hostdb.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w", err)
+		return api.HostPriceTable{}, fmt.Errorf("couldn't read RPCPriceTableResponse: %w", err)
 	} else {
-		return hostdb.HostPriceTable{
+		return api.HostPriceTable{
 			HostPriceTable: pt,
 			Expiry:         time.Now().Add(pt.Validity),
 		}, nil

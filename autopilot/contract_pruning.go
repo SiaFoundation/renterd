@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/build"
 )
@@ -132,7 +131,7 @@ func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 	return
 }
 
-func (ap *Autopilot) hostForContract(ctx context.Context, fcid types.FileContractID) (host hostdb.HostInfo, metadata api.ContractMetadata, err error) {
+func (ap *Autopilot) hostForContract(ctx context.Context, fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
 	// fetch the contract
 	metadata, err = ap.bus.Contract(ctx, fcid)
 	if err != nil {

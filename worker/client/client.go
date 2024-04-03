@@ -100,9 +100,13 @@ func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.H
 		return nil, err
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		err, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, errors.New(string(err))
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			return nil, api.ErrObjectNotFound
+		default:
+			return nil, errors.New(http.StatusText(resp.StatusCode))
+		}
 	}
 
 	head, err := parseObjectResponseHeaders(resp.Header)

@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -32,8 +31,8 @@ type (
 		// a bit, we currently use inline interfaces to avoid having to update the
 		// scanner tests with every interface change
 		bus interface {
-			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
-			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
+			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
+			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 
@@ -208,7 +207,7 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 		}
 		s.mu.Lock()
 		s.scanning = false
-		s.logger.Debugf("%s finished after %v", st, time.Since(s.scanningLastStart))
+		s.logger.Infof("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(scanType)
 }
@@ -236,12 +235,12 @@ func (s *scanner) tryUpdateTimeout() {
 
 	updated := s.tracker.timeout()
 	if updated < s.timeoutMinTimeout {
-		s.logger.Debugf("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
+		s.logger.Infof("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
 		updated = s.timeoutMinTimeout
 	}
 
 	if s.timeout != updated {
-		s.logger.Debugf("updated timeout %v->%v", s.timeout, updated)
+		s.logger.Infof("updated timeout %v->%v", s.timeout, updated)
 		s.timeout = updated
 	}
 	s.timeoutLastUpdate = time.Now()
@@ -276,7 +275,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 				exhausted = true
 			}
 
-			s.logger.Debugf("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
+			s.logger.Infof("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
 			offset += int(s.scanBatchSize)
 
 			// add batch to scan queue

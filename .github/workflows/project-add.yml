@@ -10,12 +10,5 @@ on:
 
 jobs:
   add-to-project:
-    name: Add issue to project
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/add-to-project@v0.5.0
-        with:
-          # You can target a project in a different organization
-          # to the issue
-          project-url: https://github.com/orgs/SiaFoundation/projects/5
-          github-token: ${{ secrets.PAT_ADD_TO_PROJECT }}
+    uses: SiaFoundation/workflows/.github/workflows/project-add.yml@master
+    secrets: inherit

@@ -23,7 +23,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
@@ -166,8 +165,11 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, api.Host{}) {
 			t.Fatal("host wasn't set")
+		}
+		if hi.Host.Settings.Release == "" {
+			t.Fatal("release should be set")
 		}
 	}
 	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
@@ -188,7 +190,7 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, api.Host{}) {
 			t.Fatal("host wasn't set")
 		}
 		allHosts[hi.Host.PublicKey] = struct{}{}

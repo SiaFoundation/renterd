@@ -3,15 +3,14 @@ package contractor
 import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/worker"
 )
 
-func countUsableHosts(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
+func countUsableHosts(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.RenewWindow)
 	for _, host := range hosts {
-		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
-		if usable {
+		hc := checkHost(cfg, rs, gc, host, smallestValidScore, 0)
+		if hc.Usability.IsUsable() {
 			usables++
 		}
 	}
@@ -21,41 +20,38 @@ func countUsableHosts(cfg api.ContractsConfig, cs api.ConsensusState, fee types.
 // EvaluateConfig evaluates the given configuration and if the gouging settings
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
-func EvaluateConfig(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
+func EvaluateConfig(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
-		usable, usableBreakdown := isUsableHost(cfg, rs, gc, host, 0, 0)
-		if usable {
+		hc := checkHost(cfg, rs, gc, host, 0, 0)
+		if hc.Usability.IsUsable() {
 			resp.Usable++
 			continue
 		}
-		if usableBreakdown.blocked > 0 {
+		if hc.Usability.Blocked {
 			resp.Unusable.Blocked++
 		}
-		if usableBreakdown.notacceptingcontracts > 0 {
+		if hc.Usability.NotAcceptingContracts {
 			resp.Unusable.NotAcceptingContracts++
 		}
-		if usableBreakdown.notcompletingscan > 0 {
+		if hc.Usability.NotCompletingScan {
 			resp.Unusable.NotScanned++
 		}
-		if usableBreakdown.unknown > 0 {
-			resp.Unusable.Unknown++
-		}
-		if usableBreakdown.gougingBreakdown.ContractErr != "" {
+		if hc.Gouging.ContractErr != "" {
 			resp.Unusable.Gouging.Contract++
 		}
-		if usableBreakdown.gougingBreakdown.DownloadErr != "" {
+		if hc.Gouging.DownloadErr != "" {
 			resp.Unusable.Gouging.Download++
 		}
-		if usableBreakdown.gougingBreakdown.GougingErr != "" {
+		if hc.Gouging.GougingErr != "" {
 			resp.Unusable.Gouging.Gouging++
 		}
-		if usableBreakdown.gougingBreakdown.PruneErr != "" {
+		if hc.Gouging.PruneErr != "" {
 			resp.Unusable.Gouging.Pruning++
 		}
-		if usableBreakdown.gougingBreakdown.UploadErr != "" {
+		if hc.Gouging.UploadErr != "" {
 			resp.Unusable.Gouging.Upload++
 		}
 	}
@@ -136,7 +132,7 @@ func EvaluateConfig(cfg api.ContractsConfig, cs api.ConsensusState, fee types.Cu
 
 // optimiseGougingSetting tries to optimise one field of the gouging settings to
 // try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.HostInfo) bool {
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.ContractsConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []api.Host) bool {
 	if cfg.Amount == 0 {
 		return true // nothing to do
 	}

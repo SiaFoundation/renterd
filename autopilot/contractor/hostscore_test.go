@@ -9,7 +9,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
 )
 
@@ -35,7 +34,7 @@ var cfg = api.AutopilotConfig{
 func TestHostScore(t *testing.T) {
 	day := 24 * time.Hour
 
-	newHost := func(s rhpv2.HostSettings) hostdb.Host {
+	newHost := func(s rhpv2.HostSettings) api.Host {
 		return test.NewHost(test.RandomHostKey(), test.NewHostPriceTable(), s)
 	}
 	h1 := newHost(test.NewHostSettings())

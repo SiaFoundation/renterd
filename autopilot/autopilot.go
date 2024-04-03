@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
@@ -53,10 +52,11 @@ type Bus interface {
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 
 	// hostdb
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
+	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
+	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
+	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
@@ -326,7 +326,7 @@ func (ap *Autopilot) Run() error {
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Debug("account refills loop launched")
+					ap.logger.Info("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
 			}
@@ -338,7 +338,7 @@ func (ap *Autopilot) Run() error {
 			if autopilot.Config.Contracts.Prune {
 				ap.tryPerformPruning(ap.workers)
 			} else {
-				ap.logger.Debug("pruning disabled")
+				ap.logger.Info("pruning disabled")
 			}
 		})
 
@@ -708,8 +708,8 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
-	var hostKey types.PublicKey
-	if jc.DecodeParam("hostKey", &hostKey) != nil {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostKey", &hk) != nil {
 		return
 	}
 
@@ -718,11 +718,80 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 
-	host, err := ap.c.HostInfo(jc.Request.Context(), hostKey, state)
+	// TODO: remove on next major release
+	if jc.Check("failed to get host", compatV105Host(jc.Request.Context(), state.ContractsConfig(), ap.bus, hk)) != nil {
+		return
+	}
+
+	hi, err := ap.bus.Host(jc.Request.Context(), hk)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
-	jc.Encode(host)
+
+	check, ok := hi.Checks[ap.id]
+	if ok {
+		jc.Encode(api.HostResponse{
+			Host: hi,
+			Checks: &api.HostChecks{
+				Gouging:          check.Gouging.Gouging(),
+				GougingBreakdown: check.Gouging,
+				Score:            check.Score.Score(),
+				ScoreBreakdown:   check.Score,
+				Usable:           check.Usability.IsUsable(),
+				UnusableReasons:  check.Usability.UnusableReasons(),
+			},
+		})
+		return
+	}
+
+	jc.Encode(api.HostResponse{Host: hi})
+}
+
+func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
+	var req api.SearchHostsRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
+		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
+		return
+	}
+
+	// TODO: remove on next major release
+	if jc.Check("failed to get host info", compatV105UsabilityFilterModeCheck(req.UsabilityMode)) != nil {
+		return
+	}
+
+	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), api.SearchHostOptions{
+		AutopilotID:     ap.id,
+		Offset:          req.Offset,
+		Limit:           req.Limit,
+		FilterMode:      req.FilterMode,
+		UsabilityMode:   req.UsabilityMode,
+		AddressContains: req.AddressContains,
+		KeyIn:           req.KeyIn,
+	})
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+	resps := make([]api.HostResponse, len(hosts))
+	for i, host := range hosts {
+		if check, ok := host.Checks[ap.id]; ok {
+			resps[i] = api.HostResponse{
+				Host: host,
+				Checks: &api.HostChecks{
+					Gouging:          check.Gouging.Gouging(),
+					GougingBreakdown: check.Gouging,
+					Score:            check.Score.Score(),
+					ScoreBreakdown:   check.Score,
+					Usable:           check.Usability.IsUsable(),
+					UnusableReasons:  check.Usability.UnusableReasons(),
+				},
+			}
+		} else {
+			resps[i] = api.HostResponse{Host: host}
+		}
+	}
+	jc.Encode(resps)
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
@@ -756,22 +825,6 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 	})
-}
-
-func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	state, err := ap.buildState(jc.Request.Context())
-	if jc.Check("failed to build state", err) != nil {
-		return
-	}
-	hosts, err := ap.c.HostInfos(jc.Request.Context(), state, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-	jc.Encode(hosts)
 }
 
 func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
@@ -847,4 +900,57 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 		Fee:                    fee,
 		SkipContractFormations: skipContractFormations,
 	}, nil
+}
+
+// compatV105Host performs some state checks and bus calls we no longer need but
+// are necessary checks to make sure our API is consistent. This should be
+// removed in the next major release.
+func compatV105Host(ctx context.Context, cfg api.ContractsConfig, b Bus, hk types.PublicKey) error {
+	// state checks
+	if cfg.Allowance.IsZero() {
+		return fmt.Errorf("can not score hosts because contracts allowance is zero")
+	}
+	if cfg.Amount == 0 {
+		return fmt.Errorf("can not score hosts because contracts amount is zero")
+	}
+	if cfg.Period == 0 {
+		return fmt.Errorf("can not score hosts because contract period is zero")
+	}
+
+	// fetch host
+	_, err := b.Host(ctx, hk)
+	if err != nil {
+		return fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+
+	// other checks
+	_, err = b.GougingSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	_, err = b.RedundancySettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	_, err = b.ConsensusState(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	_, err = b.RecommendedFee(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	return nil
+}
+
+func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
+	switch usabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	case "":
+	default:
+		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
+	}
+	return nil
 }

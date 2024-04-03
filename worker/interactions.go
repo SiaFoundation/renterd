@@ -1,13 +1,13 @@
 package worker
 
 import (
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/api"
 )
 
 type (
 	HostInteractionRecorder interface {
-		RecordHostScan(...hostdb.HostScan)
-		RecordPriceTableUpdate(...hostdb.PriceTableUpdate)
+		RecordHostScan(...api.HostScan)
+		RecordPriceTableUpdate(...api.HostPriceTableUpdate)
 	}
 )
 
