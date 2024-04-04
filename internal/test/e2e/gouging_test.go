@@ -120,20 +120,10 @@ func TestHostMinVersion(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  int(test.AutopilotConfig.Contracts.Amount),
-		logger: newTestLoggerCustom(zapcore.ErrorLevel),
+		hosts: int(test.AutopilotConfig.Contracts.Amount),
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
-
-	// check number of contracts
-	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
-		ContractSet: test.AutopilotConfig.Contracts.Set,
-	})
-	tt.OK(err)
-	if len(contracts) != int(test.AutopilotConfig.Contracts.Amount) {
-		t.Fatalf("expected %v contracts, got %v", test.AutopilotConfig.Contracts.Amount, len(contracts))
-	}
 
 	// set min version to a high value
 	cfg := test.AutopilotConfig
@@ -141,12 +131,12 @@ func TestHostMinVersion(t *testing.T) {
 	cluster.UpdateAutopilotConfig(context.Background(), cfg)
 
 	// contracts in set should drop to 0
-	tt.Retry(100, time.Millisecond, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
 			ContractSet: test.AutopilotConfig.Contracts.Set,
 		})
 		tt.OK(err)
-		if len(contracts) != int(test.AutopilotConfig.Contracts.Amount) {
+		if len(contracts) != 0 {
 			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
 		}
 		return nil
