@@ -271,7 +271,7 @@ func (c *contractor) performContractMaintenance(ctx context.Context, w Worker) (
 	}
 
 	// fetch candidate hosts
-	candidates, unusableHosts, err := c.candidateHosts(ctx, hosts, usedHosts, hostData, smallestValidScore) // avoid 0 score hosts
+	candidates, unusableHosts, err := c.candidateHosts(ctx, hosts, usedHosts, hostData, minValidScore) // avoid 0 score hosts
 	if err != nil {
 		return false, err
 	}
@@ -1229,7 +1229,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	// return early if there's no hosts
 	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return smallestValidScore
+		return minValidScore
 	}
 
 	// determine the number of random hosts we fetch per iteration when
@@ -1263,7 +1263,7 @@ func (c *contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 		return candidates[i].score > candidates[j].score
 	})
 	if len(candidates) < int(numContracts) {
-		return smallestValidScore
+		return minValidScore
 	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
 		minScore = cutoff
 	}

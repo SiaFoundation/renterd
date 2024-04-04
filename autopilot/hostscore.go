@@ -17,9 +17,9 @@ const (
 	// accept.
 	minProtocolVersion = "1.5.9"
 
-	// smallestValidScore is the smallest score that a host can have before
+	// minValidScore is the smallest score that a host can have before
 	// being ignored.
-	smallestValidScore = math.SmallestNonzeroFloat64
+	minValidScore = math.SmallestNonzeroFloat64
 )
 
 func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
