@@ -66,8 +66,8 @@ func TestObjectMetadata(t *testing.T) {
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{
 		ContentType:  or.Object.ContentType(),
 		Etag:         gor.Etag,
-		LastModified: or.Object.LastModified(),
-		Range:        &api.DownloadRange{Offset: 1, Length: 1, Size: int64(len(data))},
+		LastModified: or.Object.ModTime.Std(),
+		Range:        &api.ContentRange{Offset: 1, Length: 1, Size: int64(len(data))},
 		Size:         int64(len(data)),
 		Metadata:     gor.Metadata,
 	}) {

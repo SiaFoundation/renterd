@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
+	"github.com/gotd/contrib/http_range"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -133,4 +135,11 @@ func newTestSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
 	var sector [rhpv2.SectorSize]byte
 	frand.Read(sector[:])
 	return &sector, rhpv2.SectorRoot(&sector)
+}
+
+func TestFoo(t *testing.T) {
+	fmt.Println(http_range.Range{
+		Start:  1,
+		Length: 2,
+	}.ContentRange(100))
 }

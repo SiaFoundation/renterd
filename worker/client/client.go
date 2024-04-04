@@ -303,9 +303,9 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 	}
 
 	// parse range
-	var r *api.DownloadRange
+	var r *api.ContentRange
 	if cr := header.Get("Content-Range"); cr != "" {
-		dr, err := api.ParseDownloadRange(cr)
+		dr, err := api.ParseContentRange(cr)
 		if err != nil {
 			return api.HeadObjectResponse{}, err
 		}
@@ -325,10 +325,14 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 		}
 	}
 
+	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
+	if err != nil {
+		return api.HeadObjectResponse{}, fmt.Errorf("failed to parse Last-Modified header: %w", err)
+	}
 	return api.HeadObjectResponse{
 		ContentType:  header.Get("Content-Type"),
 		Etag:         trimEtag(header.Get("ETag")),
-		LastModified: header.Get("Last-Modified"),
+		LastModified: modTime,
 		Range:        r,
 		Size:         size,
 		Metadata:     api.ExtractObjectUserMetadataFrom(headers),

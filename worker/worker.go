@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -872,32 +873,45 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 		return
 	}
 
+	var off int
+	if jc.DecodeForm("offset", &off) != nil {
+		return
+	}
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+
 	// fetch object metadata
-	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
+	opts := api.GetObjectOptions{
+		Prefix:       "", // not relevant for HEAD request
+		Marker:       "", // not relevant for HEAD request
+		Offset:       0,  // not relevant for HEAD request
+		Limit:        0,  // not relevant for HEAD request
 		IgnoreDelim:  ignoreDelim,
 		OnlyMetadata: true,
+		SortBy:       "", // not relevant for HEAD request
+		SortDir:      "", // not relevant for HEAD reuqest
+	}
+
+	gor, err := w.GetObject(jc.Request.Context(), bucket, path, api.DownloadObjectOptions{
+		GetObjectOptions: opts,
+		Range:            api.DownloadRange{}, // empty range for HEAD requests
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
+	} else if errors.Is(err, http_range.ErrInvalid) {
+		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if res.Object == nil {
-		jc.Error(api.ErrObjectNotFound, http.StatusInternalServerError) // should never happen but checking because we deref. later
+	} else if jc.Check("couldn't get object", err) != nil {
 		return
 	}
+	defer gor.Content.Close()
 
 	// serve the content to ensure we're setting the exact same headers as we
 	// would for a GET request
-	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, func(io.Writer, int64, int64) error { return nil })
-	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
-		jc.Error(err, http.StatusBadRequest)
-	} else if errors.Is(err, http_range.ErrNoOverlap) {
-		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
-	} else if err != nil {
-		jc.Error(err, status)
-	}
+	serveContent(jc.ResponseWriter, jc.Request, path, *gor)
 }
 
 func (w *worker) objectsHandlerGET(jc jape.Context) {
@@ -949,60 +963,51 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	path := jc.PathParam("path")
-	res, err := w.bus.Object(ctx, bucket, path, opts)
-	if utils.IsErr(err, api.ErrObjectNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't get object or entries", err) != nil {
-		return
-	}
 	if path == "" || strings.HasSuffix(path, "/") {
+		// list directory
+		res, err := w.bus.Object(ctx, bucket, path, opts)
+		if utils.IsErr(err, api.ErrObjectNotFound) {
+			jc.Error(err, http.StatusNotFound)
+			return
+		} else if jc.Check("couldn't get object or entries", err) != nil {
+			return
+		}
 		jc.Encode(res.Entries)
 		return
 	}
 
-	// return early if the object is empty
-	if len(res.Object.Slabs) == 0 {
+	offset, length, err := api.ParseDownloadRange(jc.Request)
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
 		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
-	}
-
-	// fetch all contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 
-	// create a download function
-	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
-		ctx = WithGougingChecker(ctx, w.bus, gp)
-		err = w.downloadManager.DownloadObject(ctx, wr, *res.Object.Object, uint64(offset), uint64(length), contracts)
-		if err != nil {
-			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) &&
-				!errors.Is(err, errDownloadCancelled) &&
-				!errors.Is(err, io.ErrClosedPipe) {
-				w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
-			}
-		}
+	gor, err := w.GetObject(ctx, bucket, path, api.DownloadObjectOptions{
+		GetObjectOptions: opts,
+		Range: api.DownloadRange{
+			Offset: offset,
+			Length: length,
+		},
+	})
+	if utils.IsErr(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, http_range.ErrInvalid) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("couldn't get object", err) != nil {
 		return
 	}
+	defer gor.Content.Close()
 
 	// serve the content
-	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, downloadFn)
-	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
-		jc.Error(err, http.StatusBadRequest)
-	} else if errors.Is(err, http_range.ErrNoOverlap) {
-		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
-	} else if err != nil {
-		jc.Error(err, status)
-	}
+	serveContent(jc.ResponseWriter, jc.Request, path, *gor)
 }
 
 func (w *worker) objectsHandlerPUT(jc jape.Context) {
@@ -1584,4 +1589,81 @@ func isErrHostUnreachable(err error) bool {
 
 func isErrDuplicateTransactionSet(err error) bool {
 	return utils.IsErr(err, modules.ErrDuplicateTransactionSet)
+}
+
+func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
+	// fetch object
+	res, err := w.bus.Object(ctx, bucket, path, opts.GetObjectOptions)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch object: %w", err)
+	} else if res.Object == nil {
+		return nil, errors.New("object is a directory")
+	}
+	obj := *res.Object.Object
+
+	// check size of object against range
+	if opts.Range.Offset+opts.Range.Length > res.Object.Size {
+		return nil, http_range.ErrInvalid
+	}
+
+	// fetch gouging params
+	gp, err := w.bus.GougingParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
+	}
+
+	// fetch all contracts
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// prepare the content
+	var content io.ReadCloser
+	if opts.Range.Length == 0 || obj.TotalSize() == 0 {
+		// if the object has no content or the requested range is 0, return an
+		// empty reader
+		content = io.NopCloser(bytes.NewReader(nil))
+	} else {
+		// otherwise return a pipe reader
+		downloadFn := func(wr io.Writer, offset, length int64) error {
+			ctx = WithGougingChecker(ctx, w.bus, gp)
+			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts)
+			if err != nil {
+				w.logger.Error(err)
+				if !errors.Is(err, ErrShuttingDown) &&
+					!errors.Is(err, errDownloadCancelled) &&
+					!errors.Is(err, io.ErrClosedPipe) {
+					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+				}
+				return fmt.Errorf("failed to download object: %w", err)
+			}
+			return nil
+		}
+		pr, pw := io.Pipe()
+		go func() {
+			err := downloadFn(pw, opts.Range.Offset, opts.Range.Length)
+			pw.CloseWithError(err)
+		}()
+		content = pr
+	}
+
+	return &api.GetObjectResponse{
+		Content: content,
+		HeadObjectResponse: api.HeadObjectResponse{
+			ContentType:  res.Object.MimeType,
+			Etag:         res.Object.ETag,
+			LastModified: res.Object.ModTime.Std(),
+			Range:        opts.Range.ContentRange(res.Object.Size),
+		},
+	}, nil
+}
+func (w *worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
+	panic("not implemented")
+}
+func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
+	panic("not implemented")
+}
+func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
+	panic("not implemented")
 }

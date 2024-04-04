@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.sia.tech/renterd/object"
 )
@@ -91,12 +92,12 @@ type (
 
 	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
 	HeadObjectResponse struct {
-		ContentType  string             `json:"contentType"`
-		Etag         string             `json:"eTag"`
-		LastModified string             `json:"lastModified"`
-		Range        *DownloadRange     `json:"range,omitempty"`
-		Size         int64              `json:"size"`
-		Metadata     ObjectUserMetadata `json:"metadata"`
+		ContentType  string
+		Etag         string
+		LastModified time.Time
+		Range        *ContentRange
+		Size         int64
+		Metadata     ObjectUserMetadata
 	}
 
 	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
@@ -149,12 +150,6 @@ func ExtractObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadat
 		}
 	}
 	return oum
-}
-
-// LastModified returns the object's ModTime formatted for use in the
-// 'Last-Modified' header
-func (o ObjectMetadata) LastModified() string {
-	return o.ModTime.Std().Format(http.TimeFormat)
 }
 
 // ContentType returns the object's MimeType for use in the 'Content-Type'
