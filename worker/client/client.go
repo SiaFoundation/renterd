@@ -332,7 +332,7 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 	return api.HeadObjectResponse{
 		ContentType:  header.Get("Content-Type"),
 		Etag:         trimEtag(header.Get("ETag")),
-		LastModified: modTime,
+		LastModified: api.TimeRFC3339(modTime),
 		Range:        r,
 		Size:         size,
 		Metadata:     api.ExtractObjectUserMetadataFrom(headers),

@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"go.sia.tech/renterd/object"
 )
@@ -94,7 +93,7 @@ type (
 	HeadObjectResponse struct {
 		ContentType  string
 		Etag         string
-		LastModified time.Time
+		LastModified TimeRFC3339
 		Range        *ContentRange
 		Size         int64
 		Metadata     ObjectUserMetadata

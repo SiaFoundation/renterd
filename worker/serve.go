@@ -68,5 +68,5 @@ func serveContent(rw http.ResponseWriter, req *http.Request, name string, conten
 	// create a content reader
 	rs := newContentReader(content, hor.Size, hor.Range.Offset)
 
-	http.ServeContent(rw, req, name, hor.LastModified, rs)
+	http.ServeContent(rw, req, name, hor.LastModified.Std(), rs)
 }

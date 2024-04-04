@@ -5,6 +5,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
@@ -61,12 +62,13 @@ func TestObjectMetadata(t *testing.T) {
 
 	// perform a HEAD request and assert the headers are all present
 	hor, err := w.HeadObject(context.Background(), api.DefaultBucketName, t.Name(), api.HeadObjectOptions{Range: api.DownloadRange{Offset: 1, Length: 1}})
+	hor.LastModified = api.TimeRFC3339(hor.LastModified.Std().Round(time.Second))
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{
 		ContentType:  or.Object.ContentType(),
 		Etag:         gor.Etag,
-		LastModified: or.Object.ModTime.Std(),
+		LastModified: api.TimeRFC3339(or.Object.ModTime.Std().Round(time.Second)),
 		Range:        &api.ContentRange{Offset: 1, Length: 1, Size: int64(len(data))},
 		Size:         int64(len(data)),
 		Metadata:     gor.Metadata,

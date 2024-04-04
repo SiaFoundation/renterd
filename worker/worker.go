@@ -1619,7 +1619,7 @@ func (w *worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 	return &api.HeadObjectResponse{
 		ContentType:  res.Object.MimeType,
 		Etag:         res.Object.ETag,
-		LastModified: res.Object.ModTime.Std(),
+		LastModified: res.Object.ModTime,
 		Range:        opts.Range.ContentRange(res.Object.Size),
 		Size:         res.Object.Size,
 		Metadata:     res.Object.Metadata,
