@@ -2727,7 +2727,7 @@ func (s *SQLStore) pruneSlabsLoop() {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
 		err := s.retryTransaction(ctx, pruneSlabs)
 		if err != nil {
 			s.logger.Errorw("failed to prune slabs", zap.Error(err))

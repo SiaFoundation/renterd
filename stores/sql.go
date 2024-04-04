@@ -250,8 +250,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
-	slabPruneOngoing := make(chan struct{})
-	close(slabPruneOngoing)
 	ss := &SQLStore{
 		alerts:                 cfg.Alerts,
 		db:                     db,
@@ -621,4 +619,12 @@ func (s *SQLStore) ResetConsensusSubscription(ctx context.Context) error {
 	}
 	s.persistMu.Unlock()
 	return nil
+}
+
+func sumDurations(durations []time.Duration) time.Duration {
+	var sum time.Duration
+	for _, d := range durations {
+		sum += d
+	}
+	return sum
 }

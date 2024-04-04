@@ -4097,7 +4097,6 @@ func TestSlabCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
 
 	// check slice count
 	var slabCntr int64
@@ -4115,7 +4114,6 @@ func TestSlabCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
 
 	ss.Retry(100, 100*time.Millisecond, func() error {
 		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
@@ -4164,7 +4162,6 @@ func TestSlabCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
 
 	ss.Retry(100, 100*time.Millisecond, func() error {
 		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
