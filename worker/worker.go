@@ -1601,6 +1601,11 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	}
 	obj := *res.Object.Object
 
+	// adjust length
+	if opts.Range.Length == -1 {
+		opts.Range.Length = res.Object.Size - opts.Range.Offset
+	}
+
 	// check size of object against range
 	if opts.Range.Offset+opts.Range.Length > res.Object.Size {
 		return nil, http_range.ErrInvalid

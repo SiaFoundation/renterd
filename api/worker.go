@@ -289,8 +289,11 @@ func ParseDownloadRange(req *http.Request) (int64, int64, error) {
 	}
 
 	// extract requested offset and length
-	if len(ranges) > 1 {
+	start, length := int64(0), int64(-1)
+	if len(ranges) == 1 {
+		start, length = ranges[0].Start, ranges[0].Length
+	} else if len(ranges) > 1 {
 		return 0, 0, ErrMultiRangeNotSupported
 	}
-	return ranges[0].Start, ranges[0].Length, nil
+	return start, length, nil
 }
