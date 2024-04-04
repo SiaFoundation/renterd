@@ -410,8 +410,11 @@ func TestObjectEntries(t *testing.T) {
 		}
 		for _, entry := range got {
 			if !strings.HasSuffix(entry.Name, "/") {
-				if err := w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
+				buf := new(bytes.Buffer)
+				if err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
 					t.Fatal(err)
+				} else if buf.Len() != int(entry.Size) {
+					t.Fatal("unexpected", buf.Len(), entry.Size)
 				}
 			}
 		}

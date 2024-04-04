@@ -55,18 +55,18 @@ func (cr *contentReader) Read(p []byte) (int, error) {
 	return cr.r.Read(p)
 }
 
-func serveContent(rw http.ResponseWriter, req *http.Request, name string, gor api.GetObjectResponse) {
+func serveContent(rw http.ResponseWriter, req *http.Request, name string, content io.Reader, hor api.HeadObjectResponse) {
 	// set content type and etag
-	rw.Header().Set("Content-Type", gor.ContentType)
-	rw.Header().Set("ETag", api.FormatETag(gor.Etag))
+	rw.Header().Set("Content-Type", hor.ContentType)
+	rw.Header().Set("ETag", api.FormatETag(hor.Etag))
 
 	// set the user metadata headers
-	for k, v := range gor.Metadata {
+	for k, v := range hor.Metadata {
 		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectMetadataPrefix, k), v)
 	}
 
 	// create a content reader
-	rs := newContentReader(gor.Content, gor.Size, gor.Range.Offset)
+	rs := newContentReader(content, hor.Size, hor.Range.Offset)
 
-	http.ServeContent(rw, req, name, gor.LastModified, rs)
+	http.ServeContent(rw, req, name, hor.LastModified, rs)
 }
