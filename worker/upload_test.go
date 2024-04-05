@@ -220,7 +220,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	uploadBytes := func(n int) {
 		t.Helper()
 		params.path = fmt.Sprintf("%s_%d", t.Name(), c)
-		_, err := w.upload(context.Background(), bytes.NewReader(frand.Bytes(n)), w.Contracts(), params)
+		_, err := w.upload(context.Background(), params.bucket, params.path, bytes.NewReader(frand.Bytes(n)), w.Contracts(), testOpts()...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -505,7 +505,7 @@ func TestRefreshUploaders(t *testing.T) {
 
 	// upload data
 	contracts := w.Contracts()
-	_, err := w.upload(context.Background(), bytes.NewReader(data), contracts, params)
+	_, err := w.upload(context.Background(), params.bucket, t.Name(), bytes.NewReader(data), contracts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestUploadRegression(t *testing.T) {
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := w.upload(ctx, bytes.NewReader(data), w.Contracts(), params)
+	_, err := w.upload(ctx, params.bucket, params.path, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -616,7 +616,7 @@ func TestUploadRegression(t *testing.T) {
 	unblock()
 
 	// upload data
-	_, err = w.upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
+	_, err = w.upload(context.Background(), params.bucket, params.path, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,6 +634,13 @@ func TestUploadRegression(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
 		t.Fatal("data mismatch", data, buf.Bytes())
+	}
+}
+
+func testOpts() []UploadOption {
+	return []UploadOption{
+		WithContractSet(testContractSet),
+		WithRedundancySettings(testRedundancySettings),
 	}
 }
 

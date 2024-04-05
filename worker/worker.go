@@ -1020,18 +1020,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// grab the path
 	path := jc.PathParam("path")
 
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
-		return
-	}
-
 	// decode the contract set from the query string
 	var contractset string
 	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// decode the mimetype from the query string
@@ -1046,35 +1038,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// return early if the bucket does not exist
-	_, err = w.bus.Bucket(ctx, bucket)
-	if utils.IsErr(err, api.ErrBucketNotFound) {
-		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
-		return
-	}
-
-	// cancel the upload if no contract set is specified
-	if up.ContractSet == "" {
-		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
-		return
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
-		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
-		return
-	}
-
 	// allow overriding the redundancy settings
-	rs := up.RedundancySettings
-	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+	var minShards, totalShards int
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
-	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
-		return
-	}
-	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
 
@@ -1086,40 +1055,28 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	// build options
-	opts := []UploadOption{
-		WithBlockHeight(up.CurrentHeight),
-		WithContractSet(up.ContractSet),
-		WithMimeType(mimeType),
-		WithPacking(up.UploadPacking),
-		WithRedundancySettings(up.RedundancySettings),
-		WithObjectUserMetadata(metadata),
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
-	}
-
 	// upload the object
-	params := defaultParameters(bucket, path)
-	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
-	if err := jc.Check("couldn't upload object", err); err != nil {
-		if err != nil {
-			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
-				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
-			}
-		}
+	resp, err := w.UploadObject(ctx, jc.Request.Body, bucket, path, api.UploadObjectOptions{
+		MinShards:     minShards,
+		TotalShards:   totalShards,
+		ContractSet:   contractset,
+		ContentLength: jc.Request.ContentLength,
+		MimeType:      mimeType,
+		Metadata:      metadata,
+	})
+	if utils.IsErr(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
+		jc.Error(err, http.StatusServiceUnavailable)
 		return
 	}
 
 	// set etag header
-	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(eTag))
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
 func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
@@ -1224,6 +1181,8 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		WithPacking(up.UploadPacking),
 		WithRedundancySettings(up.RedundancySettings),
 		WithCustomKey(upload.Key),
+		WithPartNumber(partNumber),
+		WithUploadID(uploadID),
 	}
 
 	// make sure only one of the following is set
@@ -1244,8 +1203,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// upload the multipart
-	params := multipartParameters(bucket, path, uploadID, partNumber)
-	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
+	eTag, err := w.upload(ctx, bucket, path, jc.Request.Body, contracts, opts...)
 	if jc.Check("couldn't upload object", err) != nil {
 		if err != nil {
 			w.logger.Error(err)
@@ -1695,8 +1653,69 @@ func (w *worker) HeadObject(ctx context.Context, bucket, path string, opts api.H
 }
 
 func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
-	panic("not implemented")
+	// return early if the bucket does not exist
+	_, err := w.bus.Bucket(ctx, bucket)
+	if err != nil {
+		return nil, fmt.Errorf("bucket '%s' not found; %w", bucket, err)
+	}
+
+	// fetch the upload parameters
+	up, err := w.bus.UploadParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
+	} else if opts.ContractSet != "" {
+		up.ContractSet = opts.ContractSet
+	} else if up.ContractSet == "" {
+		return nil, api.ErrContractSetNotSpecified
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		return nil, api.ErrConsensusNotSynced
+	}
+
+	// allow overriding the redundancy settings
+	if opts.MinShards != 0 {
+		up.RedundancySettings.MinShards = opts.MinShards
+	}
+	if opts.TotalShards != 0 {
+		up.RedundancySettings.TotalShards = opts.TotalShards
+	}
+	err = api.RedundancySettings{MinShards: opts.MinShards, TotalShards: opts.TotalShards}.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("invalid redundancy settings: %w", err)
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// fetch contracts
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// upload
+	eTag, err := w.upload(ctx, bucket, path, r, contracts, []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithMimeType(opts.MimeType),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+		WithObjectUserMetadata(opts.Metadata),
+	}...)
+	if err != nil {
+		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
+		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
+			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+		}
+		return nil, fmt.Errorf("couldn't upload object: %w", err)
+	}
+	return &api.UploadObjectResponse{
+		ETag: eTag,
+	}, nil
 }
+
 func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
 	panic("not implemented")
 }
