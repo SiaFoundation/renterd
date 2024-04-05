@@ -1073,6 +1073,8 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
 		jc.Error(err, http.StatusServiceUnavailable)
 		return
+	} else if jc.Check("couldn't upload object", err) != nil {
+		return
 	}
 
 	// set etag header
@@ -1681,7 +1683,7 @@ func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	if opts.TotalShards != 0 {
 		up.RedundancySettings.TotalShards = opts.TotalShards
 	}
-	err = api.RedundancySettings{MinShards: opts.MinShards, TotalShards: opts.TotalShards}.Validate()
+	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("invalid redundancy settings: %w", err)
 	}
