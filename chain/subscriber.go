@@ -161,9 +161,6 @@ func (s *Subscriber) Run() (func(), error) {
 		}
 	}()
 
-	// trigger initial sync
-	s.triggerSync()
-
 	// trigger a sync on reorgs
 	return s.cm.OnReorg(func(_ types.ChainIndex) { s.triggerSync() }), nil
 }
