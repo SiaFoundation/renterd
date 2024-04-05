@@ -60,6 +60,12 @@ type (
 	}
 )
 
+// EndHeight of a contract formed using the AutopilotConfig given the current
+// period.
+func (ap *Autopilot) EndHeight() uint64 {
+	return ap.CurrentPeriod + ap.Config.Contracts.Period + ap.Config.Contracts.RenewWindow
+}
+
 type (
 	// AutopilotTriggerRequest is the request object used by the /trigger
 	// endpoint
@@ -114,7 +120,6 @@ type (
 			} `json:"gouging"`
 			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
 			NotScanned            uint64 `json:"notScanned"`
-			Unknown               uint64 `json:"unknown"`
 		}
 		Recommendation *ConfigRecommendation `json:"recommendation,omitempty"`
 	}
