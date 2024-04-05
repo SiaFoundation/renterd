@@ -250,7 +250,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 		if rangeRequest.End >= 0 {
 			length = rangeRequest.End - rangeRequest.Start + 1
 		}
-		opts.Range = api.DownloadRange{Offset: rangeRequest.Start, Length: length}
+		opts.Range = &api.DownloadRange{Offset: rangeRequest.Start, Length: length}
 	}
 
 	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)

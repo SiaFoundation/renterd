@@ -70,7 +70,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// perform a HEAD request and assert the headers are all present
-	hor, err := w.HeadObject(context.Background(), api.DefaultBucketName, t.Name(), api.HeadObjectOptions{Range: api.DownloadRange{Offset: 1, Length: 1}})
+	hor, err := w.HeadObject(context.Background(), api.DefaultBucketName, t.Name(), api.HeadObjectOptions{Range: &api.DownloadRange{Offset: 1, Length: 1}})
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{

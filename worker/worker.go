@@ -882,7 +882,7 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 		return
 	}
 
-	offset, length, err := api.ParseDownloadRange(jc.Request)
+	dr, err := api.ParseDownloadRange(jc.Request)
 	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -897,10 +897,7 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	// fetch object metadata
 	hor, err := w.HeadObject(jc.Request.Context(), bucket, path, api.HeadObjectOptions{
 		IgnoreDelim: ignoreDelim,
-		Range: api.DownloadRange{
-			Offset: offset,
-			Length: length,
-		},
+		Range:       &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -979,7 +976,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	offset, length, err := api.ParseDownloadRange(jc.Request)
+	dr, err := api.ParseDownloadRange(jc.Request)
 	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -993,10 +990,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 
 	gor, err := w.GetObject(ctx, bucket, path, api.DownloadObjectOptions{
 		GetObjectOptions: opts,
-		Range: api.DownloadRange{
-			Offset: offset,
-			Length: length,
-		},
+		Range:            &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1567,6 +1561,9 @@ func (w *worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 	}
 
 	// adjust length
+	if opts.Range == nil {
+		opts.Range = &api.DownloadRange{Offset: 0, Length: -1}
+	}
 	if opts.Range.Length == -1 {
 		opts.Range.Length = res.Object.Size - opts.Range.Offset
 	}
@@ -1598,6 +1595,9 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	obj := *res.Object.Object
 
 	// adjust range
+	if opts.Range == nil {
+		opts.Range = &api.DownloadRange{}
+	}
 	opts.Range.Offset = hor.Range.Offset
 	opts.Range.Length = hor.Range.Length
 

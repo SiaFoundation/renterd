@@ -208,12 +208,12 @@ type (
 
 	HeadObjectOptions struct {
 		IgnoreDelim bool
-		Range       DownloadRange
+		Range       *DownloadRange
 	}
 
 	DownloadObjectOptions struct {
 		GetObjectOptions
-		Range DownloadRange
+		Range *DownloadRange
 	}
 
 	GetObjectOptions struct {
@@ -291,7 +291,7 @@ func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
 }
 
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
-	if opts.Range != (DownloadRange{}) {
+	if opts.Range != nil {
 		if opts.Range.Length == -1 {
 			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
 		} else {
@@ -313,7 +313,7 @@ func (opts HeadObjectOptions) Apply(values url.Values) {
 }
 
 func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
-	if opts.Range != (DownloadRange{}) {
+	if opts.Range != nil {
 		if opts.Range.Length == -1 {
 			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
 		} else {

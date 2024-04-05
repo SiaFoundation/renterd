@@ -279,21 +279,21 @@ func ParseContentRange(contentRange string) (ContentRange, error) {
 	}, nil
 }
 
-func ParseDownloadRange(req *http.Request) (int64, int64, error) {
+func ParseDownloadRange(req *http.Request) (DownloadRange, error) {
 	// parse the request range
 	// we pass math.MaxInt64 since a range header in a request doesn't have a
 	// size
 	ranges, err := http_range.ParseRange(req.Header.Get("Range"), math.MaxInt64)
 	if err != nil {
-		return 0, 0, err
+		return DownloadRange{}, err
 	}
 
 	// extract requested offset and length
-	start, length := int64(0), int64(-1)
+	dr := DownloadRange{Offset: 0, Length: -1}
 	if len(ranges) == 1 {
-		start, length = ranges[0].Start, ranges[0].Length
+		dr.Offset, dr.Length = ranges[0].Start, ranges[0].Length
 	} else if len(ranges) > 1 {
-		return 0, 0, ErrMultiRangeNotSupported
+		return DownloadRange{}, ErrMultiRangeNotSupported
 	}
-	return start, length, nil
+	return dr, nil
 }
