@@ -243,8 +243,6 @@ gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213/go.mod h1
 gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130/go.mod h1:SxigdS5Q1ui+OMgGAXt1E/Fg3RB6PvKXMov2O3gvIzs=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.etcd.io/bbolt v1.3.5/go.mod h1:G5EMThwa9y8QZGBClrRx5EY+Yw9kAhnjy3bSjsnlVTQ=
-go.sia.tech/core v0.2.2-0.20240325122830-e781eaa57d37 h1:jsiab6uAUkaeDL7XEseAxJw7NVhxLNoU2WaB0AHbgG8=
-go.sia.tech/core v0.2.2-0.20240325122830-e781eaa57d37/go.mod h1:Zk7HaybEPgkPC1p6e6tTQr8PIeZClTgNcLNGYDLQJeE=
 go.sia.tech/core v0.2.2-0.20240404003127-f4248250d041 h1:3tgQlTmop/OU5dTHnBmAdNIPgae67wRijaknBhmAOCg=
 go.sia.tech/core v0.2.2-0.20240404003127-f4248250d041/go.mod h1:Zk7HaybEPgkPC1p6e6tTQr8PIeZClTgNcLNGYDLQJeE=
 go.sia.tech/coreutils v0.0.3 h1:ZxuzovRpQMvfy/pCOV4om1cPF6sE15GyJyK36kIrF1Y=
