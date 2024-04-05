@@ -298,12 +298,15 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 		for i := 1; i <= len(s.retryTxIntervals)+1; i++ {
 			index, err = s.processUpdates(crus, caus)
 			if err == nil {
+				fmt.Println("DEBUG PJ: processed updates successfully, height", index.Height)
 				break
 			}
+			fmt.Println("DEBUG PJ: processing updates failed, height", index.Height)
 
 			// no more retries left
 			if i-1 == len(s.retryTxIntervals) {
 				s.logger.Error(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i, len(s.retryTxIntervals)+1, err))
+				fmt.Println("DEBUG PJ: processing updates failed after all retries")
 				return fmt.Errorf("failed to process updates after %d attempts: %w", i, err)
 			}
 
@@ -322,6 +325,7 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 
 	// process revert updates
 	for _, cru := range crus {
+		fmt.Println("DEBUG PJ: revert block", cru.State.Index)
 		if err := s.revertChainUpdate(tx, cru); err != nil {
 			return types.ChainIndex{}, fmt.Errorf("failed to revert chain update: %w", err)
 		}
