@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"math"
@@ -50,7 +50,6 @@ func TestOptimiseGougingSetting(t *testing.T) {
 			Allowance: types.Siacoins(100000),
 			Amount:    10,
 		},
-		Hosts: api.HostsConfig{},
 	}
 	cs := api.ConsensusState{
 		BlockHeight:   100,

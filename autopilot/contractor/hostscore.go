@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"math"
@@ -23,10 +23,11 @@ const (
 )
 
 func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+	cCfg := cfg.Contracts
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
 	// every single host.
-	idealDataPerHost := float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount)
+	idealDataPerHost := float64(cCfg.Storage) * expectedRedundancy / float64(cCfg.Amount)
 	// allocationPerHost is the amount of data that we would like to be able to
 	// put on each host, because data is not always spread evenly across the
 	// hosts during upload. Slower hosts may get very little data, more
@@ -37,12 +38,12 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedR
 	// data will store twice the expectation
 	allocationPerHost := idealDataPerHost * 2
 	// hostPeriodCost is the amount of money we expect to spend on a host in a period.
-	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
+	hostPeriodCost := hostPeriodCostForScore(h, cCfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h),
-		Collateral:       collateralScore(cfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
+		Collateral:       collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
-		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
+		Prices:           priceAdjustmentScore(hostPeriodCost, cCfg),
 		StorageRemaining: storageRemainingScore(h.Settings, storedData, allocationPerHost),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
@@ -58,8 +59,8 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedR
 //   - If the host is more expensive than expected, an exponential malus is applied.
 //     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
 //     it to drop to 0.05.
-func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.AutopilotConfig) float64 {
-	hostPeriodBudget := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
+func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.ContractsConfig) float64 {
+	hostPeriodBudget := cfg.Allowance.Div64(cfg.Amount)
 
 	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())
 	fRatio, _ := ratio.Float64()
@@ -132,7 +133,7 @@ func ageScore(h api.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, allocationPerHost uint64) float64 {
+func collateralScore(cfg api.ContractsConfig, pt rhpv3.HostPriceTable, allocationPerHost uint64) float64 {
 	// Ignore hosts which have set their max collateral to 0.
 	if pt.MaxCollateral.IsZero() || pt.CollateralCost.IsZero() {
 		return 0
@@ -144,10 +145,10 @@ func collateralScore(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, allocatio
 
 	// compute the cost of storing
 	numSectors := bytesToSectors(allocationPerHost)
-	storageCost := pt.AppendSectorCost(cfg.Contracts.Period).Storage.Mul64(numSectors)
+	storageCost := pt.AppendSectorCost(cfg.Period).Storage.Mul64(numSectors)
 
 	// calculate the expected collateral for the host allocation.
-	expectedCollateral := pt.CollateralCost.Mul64(allocationPerHost).Mul64(cfg.Contracts.Period)
+	expectedCollateral := pt.CollateralCost.Mul64(allocationPerHost).Mul64(cfg.Period)
 	if expectedCollateral.Cmp(pt.MaxCollateral) > 0 {
 		expectedCollateral = pt.MaxCollateral
 	}
@@ -301,8 +302,8 @@ func sectorUploadCost(pt rhpv3.HostPriceTable, duration uint64) types.Currency {
 	return uploadSectorCostRHPv3
 }
 
-func uploadCostForScore(cfg api.AutopilotConfig, h api.Host, bytes uint64) types.Currency {
-	uploadSectorCostRHPv3 := sectorUploadCost(h.PriceTable.HostPriceTable, cfg.Contracts.Period)
+func uploadCostForScore(cfg api.ContractsConfig, h api.Host, bytes uint64) types.Currency {
+	uploadSectorCostRHPv3 := sectorUploadCost(h.PriceTable.HostPriceTable, cfg.Period)
 	numSectors := bytesToSectors(bytes)
 	return uploadSectorCostRHPv3.Mul64(numSectors)
 }
@@ -314,20 +315,20 @@ func downloadCostForScore(h api.Host, bytes uint64) types.Currency {
 	return downloadSectorCostRHPv3.Mul64(numSectors)
 }
 
-func storageCostForScore(cfg api.AutopilotConfig, h api.Host, bytes uint64) types.Currency {
-	storeSectorCostRHPv3 := sectorStorageCost(h.PriceTable.HostPriceTable, cfg.Contracts.Period)
+func storageCostForScore(cfg api.ContractsConfig, h api.Host, bytes uint64) types.Currency {
+	storeSectorCostRHPv3 := sectorStorageCost(h.PriceTable.HostPriceTable, cfg.Period)
 	numSectors := bytesToSectors(bytes)
 	return storeSectorCostRHPv3.Mul64(numSectors)
 }
 
-func hostPeriodCostForScore(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) types.Currency {
+func hostPeriodCostForScore(h api.Host, cfg api.ContractsConfig, expectedRedundancy float64) types.Currency {
 	// compute how much data we upload, download and store.
-	uploadPerHost := uint64(float64(cfg.Contracts.Upload) * expectedRedundancy / float64(cfg.Contracts.Amount))
-	downloadPerHost := uint64(float64(cfg.Contracts.Download) * expectedRedundancy / float64(cfg.Contracts.Amount))
-	storagePerHost := uint64(float64(cfg.Contracts.Storage) * expectedRedundancy / float64(cfg.Contracts.Amount))
+	uploadPerHost := uint64(float64(cfg.Upload) * expectedRedundancy / float64(cfg.Amount))
+	downloadPerHost := uint64(float64(cfg.Download) * expectedRedundancy / float64(cfg.Amount))
+	storagePerHost := uint64(float64(cfg.Storage) * expectedRedundancy / float64(cfg.Amount))
 
 	// compute the individual costs.
-	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Contracts.Period, storagePerHost, h.Settings)
+	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Period, storagePerHost, h.Settings)
 	hostContractPrice := contractPriceForScore(h)
 	hostUploadCost := uploadCostForScore(cfg, h, uploadPerHost)
 	hostDownloadCost := downloadCostForScore(h, downloadPerHost)

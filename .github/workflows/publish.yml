@@ -112,7 +112,7 @@ jobs:
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: renterd
           path: release/
@@ -208,7 +208,7 @@ jobs:
           /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
           ditto -ck bin $ZIP_OUTPUT
           xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: renterd
           path: release/
@@ -249,7 +249,7 @@ jobs:
           azuresigntool sign -kvu "${{ secrets.AZURE_KEY_VAULT_URI }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc ${{ secrets.AZURE_CERT_NAME }} -tr http://timestamp.digicert.com -v bin/renterd.exe
           cp README.md LICENSE bin/
           7z a $ZIP_OUTPUT bin/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: renterd
           path: release/

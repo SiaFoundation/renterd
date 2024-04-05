@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -196,39 +197,33 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 	go func(st string) {
 		defer s.wg.Done()
 
-		var interrupted bool
 		for resp := range s.launchScanWorkers(ctx, w, s.launchHostScans()) {
 			if s.isInterrupted() || s.ap.isStopped() {
-				interrupted = true
 				break
 			}
 			if resp.err != nil && !strings.Contains(resp.err.Error(), "connection refused") {
 				s.logger.Error(resp.err)
 			}
 		}
-
-		// fetch the config right before removing offline hosts to get the most
-		// recent settings in case they were updated while scanning.
-		hostCfg := s.ap.State().cfg.Hosts
-		maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
-		minRecentScanFailures := hostCfg.MinRecentScanFailures
-
-		if !interrupted && maxDowntime > 0 {
-			s.logger.Infof("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
-			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
-			if err != nil {
-				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
-			} else if removed > 0 {
-				s.logger.Infof("removed %v offline hosts", removed)
-			}
-		}
-
 		s.mu.Lock()
 		s.scanning = false
 		s.logger.Infof("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(scanType)
-	return
+}
+
+func (s *scanner) PruneHosts(ctx context.Context, cfg api.HostsConfig) {
+	maxDowntime := time.Duration(cfg.MaxDowntimeHours) * time.Hour
+	minRecentScanFailures := cfg.MinRecentScanFailures
+	if maxDowntime > 0 {
+		s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
+		removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
+		if err != nil {
+			s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
+		} else if removed > 0 {
+			s.logger.Infof("removed %v offline hosts", removed)
+		}
+	}
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -314,7 +309,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				if err != nil {
 					break // abort
-				} else if !utils.IsErr(errors.New(scan.ScanError), errIOTimeout) && scan.Ping > 0 {
+				} else if !utils.IsErr(errors.New(scan.ScanError), contractor.ErrIOTimeout) && scan.Ping > 0 {
 					s.tracker.addDataPoint(time.Duration(scan.Ping))
 				}
 
