@@ -241,7 +241,6 @@ type (
 
 	// UploadObjectOptions is the options type for the worker client.
 	UploadObjectOptions struct {
-		Offset        int
 		MinShards     int
 		TotalShards   int
 		ContractSet   string
@@ -251,15 +250,15 @@ type (
 	}
 
 	UploadMultipartUploadPartOptions struct {
+		ContractSet      string
+		MinShards        int
+		TotalShards      int
 		EncryptionOffset *int
 		ContentLength    int64
 	}
 )
 
 func (opts UploadObjectOptions) ApplyValues(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
 	if opts.MinShards != 0 {
 		values.Set("minshards", fmt.Sprint(opts.MinShards))
 	}
@@ -283,6 +282,15 @@ func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	if opts.EncryptionOffset != nil {
 		values.Set("offset", fmt.Sprint(*opts.EncryptionOffset))
+	}
+	if opts.MinShards != 0 {
+		values.Set("minshards", fmt.Sprint(opts.MinShards))
+	}
+	if opts.TotalShards != 0 {
+		values.Set("totalshards", fmt.Sprint(opts.TotalShards))
+	}
+	if opts.ContractSet != "" {
+		values.Set("contractset", opts.ContractSet)
 	}
 }
 

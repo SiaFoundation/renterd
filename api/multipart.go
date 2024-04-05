@@ -7,6 +7,11 @@ import (
 )
 
 var (
+	// ErrInvalidMultipartEncryptionSettings is returned if the multipart upload
+	// has an invalid combination of encryption params. e.g. when encryption is
+	// enabled but not offset is set.
+	ErrInvalidMultipartEncryptionSettings = errors.New("invalid multipart encryption settings")
+
 	// ErrMultipartUploadNotFound is returned if the specified multipart upload
 	// wasn't found.
 	ErrMultipartUploadNotFound = errors.New("multipart upload not found")

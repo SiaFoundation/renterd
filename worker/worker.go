@@ -1058,7 +1058,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		MimeType:      mimeType,
 		Metadata:      metadata,
 	})
-	if utils.IsErr(err, api.ErrBucketNotFound) {
+	if utils.IsErr(err, api.ErrInvalidRedundancySettings) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
@@ -1082,46 +1085,15 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// grab the path
 	path := jc.PathParam("path")
 
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
-		return
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// cancel the upload if no contract set is specified
-	if up.ContractSet == "" {
-		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
-		return
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
-		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
-		return
-	}
-
 	// decode the contract set from the query string
 	var contractset string
 	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// decode the bucket from the query string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-
-	// return early if the bucket does not exist
-	_, err = w.bus.Bucket(ctx, bucket)
-	if utils.IsErr(err, api.ErrBucketNotFound) {
-		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
 
@@ -1141,14 +1113,11 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// allow overriding the redundancy settings
-	rs := up.RedundancySettings
-	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+	var minShards, totalShards int
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
-	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
-		return
-	}
-	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
 
@@ -1156,62 +1125,40 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
-	} else if offset < 0 {
-		jc.Error(errors.New("offset must be positive"), http.StatusBadRequest)
-		return
-	}
-
-	// fetch upload from bus
-	upload, err := w.bus.MultipartUpload(ctx, uploadID)
-	if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch multipart upload", err) != nil {
-		return
-	}
-
-	// built options
-	opts := []UploadOption{
-		WithBlockHeight(up.CurrentHeight),
-		WithContractSet(up.ContractSet),
-		WithPacking(up.UploadPacking),
-		WithRedundancySettings(up.RedundancySettings),
-		WithCustomKey(upload.Key),
-		WithPartNumber(partNumber),
-		WithUploadID(uploadID),
-	}
-
-	// make sure only one of the following is set
-	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && jc.Request.FormValue("offset") == "" {
-		jc.Error(errors.New("if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set"), http.StatusBadRequest)
-		return
-	} else if encryptionEnabled {
-		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
 	}
 
 	// upload the multipart
-	eTag, err := w.upload(ctx, bucket, path, jc.Request.Body, contracts, opts...)
-	if jc.Check("couldn't upload object", err) != nil {
-		if err != nil {
-			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
-				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
-			}
-		}
+	resp, err := w.UploadMultipartUploadPart(ctx, jc.Request.Body, bucket, path, uploadID, partNumber, api.UploadMultipartUploadPartOptions{
+		ContractSet:      contractset,
+		MinShards:        minShards,
+		TotalShards:      totalShards,
+		EncryptionOffset: nil,
+		ContentLength:    jc.Request.ContentLength,
+	})
+	if utils.IsErr(err, api.ErrInvalidRedundancySettings) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
+		jc.Error(err, http.StatusServiceUnavailable)
+		return
+	} else if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if utils.IsErr(err, api.ErrInvalidMultipartEncryptionSettings) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("couldn't upload multipart part", err) != nil {
 		return
 	}
 
 	// set etag header
-	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(eTag))
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
@@ -1685,7 +1632,7 @@ func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	}
 	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
 	if err != nil {
-		return nil, fmt.Errorf("invalid redundancy settings: %w", err)
+		return nil, err
 	}
 
 	// attach gouging checker to the context
@@ -1719,5 +1666,84 @@ func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 }
 
 func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
-	panic("not implemented")
+	// return early if the bucket does not exist
+	_, err := w.bus.Bucket(ctx, bucket)
+	if err != nil {
+		return nil, fmt.Errorf("bucket '%s' not found; %w", bucket, err)
+	}
+
+	// fetch the upload parameters
+	up, err := w.bus.UploadParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
+	} else if opts.ContractSet != "" {
+		up.ContractSet = opts.ContractSet
+	} else if up.ContractSet == "" {
+		return nil, api.ErrContractSetNotSpecified
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		return nil, api.ErrConsensusNotSynced
+	}
+
+	// allow overriding the redundancy settings
+	if opts.MinShards != 0 {
+		up.RedundancySettings.MinShards = opts.MinShards
+	}
+	if opts.TotalShards != 0 {
+		up.RedundancySettings.TotalShards = opts.TotalShards
+	}
+	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
+	if err != nil {
+		return nil, err
+	}
+
+	// fetch upload from bus
+	upload, err := w.bus.MultipartUpload(ctx, uploadID)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch multipart upload: %w", err)
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// prepare opts
+	uploadOpts := []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+		WithCustomKey(upload.Key),
+		WithPartNumber(partNumber),
+		WithUploadID(uploadID),
+	}
+
+	// make sure only one of the following is set
+	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
+		return nil, fmt.Errorf("%w: if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set", api.ErrInvalidMultipartEncryptionSettings)
+	} else if opts.EncryptionOffset != nil && *opts.EncryptionOffset < 0 {
+		return nil, fmt.Errorf("%w: encryption offset must be positive", api.ErrInvalidMultipartEncryptionSettings)
+	} else if encryptionEnabled {
+		uploadOpts = append(uploadOpts, WithCustomEncryptionOffset(uint64(*opts.EncryptionOffset)))
+	}
+
+	// fetch contracts
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// upload
+	eTag, err := w.upload(ctx, bucket, path, r, contracts, uploadOpts...)
+	if err != nil {
+		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
+		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
+			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+		}
+		return nil, fmt.Errorf("couldn't upload object: %w", err)
+	}
+	return &api.UploadMultipartUploadPartResponse{
+		ETag: eTag,
+	}, nil
 }
