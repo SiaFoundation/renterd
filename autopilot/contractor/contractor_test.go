@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"math"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestCalculateMinScore(t *testing.T) {
-	c := &contractor{
+	c := &Contractor{
 		logger: zap.NewNop().Sugar(),
 	}
 
@@ -43,7 +43,7 @@ func TestCalculateMinScore(t *testing.T) {
 func TestShouldForgiveFailedRenewal(t *testing.T) {
 	var fcid types.FileContractID
 	frand.Read(fcid[:])
-	c := &contractor{
+	c := &Contractor{
 		firstRefreshFailure: make(map[types.FileContractID]time.Time),
 	}
 

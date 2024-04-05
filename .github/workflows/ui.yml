@@ -1,9 +1,8 @@
 name: Update UI and open PR
 
 on:
-  # Run daily
-  schedule:
-    - cron: '0 0 * * *'
+  repository_dispatch:
+    types: [update-ui]
   # Enable manual trigger
   workflow_dispatch:
 

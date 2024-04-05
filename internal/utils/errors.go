@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// Common i/o related errors
+var (
+	ErrNoRouteToHost         = errors.New("no route to host")
+	ErrNoSuchHost            = errors.New("no such host")
+	ErrConnectionRefused     = errors.New("connection refused")
+	ErrConnectionTimedOut    = errors.New("connection timed out")
+	ErrConnectionResetByPeer = errors.New("connection reset by peer")
+)
+
 // IsErr can be used to compare an error to a target and also works when used on
 // errors that haven't been wrapped since it will fall back to a string
 // comparison. Useful to check errors returned over the network.
