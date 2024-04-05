@@ -1121,20 +1121,25 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// get the offset
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
-		return
-	}
-
-	// upload the multipart
-	resp, err := w.UploadMultipartUploadPart(ctx, jc.Request.Body, bucket, path, uploadID, partNumber, api.UploadMultipartUploadPartOptions{
+	// prepare options
+	opts := api.UploadMultipartUploadPartOptions{
 		ContractSet:      contractset,
 		MinShards:        minShards,
 		TotalShards:      totalShards,
 		EncryptionOffset: nil,
 		ContentLength:    jc.Request.ContentLength,
-	})
+	}
+
+	// get the offset
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if jc.Request.FormValue("offset") != "" {
+		opts.EncryptionOffset = &offset
+	}
+
+	// upload the multipart
+	resp, err := w.UploadMultipartUploadPart(ctx, jc.Request.Body, bucket, path, uploadID, partNumber, opts)
 	if utils.IsErr(err, api.ErrInvalidRedundancySettings) {
 		jc.Error(err, http.StatusBadRequest)
 		return
