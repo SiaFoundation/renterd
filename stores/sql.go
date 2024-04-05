@@ -314,26 +314,28 @@ func (ss *SQLStore) ChainIndex() (types.ChainIndex, error) {
 }
 
 func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
-	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, func(err error) bool {
-		return err == nil ||
-			utils.IsErr(err, context.Canceled) ||
-			utils.IsErr(err, gorm.ErrRecordNotFound) ||
-			utils.IsErr(err, errInvalidNumberOfShards) ||
-			utils.IsErr(err, errShardRootChanged) ||
-			utils.IsErr(err, api.ErrContractNotFound) ||
-			utils.IsErr(err, api.ErrObjectNotFound) ||
-			utils.IsErr(err, api.ErrObjectCorrupted) ||
-			utils.IsErr(err, api.ErrBucketExists) ||
-			utils.IsErr(err, api.ErrBucketNotFound) ||
-			utils.IsErr(err, api.ErrBucketNotEmpty) ||
-			utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
-			utils.IsErr(err, api.ErrObjectExists) ||
-			utils.IsErr(err, errNoSuchTable) ||
-			utils.IsErr(err, api.ErrPartNotFound) ||
-			utils.IsErr(err, api.ErrSlabNotFound) ||
-			utils.IsErr(err, syncer.ErrPeerNotFound) ||
-			utils.IsErr(err, errDuplicateEntry)
-	})
+	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, s.retryAbortFn)
+}
+
+func (s *SQLStore) retryAbortFn(err error) bool {
+	return err == nil ||
+		utils.IsErr(err, context.Canceled) ||
+		utils.IsErr(err, gorm.ErrRecordNotFound) ||
+		utils.IsErr(err, errInvalidNumberOfShards) ||
+		utils.IsErr(err, errShardRootChanged) ||
+		utils.IsErr(err, api.ErrContractNotFound) ||
+		utils.IsErr(err, api.ErrObjectNotFound) ||
+		utils.IsErr(err, api.ErrObjectCorrupted) ||
+		utils.IsErr(err, api.ErrBucketExists) ||
+		utils.IsErr(err, api.ErrBucketNotFound) ||
+		utils.IsErr(err, api.ErrBucketNotEmpty) ||
+		utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
+		utils.IsErr(err, api.ErrObjectExists) ||
+		utils.IsErr(err, errNoSuchTable) ||
+		utils.IsErr(err, api.ErrPartNotFound) ||
+		utils.IsErr(err, api.ErrSlabNotFound) ||
+		utils.IsErr(err, syncer.ErrPeerNotFound) ||
+		utils.IsErr(err, errDuplicateEntry)
 }
 
 func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {

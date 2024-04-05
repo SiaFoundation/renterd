@@ -1,79 +1,298 @@
 package stores
 
 import (
-	"context"
 	"fmt"
+	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/chain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-var _ chain.ChainStore = (*SQLStore)(nil)
+var (
+	_ chain.ChainStore    = (*SQLStore)(nil)
+	_ chain.ChainUpdateTx = (*chainUpdateTx)(nil)
+)
 
-// ApplyChainUpdate implements the ChainStore interface and applies a given
-// chain update to the database. This includes host announcements, contract
-// updates and all wallet related updates.
-func (s *SQLStore) ApplyChainUpdate(ctx context.Context, cu *chain.Update) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// apply contract updates
-		for fcid, contractUpdate := range cu.ContractUpdates {
-			if err := updateContract(tx, fcid, *contractUpdate); err != nil {
-				return fmt.Errorf("%w; failed to update contract %v", err, fcid)
-			}
+// chainUpdateTx implements the ChainUpdateTx interface.
+type chainUpdateTx struct {
+	tx *gorm.DB
+}
+
+// BeginChainUpdateTx starts a transaction and wraps it in a chainUpdateTx. This
+// transaction will be used to process a chain update in the subscriber.
+func (s *SQLStore) BeginChainUpdateTx() chain.ChainUpdateTx {
+	return &chainUpdateTx{tx: s.db.Begin()}
+}
+
+// AddEvents is called with all relevant events added in the update.
+func (u *chainUpdateTx) AddEvents(events []wallet.Event) error {
+	for _, e := range events {
+		if err := u.tx.
+			Clauses(clause.OnConflict{
+				DoNothing: true,
+				Columns:   []clause.Column{{Name: "event_id"}},
+			}).
+			Create(&dbWalletEvent{
+				EventID:        hash256(e.ID),
+				Inflow:         currency(e.Inflow),
+				Outflow:        currency(e.Outflow),
+				Transaction:    e.Transaction,
+				MaturityHeight: e.MaturityHeight,
+				Source:         string(e.Source),
+				Timestamp:      e.Timestamp.Unix(),
+				Height:         e.Index.Height,
+				BlockID:        hash256(e.Index.ID),
+			}).Error; err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		// mark failed contracts
-		if err := markFailedContracts(tx, cu.Index.Height); err != nil {
-			return fmt.Errorf("%w; failed to mark failed contracts", err)
+// AddSiacoinElements is called with all new siacoin elements in the update.
+// Ephemeral siacoin elements are not included.
+func (u *chainUpdateTx) AddSiacoinElements(elements []wallet.SiacoinElement) error {
+	for _, e := range elements {
+		if err := u.tx.
+			Clauses(clause.OnConflict{
+				DoNothing: true,
+				Columns:   []clause.Column{{Name: "output_id"}},
+			}).
+			Create(&dbWalletOutput{
+				OutputID:       hash256(e.ID),
+				LeafIndex:      e.StateElement.LeafIndex,
+				MerkleProof:    merkleProof{proof: e.StateElement.MerkleProof},
+				Value:          currency(e.SiacoinOutput.Value),
+				Address:        hash256(e.SiacoinOutput.Address),
+				MaturityHeight: e.MaturityHeight,
+				Height:         e.Index.Height,
+				BlockID:        hash256(e.Index.ID),
+			}).Error; err != nil {
+			return nil
 		}
+	}
+	return nil
+}
 
-		// apply host updates
-		if err := updateHosts(tx, cu.HostUpdates); err != nil {
-			return fmt.Errorf("%w; failed to add hosts", err)
+// Commit commits the updates to the database.
+func (u *chainUpdateTx) Commit() error {
+	return u.tx.Commit().Error
+}
+
+// ContractState returns the state of a file contract.
+func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
+	var state contractState
+	err := u.tx.
+		Select("state").
+		Model(&dbContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Scan(&state).
+		Error
+
+	if err == gorm.ErrRecordNotFound {
+		err = u.tx.
+			Select("state").
+			Model(&dbArchivedContract{}).
+			Where("fcid = ?", fileContractID(fcid)).
+			Scan(&state).
+			Error
+	}
+
+	if err != nil {
+		return "", err
+	}
+	return api.ContractState(state.String()), nil
+}
+
+// RemoveSiacoinElements is called with all siacoin elements that were spent in
+// the update.
+func (u *chainUpdateTx) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
+	for _, id := range ids {
+		if err := u.tx.
+			Where("output_id", hash256(id)).
+			Delete(&dbWalletOutput{}).
+			Error; err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		// apply wallet event updates
-		for _, weu := range cu.WalletEventUpdates {
-			if err := updateWalletEvent(tx, weu); err != nil {
-				return fmt.Errorf("%w; failed to update wallet event %+v", err, weu)
-			}
-		}
+// RevertIndex is called with the chain index that is being reverted. Any events
+// and siacoin elements that were created by the index should be removed.
+func (u *chainUpdateTx) RevertIndex(index types.ChainIndex) error {
+	if err := u.tx.
+		Model(&dbWalletEvent{}).
+		Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).
+		Delete(&dbWalletEvent{}).
+		Error; err != nil {
+		return err
+	}
+	return u.tx.
+		Model(&dbWalletOutput{}).
+		Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).
+		Delete(&dbWalletOutput{}).
+		Error
+}
 
-		// apply wallet output updates
-		for _, wou := range cu.WalletOutputUpdates {
-			if err := updateWalletOutput(tx, wou); err != nil {
-				return fmt.Errorf("%w; failed to update wallet output %+v", err, wou)
-			}
-		}
+// UpdateChainIndex updates the chain index in the database.
+func (u *chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
+	return u.tx.
+		Model(&dbConsensusInfo{}).
+		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
+		Updates(map[string]interface{}{
+			"height":   index.Height,
+			"block_id": hash256(index.ID),
+		}).
+		Error
+}
 
-		// process reverts
-		for _, reverted := range cu.RevertIndices {
-			if err := revertIndex(tx, reverted); err != nil {
-				return fmt.Errorf("%w; failed to revert index %d", err, reverted.Height)
-			}
-		}
+// UpdateContract updates the revision height, revision number, and size the
+// contract with given fcid.
+func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
+	updates := map[string]interface{}{
+		"revision_height": revisionHeight,
+	}
+	if revisionNumber > 0 {
+		updates["revision_number"] = fmt.Sprint(revisionNumber)
+	}
+	if size > 0 {
+		updates["size"] = size
+	}
 
-		// update chain index
-		if err := updateChainIndex(tx, cu.Index); err != nil {
-			return fmt.Errorf("%w; failed to update chain index", err)
-		}
+	if err := u.tx.
+		Model(&dbContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Updates(updates).
+		Error; err != nil {
+		return err
+	}
+	return u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Updates(updates).
+		Error
+}
 
+// UpdateContractState updates the state of the contract with given fcid.
+func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {
+	var cs contractState
+	if err := cs.LoadString(string(state)); err != nil {
+		return err
+	}
+
+	if err := u.tx.
+		Model(&dbContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Update("state", cs).
+		Error; err != nil {
+		return err
+	}
+	return u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Update("state", cs).
+		Error
+}
+
+// UpdateContractProofHeight updates the proof height of the contract with given
+// fcid.
+func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
+	if err := u.tx.
+		Model(&dbContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Update("proof_height", proofHeight).
+		Error; err != nil {
+		return err
+	}
+	return u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid = ?", fileContractID(fcid)).
+		Update("proof_height", proofHeight).
+		Error
+}
+
+// UpdateFailedContracts marks active contract as failed if the current
+// blockheight surposses their window_end.
+func (u *chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
+	return u.tx.
+		Model(&dbContract{}).
+		Where("state = ? AND ? > window_end", contractStateActive, blockHeight).
+		Update("state", contractStateFailed).
+		Error
+}
+
+// UpdateHost creates the announcement and upserts the host in the database.
+func (u *chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error {
+	// create the announcement
+	if err := u.tx.Create(&dbAnnouncement{
+		HostKey:     publicKey(hk),
+		BlockHeight: bh,
+		BlockID:     blockID.String(),
+		NetAddress:  ha.NetAddress,
+	}).Error; err != nil {
+		return err
+	}
+
+	// create the host
+	if err := u.tx.Create(&dbHost{
+		PublicKey:        publicKey(hk),
+		LastAnnouncement: ts.UTC(),
+		NetAddress:       ha.NetAddress,
+	}).Error; err != nil {
+		return err
+	}
+
+	// fetch blocklists
+	allowlist, blocklist, err := getBlocklists(u.tx)
+	if err != nil {
+		return fmt.Errorf("%w; failed to fetch blocklists", err)
+	}
+
+	// return early if there are no allowlist or blocklist entries
+	if len(allowlist)+len(blocklist) == 0 {
 		return nil
-	})
+	}
+
+	// update blocklist
+	if err := updateBlocklist(u.tx, hk, allowlist, blocklist); err != nil {
+		return fmt.Errorf("%w; failed to update blocklist for host %v", err, hk)
+	}
+
+	return nil
+}
+
+// UpdateStateElements updates the proofs of all state elements affected by the
+// update.
+func (u *chainUpdateTx) UpdateStateElements(elements []types.StateElement) error {
+	for _, se := range elements {
+		if err := u.tx.
+			Model(&dbWalletOutput{}).
+			Where("output_id", hash256(se.ID)).
+			Updates(map[string]interface{}{
+				"merkle_proof": merkleProof{proof: se.MerkleProof},
+				"leaf_index":   se.LeafIndex,
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WalletStateElements implements the ChainStore interface and returns all state
 // elements in the database.
-func (s *SQLStore) WalletStateElements(ctx context.Context) ([]types.StateElement, error) {
+func (u *chainUpdateTx) WalletStateElements() ([]types.StateElement, error) {
 	type row struct {
 		ID          hash256
 		LeafIndex   uint64
 		MerkleProof merkleProof
 	}
 	var rows []row
-	if err := s.db.WithContext(ctx).
+	if err := u.tx.
 		Model(&dbWalletOutput{}).
 		Select("output_id AS id", "leaf_index", "merkle_proof").
 		Find(&rows).
@@ -89,162 +308,4 @@ func (s *SQLStore) WalletStateElements(ctx context.Context) ([]types.StateElemen
 		})
 	}
 	return elements, nil
-}
-
-func updateHosts(tx *gorm.DB, ann map[types.PublicKey]chain.HostUpdate) error {
-	if len(ann) == 0 {
-		return nil
-	}
-
-	var hosts []dbHost
-	var announcements []dbAnnouncement
-	for hk, ha := range ann {
-		hosts = append(hosts, dbHost{
-			PublicKey:        publicKey(hk),
-			LastAnnouncement: ha.Timestamp.UTC(),
-			NetAddress:       ha.Announcement.NetAddress,
-		})
-		announcements = append(announcements, dbAnnouncement{
-			HostKey:     publicKey(hk),
-			BlockHeight: ha.BlockHeight,
-			BlockID:     ha.BlockID.String(),
-			NetAddress:  ha.Announcement.NetAddress,
-		})
-	}
-
-	if err := tx.Create(&announcements).Error; err != nil {
-		return err
-	}
-	if err := tx.Create(&hosts).Error; err != nil {
-		return err
-	}
-
-	// fetch blocklists
-	allowlist, blocklist, err := getBlocklists(tx)
-	if err != nil {
-		return fmt.Errorf("%w; failed to fetch blocklists", err)
-	}
-
-	// return early if there are no allowlist or blocklist entries
-	if len(allowlist)+len(blocklist) == 0 {
-		return nil
-	}
-
-	// update blocklist for every host
-	for hk := range ann {
-		if err := updateBlocklist(tx, hk, allowlist, blocklist); err != nil {
-			return fmt.Errorf("%w; failed to update blocklist for host %v", err, hk)
-		}
-	}
-
-	return nil
-}
-
-func markFailedContracts(tx *gorm.DB, height uint64) error {
-	return tx.
-		Model(&dbContract{}).
-		Where("state = ? AND ? > window_end", contractStateActive, height).
-		Update("state", contractStateFailed).
-		Error
-}
-
-func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {
-	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-		Model: Model{
-			ID: consensusInfoID,
-		},
-	}).Updates(map[string]interface{}{
-		"height":   newTip.Height,
-		"block_id": hash256(newTip.ID),
-	}).Error
-}
-
-func updateContract(tx *gorm.DB, fcid types.FileContractID, update chain.ContractUpdate) error {
-	var cs contractState
-	if err := cs.LoadString(string(update.State)); err != nil {
-		return err
-	}
-
-	updates := make(map[string]interface{})
-	updates["state"] = cs
-
-	if update.RevisionHeight != nil {
-		updates["revision_height"] = *update.RevisionHeight
-	}
-	if update.RevisionNumber != nil {
-		updates["revision_number"] = fmt.Sprint(*update.RevisionNumber)
-	}
-	if update.ProofHeight != nil {
-		updates["proof_height"] = *update.ProofHeight
-	}
-	if update.Size != nil {
-		updates["size"] = *update.Size
-	}
-
-	if err := tx.
-		Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Updates(updates).
-		Error; err != nil {
-		return err
-	}
-	return tx.
-		Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Updates(updates).
-		Error
-}
-
-func updateWalletOutput(tx *gorm.DB, wou chain.WalletOutputUpdate) error {
-	if wou.Addition {
-		return tx.
-			Clauses(clause.OnConflict{
-				DoNothing: true,
-				Columns:   []clause.Column{{Name: "output_id"}},
-			}).Create(&dbWalletOutput{
-			OutputID:       hash256(wou.Element.ID),
-			LeafIndex:      wou.Element.StateElement.LeafIndex,
-			MerkleProof:    merkleProof{proof: wou.Element.StateElement.MerkleProof},
-			Value:          currency(wou.Element.SiacoinOutput.Value),
-			Address:        hash256(wou.Element.SiacoinOutput.Address),
-			MaturityHeight: wou.Element.MaturityHeight,
-			Height:         wou.Element.Index.Height,
-			BlockID:        hash256(wou.Element.Index.ID),
-		}).Error
-	}
-	return tx.
-		Where("output_id", hash256(wou.ID)).
-		Delete(&dbWalletOutput{}).
-		Error
-}
-
-func updateWalletEvent(tx *gorm.DB, weu chain.WalletEventUpdate) error {
-	if weu.Addition {
-		return tx.
-			Clauses(clause.OnConflict{
-				DoNothing: true,
-				Columns:   []clause.Column{{Name: "event_id"}},
-			}).Create(&dbWalletEvent{
-			EventID:        hash256(weu.Event.ID),
-			Inflow:         currency(weu.Event.Inflow),
-			Outflow:        currency(weu.Event.Outflow),
-			Transaction:    weu.Event.Transaction,
-			MaturityHeight: weu.Event.MaturityHeight,
-			Source:         string(weu.Event.Source),
-			Timestamp:      weu.Event.Timestamp.Unix(),
-			Height:         weu.Event.Index.Height,
-			BlockID:        hash256(weu.Event.Index.ID),
-		}).Error
-	}
-	return tx.
-		Where("event_id", hash256(weu.Event.ID)).
-		Delete(&dbWalletEvent{}).
-		Error
-}
-
-func revertIndex(tx *gorm.DB, index types.ChainIndex) error {
-	if err := tx.Model(&dbWalletEvent{}).Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).Delete(&dbWalletEvent{}).Error; err != nil {
-		return err
-	}
-	return tx.Model(&dbWalletOutput{}).Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).Delete(&dbWalletOutput{}).Error
 }

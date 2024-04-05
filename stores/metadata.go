@@ -724,21 +724,17 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 	return added.convert(), nil
 }
 
-func (s *SQLStore) AddContractStoreSubscriber(ctx context.Context, cs chain.ContractStoreSubscriber) (map[types.FileContractID]api.ContractState, func(), error) {
+func (s *SQLStore) AddContractStoreSubscriber(ctx context.Context, cs chain.ContractStoreSubscriber) (map[types.FileContractID]struct{}, func(), error) {
 	// fetch all ids
-	type row struct {
-		FCID  fileContractID
-		State contractState
-	}
-	var active, archived []row
+	var active, archived []fileContractID
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := s.db.Model(&dbContract{}).
-			Select("fcid, state").
+			Select("fcid").
 			Find(&active).Error; err != nil {
 			return err
 		}
 		if err := s.db.Model(&dbArchivedContract{}).
-			Select("fcid, state").
+			Select("fcid").
 			Find(&archived).Error; err != nil {
 			return err
 		}
@@ -748,9 +744,9 @@ func (s *SQLStore) AddContractStoreSubscriber(ctx context.Context, cs chain.Cont
 	}
 
 	// convert to map
-	fcids := make(map[types.FileContractID]api.ContractState)
-	for _, row := range append(active, archived...) {
-		fcids[types.FileContractID(row.FCID)] = api.ContractState(row.State.String())
+	fcids := make(map[types.FileContractID]struct{})
+	for _, id := range append(active, archived...) {
+		fcids[types.FileContractID(id)] = struct{}{}
 	}
 
 	// add subscriber

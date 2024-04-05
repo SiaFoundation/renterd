@@ -55,6 +55,17 @@ type (
 	ShutdownFn = func(context.Context) error
 )
 
+var (
+	retryTxIntervals = []time.Duration{
+		200 * time.Millisecond,
+		500 * time.Millisecond,
+		time.Second,
+		3 * time.Second,
+		10 * time.Second,
+		10 * time.Second,
+	}
+)
+
 func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, *chain.Subscriber, error) {
 	// If no DB dialector was provided, use SQLite.
 	dbConn := cfg.DBDialector
@@ -95,7 +106,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        logger.Sugar(),
 		GormLogger:                    sqlLogger,
-		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
+		RetryTransactionIntervals:     retryTxIntervals,
 	})
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -141,12 +152,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithSyncInterval(100*time.Millisecond), syncer.WithLogger(logger.Named("syncer")))
 
-	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("subscriber").Sugar())
+	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, retryTxIntervals, logger.Named("chainsubscriber"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

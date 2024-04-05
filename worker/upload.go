@@ -1085,7 +1085,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// release all other candidates for this sector
 	for _, candidate := range s.candidates {
-		if candidate.req != nil && candidate.req != req && candidate.req.sector.index == sector.index {
+		if candidate.req != nil && candidate.req.sector == sector {
 			candidate.req = nil
 		}
 	}
