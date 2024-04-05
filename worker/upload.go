@@ -1056,6 +1056,13 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// redundant sectors can't complete the upload
 	if sector.isUploaded() {
+		// release the candidate
+		for _, candidate := range s.candidates {
+			if candidate.req == req {
+				candidate.req = nil
+				break
+			}
+		}
 		return false, false
 	}
 
@@ -1068,14 +1075,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// update uploaded sectors
 	s.numUploaded++
-
-	// release the candidate if the upload was redundant
-	for _, candidate := range s.candidates {
-		if candidate.req == req && sector.isUploaded() {
-			candidate.req = nil
-			break
-		}
-	}
 
 	// release memory
 	s.mem.ReleaseSome(rhpv2.SectorSize)
