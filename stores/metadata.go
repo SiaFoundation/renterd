@@ -13,11 +13,17 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lukechampine.com/frand"
+)
+
+var (
+	pruneSlabsAlertID = frand.Entropy256()
 )
 
 const (
@@ -356,7 +362,7 @@ func (c dbContract) convert() api.ContractMetadata {
 		ID:            types.FileContractID(c.FCID),
 		HostIP:        c.Host.NetAddress,
 		HostKey:       types.PublicKey(c.Host.PublicKey),
-		SiamuxAddr:    c.Host.Settings.convert().SiamuxAddr(),
+		SiamuxAddr:    rhpv2.HostSettings(c.Host.Settings).SiamuxAddr(),
 
 		RenewedFrom: types.FileContractID(c.RenewedFrom),
 		TotalCost:   types.Currency(c.TotalCost),
@@ -2204,6 +2210,12 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 							DBSectorID:   sectorID,
 							DBContractID: contracts[fcid].ID,
 						})
+					} else {
+						s.logger.Warn("missing contract for shard",
+							"contract", fcid,
+							"root", shard.Root,
+							"latest_host", shard.LatestHost,
+						)
 					}
 				}
 			}
@@ -2685,14 +2697,49 @@ func archiveContracts(tx *gorm.DB, contracts []dbContract, toArchive map[types.F
 	return nil
 }
 
+func (s *SQLStore) pruneSlabsLoop() {
+	for {
+		select {
+		case <-s.slabPruneSigChan:
+		case <-s.shutdownCtx.Done():
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
+		err := s.retryTransaction(ctx, pruneSlabs)
+		if err != nil {
+			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
+				ID:        pruneSlabsAlertID,
+				Severity:  alerts.SeverityWarning,
+				Message:   "Failed to prune slabs from database",
+				Timestamp: time.Now(),
+				Data: map[string]interface{}{
+					"error": err.Error(),
+					"hint":  "This might happen when your database is under a lot of load due to deleting objects rapidly. This alert will disappear the next time slabs are pruned successfully.",
+				},
+			})
+		} else {
+			s.alerts.DismissAlerts(s.shutdownCtx, pruneSlabsAlertID)
+		}
+		cancel()
+	}
+}
+
 func pruneSlabs(tx *gorm.DB) error {
-	// delete slabs without any associated slices or buffers
 	return tx.Exec(`
 DELETE
 FROM slabs
 WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
 AND slabs.db_buffered_slab_id IS NULL
 `).Error
+}
+
+func (s *SQLStore) triggerSlabPruning() {
+	select {
+	case s.slabPruneSigChan <- struct{}{}:
+	default:
+	}
 }
 
 // deleteObject deletes an object from the store and prunes all slabs which are
@@ -2721,9 +2768,8 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 	numDeleted := tx.RowsAffected
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
-	} else if err := pruneSlabs(tx); err != nil {
-		return numDeleted, err
 	}
+	s.triggerSlabPruning()
 	return numDeleted, nil
 }
 
@@ -2756,7 +2802,7 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
 			if rowsAffected > 0 {
-				return pruneSlabs(tx)
+				s.triggerSlabPruning()
 			}
 			duration = time.Since(start)
 			return nil

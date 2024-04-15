@@ -90,6 +90,9 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
+		slabPruneSigChan chan struct{}
+		wg               sync.WaitGroup
+
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
@@ -213,13 +216,14 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		alerts:       cfg.Alerts,
-		db:           db,
-		dbMetrics:    dbMetrics,
-		logger:       l,
-		hasAllowlist: allowlistCnt > 0,
-		hasBlocklist: blocklistCnt > 0,
-		settings:     make(map[string]string),
+		alerts:           cfg.Alerts,
+		db:               db,
+		dbMetrics:        dbMetrics,
+		logger:           l,
+		hasAllowlist:     allowlistCnt > 0,
+		hasBlocklist:     blocklistCnt > 0,
+		settings:         make(map[string]string),
+		slabPruneSigChan: make(chan struct{}, 1),
 
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
@@ -236,6 +240,9 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := ss.initSlabPruning(); err != nil {
+		return nil, err
+	}
 	return ss, nil
 }
 
@@ -248,6 +255,18 @@ func isSQLite(db *gorm.DB) bool {
 	default:
 		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
 	}
+}
+
+func (s *SQLStore) initSlabPruning() error {
+	// start pruning loop
+	s.wg.Add(1)
+	go func() {
+		s.pruneSlabsLoop()
+		s.wg.Done()
+	}()
+
+	// prune once to guarantee consistency on startup
+	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
@@ -385,4 +404,12 @@ func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogge
 		time.Sleep(intervals[i])
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
+}
+
+func sumDurations(durations []time.Duration) time.Duration {
+	var sum time.Duration
+	for _, d := range durations {
+		sum += d
+	}
+	return sum
 }

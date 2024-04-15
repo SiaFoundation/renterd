@@ -25,9 +25,9 @@ import (
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // TODOs:
@@ -38,7 +38,7 @@ type BusConfig struct {
 	config.Bus
 	Network             *consensus.Network
 	Genesis             types.Block
-	DBLoggerConfig      stores.LoggerConfig
+	DBLogger            logger.Interface
 	DBDialector         gorm.Dialector
 	DBMetricsDialector  gorm.Dialector
 	SlabPruningInterval time.Duration
@@ -84,7 +84,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 
 	alertsMgr := alerts.NewManager()
-	sqlLogger := stores.NewSQLLogger(logger.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := types.StandardUnlockHash(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
@@ -99,7 +98,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		WalletAddress:                 walletAddr,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        logger.Sugar(),
-		GormLogger:                    sqlLogger,
+		GormLogger:                    cfg.DBLogger,
 		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
 	})
 	if err != nil {
@@ -220,44 +219,4 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Work
 		return nil, nil, nil, err
 	}
 	return ap.Handler(), ap.Run, ap.Shutdown, nil
-}
-
-func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
-	writer, closeFn, err := zap.Open(path)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// console
-	config := zap.NewProductionEncoderConfig()
-	config.EncodeTime = zapcore.RFC3339TimeEncoder
-	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	config.StacktraceKey = ""
-	consoleEncoder := zapcore.NewConsoleEncoder(config)
-
-	// file
-	config = zap.NewProductionEncoderConfig()
-	config.EncodeTime = zapcore.RFC3339TimeEncoder
-	config.CallerKey = ""     // hide
-	config.StacktraceKey = "" // hide
-	config.NameKey = "component"
-	config.TimeKey = "date"
-	fileEncoder := zapcore.NewJSONEncoder(config)
-
-	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, writer, zapcore.DebugLevel),
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel),
-	)
-
-	logger := zap.New(
-		core,
-		zap.AddCaller(),
-		zap.AddStacktrace(zapcore.ErrorLevel),
-	)
-
-	return logger, func(_ context.Context) error {
-		_ = logger.Sync() // ignore Error
-		closeFn()
-		return nil
-	}, nil
 }

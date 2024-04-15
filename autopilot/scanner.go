@@ -11,7 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -31,8 +31,8 @@ type (
 		// a bit, we currently use inline interfaces to avoid having to update the
 		// scanner tests with every interface change
 		bus interface {
-			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
-			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
+			SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
+			HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
 			RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		}
 
@@ -207,28 +207,25 @@ func (s *scanner) tryPerformHostScan(ctx context.Context, w scanWorker, force bo
 				s.logger.Error(resp.err)
 			}
 		}
-
-		// fetch the config right before removing offline hosts to get the most
-		// recent settings in case they were updated while scanning.
-		hostCfg := s.ap.State().cfg.Hosts
-		maxDowntime := time.Duration(hostCfg.MaxDowntimeHours) * time.Hour
-		minRecentScanFailures := hostCfg.MinRecentScanFailures
-		if !s.ap.isStopped() && maxDowntime > 0 {
-			s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
-			removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
-			if err != nil {
-				s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
-			} else if removed > 0 {
-				s.logger.Infof("removed %v offline hosts", removed)
-			}
-		}
-
 		s.mu.Lock()
 		s.scanning = false
-		s.logger.Debugf("%s finished after %v", st, time.Since(s.scanningLastStart))
+		s.logger.Infof("%s finished after %v", st, time.Since(s.scanningLastStart))
 		s.mu.Unlock()
 	}(scanType)
-	return
+}
+
+func (s *scanner) PruneHosts(ctx context.Context, cfg api.HostsConfig) {
+	maxDowntime := time.Duration(cfg.MaxDowntimeHours) * time.Hour
+	minRecentScanFailures := cfg.MinRecentScanFailures
+	if maxDowntime > 0 {
+		s.logger.Debugf("removing hosts that have been offline for more than %v and have failed at least %d scans", maxDowntime, minRecentScanFailures)
+		removed, err := s.bus.RemoveOfflineHosts(ctx, minRecentScanFailures, maxDowntime)
+		if err != nil {
+			s.logger.Errorf("error occurred while removing offline hosts, err: %v", err)
+		} else if removed > 0 {
+			s.logger.Infof("removed %v offline hosts", removed)
+		}
+	}
 }
 
 func (s *scanner) tryUpdateTimeout() {
@@ -240,12 +237,12 @@ func (s *scanner) tryUpdateTimeout() {
 
 	updated := s.tracker.timeout()
 	if updated < s.timeoutMinTimeout {
-		s.logger.Debugf("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
+		s.logger.Infof("updated timeout is lower than min timeout, %v<%v", updated, s.timeoutMinTimeout)
 		updated = s.timeoutMinTimeout
 	}
 
 	if s.timeout != updated {
-		s.logger.Debugf("updated timeout %v->%v", s.timeout, updated)
+		s.logger.Infof("updated timeout %v->%v", s.timeout, updated)
 		s.timeout = updated
 	}
 	s.timeoutLastUpdate = time.Now()
@@ -277,7 +274,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 				exhausted = true
 			}
 
-			s.logger.Debugf("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
+			s.logger.Infof("scanning %d hosts in range %d-%d", len(hosts), offset, offset+int(s.scanBatchSize))
 			offset += int(s.scanBatchSize)
 
 			// add batch to scan queue
@@ -311,7 +308,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				if err != nil {
 					break // abort
-				} else if !utils.IsErr(errors.New(scan.ScanError), errIOTimeout) && scan.Ping > 0 {
+				} else if !utils.IsErr(errors.New(scan.ScanError), contractor.ErrIOTimeout) && scan.Ping > 0 {
 					s.tracker.addDataPoint(time.Duration(scan.Ping))
 				}
 

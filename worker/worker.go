@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -105,11 +104,11 @@ type (
 	}
 
 	HostStore interface {
-		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
+		RecordHostScans(ctx context.Context, scans []api.HostScan) error
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	}
 
 	ObjectStore interface {
@@ -354,9 +353,9 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 
 	// defer interaction recording
 	var err error
-	var hpt hostdb.HostPriceTable
+	var hpt api.HostPriceTable
 	defer func() {
-		w.bus.RecordPriceTables(ctx, []hostdb.PriceTableUpdate{
+		w.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
 			{
 				HostKey:    rptr.HostKey,
 				Success:    isSuccessfulInteraction(err),
@@ -689,7 +688,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 			// sync the account
 			err = h.SyncAccount(ctx, &rev)
 			if err != nil {
-				w.logger.Debugf(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
+				w.logger.Infof(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
 				return
 			}
 
@@ -784,7 +783,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	}
 
 	// migrate the slab
-	numShardsMigrated, surchargeApplied, err := w.migrate(ctx, &slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
+	numShardsMigrated, surchargeApplied, err := w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
 	if err != nil {
 		jc.Encode(api.MigrateSlabResponse{
 			NumShardsMigrated: numShardsMigrated,
@@ -1298,6 +1297,10 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
 		resp.Error = errs.Error()
+		resp.Errors = make(map[types.PublicKey]string)
+		for pk, err := range errs {
+			resp.Errors[pk] = err.Error()
+		}
 	}
 	jc.Encode(resp)
 }
@@ -1436,26 +1439,31 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	logger := w.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
 	// prepare a helper for scanning
 	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
-		// apply timeout
-		scanCtx := ctx
-		var cancel context.CancelFunc
-		if timeout > 0 {
-			scanCtx, cancel = context.WithTimeout(scanCtx, timeout)
-			defer cancel()
+		// helper to prepare a context for scanning
+		withTimeoutCtx := func() (context.Context, context.CancelFunc) {
+			if timeout > 0 {
+				return context.WithTimeout(ctx, timeout)
+			}
+			return ctx, func() {}
 		}
-		// resolve hostIP. We don't want to scan hosts on private networks.
-		if !w.allowPrivateIPs {
-			host, _, err := net.SplitHostPort(hostIP)
-			if err != nil {
-				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-			}
-			addrs, err := (&net.Resolver{}).LookupIPAddr(scanCtx, host)
-			if err != nil {
-				return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-			}
-			for _, addr := range addrs {
-				if isPrivateIP(addr.IP) {
-					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
+		// resolve the address
+		{
+			scanCtx, cancel := withTimeoutCtx()
+			defer cancel()
+			// resolve hostIP. We don't want to scan hosts on private networks.
+			if !w.allowPrivateIPs {
+				host, _, err := net.SplitHostPort(hostIP)
+				if err != nil {
+					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+				}
+				addrs, err := (&net.Resolver{}).LookupIPAddr(scanCtx, host)
+				if err != nil {
+					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+				}
+				for _, addr := range addrs {
+					if isPrivateIP(addr.IP) {
+						return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
+					}
 				}
 			}
 		}
@@ -1463,37 +1471,49 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		// fetch the host settings
 		start := time.Now()
 		var settings rhpv2.HostSettings
-		err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-			var err error
-			if settings, err = RPCSettings(scanCtx, t); err != nil {
-				return fmt.Errorf("failed to fetch host settings: %w", err)
+		{
+			scanCtx, cancel := withTimeoutCtx()
+			defer cancel()
+			err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+				var err error
+				if settings, err = RPCSettings(scanCtx, t); err != nil {
+					return fmt.Errorf("failed to fetch host settings: %w", err)
+				}
+				// NOTE: we overwrite the NetAddress with the host address here
+				// since we just used it to dial the host we know it's valid
+				settings.NetAddress = hostIP
+				return nil
+			})
+			if err != nil {
+				return settings, rhpv3.HostPriceTable{}, time.Since(start), err
 			}
-			// NOTE: we overwrite the NetAddress with the host address here
-			// since we just used it to dial the host we know it's valid
-			settings.NetAddress = hostIP
-			return nil
-		})
-		elapsed := time.Since(start)
-		if err != nil {
-			return settings, rhpv3.HostPriceTable{}, elapsed, err
 		}
 
 		// fetch the host pricetable
 		var pt rhpv3.HostPriceTable
-		err = w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
-			if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
-				return fmt.Errorf("failed to fetch host price table: %w", err)
-			} else {
-				pt = hpt.HostPriceTable
-				return nil
+		{
+			scanCtx, cancel := withTimeoutCtx()
+			defer cancel()
+			err := w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
+				if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
+					return fmt.Errorf("failed to fetch host price table: %w", err)
+				} else {
+					pt = hpt.HostPriceTable
+					return nil
+				}
+			})
+			if err != nil {
+				return settings, rhpv3.HostPriceTable{}, time.Since(start), err
 			}
-		})
-		return settings, pt, elapsed, err
+		}
+		return settings, pt, time.Since(start), nil
 	}
 
 	// scan: first try
 	settings, pt, duration, err := scan()
 	if err != nil {
+		logger = logger.With(zap.Error(err))
+
 		// scan: second try
 		select {
 		case <-ctx.Done():
@@ -1502,11 +1522,11 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		}
 		settings, pt, duration, err = scan()
 
-		logger = logger.With("elapsed", duration)
+		logger = logger.With("elapsed", duration).With(zap.Error(err))
 		if err == nil {
-			logger.Debug("successfully scanned host on second try")
+			logger.Info("successfully scanned host on second try")
 		} else if !isErrHostUnreachable(err) {
-			logger.Debugw("failed to scan host", zap.Error(err))
+			logger.Infow("failed to scan host")
 		}
 	}
 
@@ -1524,7 +1544,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// record scans that timed out.
 	recordCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	scanErr := w.bus.RecordHostScans(recordCtx, []hostdb.HostScan{
+	scanErr := w.bus.RecordHostScans(recordCtx, []api.HostScan{
 		{
 			HostKey:    hostKey,
 			Success:    isSuccessfulInteraction(err),

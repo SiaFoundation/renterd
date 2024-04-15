@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -36,7 +35,7 @@ var (
 )
 
 type (
-	// dbHost defines a hostdb.Interaction as persisted in the DB. Deleting a
+	// dbHost defines a api.Interaction as persisted in the DB. Deleting a
 	// host from the db will cascade the deletion and also delete the
 	// corresponding announcements and interactions with that host.
 	//
@@ -73,6 +72,45 @@ type (
 
 		Allowlist []dbAllowlistEntry `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
 		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
+		Checks    []dbHostCheck      `gorm:"foreignKey:DBHostID;constraint:OnDelete:CASCADE"`
+	}
+
+	// dbHostCheck contains information about a host that is collected and used
+	// by the autopilot.
+	dbHostCheck struct {
+		Model
+
+		DBAutopilotID uint
+		DBAutopilot   dbAutopilot
+
+		DBHostID uint
+		DBHost   dbHost
+
+		// usability
+		UsabilityBlocked               bool
+		UsabilityOffline               bool
+		UsabilityLowScore              bool
+		UsabilityRedundantIP           bool
+		UsabilityGouging               bool
+		UsabilityNotAcceptingContracts bool
+		UsabilityNotAnnounced          bool
+		UsabilityNotCompletingScan     bool
+
+		// score
+		ScoreAge              float64
+		ScoreCollateral       float64
+		ScoreInteractions     float64
+		ScoreStorageRemaining float64
+		ScoreUptime           float64
+		ScoreVersion          float64
+		ScorePrices           float64
+
+		// gouging
+		GougingContractErr string
+		GougingDownloadErr string
+		GougingGougingErr  string
+		GougingPruneErr    string
+		GougingUploadErr   string
 	}
 
 	// dbAllowlistEntry defines a table that stores the host blocklist.
@@ -116,63 +154,6 @@ type (
 		timestamp   time.Time
 	}
 )
-
-// convert converts hostSettings to rhp.HostSettings
-func (s hostSettings) convert() rhpv2.HostSettings {
-	return rhpv2.HostSettings{
-		AcceptingContracts:         s.AcceptingContracts,
-		MaxDownloadBatchSize:       s.MaxDownloadBatchSize,
-		MaxDuration:                s.MaxDuration,
-		MaxReviseBatchSize:         s.MaxReviseBatchSize,
-		NetAddress:                 s.NetAddress,
-		RemainingStorage:           s.RemainingStorage,
-		SectorSize:                 s.SectorSize,
-		TotalStorage:               s.TotalStorage,
-		Address:                    s.Address,
-		WindowSize:                 s.WindowSize,
-		Collateral:                 s.Collateral,
-		MaxCollateral:              s.MaxCollateral,
-		BaseRPCPrice:               s.BaseRPCPrice,
-		ContractPrice:              s.ContractPrice,
-		DownloadBandwidthPrice:     s.DownloadBandwidthPrice,
-		SectorAccessPrice:          s.SectorAccessPrice,
-		StoragePrice:               s.StoragePrice,
-		UploadBandwidthPrice:       s.UploadBandwidthPrice,
-		EphemeralAccountExpiry:     s.EphemeralAccountExpiry,
-		MaxEphemeralAccountBalance: s.MaxEphemeralAccountBalance,
-		RevisionNumber:             s.RevisionNumber,
-		Version:                    s.Version,
-		SiaMuxPort:                 s.SiaMuxPort,
-	}
-}
-
-func convertHostSettings(settings rhpv2.HostSettings) hostSettings {
-	return hostSettings{
-		AcceptingContracts:         settings.AcceptingContracts,
-		MaxDownloadBatchSize:       settings.MaxDownloadBatchSize,
-		MaxDuration:                settings.MaxDuration,
-		MaxReviseBatchSize:         settings.MaxReviseBatchSize,
-		NetAddress:                 settings.NetAddress,
-		RemainingStorage:           settings.RemainingStorage,
-		SectorSize:                 settings.SectorSize,
-		TotalStorage:               settings.TotalStorage,
-		Address:                    settings.Address,
-		WindowSize:                 settings.WindowSize,
-		Collateral:                 settings.Collateral,
-		MaxCollateral:              settings.MaxCollateral,
-		BaseRPCPrice:               settings.BaseRPCPrice,
-		ContractPrice:              settings.ContractPrice,
-		DownloadBandwidthPrice:     settings.DownloadBandwidthPrice,
-		SectorAccessPrice:          settings.SectorAccessPrice,
-		StoragePrice:               settings.StoragePrice,
-		UploadBandwidthPrice:       settings.UploadBandwidthPrice,
-		EphemeralAccountExpiry:     settings.EphemeralAccountExpiry,
-		MaxEphemeralAccountBalance: settings.MaxEphemeralAccountBalance,
-		RevisionNumber:             settings.RevisionNumber,
-		Version:                    settings.Version,
-		SiaMuxPort:                 settings.SiaMuxPort,
-	}
-}
 
 // convert converts hostSettings to rhp.HostSettings
 func (pt hostPriceTable) convert() rhpv3.HostPriceTable {
@@ -261,22 +242,29 @@ func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 func (dbHost) TableName() string { return "hosts" }
 
 // TableName implements the gorm.Tabler interface.
+func (dbHostCheck) TableName() string { return "host_checks" }
+
+// TableName implements the gorm.Tabler interface.
 func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
 
-// convert converts a host into a hostdb.Host.
-func (h dbHost) convert() hostdb.Host {
+// convert converts a host into a api.HostInfo
+func (h dbHost) convert(blocked bool) api.Host {
 	var lastScan time.Time
 	if h.LastScan > 0 {
 		lastScan = time.Unix(0, h.LastScan)
 	}
-	return hostdb.Host{
+	checks := make(map[string]api.HostCheck)
+	for _, check := range h.Checks {
+		checks[check.DBAutopilot.Identifier] = check.convert()
+	}
+	return api.Host{
 		KnownSince:       h.CreatedAt,
 		LastAnnouncement: h.LastAnnouncement,
 		NetAddress:       h.NetAddress,
-		Interactions: hostdb.Interactions{
+		Interactions: api.HostInteractions{
 			TotalScans:              h.TotalScans,
 			LastScan:                lastScan,
 			LastScanSuccess:         h.LastScanSuccess,
@@ -287,13 +275,46 @@ func (h dbHost) convert() hostdb.Host {
 			FailedInteractions:      h.FailedInteractions,
 			LostSectors:             h.LostSectors,
 		},
-		PriceTable: hostdb.HostPriceTable{
+		PriceTable: api.HostPriceTable{
 			HostPriceTable: h.PriceTable.convert(),
 			Expiry:         h.PriceTableExpiry.Time,
 		},
 		PublicKey: types.PublicKey(h.PublicKey),
 		Scanned:   h.Scanned,
-		Settings:  h.Settings.convert(),
+		Settings:  rhpv2.HostSettings(h.Settings),
+		Blocked:   blocked,
+		Checks:    checks,
+	}
+}
+
+func (hi dbHostCheck) convert() api.HostCheck {
+	return api.HostCheck{
+		Gouging: api.HostGougingBreakdown{
+			ContractErr: hi.GougingContractErr,
+			DownloadErr: hi.GougingDownloadErr,
+			GougingErr:  hi.GougingGougingErr,
+			PruneErr:    hi.GougingPruneErr,
+			UploadErr:   hi.GougingUploadErr,
+		},
+		Score: api.HostScoreBreakdown{
+			Age:              hi.ScoreAge,
+			Collateral:       hi.ScoreCollateral,
+			Interactions:     hi.ScoreInteractions,
+			StorageRemaining: hi.ScoreStorageRemaining,
+			Uptime:           hi.ScoreUptime,
+			Version:          hi.ScoreVersion,
+			Prices:           hi.ScorePrices,
+		},
+		Usability: api.HostUsabilityBreakdown{
+			Blocked:               hi.UsabilityBlocked,
+			Offline:               hi.UsabilityOffline,
+			LowScore:              hi.UsabilityLowScore,
+			RedundantIP:           hi.UsabilityRedundantIP,
+			Gouging:               hi.UsabilityGouging,
+			NotAcceptingContracts: hi.UsabilityNotAcceptingContracts,
+			NotAnnounced:          hi.UsabilityNotAnnounced,
+			NotCompletingScan:     hi.UsabilityNotCompletingScan,
+		},
 	}
 }
 
@@ -402,29 +423,85 @@ func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error) {
-	var h dbHost
-
-	tx := ss.db.
-		WithContext(ctx).
-		Where(&dbHost{PublicKey: publicKey(hostKey)}).
-		Preload("Allowlist").
-		Preload("Blocklist").
-		Take(&h)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return hostdb.HostInfo{}, api.ErrHostNotFound
-	} else if tx.Error != nil {
-		return hostdb.HostInfo{}, tx.Error
+func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
+	hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
+	if err != nil {
+		return api.Host{}, err
+	} else if len(hosts) == 0 {
+		return api.Host{}, api.ErrHostNotFound
+	} else {
+		return hosts[0], nil
 	}
+}
 
-	return hostdb.HostInfo{
-		Host:    h.convert(),
-		Blocked: ss.isBlocked(h),
-	}, nil
+func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
+	err = ss.retryTransaction(ctx, (func(tx *gorm.DB) error {
+		// fetch ap id
+		var apID uint
+		if err := tx.
+			Model(&dbAutopilot{}).
+			Where("identifier = ?", autopilotID).
+			Select("id").
+			Take(&apID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrAutopilotNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// fetch host id
+		var hID uint
+		if err := tx.
+			Model(&dbHost{}).
+			Where("public_key = ?", publicKey(hk)).
+			Select("id").
+			Take(&hID).
+			Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return api.ErrHostNotFound
+		} else if err != nil {
+			return err
+		}
+
+		// update host info
+		return tx.
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "db_autopilot_id"}, {Name: "db_host_id"}},
+				UpdateAll: true,
+			}).
+			Create(&dbHostCheck{
+				DBAutopilotID: apID,
+				DBHostID:      hID,
+
+				UsabilityBlocked:               hc.Usability.Blocked,
+				UsabilityOffline:               hc.Usability.Offline,
+				UsabilityLowScore:              hc.Usability.LowScore,
+				UsabilityRedundantIP:           hc.Usability.RedundantIP,
+				UsabilityGouging:               hc.Usability.Gouging,
+				UsabilityNotAcceptingContracts: hc.Usability.NotAcceptingContracts,
+				UsabilityNotAnnounced:          hc.Usability.NotAnnounced,
+				UsabilityNotCompletingScan:     hc.Usability.NotCompletingScan,
+
+				ScoreAge:              hc.Score.Age,
+				ScoreCollateral:       hc.Score.Collateral,
+				ScoreInteractions:     hc.Score.Interactions,
+				ScoreStorageRemaining: hc.Score.StorageRemaining,
+				ScoreUptime:           hc.Score.Uptime,
+				ScoreVersion:          hc.Score.Version,
+				ScorePrices:           hc.Score.Prices,
+
+				GougingContractErr: hc.Gouging.ContractErr,
+				GougingDownloadErr: hc.Gouging.DownloadErr,
+				GougingGougingErr:  hc.Gouging.GougingErr,
+				GougingPruneErr:    hc.Gouging.PruneErr,
+				GougingUploadErr:   hc.Gouging.UploadErr,
+			}).
+			Error
+	}))
+	return
 }
 
 // HostsForScanning returns the address of hosts for scanning.
-func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error) {
+func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -433,7 +510,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 		PublicKey  publicKey `gorm:"unique;index;NOT NULL"`
 		NetAddress string
 	}
-	var hostAddresses []hostdb.HostAddress
+	var hostAddresses []api.HostAddress
 
 	err := ss.db.
 		WithContext(ctx).
@@ -444,7 +521,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 		Order("last_scan ASC").
 		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, h := range hosts {
-				hostAddresses = append(hostAddresses, hostdb.HostAddress{
+				hostAddresses = append(hostAddresses, api.HostAddress{
 					PublicKey:  types.PublicKey(h.PublicKey),
 					NetAddress: h.NetAddress,
 				})
@@ -458,65 +535,57 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 	return hostAddresses, err
 }
 
-func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.HostInfo, error) {
+func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
 
-	// Apply filter mode.
-	var blocked bool
-	query := ss.db
+	// validate filterMode
 	switch filterMode {
 	case api.HostFilterModeAllowed:
-		query = query.Scopes(ss.excludeBlocked)
 	case api.HostFilterModeBlocked:
-		query = query.Scopes(ss.excludeAllowed)
-		blocked = true
 	case api.HostFilterModeAll:
-		// preload allowlist and blocklist
-		query = query.
-			Preload("Allowlist").
-			Preload("Blocklist")
 	default:
 		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
 	}
 
-	// Add address filter.
-	if addressContains != "" {
-		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
-			return d.Where("net_address LIKE ?", "%"+addressContains+"%")
-		})
+	ss.mu.Lock()
+	hasAllowlist := ss.hasAllowlist
+	hasBlocklist := ss.hasBlocklist
+	ss.mu.Unlock()
+
+	// prepare query
+	query := ss.db.
+		Model(&dbHost{}).
+		Scopes(
+			autopilotFilter(autopilotID),
+			hostFilter(filterMode, hasAllowlist, hasBlocklist),
+			hostNetAddress(addressContains),
+			hostPublicKey(keyIn),
+			usabilityFilter(autopilotID, usabilityMode),
+		)
+
+	// preload allowlist and blocklist
+	if filterMode == api.HostFilterModeAll {
+		query = query.
+			Preload("Allowlist").
+			Preload("Blocklist")
 	}
 
-	// Only search for specific hosts.
-	if len(keyIn) > 0 {
-		pubKeys := make([]publicKey, len(keyIn))
-		for i, pk := range keyIn {
-			pubKeys[i] = publicKey(pk)
-		}
-		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
-			return d.Where("public_key IN ?", pubKeys)
-		})
-	}
-
-	var hosts []hostdb.HostInfo
+	var hosts []api.Host
 	var fullHosts []dbHost
 	err := query.
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
 			for _, fh := range fullHosts {
+				var blocked bool
 				if filterMode == api.HostFilterModeAll {
-					hosts = append(hosts, hostdb.HostInfo{
-						Host:    fh.convert(),
-						Blocked: ss.isBlocked(fh),
-					})
+					blocked = ss.isBlocked(fh)
 				} else {
-					hosts = append(hosts, hostdb.HostInfo{
-						Host:    fh.convert(),
-						Blocked: blocked,
-					})
+					blocked = filterMode == api.HostFilterModeBlocked
 				}
+				hosts = append(hosts, fh.convert(blocked))
 			}
 			return nil
 		}).
@@ -528,8 +597,8 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, filterMode, addressContains
 }
 
 // Hosts returns non-blocked hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]hostdb.HostInfo, error) {
-	return ss.SearchHosts(ctx, api.HostFilterModeAllowed, "", nil, offset, limit)
+func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
+	return ss.SearchHosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 }
 
 func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
@@ -692,7 +761,7 @@ func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err 
 	return
 }
 
-func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error {
+func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
 	if len(scans) == 0 {
 		return nil // nothing to do
 	}
@@ -751,7 +820,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 				// overwrite the NetAddress in the settings with the one we
 				// received through the host announcement
 				scan.Settings.NetAddress = host.NetAddress
-				host.Settings = convertHostSettings(scan.Settings)
+				host.Settings = hostSettings(scan.Settings)
 
 				// scans can only update the price table if the current
 				// pricetable is expired anyway, ensuring scans never
@@ -813,7 +882,7 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []hostdb.HostScan
 	})
 }
 
-func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
 	if len(priceTableUpdate) == 0 {
 		return nil // nothing to do
 	}
@@ -900,39 +969,90 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ho
 	})
 }
 
-// excludeBlocked can be used as a scope for a db transaction to exclude blocked
-// hosts.
-func (ss *SQLStore) excludeBlocked(db *gorm.DB) *gorm.DB {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-
-	if ss.hasAllowlist {
-		db = db.Where("EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+// hostPublicKey can be used as a scope to filter hosts by their public key.
+func hostPublicKey(keyIn []types.PublicKey) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if len(keyIn) > 0 {
+			pubKeys := make([]publicKey, len(keyIn))
+			for i, pk := range keyIn {
+				pubKeys[i] = publicKey(pk)
+			}
+			return db.Where("public_key IN ?", pubKeys)
+		}
+		return db
 	}
-	if ss.hasBlocklist {
-		db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
-	}
-	return db
 }
 
-// excludeAllowed can be used as a scope for a db transaction to exclude allowed
-// hosts.
-func (ss *SQLStore) excludeAllowed(db *gorm.DB) *gorm.DB {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
+// autopilotFilter can be used as a scope to filter host checks based on their
+// autopilot
+func autopilotFilter(autopilotID string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if autopilotID == "" {
+			return db.Preload("Checks.DBAutopilot")
+		}
+		return db.Preload("Checks.DBAutopilot", "identifier = ?", autopilotID)
+	}
+}
 
-	if ss.hasAllowlist {
-		db = db.Where("NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+// hostNetAddress can be used as a scope to filter hosts by their net address.
+func hostNetAddress(addressContains string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if addressContains != "" {
+			return db.Where("net_address LIKE ?", "%"+addressContains+"%")
+		}
+		return db
 	}
-	if ss.hasBlocklist {
-		db = db.Where("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+}
+
+// hostFilter can be used as a scope to filter hosts based on their filter mode,
+// returning either all, allowed or blocked hosts.
+func hostFilter(filterMode string, hasAllowlist, hasBlocklist bool) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		switch filterMode {
+		case api.HostFilterModeAllowed:
+			if hasAllowlist {
+				db = db.Where("EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+			}
+			if hasBlocklist {
+				db = db.Where("NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+			}
+		case api.HostFilterModeBlocked:
+			if hasAllowlist {
+				db = db.Where("NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+			}
+			if hasBlocklist {
+				db = db.Where("EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = hosts.id)")
+			}
+			if !hasAllowlist && !hasBlocklist {
+				// if neither an allowlist nor a blocklist exist, all hosts are allowed
+				// which means we return none
+				db = db.Where("1 = 0")
+			}
+		case api.HostFilterModeAll:
+			// do nothing
+		}
+		return db
 	}
-	if !ss.hasAllowlist && !ss.hasBlocklist {
-		// if neither an allowlist nor a blocklist exist, all hosts are allowed
-		// which means we return none
-		db = db.Where("1 = 0")
+}
+
+func usabilityFilter(autopilotID, usabilityMode string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		switch usabilityMode {
+		case api.UsabilityFilterModeUsable:
+			db = db.
+				Joins("INNER JOIN host_checks hc on hc.db_host_id = hosts.id").
+				Joins("INNER JOIN autopilots a on a.id = hc.db_autopilot_id AND a.identifier = ?", autopilotID).
+				Where("hc.usability_blocked = ? AND hc.usability_offline = ? AND hc.usability_low_score = ? AND hc.usability_redundant_ip = ? AND hc.usability_gouging = ? AND hc.usability_not_accepting_contracts = ? AND hc.usability_not_announced = ? AND hc.usability_not_completing_scan = ?", false, false, false, false, false, false, false, false)
+		case api.UsabilityFilterModeUnusable:
+			db = db.
+				Joins("INNER JOIN host_checks hc on hc.db_host_id = hosts.id").
+				Joins("INNER JOIN autopilots a on a.id = hc.db_autopilot_id AND a.identifier = ?", autopilotID).
+				Where("hc.usability_blocked = ? OR hc.usability_offline = ? OR hc.usability_low_score = ? OR hc.usability_redundant_ip = ? OR hc.usability_gouging = ? OR hc.usability_not_accepting_contracts = ? OR hc.usability_not_announced = ? OR hc.usability_not_completing_scan = ?", true, true, true, true, true, true, true, true)
+		case api.UsabilityFilterModeAll:
+			// do nothing
+		}
+		return db
 	}
-	return db
 }
 
 func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {

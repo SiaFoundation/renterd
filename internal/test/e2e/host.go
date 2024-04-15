@@ -223,7 +223,15 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(dir, privKey, rhp2Listener.Addr().String(), db, cm, tp, wallet, am, log.Named("settings"))
+	settings, err := settings.NewConfigManager(
+		settings.WithHostKey(privKey),
+		settings.WithRHP2Addr(rhp2Listener.Addr().String()),
+		settings.WithStore(db),
+		settings.WithChainManager(cm),
+		settings.WithTransactionPool(tp),
+		settings.WithWallet(wallet),
+		settings.WithAlertManager(am),
+		settings.WithLog(log.Named("settings")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}

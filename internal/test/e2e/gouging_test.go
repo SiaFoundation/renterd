@@ -112,3 +112,33 @@ func TestGouging(t *testing.T) {
 		return err
 	})
 }
+
+func TestHostMinVersion(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a new test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: int(test.AutopilotConfig.Contracts.Amount),
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	// set min version to a high value
+	cfg := test.AutopilotConfig
+	cfg.Hosts.MinProtocolVersion = "99.99.99"
+	cluster.UpdateAutopilotConfig(context.Background(), cfg)
+
+	// contracts in set should drop to 0
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
+			ContractSet: test.AutopilotConfig.Contracts.Set,
+		})
+		tt.OK(err)
+		if len(contracts) != 0 {
+			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
+		}
+		return nil
+	})
+}
