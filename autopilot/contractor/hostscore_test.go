@@ -39,7 +39,6 @@ func TestHostScore(t *testing.T) {
 	}
 	h1 := newHost(test.NewHostSettings())
 	h2 := newHost(test.NewHostSettings())
-	cfg := cfg.Contracts
 
 	// assert both hosts score equal
 	redundancy := 3.0

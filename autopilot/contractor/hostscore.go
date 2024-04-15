@@ -12,13 +12,22 @@ import (
 	"go.sia.tech/siad/build"
 )
 
-const smallestValidScore = math.SmallestNonzeroFloat64
+const (
+	// MinProtocolVersion is the minimum protocol version of a host that we
+	// accept.
+	minProtocolVersion = "1.5.9"
 
-func hostScore(cfg api.ContractsConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+	// minValidScore is the smallest score that a host can have before
+	// being ignored.
+	minValidScore = math.SmallestNonzeroFloat64
+)
+
+func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+	cCfg := cfg.Contracts
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
 	// every single host.
-	idealDataPerHost := float64(cfg.Storage) * expectedRedundancy / float64(cfg.Amount)
+	idealDataPerHost := float64(cCfg.Storage) * expectedRedundancy / float64(cCfg.Amount)
 	// allocationPerHost is the amount of data that we would like to be able to
 	// put on each host, because data is not always spread evenly across the
 	// hosts during upload. Slower hosts may get very little data, more
@@ -29,15 +38,15 @@ func hostScore(cfg api.ContractsConfig, h api.Host, storedData uint64, expectedR
 	// data will store twice the expectation
 	allocationPerHost := idealDataPerHost * 2
 	// hostPeriodCost is the amount of money we expect to spend on a host in a period.
-	hostPeriodCost := hostPeriodCostForScore(h, cfg, expectedRedundancy)
+	hostPeriodCost := hostPeriodCostForScore(h, cCfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h),
-		Collateral:       collateralScore(cfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
+		Collateral:       collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
-		Prices:           priceAdjustmentScore(hostPeriodCost, cfg),
+		Prices:           priceAdjustmentScore(hostPeriodCost, cCfg),
 		StorageRemaining: storageRemainingScore(h.Settings, storedData, allocationPerHost),
 		Uptime:           uptimeScore(h),
-		Version:          versionScore(h.Settings),
+		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
 	}
 }
 
@@ -237,13 +246,22 @@ func uptimeScore(h api.Host) float64 {
 	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
 }
 
-func versionScore(settings rhpv2.HostSettings) float64 {
+func versionScore(settings rhpv2.HostSettings, minVersion string) float64 {
+	if minVersion == "" {
+		minVersion = minProtocolVersion
+	}
 	versions := []struct {
 		version string
 		penalty float64
 	}{
-		{"1.6.0", 0.99},
-		{"1.5.9", 0.00},
+		// latest protocol version
+		{"1.6.0", 0.10},
+
+		// user-defined minimum
+		{minVersion, 0.00},
+
+		// absolute minimum
+		{minProtocolVersion, 0.00},
 	}
 	weight := 1.0
 	for _, v := range versions {

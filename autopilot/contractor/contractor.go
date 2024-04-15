@@ -310,7 +310,7 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	}
 
 	// fetch candidate hosts
-	candidates, unusableHosts, err := c.candidateHosts(mCtx, hosts, usedHosts, hostData, smallestValidScore) // avoid 0 score hosts
+	candidates, unusableHosts, err := c.candidateHosts(mCtx, hosts, usedHosts, hostData, minValidScore) // avoid 0 score hosts
 	if err != nil {
 		return false, err
 	}
@@ -756,7 +756,7 @@ func (c *Contractor) runHostChecks(ctx *mCtx, hosts []api.Host, hostData map[typ
 	checks := make(map[types.PublicKey]*api.HostCheck)
 	for _, h := range hosts {
 		h.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
-		checks[h.PublicKey] = checkHost(ctx.ContractsConfig(), ctx.state.RS, gc, h, minScore, hostData[h.PublicKey])
+		checks[h.PublicKey] = checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore, hostData[h.PublicKey])
 	}
 	return checks, nil
 }
@@ -1173,7 +1173,7 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	// return early if there's no hosts
 	if len(candidates) == 0 {
 		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return smallestValidScore
+		return minValidScore
 	}
 
 	// determine the number of random hosts we fetch per iteration when
@@ -1207,7 +1207,7 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 		return candidates[i].score > candidates[j].score
 	})
 	if len(candidates) < int(numContracts) {
-		return smallestValidScore
+		return minValidScore
 	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
 		minScore = cutoff
 	}
@@ -1273,7 +1273,7 @@ func (c *Contractor) candidateHosts(ctx *mCtx, hosts []api.Host, usedHosts map[t
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		hc := checkHost(ctx.ContractsConfig(), ctx.state.RS, gc, h, minScore, storedData[h.PublicKey])
+		hc := checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore, storedData[h.PublicKey])
 		if hc.Usability.IsUsable() {
 			candidates = append(candidates, scoredHost{h, hc.Score.Score()})
 			continue

@@ -207,7 +207,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	jc.Encode(contractor.EvaluateConfig(reqCfg.Contracts, cs, fee, cfg.CurrentPeriod, rs, gs, hosts))
+	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, cfg.CurrentPeriod, rs, gs, hosts))
 }
 
 func (ap *Autopilot) Run() error {
