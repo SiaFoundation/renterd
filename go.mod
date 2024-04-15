@@ -1,6 +1,8 @@
 module go.sia.tech/renterd
 
-go 1.21.6
+go 1.21.7
+
+toolchain go1.21.8
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3
@@ -11,18 +13,18 @@ require (
 	github.com/minio/minio-go/v7 v7.0.69
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.2-0.20240325122830-e781eaa57d37
+	go.sia.tech/core v0.2.2
 	go.sia.tech/coreutils v0.0.3
 	go.sia.tech/gofakes3 v0.0.1
-	go.sia.tech/hostd v1.0.4-0.20240327150808-8c407121ad92
+	go.sia.tech/hostd v1.0.4
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.49.0
+	go.sia.tech/web/renterd v0.50.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.21.0
-	golang.org/x/sys v0.18.0
-	golang.org/x/term v0.18.0
+	golang.org/x/crypto v0.22.0
+	golang.org/x/sys v0.19.0
+	golang.org/x/term v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.6
 	gorm.io/driver/sqlite v1.5.5
@@ -75,7 +77,7 @@ require (
 	gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e // indirect
 	gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259 // indirect
 	gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 // indirect
-	go.sia.tech/web v0.0.0-20231213145933-3f175a86abff // indirect
+	go.sia.tech/web v0.0.0-20240403135501-82ff3a2a3e7c // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.22.0 // indirect
 	golang.org/x/text v0.14.0 // indirect

@@ -194,13 +194,11 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 			// fetch packed slab to upload
 			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
 			if err != nil {
-				return "", fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
-			}
-
-			// upload packed slab
-			if len(packedSlabs) > 0 {
+				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
+			} else if len(packedSlabs) > 0 {
+				// upload packed slab
 				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
-					w.logger.Error(err)
+					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
 			}
 		}
@@ -282,7 +280,7 @@ func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.Pac
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
-		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+		return fmt.Errorf("couldn't fetch contracts from bus: %v", err)
 	}
 
 	// fetch upload params

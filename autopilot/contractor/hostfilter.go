@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"errors"
@@ -97,69 +97,12 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 	return values
 }
 
-// checkHost performs a series of checks on the host.
-func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) *api.HostCheck {
-	if rs.Validate() != nil {
-		panic("invalid redundancy settings were supplied - developer error")
-	}
-
-	// prepare host breakdown fields
-	var gb api.HostGougingBreakdown
-	var sb api.HostScoreBreakdown
-	var ub api.HostUsabilityBreakdown
-
-	// blocked status does not influence what host info is calculated
-	if h.Blocked {
-		ub.Blocked = true
-	}
-
-	// calculate remaining host info fields
-	if !h.IsAnnounced() {
-		ub.NotAnnounced = true
-	} else if !h.Scanned {
-		ub.NotCompletingScan = true
-	} else {
-		// online check
-		if !h.IsOnline() {
-			ub.Offline = true
-		}
-
-		// accepting contracts check
-		if !h.Settings.AcceptingContracts {
-			ub.NotAcceptingContracts = true
-		}
-
-		// perform gouging checks
-		gb = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
-		if gb.Gouging() {
-			ub.Gouging = true
-		} else if minScore > 0 {
-			// perform scoring checks
-			//
-			// NOTE: only perform these scoring checks if we know the host is
-			// not gouging, this because the core package does not have overflow
-			// checks in its cost calculations needed to calculate the period
-			// cost
-			sb = hostScore(cfg, h, storedData, rs.Redundancy())
-			if sb.Score() < minScore {
-				ub.LowScore = true
-			}
-		}
-	}
-
-	return &api.HostCheck{
-		Usability: ub,
-		Gouging:   gb,
-		Score:     sb,
-	}
-}
-
 // isUsableContract returns whether the given contract is
 // - usable -> can be used in the contract set
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *contractor) isUsableContract(cfg api.AutopilotConfig, state state, ci contractInfo, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
 	contract, s, pt := ci.contract, ci.settings, ci.priceTable
 
 	usable = true
@@ -176,7 +119,7 @@ func (c *contractor) isUsableContract(cfg api.AutopilotConfig, state state, ci c
 		refresh = false
 		renew = false
 	} else {
-		if isOutOfCollateral(cfg, state.rs, contract, s, pt) {
+		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = false
 			recoverable = true
@@ -290,4 +233,61 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
 	return
+}
+
+// checkHost performs a series of checks on the host.
+func checkHost(cfg api.ContractsConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) *api.HostCheck {
+	if rs.Validate() != nil {
+		panic("invalid redundancy settings were supplied - developer error")
+	}
+
+	// prepare host breakdown fields
+	var gb api.HostGougingBreakdown
+	var sb api.HostScoreBreakdown
+	var ub api.HostUsabilityBreakdown
+
+	// blocked status does not influence what host info is calculated
+	if h.Blocked {
+		ub.Blocked = true
+	}
+
+	// calculate remaining host info fields
+	if !h.IsAnnounced() {
+		ub.NotAnnounced = true
+	} else if !h.Scanned {
+		ub.NotCompletingScan = true
+	} else {
+		// online check
+		if !h.IsOnline() {
+			ub.Offline = true
+		}
+
+		// accepting contracts check
+		if !h.Settings.AcceptingContracts {
+			ub.NotAcceptingContracts = true
+		}
+
+		// perform gouging checks
+		gb = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
+		if gb.Gouging() {
+			ub.Gouging = true
+		} else if minScore > 0 {
+			// perform scoring checks
+			//
+			// NOTE: only perform these scoring checks if we know the host is
+			// not gouging, this because the core package does not have overflow
+			// checks in its cost calculations needed to calculate the period
+			// cost
+			sb = hostScore(cfg, h, storedData, rs.Redundancy())
+			if sb.Score() < minScore {
+				ub.LowScore = true
+			}
+		}
+	}
+
+	return &api.HostCheck{
+		Usability: ub,
+		Gouging:   gb,
+		Score:     sb,
+	}
 }
