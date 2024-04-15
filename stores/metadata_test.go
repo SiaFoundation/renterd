@@ -1058,9 +1058,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[0].DBSlabID = 1
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 4
+	expectedObj.Slabs[1].DBSlabID = 2
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1082,7 +1082,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   3,
+				DBSlabID:   1,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1122,7 +1122,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   4,
+				DBSlabID:   2,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -4028,7 +4028,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 }
 
-func TestSlabCleanupTrigger(t *testing.T) {
+func TestSlabCleanup(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -4100,11 +4100,14 @@ func TestSlabCleanupTrigger(t *testing.T) {
 
 	// check slice count
 	var slabCntr int64
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 1 {
-		t.Fatalf("expected 1 slabs, got %v", slabCntr)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 1 {
+			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 
 	// delete second object
 	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
@@ -4112,11 +4115,14 @@ func TestSlabCleanupTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 0 {
-		t.Fatalf("expected 0 slabs, got %v", slabCntr)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 0 {
+			return fmt.Errorf("expected 0 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 
 	// create another object that references a slab with buffer
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
@@ -4156,11 +4162,15 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 1 {
-		t.Fatalf("expected 1 slabs, got %v", slabCntr)
-	}
+
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 1 {
+			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 }
 
 func TestUpsertSectors(t *testing.T) {

@@ -285,6 +285,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+	if err := ss.initSlabPruning(); err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
 	return ss, ccid, nil
 }
 
@@ -303,6 +306,18 @@ func (ss *SQLStore) hasAllowlist() bool {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	return ss.allowListCnt > 0
+}
+
+func (s *SQLStore) initSlabPruning() error {
+	// start pruning loop
+	s.wg.Add(1)
+	go func() {
+		s.pruneSlabsLoop()
+		s.wg.Done()
+	}()
+
+	// prune once to guarantee consistency on startup
+	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
@@ -604,4 +619,12 @@ func (s *SQLStore) ResetConsensusSubscription(ctx context.Context) error {
 	}
 	s.persistMu.Unlock()
 	return nil
+}
+
+func sumDurations(durations []time.Duration) time.Duration {
+	var sum time.Duration
+	for _, d := range durations {
+		sum += d
+	}
+	return sum
 }
