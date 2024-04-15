@@ -1607,35 +1607,8 @@ func (w *worker) HeadObject(ctx context.Context, bucket, path string, opts api.H
 }
 
 func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
-	// return early if the bucket does not exist
-	_, err := w.bus.Bucket(ctx, bucket)
-	if err != nil {
-		return nil, fmt.Errorf("bucket '%s' not found; %w", bucket, err)
-	}
-
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
-	} else if opts.ContractSet != "" {
-		up.ContractSet = opts.ContractSet
-	} else if up.ContractSet == "" {
-		return nil, api.ErrContractSetNotSpecified
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		return nil, api.ErrConsensusNotSynced
-	}
-
-	// allow overriding the redundancy settings
-	if opts.MinShards != 0 {
-		up.RedundancySettings.MinShards = opts.MinShards
-	}
-	if opts.TotalShards != 0 {
-		up.RedundancySettings.TotalShards = opts.TotalShards
-	}
-	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
+	// prepare upload params
+	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
 	if err != nil {
 		return nil, err
 	}
@@ -1671,35 +1644,8 @@ func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 }
 
 func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
-	// return early if the bucket does not exist
-	_, err := w.bus.Bucket(ctx, bucket)
-	if err != nil {
-		return nil, fmt.Errorf("bucket '%s' not found; %w", bucket, err)
-	}
-
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
-	} else if opts.ContractSet != "" {
-		up.ContractSet = opts.ContractSet
-	} else if up.ContractSet == "" {
-		return nil, api.ErrContractSetNotSpecified
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		return nil, api.ErrConsensusNotSynced
-	}
-
-	// allow overriding the redundancy settings
-	if opts.MinShards != 0 {
-		up.RedundancySettings.MinShards = opts.MinShards
-	}
-	if opts.TotalShards != 0 {
-		up.RedundancySettings.TotalShards = opts.TotalShards
-	}
-	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
+	// prepare upload params
+	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
 	if err != nil {
 		return nil, err
 	}
@@ -1751,4 +1697,40 @@ func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	return &api.UploadMultipartUploadPartResponse{
 		ETag: eTag,
 	}, nil
+}
+
+func (w *worker) prepareUploadParams(ctx context.Context, bucket string, contractSet string, minShards, totalShards int) (api.UploadParams, error) {
+	// return early if the bucket does not exist
+	_, err := w.bus.Bucket(ctx, bucket)
+	if err != nil {
+		return api.UploadParams{}, fmt.Errorf("bucket '%s' not found; %w", bucket, err)
+	}
+
+	// fetch the upload parameters
+	up, err := w.bus.UploadParams(ctx)
+	if err != nil {
+		return api.UploadParams{}, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
+	} else if contractSet != "" {
+		up.ContractSet = contractSet
+	} else if up.ContractSet == "" {
+		return api.UploadParams{}, api.ErrContractSetNotSpecified
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		return api.UploadParams{}, api.ErrConsensusNotSynced
+	}
+
+	// allow overriding the redundancy settings
+	if minShards != 0 {
+		up.RedundancySettings.MinShards = minShards
+	}
+	if totalShards != 0 {
+		up.RedundancySettings.TotalShards = totalShards
+	}
+	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
+	if err != nil {
+		return api.UploadParams{}, err
+	}
+	return up, nil
 }
