@@ -1052,6 +1052,10 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 		return false, false
 	}
 
+	// remove an error for this host if it successfully uploaded another sector.
+	// This might happen if another host was faster and this one got reused.
+	delete(s.errs, req.hk)
+
 	// redundant sectors can't complete the upload
 	if sector.isUploaded() {
 		return false, false
