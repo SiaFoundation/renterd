@@ -97,6 +97,7 @@ func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, s
 		select {
 		case <-time.After(h.uploadDelay):
 		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	return nil
