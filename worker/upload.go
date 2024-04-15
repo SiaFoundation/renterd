@@ -202,10 +202,10 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 				}
 			}
 		}
-
-		// make sure there's a goroutine uploading the remainder of the packed slabs
-		go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
 	}
+
+	// make sure there's a goroutine uploading any packed slabs
+	go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
 
 	return eTag, nil
 }
