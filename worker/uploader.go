@@ -139,6 +139,8 @@ outer:
 			canceledOverdrive := req.done() && req.overdrive && err != nil
 			if !canceledOverdrive && !isClosedStream(err) {
 				u.trackSectorUpload(err, elapsed)
+			} else {
+				u.logger.Debugw("not tracking sector upload metric", zap.Error(err))
 			}
 		}
 	}

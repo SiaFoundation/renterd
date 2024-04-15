@@ -1046,18 +1046,23 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 	s.numInflight--
 
-	// failed reqs can't complete the upload
-	if resp.err != nil {
-		s.errs[req.hk] = resp.err
+	// redundant sectors can't complete the upload
+	if sector.isUploaded() {
+		// release the candidate
+		for _, candidate := range s.candidates {
+			if candidate.req == req {
+				candidate.req = nil
+				break
+			}
+		}
 		return false, false
 	}
 
-	// remove an error for this host if it successfully uploaded another sector.
-	// This might happen if another host was faster and this one got reused.
-	delete(s.errs, req.hk)
-
-	// redundant sectors can't complete the upload
-	if sector.isUploaded() {
+	// failed reqs can't complete the upload, we do this after the isUploaded
+	// check since any error returned for a redundant sector is probably a
+	// result of the sector ctx being closed
+	if resp.err != nil {
+		s.errs[req.hk] = resp.err
 		return false, false
 	}
 
@@ -1070,13 +1075,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// update uploaded sectors
 	s.numUploaded++
-
-	// release all other candidates for this sector
-	for _, candidate := range s.candidates {
-		if candidate.req != nil && candidate.req != req && candidate.req.sector.index == sector.index {
-			candidate.req = nil
-		}
-	}
 
 	// release memory
 	s.mem.ReleaseSome(rhpv2.SectorSize)
