@@ -236,7 +236,7 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(cfg api.ContractsConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) *api.HostCheck {
+func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) *api.HostCheck {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
