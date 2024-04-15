@@ -94,7 +94,10 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
 	h.AddSector(sectorRoot, sector)
 	if h.uploadDelay > 0 {
-		time.Sleep(h.uploadDelay)
+		select {
+		case <-time.After(h.uploadDelay):
+		case <-ctx.Done():
+		}
 	}
 	return nil
 }
