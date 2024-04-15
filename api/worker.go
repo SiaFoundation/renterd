@@ -27,7 +27,7 @@ var (
 	// be scanned since it is on a private network.
 	ErrHostOnPrivateNetwork = errors.New("host is on a private network")
 
-	// ErrMultiRangeNotSupported is returned by the worker API when a requesta
+	// ErrMultiRangeNotSupported is returned by the worker API when a request
 	// tries to download multiple ranges at once.
 	ErrMultiRangeNotSupported = errors.New("multipart ranges are not supported")
 )
@@ -280,9 +280,8 @@ func ParseContentRange(contentRange string) (ContentRange, error) {
 }
 
 func ParseDownloadRange(req *http.Request) (DownloadRange, error) {
-	// parse the request range
-	// we pass math.MaxInt64 since a range header in a request doesn't have a
-	// size
+	// parse the request range we pass math.MaxInt64 since a range header in a
+	// request doesn't have a size
 	ranges, err := http_range.ParseRange(req.Header.Get("Range"), math.MaxInt64)
 	if err != nil {
 		return DownloadRange{}, err
