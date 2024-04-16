@@ -525,7 +525,7 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 	return nil
 }
 
-func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) (err error) {
+func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
 	abortRetry := func(err error) bool {
 		if err == nil ||
 			errors.Is(err, context.Canceled) ||
@@ -550,23 +550,24 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 		return false
 	}
 
+	var err error
 	attempts := len(s.retryTransactionIntervals) + 1
-	for i := 1; i <= attempts; i++ {
+	for i := 0; i < attempts; i++ {
 		// execute the transaction
 		err = s.db.WithContext(ctx).Transaction(fc)
-		if err == nil || abortRetry(err) {
-			return
+		if abortRetry(err) {
+			return err
 		}
 
 		// if this was the last attempt, return the error
-		if i-1 == len(s.retryTransactionIntervals) {
-			s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i, attempts, err))
-			return
+		if i == len(s.retryTransactionIntervals) {
+			s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, attempts, err))
+			return err
 		}
 
 		// log the failed attempt and sleep before retrying
-		interval := s.retryTransactionIntervals[i-1]
-		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i, attempts, interval, err))
+		interval := s.retryTransactionIntervals[i]
+		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, attempts, interval, err))
 		time.Sleep(interval)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
