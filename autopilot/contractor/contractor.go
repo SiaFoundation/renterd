@@ -14,6 +14,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	cwallet "go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
@@ -984,7 +985,16 @@ func (c *Contractor) runContractRenewals(ctx *mCtx, w Worker, toRenew []contract
 		contract := toRenew[i].contract.ContractMetadata
 		renewed, proceed, err := c.renewContract(ctx, w, toRenew[i], budget)
 		if err != nil {
-			c.alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
+			// don't register an alert for hosts that are out of funds since the
+			// user can't do anything about it
+			if !(worker.IsErrHost(err) && utils.IsErr(err, cwallet.ErrNotEnoughFunds)) {
+				c.alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
+			}
+			c.logger.With(zap.Error(err)).
+				With("fcid", toRenew[i].contract.ID).
+				With("hostKey", toRenew[i].contract.HostKey).
+				With("proceed", proceed).
+				Errorw("failed to renew contract")
 			if toRenew[i].usable {
 				toKeep = append(toKeep, toRenew[i].contract.ContractMetadata)
 			}
