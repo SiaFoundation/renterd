@@ -32,6 +32,8 @@ import (
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
+	gormlogger "gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -238,6 +240,18 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	apSettings := test.AutopilotConfig
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
+	}
+
+	// default database logger
+	if busCfg.DBLogger == nil {
+		busCfg.DBLogger = zapgorm2.Logger{
+			ZapLogger:                 logger.Named("SQL"),
+			LogLevel:                  gormlogger.Warn,
+			SlowThreshold:             100 * time.Millisecond,
+			SkipCallerLookup:          false,
+			IgnoreRecordNotFoundError: true,
+			Context:                   nil,
+		}
 	}
 
 	// Check if we are testing against an external database. If so, we create a
