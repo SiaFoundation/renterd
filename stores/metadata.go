@@ -1469,13 +1469,16 @@ func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
 	return found
 }
 
-func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
-	fcids := make([]fileContractID, 0, len(usedContracts))
-	for _, hostFCIDs := range usedContracts {
+func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
+	// flatten map to get all used contract ids
+	fcids := make([]fileContractID, 0, len(usedContractsByHost))
+	for _, hostFCIDs := range usedContractsByHost {
 		for fcid := range hostFCIDs {
 			fcids = append(fcids, fileContractID(fcid))
 		}
 	}
+
+	// fetch all contracts, take into account renewals
 	var contracts []dbContract
 	err := tx.Model(&dbContract{}).
 		Joins("Host").
@@ -1484,17 +1487,19 @@ func fetchUsedContracts(tx *gorm.DB, usedContracts map[types.PublicKey]map[types
 	if err != nil {
 		return nil, err
 	}
-	fetchedContracts := make(map[types.FileContractID]dbContract, len(contracts))
+
+	// build map of used contracts
+	usedContracts := make(map[types.FileContractID]dbContract, len(contracts))
 	for _, c := range contracts {
-		// If a contract has been renewed, we add the renewed contract to the
-		// map using the old contract's id.
-		if _, renewed := usedContracts[types.PublicKey(c.Host.PublicKey)][types.FileContractID(c.RenewedFrom)]; renewed {
-			fetchedContracts[types.FileContractID(c.RenewedFrom)] = c
-		} else {
-			fetchedContracts[types.FileContractID(c.FCID)] = c
+		if _, used := usedContractsByHost[types.PublicKey(c.Host.PublicKey)][types.FileContractID(c.FCID)]; used {
+			usedContracts[types.FileContractID(c.FCID)] = c
+		}
+		if _, used := usedContractsByHost[types.PublicKey(c.Host.PublicKey)][types.FileContractID(c.RenewedFrom)]; used {
+			usedContracts[types.FileContractID(c.RenewedFrom)] = c
 		}
 	}
-	return fetchedContracts, nil
+
+	return usedContracts, nil
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {

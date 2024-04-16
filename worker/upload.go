@@ -203,10 +203,10 @@ func (w *worker) upload(ctx context.Context, bucket, path string, r io.Reader, c
 				}
 			}
 		}
-
-		// make sure there's a goroutine uploading the remainder of the packed slabs
-		go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
 	}
+
+	// make sure there's a goroutine uploading any packed slabs
+	go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
 
 	return eTag, nil
 }
@@ -951,7 +951,7 @@ loop:
 func (s *slabUpload) canOverdrive(overdriveTimeout time.Duration) bool {
 	// overdrive is not kicking in yet
 	remaining := s.numSectors - s.numUploaded
-	if remaining >= s.maxOverdrive {
+	if remaining > s.maxOverdrive {
 		return false
 	}
 
@@ -1047,14 +1047,23 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 	s.numInflight--
 
-	// failed reqs can't complete the upload
-	if resp.err != nil {
-		s.errs[req.hk] = resp.err
+	// redundant sectors can't complete the upload
+	if sector.isUploaded() {
+		// release the candidate
+		for _, candidate := range s.candidates {
+			if candidate.req == req {
+				candidate.req = nil
+				break
+			}
+		}
 		return false, false
 	}
 
-	// redundant sectors can't complete the upload
-	if sector.uploaded.Root != (types.Hash256{}) {
+	// failed reqs can't complete the upload, we do this after the isUploaded
+	// check since any error returned for a redundant sector is probably a
+	// result of the sector ctx being closed
+	if resp.err != nil {
+		s.errs[req.hk] = resp.err
 		return false, false
 	}
 
@@ -1067,13 +1076,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// update uploaded sectors
 	s.numUploaded++
-
-	// release all other candidates for this sector
-	for _, candidate := range s.candidates {
-		if candidate.req != nil && candidate.req != req && candidate.req.sector.index == sector.index {
-			candidate.req = nil
-		}
-	}
 
 	// release memory
 	s.mem.ReleaseSome(rhpv2.SectorSize)

@@ -640,10 +640,34 @@ func TestUploadRegression(t *testing.T) {
 	}
 }
 
-func testOpts() []UploadOption {
-	return []UploadOption{
-		WithContractSet(testContractSet),
-		WithRedundancySettings(testRedundancySettings),
+func TestUploadSingleSectorSlowHosts(t *testing.T) {
+	// create test worker
+	w := newTestWorker(t)
+
+	// add hosts to worker
+	minShards := 10
+	totalShards := 30
+	slowHosts := 5
+	w.uploadManager.maxOverdrive = uint64(slowHosts)
+	w.uploadManager.overdriveTimeout = time.Second
+	hosts := w.AddHosts(totalShards + slowHosts)
+
+	for i := 0; i < slowHosts; i++ {
+		hosts[i].uploadDelay = time.Hour
+	}
+
+	// create test data
+	data := frand.Bytes(rhpv2.SectorSize * minShards)
+
+	// create upload params
+	params := testParameters(t.Name())
+	params.rs.MinShards = minShards
+	params.rs.TotalShards = totalShards
+
+	// upload data
+	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -657,5 +681,12 @@ func testParameters(path string) uploadParameters {
 
 		contractSet: testContractSet,
 		rs:          testRedundancySettings,
+	}
+}
+
+func testOpts() []UploadOption {
+	return []UploadOption{
+		WithContractSet(testContractSet),
+		WithRedundancySettings(testRedundancySettings),
 	}
 }
