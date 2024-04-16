@@ -2297,30 +2297,25 @@ func TestBusRecordedMetrics(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
 	})
-	defer func() {
-		cluster.Shutdown()
-	}()
+	defer cluster.Shutdown()
 
-	// Get contract metrics.
-	var err error
-	var csMetrics []api.ContractSetMetric
-	cluster.tt.Retry(1, 100*time.Millisecond, func() error {
-		// Retry fetching metrics since they are buffered.
-		csMetrics, err = cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-		cluster.tt.OK(err)
+	// sleep to ensure metrics are recorded
+	time.Sleep(2 * testBusFlushInterval)
 
-		// Remove metrics from before contract was formed.
-		for i := 0; i < len(csMetrics); i++ {
-			if csMetrics[i].Contracts > 0 {
-				csMetrics = csMetrics[i:]
-				break
-			}
+	// get contract metrics
+	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
+	cluster.tt.OK(err)
+
+	// remove metrics from before contract was formed
+	for i := 0; i < len(csMetrics); i++ {
+		if csMetrics[i].Contracts > 0 {
+			csMetrics = csMetrics[i:]
+			break
 		}
-		if len(csMetrics) == 0 {
-			return fmt.Errorf("expected at least 1 metric with contracts, got %v", len(csMetrics))
-		}
-		return nil
-	})
+	}
+	if len(csMetrics) == 0 {
+		t.Fatalf("expected at least 1 metric with contracts, got %v", len(csMetrics))
+	}
 
 	for _, m := range csMetrics {
 		if m.Contracts != 1 {
@@ -2332,7 +2327,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		}
 	}
 
-	// Get churn metrics. Should have 1 for the new contract.
+	// get churn metrics, should have 1 for the new contract
 	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetChurnMetricsQueryOpts{})
 	cluster.tt.OK(err)
 	if len(cscMetrics) != 1 {
@@ -2347,7 +2342,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}
 
-	// Get contract metrics.
+	// get contract metrics
 	var cMetrics []api.ContractMetric
 	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
 		// Retry fetching metrics since they are buffered.
@@ -2385,7 +2380,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero ListSpending")
 	}
 
-	// Prune one of the metrics
+	// prune one of the metrics
 	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
 		t.Fatal(err)
 	} else if cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
