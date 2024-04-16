@@ -63,8 +63,9 @@ type (
 		retryTxIntervals   []time.Duration
 		walletAddress      types.Address
 
-		syncSig         chan struct{}
 		csUnsubscribeFn func()
+		syncSig         chan struct{}
+		wg              sync.WaitGroup
 
 		mu             sync.Mutex
 		closedChan     chan struct{}
@@ -126,6 +127,8 @@ func (s *Subscriber) Close() error {
 	// unsubscribe from chain manager
 	s.csUnsubscribeFn()
 
+	// wait for sync loop to finish
+	s.wg.Wait()
 	return nil
 }
 
@@ -140,7 +143,10 @@ func (s *Subscriber) Run() (func(), error) {
 	}
 
 	// start sync loop
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
+
 		for {
 			select {
 			case <-s.closedChan:
