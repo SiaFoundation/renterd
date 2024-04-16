@@ -38,6 +38,7 @@ type (
 
 	ChainUpdateTx interface {
 		Commit() error
+		Rollback()
 
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		UpdateChainIndex(index types.ChainIndex) error
@@ -347,12 +348,19 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 	return nil
 }
 
-func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, _ error) {
+func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, err error) {
 	// begin a new chain update
 	tx := s.cs.BeginChainUpdateTx()
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
 
 	// process wallet updates
-	wallet.UpdateChainState(tx, s.walletAddress, caus, crus)
+	if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
+		return types.ChainIndex{}, err
+	}
 
 	// process revert updates
 	for _, cru := range crus {

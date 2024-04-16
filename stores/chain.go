@@ -93,6 +93,11 @@ func (u *chainUpdateTx) Commit() error {
 	return u.tx.Commit().Error
 }
 
+// Rollback rolls back the transaction
+func (u *chainUpdateTx) Rollback() {
+	_ = u.tx.Rollback() // ignore error
+}
+
 // ContractState returns the state of a file contract.
 func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
 	var state contractState

@@ -96,7 +96,10 @@ func (s *SQLStore) Tip() (types.ChainIndex, error) {
 // querying the wallet.
 func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
 	tx := s.BeginChainUpdateTx()
-	wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
+	if err := wallet.UpdateChainState(tx, s.walletAddress, applied, reverted); err != nil {
+		tx.Rollback()
+		return err
+	}
 	return tx.Commit()
 }
 
