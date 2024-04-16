@@ -28,8 +28,43 @@ func (s *SQLStore) BeginChainUpdateTx() chain.ChainUpdateTx {
 	return &chainUpdateTx{tx: s.db.Begin()}
 }
 
-// AddEvents is called with all relevant events added in the update.
-func (u *chainUpdateTx) AddEvents(events []wallet.Event) error {
+// ApplyIndex is called with the chain index that is being applied. Any
+// transactions and siacoin elements that were created by the index should be
+// added and any siacoin elements that were spent should be removed.
+func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event) error {
+	// remove spent outputs
+	for _, e := range spent {
+		// TODO: check if rows affected is > 0?
+		if err := u.tx.
+			Where("output_id", hash256(e.ID)).
+			Delete(&dbWalletOutput{}).
+			Error; err != nil {
+			return err
+		}
+	}
+
+	// create outputs
+	for _, e := range created {
+		if err := u.tx.
+			Clauses(clause.OnConflict{
+				DoNothing: true,
+				Columns:   []clause.Column{{Name: "output_id"}},
+			}).
+			Create(&dbWalletOutput{
+				OutputID:       hash256(e.ID),
+				LeafIndex:      e.StateElement.LeafIndex,
+				MerkleProof:    merkleProof{proof: e.StateElement.MerkleProof},
+				Value:          currency(e.SiacoinOutput.Value),
+				Address:        hash256(e.SiacoinOutput.Address),
+				MaturityHeight: e.MaturityHeight,
+				Height:         index.Height,
+				BlockID:        hash256(index.ID),
+			}).Error; err != nil {
+			return nil
+		}
+	}
+
+	// create events
 	for _, e := range events {
 		if err := u.tx.
 			Clauses(clause.OnConflict{
@@ -48,31 +83,6 @@ func (u *chainUpdateTx) AddEvents(events []wallet.Event) error {
 				BlockID:        hash256(e.Index.ID),
 			}).Error; err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// AddSiacoinElements is called with all new siacoin elements in the update.
-// Ephemeral siacoin elements are not included.
-func (u *chainUpdateTx) AddSiacoinElements(elements []wallet.SiacoinElement) error {
-	for _, e := range elements {
-		if err := u.tx.
-			Clauses(clause.OnConflict{
-				DoNothing: true,
-				Columns:   []clause.Column{{Name: "output_id"}},
-			}).
-			Create(&dbWalletOutput{
-				OutputID:       hash256(e.ID),
-				LeafIndex:      e.StateElement.LeafIndex,
-				MerkleProof:    merkleProof{proof: e.StateElement.MerkleProof},
-				Value:          currency(e.SiacoinOutput.Value),
-				Address:        hash256(e.SiacoinOutput.Address),
-				MaturityHeight: e.MaturityHeight,
-				Height:         e.Index.Height,
-				BlockID:        hash256(e.Index.ID),
-			}).Error; err != nil {
-			return nil
 		}
 	}
 	return nil
@@ -122,20 +132,46 @@ func (u *chainUpdateTx) RemoveSiacoinElements(ids []types.SiacoinOutputID) error
 	return nil
 }
 
-// RevertIndex is called with the chain index that is being reverted. Any events
-// and siacoin elements that were created by the index should be removed.
-func (u *chainUpdateTx) RevertIndex(index types.ChainIndex) error {
-	if err := u.tx.
+// RevertIndex is called with the chain index that is being reverted. Any
+// transactions and siacoin elements that were created by the index should be
+// removed.
+func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement) error {
+	// recreate unspent outputs
+	for _, e := range unspent {
+		if err := u.tx.
+			Clauses(clause.OnConflict{
+				DoNothing: true,
+				Columns:   []clause.Column{{Name: "output_id"}},
+			}).
+			Create(&dbWalletOutput{
+				OutputID:       hash256(e.ID),
+				LeafIndex:      e.StateElement.LeafIndex,
+				MerkleProof:    merkleProof{proof: e.StateElement.MerkleProof},
+				Value:          currency(e.SiacoinOutput.Value),
+				Address:        hash256(e.SiacoinOutput.Address),
+				MaturityHeight: e.MaturityHeight,
+				Height:         index.Height,
+				BlockID:        hash256(index.ID),
+			}).Error; err != nil {
+			return nil
+		}
+	}
+
+	// remove outputs created at the reverted index
+	for _, e := range removed {
+		if err := u.tx.
+			Where("output_id", hash256(e.ID)).
+			Delete(&dbWalletOutput{}).
+			Error; err != nil {
+			return err
+		}
+	}
+
+	// remove events created at the reverted index
+	return u.tx.
 		Model(&dbWalletEvent{}).
 		Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).
 		Delete(&dbWalletEvent{}).
-		Error; err != nil {
-		return err
-	}
-	return u.tx.
-		Model(&dbWalletOutput{}).
-		Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).
-		Delete(&dbWalletOutput{}).
 		Error
 }
 

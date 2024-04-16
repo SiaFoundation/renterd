@@ -735,13 +735,15 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 }
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
-	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
-	for _, host := range hosts {
-		usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
-		if usable {
-			usables++
-		}
-	}
+	_ = worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+	_ = rs
+	_ = hosts
+	// for _, _ = range hosts {
+	// usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
+	// if usable {
+	// 	usables++
+	// }
+	// }
 	return
 }
 
@@ -749,43 +751,44 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
 func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
-	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+	_ = worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
-	for _, host := range hosts {
-		usable, usableBreakdown := isUsableHost(cfg, rs, gc, host, 0, 0)
-		if usable {
-			resp.Usable++
-			continue
-		}
-		if usableBreakdown.blocked > 0 {
-			resp.Unusable.Blocked++
-		}
-		if usableBreakdown.notacceptingcontracts > 0 {
-			resp.Unusable.NotAcceptingContracts++
-		}
-		if usableBreakdown.notcompletingscan > 0 {
-			resp.Unusable.NotScanned++
-		}
-		if usableBreakdown.unknown > 0 {
-			resp.Unusable.Unknown++
-		}
-		if usableBreakdown.gougingBreakdown.ContractErr != "" {
-			resp.Unusable.Gouging.Contract++
-		}
-		if usableBreakdown.gougingBreakdown.DownloadErr != "" {
-			resp.Unusable.Gouging.Download++
-		}
-		if usableBreakdown.gougingBreakdown.GougingErr != "" {
-			resp.Unusable.Gouging.Gouging++
-		}
-		if usableBreakdown.gougingBreakdown.PruneErr != "" {
-			resp.Unusable.Gouging.Pruning++
-		}
-		if usableBreakdown.gougingBreakdown.UploadErr != "" {
-			resp.Unusable.Gouging.Upload++
-		}
-	}
+	// for _, _ = range hosts {
+	// hi := calculateHostInfo(cfg, rs, gc, host, 0, 0, false)
+	// if hi.Usability.Usable() {
+	// 	resp.Usable++
+	// 	continue
+	// }
+	// // TODO: these hosts are never blocked because we only evaluate non-blocked hosts
+	// if hi.Usability.Blocked {
+	// 	resp.Unusable.Blocked++
+	// }
+	// if usableBreakdown.notacceptingcontracts > 0 {
+	// 	resp.Unusable.NotAcceptingContracts++
+	// }
+	// if usableBreakdown.notcompletingscan > 0 {
+	// 	resp.Unusable.NotScanned++
+	// }
+	// if usableBreakdown.unknown > 0 {
+	// 	resp.Unusable.Unknown++
+	// }
+	// if usableBreakdown.gougingBreakdown.ContractErr != "" {
+	// 	resp.Unusable.Gouging.Contract++
+	// }
+	// if usableBreakdown.gougingBreakdown.DownloadErr != "" {
+	// 	resp.Unusable.Gouging.Download++
+	// }
+	// if usableBreakdown.gougingBreakdown.GougingErr != "" {
+	// 	resp.Unusable.Gouging.Gouging++
+	// }
+	// if usableBreakdown.gougingBreakdown.PruneErr != "" {
+	// 	resp.Unusable.Gouging.Pruning++
+	// }
+	// if usableBreakdown.gougingBreakdown.UploadErr != "" {
+	// 	resp.Unusable.Gouging.Upload++
+	// }
+	// }
 
 	if resp.Usable >= cfg.Contracts.Amount {
 		return // no recommendation needed

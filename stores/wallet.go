@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"gorm.io/gorm"
 )
@@ -90,33 +91,35 @@ func (s *SQLStore) Tip() (types.ChainIndex, error) {
 	}, nil
 }
 
+// TODO: feels wrong to have to implement UpdateChainState on the
+// SingleWalletStore interface which up until this point only had methods for
+// querying the wallet.
+func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
+	tx := s.BeginChainUpdateTx()
+	wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
+	return tx.Commit()
+}
+
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
-func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
+func (s *SQLStore) UnspentSiacoinElements() ([]types.SiacoinElement, error) {
 	var dbElems []dbWalletOutput
 	if err := s.db.Find(&dbElems).Error; err != nil {
 		return nil, err
 	}
 
-	elements := make([]wallet.SiacoinElement, len(dbElems))
+	elements := make([]types.SiacoinElement, len(dbElems))
 	for i, el := range dbElems {
-		elements[i] = wallet.SiacoinElement{
-			SiacoinElement: types.SiacoinElement{
-				StateElement: types.StateElement{
-					ID:          types.Hash256(el.OutputID),
-					LeafIndex:   el.LeafIndex,
-					MerkleProof: el.MerkleProof.proof,
-				},
-				MaturityHeight: el.MaturityHeight,
-				SiacoinOutput: types.SiacoinOutput{
-					Address: types.Address(el.Address),
-					Value:   types.Currency(el.Value),
-				},
+		elements[i] = types.SiacoinElement{
+			StateElement: types.StateElement{
+				ID:          types.Hash256(el.OutputID),
+				LeafIndex:   el.LeafIndex,
+				MerkleProof: el.MerkleProof.proof,
 			},
-			Index: types.ChainIndex{
-				Height: el.Height,
-				ID:     types.BlockID(el.BlockID),
+			MaturityHeight: el.MaturityHeight,
+			SiacoinOutput: types.SiacoinOutput{
+				Address: types.Address(el.Address),
+				Value:   types.Currency(el.Value),
 			},
-			// TODO: Index missing
 		}
 	}
 	return elements, nil

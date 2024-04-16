@@ -174,54 +174,63 @@ func (u *unusableHostResult) keysAndValues() []interface{} {
 	return values
 }
 
-// isUsableHost returns whether the given host is usable along with a list of
-// reasons why it was deemed unusable.
-func isUsableHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.HostInfo, minScore float64, storedData uint64) (bool, unusableHostResult) {
+// calculateHostInfo returns the host info for the given host. This function will
+func calculateHostInfo(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h hostdb.Host, minScore float64, storedData uint64, blocked bool) hostdb.HostInfo {
+	_ = cfg
+	_ = rs
+	_ = gc
+	_ = h
+	_ = minScore
+	_ = storedData
+	_ = blocked
+
+	// sanity check redundancy settings
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
 
-	var errs []error
-	if h.Blocked {
-		errs = append(errs, errHostBlocked)
-	}
+	// var errs []error
+	// if h.Blocked {
+	// 	errs = append(errs, errHostBlocked)
+	// }
 
-	var gougingBreakdown api.HostGougingBreakdown
-	var scoreBreakdown api.HostScoreBreakdown
-	if !h.IsAnnounced() {
-		errs = append(errs, errHostNotAnnounced)
-	} else if !h.Scanned {
-		errs = append(errs, errHostNotCompletingScan)
-	} else {
-		// online check
-		if !h.IsOnline() {
-			errs = append(errs, errHostOffline)
-		}
+	// // populate host info fields
+	// ub.Blocked = blocked
+	// if !h.IsAnnounced() {
+	// 	errs = append(errs, errHostNotAnnounced)
+	// } else if !h.Scanned {
+	// 	errs = append(errs, errHostNotCompletingScan)
+	// } else {
+	// 	// online check
+	// 	if !h.IsOnline() {
+	// 		errs = append(errs, errHostOffline)
+	// 	}
 
-		// accepting contracts check
-		if !h.Settings.AcceptingContracts {
-			errs = append(errs, errHostNotAcceptingContracts)
-		}
+	// 	// accepting contracts check
+	// 	if !h.Settings.AcceptingContracts {
+	// 		errs = append(errs, errHostNotAcceptingContracts)
+	// 	}
 
-		// perform gouging checks
-		gougingBreakdown = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
-		if gougingBreakdown.Gouging() {
-			errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown))
-		} else if minScore > 0 {
-			// perform scoring checks
-			//
-			// NOTE: only perform these scoring checks if we know the host is
-			// not gouging, this because the core package does not have overflow
-			// checks in its cost calculations needed to calculate the period
-			// cost
-			scoreBreakdown = hostScore(cfg, h.Host, storedData, rs.Redundancy())
-			if scoreBreakdown.Score() < minScore {
-				errs = append(errs, fmt.Errorf("%w: (%s): %v < %v", errLowScore, scoreBreakdown.String(), scoreBreakdown.Score(), minScore))
-			}
-		}
-	}
+	// 	// perform gouging checks
+	// 	gougingBreakdown = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
+	// 	if gougingBreakdown.Gouging() {
+	// 		errs = append(errs, fmt.Errorf("%w: %v", errHostPriceGouging, gougingBreakdown))
+	// 	} else if minScore > 0 {
+	// 		// perform scoring checks
+	// 		//
+	// 		// NOTE: only perform these scoring checks if we know the host is
+	// 		// not gouging, this because the core package does not have overflow
+	// 		// checks in its cost calculations needed to calculate the period
+	// 		// cost
+	// 		scoreBreakdown = hostScore(cfg, h.Host, storedData, rs.Redundancy())
+	// 		if scoreBreakdown.Score() < minScore {
+	// 			errs = append(errs, fmt.Errorf("%w: (%s): %v < %v", errLowScore, scoreBreakdown.String(), scoreBreakdown.Score(), minScore))
+	// 		}
+	// 	}
+	// }
 
-	return len(errs) == 0, newUnusableHostResult(errs, gougingBreakdown, scoreBreakdown)
+	// return len(errs) == 0, newUnusableHostResult(errs, gougingBreakdown, scoreBreakdown)
+	return hostdb.HostInfo{Blocked: true}
 }
 
 // isUsableContract returns whether the given contract is

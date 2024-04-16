@@ -43,8 +43,7 @@ type (
 		UpdateFailedContracts(blockHeight uint64) error
 		UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
 
-		wallet.ApplyTx
-		wallet.RevertTx
+		wallet.UpdateTx
 	}
 
 	ContractStore interface {
@@ -301,7 +300,7 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 				fmt.Println("DEBUG PJ: processed updates successfully, height", index.Height)
 				break
 			}
-			fmt.Println("DEBUG PJ: processing updates failed, height", index.Height)
+			fmt.Println("DEBUG PJ: processing updates failed, err", err)
 
 			// no more retries left
 			if i-1 == len(s.retryTxIntervals) {
@@ -323,27 +322,27 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 	// begin a new chain update
 	tx := s.cs.BeginChainUpdateTx()
 
+	// process wallet updates
+	wallet.UpdateChainState(tx, s.walletAddress, caus, crus)
+
 	// process revert updates
 	for _, cru := range crus {
 		fmt.Println("DEBUG PJ: revert block", cru.State.Index)
 		if err := s.revertChainUpdate(tx, cru); err != nil {
 			return types.ChainIndex{}, fmt.Errorf("failed to revert chain update: %w", err)
 		}
-		if err := wallet.RevertChainUpdate(tx, s.walletAddress, cru); err != nil {
-			return types.ChainIndex{}, fmt.Errorf("failed to revert wallet update: %w", err)
-		}
-		index = cru.State.Index
 	}
 
 	// process apply updates
 	if err := s.applyChainUpdates(tx, caus); err != nil {
 		return types.ChainIndex{}, fmt.Errorf("failed to apply chain updates: %w", err)
 	}
-	if err := wallet.ApplyChainUpdates(tx, s.walletAddress, caus); err != nil {
-		return types.ChainIndex{}, fmt.Errorf("failed to apply wallet updates: %w", err)
-	}
+
+	// get the last index
 	if len(caus) > 0 {
 		index = caus[len(caus)-1].State.Index
+	} else if len(crus) > 0 {
+		index = crus[len(crus)-1].State.Index
 	}
 
 	// update chain index

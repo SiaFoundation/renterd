@@ -107,6 +107,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		Logger:                        logger.Sugar(),
 		GormLogger:                    sqlLogger,
 		RetryTransactionIntervals:     retryTxIntervals,
+		WalletAddress:                 types.StandardUnlockHash(seed.PublicKey()),
 	})
 	if err != nil {
 		return nil, nil, nil, nil, err

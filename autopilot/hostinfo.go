@@ -31,7 +31,7 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	if err != nil {
 		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
 	}
-	rs, err := c.ap.bus.RedundancySettings(ctx)
+	_, err = c.ap.bus.RedundancySettings(ctx)
 	if err != nil {
 		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
 	}
@@ -43,38 +43,39 @@ func (c *contractor) HostInfo(ctx context.Context, hostKey types.PublicKey) (api
 	if err != nil {
 		return api.HostHandlerResponse{}, fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
 	}
-	c.mu.Lock()
-	storedData := c.cachedDataStored[hostKey]
-	minScore := c.cachedMinScore
-	c.mu.Unlock()
+	// c.mu.Lock()
+	// storedData := c.cachedDataStored[hostKey]
+	// minScore := c.cachedMinScore
+	// c.mu.Unlock()
 
-	gc := worker.NewGougingChecker(gs, cs, fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+	_ = worker.NewGougingChecker(gs, cs, fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
 
 	// ignore the pricetable's HostBlockHeight by setting it to our own blockheight
 	host.Host.PriceTable.HostBlockHeight = cs.BlockHeight
 
-	isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host, minScore, storedData)
-	return api.HostHandlerResponse{
-		Host: host.Host,
-		Checks: &api.HostHandlerResponseChecks{
-			Gouging:          unusableResult.gougingBreakdown.Gouging(),
-			GougingBreakdown: unusableResult.gougingBreakdown,
-			Score:            unusableResult.scoreBreakdown.Score(),
-			ScoreBreakdown:   unusableResult.scoreBreakdown,
-			Usable:           isUsable,
-			UnusableReasons:  unusableResult.reasons(),
-		},
-	}, nil
+	// isUsable, unusableResult := isUsableHost(state.cfg, rs, gc, host, minScore, storedData)
+	// return api.HostHandlerResponse{
+	// 	Host: host.Host,
+	// 	Checks: &api.HostHandlerResponseChecks{
+	// 		Gouging:          unusableResult.gougingBreakdown.Gouging(),
+	// 		GougingBreakdown: unusableResult.gougingBreakdown,
+	// 		Score:            unusableResult.scoreBreakdown.Score(),
+	// 		ScoreBreakdown:   unusableResult.scoreBreakdown,
+	// 		Usable:           isUsable,
+	// 		UnusableReasons:  unusableResult.reasons(),
+	// 	},
+	// }, nil
+	return api.HostHandlerResponse{}, nil
 }
 
 func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo) (hi hostInfo, found bool) {
 	// grab host details from cache
-	c.mu.Lock()
-	hi, found = c.cachedHostInfo[host.PublicKey]
-	storedData := c.cachedDataStored[host.PublicKey]
-	minScore := c.cachedMinScore
-	c.mu.Unlock()
-
+	// c.mu.Lock()
+	// hi, found = c.cachedHostInfo[host.PublicKey]
+	// storedData := c.cachedDataStored[host.PublicKey]
+	// minScore := c.cachedMinScore
+	// c.mu.Unlock()
+	found = true
 	// return early if the host info is not cached
 	if !found {
 		return
@@ -89,12 +90,12 @@ func (c *contractor) hostInfoFromCache(ctx context.Context, host hostdb.HostInfo
 			c.logger.Error("failed to fetch consensus state from bus: %v", err)
 		} else {
 			state := c.ap.State()
-			gc := worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
-			isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, storedData)
-			hi = hostInfo{
-				Usable:         isUsable,
-				UnusableResult: unusableResult,
-			}
+			_ = worker.NewGougingChecker(state.gs, cs, state.fee, state.cfg.Contracts.Period, state.cfg.Contracts.RenewWindow)
+			// isUsable, unusableResult := isUsableHost(state.cfg, state.rs, gc, host, minScore, storedData)
+			// hi = hostInfo{
+			// 	Usable:         isUsable,
+			// 	UnusableResult: unusableResult,
+			// }
 
 			// update cache
 			c.mu.Lock()

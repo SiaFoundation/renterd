@@ -206,7 +206,7 @@ type (
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
 		ReleaseInputs(txns ...types.Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
-		SpendableOutputs() ([]wallet.SiacoinElement, error)
+		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
 		UnconfirmedTransactions() ([]wallet.Event, error)
 		Events(offset, limit int) ([]wallet.Event, error)

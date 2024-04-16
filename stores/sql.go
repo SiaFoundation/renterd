@@ -61,6 +61,10 @@ type (
 		Logger                        *zap.SugaredLogger
 		GormLogger                    glogger.Interface
 		RetryTransactionIntervals     []time.Duration
+
+		// TODO: need this for UpdateChainState, which I'd like to get rid of on
+		// the store
+		WalletAddress types.Address
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -69,6 +73,8 @@ type (
 		db        *gorm.DB
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
+
+		walletAddress types.Address
 
 		// ObjectDB related fields
 		slabBufferMgr *SlabBufferManager
@@ -203,6 +209,8 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		css:          make(map[[16]byte]chain.ContractStoreSubscriber),
 		hasAllowlist: allowlistCnt > 0,
 		hasBlocklist: blocklistCnt > 0,
+
+		walletAddress: cfg.WalletAddress,
 
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
