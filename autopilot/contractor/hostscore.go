@@ -22,7 +22,7 @@ const (
 	minValidScore = math.SmallestNonzeroFloat64
 )
 
-func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedRedundancy float64) api.HostScoreBreakdown {
+func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) api.HostScoreBreakdown {
 	cCfg := cfg.Contracts
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
@@ -44,7 +44,7 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, storedData uint64, expectedR
 		Collateral:       collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
 		Prices:           priceAdjustmentScore(hostPeriodCost, cCfg),
-		StorageRemaining: storageRemainingScore(h.Settings, storedData, allocationPerHost),
+		StorageRemaining: storageRemainingScore(h.Settings, h.StoredData, allocationPerHost),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
 	}

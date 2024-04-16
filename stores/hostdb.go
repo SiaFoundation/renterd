@@ -255,7 +255,7 @@ func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
 func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
 
 // convert converts a host into a api.HostInfo
-func (h dbHost) convert(blocked bool) api.Host {
+func (h dbHost) convert(blocked bool, storedData uint64) api.Host {
 	var lastScan time.Time
 	if h.LastScan > 0 {
 		lastScan = time.Unix(0, h.LastScan)
@@ -283,11 +283,12 @@ func (h dbHost) convert(blocked bool) api.Host {
 			HostPriceTable: h.PriceTable.convert(),
 			Expiry:         h.PriceTableExpiry.Time,
 		},
-		PublicKey: types.PublicKey(h.PublicKey),
-		Scanned:   h.Scanned,
-		Settings:  rhpv2.HostSettings(h.Settings),
-		Blocked:   blocked,
-		Checks:    checks,
+		PublicKey:  types.PublicKey(h.PublicKey),
+		Scanned:    h.Scanned,
+		Settings:   rhpv2.HostSettings(h.Settings),
+		Blocked:    blocked,
+		Checks:     checks,
+		StoredData: storedData,
 	}
 }
 
@@ -571,9 +572,25 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 			Preload("Blocklist")
 	}
 
+	// fetch stored data for each host
+	var storedData []struct {
+		HostID     uint
+		StoredData uint64
+	}
+	err := ss.db.Raw("SELECT host_id, SUM(size) as StoredData FROM contracts GROUP BY host_id").
+		Scan(&storedData).
+		Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stored data: %w", err)
+	}
+	storedDataMap := make(map[uint]uint64)
+	for _, host := range storedData {
+		storedDataMap[host.HostID] = host.StoredData
+	}
+
 	var hosts []api.Host
 	var fullHosts []dbHost
-	err := query.
+	err = query.
 		Offset(offset).
 		Limit(limit).
 		FindInBatches(&fullHosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
@@ -584,7 +601,7 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 				} else {
 					blocked = filterMode == api.HostFilterModeBlocked
 				}
-				hosts = append(hosts, fh.convert(blocked))
+				hosts = append(hosts, fh.convert(blocked, storedDataMap[fh.ID]))
 			}
 			return nil
 		}).
