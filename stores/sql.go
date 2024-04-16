@@ -564,14 +564,26 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 		}
 		return false
 	}
+
 	var err error
-	for i := 0; i < len(s.retryTransactionIntervals); i++ {
+	attempts := len(s.retryTransactionIntervals) + 1
+	for i := 0; i < attempts; i++ {
+		// execute the transaction
 		err = s.db.WithContext(ctx).Transaction(fc)
 		if abortRetry(err) {
 			return err
 		}
-		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(s.retryTransactionIntervals), s.retryTransactionIntervals[i], err))
-		time.Sleep(s.retryTransactionIntervals[i])
+
+		// if this was the last attempt, return the error
+		if i == len(s.retryTransactionIntervals) {
+			s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, attempts, err))
+			return err
+		}
+
+		// log the failed attempt and sleep before retrying
+		interval := s.retryTransactionIntervals[i]
+		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, attempts, interval, err))
+		time.Sleep(interval)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
 }
