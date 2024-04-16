@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 )
 
 func TestPriceTables(t *testing.T) {
@@ -45,7 +44,7 @@ func TestPriceTables(t *testing.T) {
 	// manage the host, make sure fetching the price table blocks
 	fetchPTBlockChan := make(chan struct{})
 	validPT := newTestHostPriceTable()
-	hm.addHost(newTestHostCustom(h, c, func() hostdb.HostPriceTable {
+	hm.addHost(newTestHostCustom(h, c, func() api.HostPriceTable {
 		<-fetchPTBlockChan
 		return validPT
 	}))

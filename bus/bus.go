@@ -26,7 +26,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
@@ -74,18 +73,18 @@ type (
 
 	// A HostDB stores information about hosts.
 	HostDB interface {
-		Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]hostdb.HostAddress, error)
-		RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error
-		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, filterMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]hostdb.HostInfo, error)
-
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
+		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
+		RecordHostScans(ctx context.Context, scans []api.HostScan) error
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
+		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
+		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -265,6 +264,8 @@ func (b *bus) Handler() http.Handler {
 		"GET    /autopilots":    b.autopilotsListHandlerGET,
 		"GET    /autopilot/:id": b.autopilotsHandlerGET,
 		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
+
+		"PUT    /autopilot/:id/host/:hostkey/check": b.autopilotHostCheckHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -834,7 +835,7 @@ func (b *bus) hostsHandlerGETDeprecated(jc jape.Context) {
 	}
 
 	// fetch hosts
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), api.HostFilterModeAllowed, "", nil, offset, limit)
+	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
@@ -847,10 +848,11 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO: on the next major release
-	// - set defaults in handler
-	// - validate request params and return 400 if invalid
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.FilterMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	// TODO: on the next major release:
+	// - properly default search params (currently no defaults are set)
+	// - properly validate and return 400 (currently validation is done in autopilot and the store)
+
+	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
@@ -1089,7 +1091,7 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		// adjust the amount of prunable data with the pending uploads, due to
 		// how we record contract spending a contract's size might already
 		// include pending sectors
-		pending := b.uploadingSectors.pending(fcid)
+		pending := b.uploadingSectors.Pending(fcid)
 		if pending > size.Prunable {
 			size.Prunable = 0
 		} else {
@@ -1136,7 +1138,7 @@ func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	// adjust the amount of prunable data with the pending uploads, due to how
 	// we record contract spending a contract's size might already include
 	// pending sectors
-	pending := b.uploadingSectors.pending(id)
+	pending := b.uploadingSectors.Pending(id)
 	if pending > size.Prunable {
 		size.Prunable = 0
 	} else {
@@ -1213,6 +1215,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(r)
 	}
+	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
 }
 
 func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1225,7 +1228,7 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
 		jc.Encode(api.ContractRootsResponse{
 			Roots:     roots,
-			Uploading: b.uploadingSectors.sectors(id),
+			Uploading: b.uploadingSectors.Sectors(id),
 		})
 	}
 }
@@ -2044,6 +2047,29 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
 }
 
+func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
+	var id string
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	var hc api.HostCheck
+	if jc.Check("failed to decode host check", jc.Decode(&hc)) != nil {
+		return
+	}
+
+	err := b.hdb.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
+	if errors.Is(err, api.ErrAutopilotNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to update host", err) != nil {
+		return
+	}
+}
+
 func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
@@ -2069,7 +2095,7 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		jc.Check("failed to track upload", b.uploadingSectors.trackUpload(id))
+		jc.Check("failed to track upload", b.uploadingSectors.StartUpload(id))
 	}
 }
 
@@ -2082,13 +2108,13 @@ func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	jc.Check("failed to add sector", b.uploadingSectors.addUploadingSector(id, req.ContractID, req.Root))
+	jc.Check("failed to add sector", b.uploadingSectors.AddSector(id, req.ContractID, req.Root))
 }
 
 func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		b.uploadingSectors.finishUpload(id)
+		b.uploadingSectors.FinishUpload(id)
 	}
 }
 

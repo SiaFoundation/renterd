@@ -16,12 +16,11 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
-	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
 
@@ -52,10 +51,11 @@ type Bus interface {
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 
 	// hostdb
-	Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error)
-	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error)
+	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
 	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]hostdb.HostInfo, error)
+	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
+	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
@@ -99,15 +99,12 @@ type Autopilot struct {
 	workers *workerPool
 
 	a *accounts
-	c *contractor
+	c *contractor.Contractor
 	m *migrator
 	s *scanner
 
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
-
-	stateMu sync.Mutex
-	state   state
 
 	startStopMu       sync.Mutex
 	startTime         time.Time
@@ -115,17 +112,12 @@ type Autopilot struct {
 	shutdownCtxCancel context.CancelFunc
 	ticker            *time.Ticker
 	triggerChan       chan bool
-}
 
-// state holds a bunch of variables that are used by the autopilot and updated
-type state struct {
-	gs  api.GougingSettings
-	rs  api.RedundancySettings
-	cfg api.AutopilotConfig
+	mu               sync.Mutex
+	pruning          bool
+	pruningLastStart time.Time
 
-	address types.Address
-	fee     types.Currency
-	period  uint64
+	maintenanceTxnIDs []types.TransactionID
 }
 
 // New initializes an Autopilot.
@@ -136,7 +128,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
 		id:      id,
 		bus:     bus,
-		logger:  logger.Sugar().Named(api.DefaultAutopilotID),
+		logger:  logger.Sugar().Named("autopilot").Named(id),
 		workers: newWorkerPool(workers),
 
 		shutdownCtx:       shutdownCtx,
@@ -157,11 +149,15 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 	}
 
 	ap.s = scanner
-	ap.c = newContractor(ap, revisionSubmissionBuffer, revisionBroadcastInterval)
+	ap.c = contractor.New(bus, bus, ap.logger, revisionSubmissionBuffer, revisionBroadcastInterval)
 	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
 	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
 
 	return ap, nil
+}
+
+func (ap *Autopilot) Config(ctx context.Context) (api.Autopilot, error) {
+	return ap.bus.Autopilot(ctx, ap.id)
 }
 
 // Handler returns an HTTP handler that serves the autopilot api.
@@ -187,14 +183,21 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// fetch necessary information
-	cfg := req.AutopilotConfig
+	reqCfg := req.AutopilotConfig
 	gs := req.GougingSettings
 	rs := req.RedundancySettings
 	cs, err := ap.bus.ConsensusState(ctx)
 	if jc.Check("failed to get consensus state", err) != nil {
 		return
 	}
-	state := ap.State()
+	fee, err := ap.bus.RecommendedFee(ctx)
+	if jc.Check("failed to get recommended fee", err) != nil {
+		return
+	}
+	cfg, err := ap.Config(ctx)
+	if jc.Check("failed to get autopilot config", err) != nil {
+		return
+	}
 
 	// fetch hosts
 	hosts, err := ap.bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
@@ -203,7 +206,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	jc.Encode(evaluateConfig(cfg, cs, state.fee, state.period, rs, gs, hosts))
+	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, cfg.CurrentPeriod, rs, gs, hosts))
 }
 
 func (ap *Autopilot) Run() error {
@@ -242,14 +245,6 @@ func (ap *Autopilot) Run() error {
 		ap.workers.withWorker(func(w Worker) {
 			defer ap.logger.Info("autopilot iteration ended")
 
-			// log worker id chosen for this maintenance iteration.
-			workerID, err := w.ID(ap.shutdownCtx)
-			if err != nil {
-				ap.logger.Warn("failed to reach worker, err: %v", err)
-			} else {
-				ap.logger.Infof("using worker %s for iteration", workerID)
-			}
-
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ap.shutdownCtx, w, forceScan)
@@ -279,26 +274,39 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// update the loop state
-			//
-			// NOTE: it is important this is the first action we perform in this
-			// iteration of the loop, keeping a state object ensures we use the
-			// same state throughout the entire iteration and we don't needless
-			// fetch the same information twice
-			err = ap.updateState(ap.shutdownCtx)
+			// fetch configuration
+			autopilot, err := ap.Config(ap.shutdownCtx)
 			if err != nil {
-				ap.logger.Errorf("failed to update state, err: %v", err)
+				ap.logger.Errorf("aborting maintenance, failed to fetch autopilot config", zap.Error(err))
 				return
 			}
 
+			// prune hosts that have been offline for too long
+			ap.s.PruneHosts(ap.shutdownCtx, autopilot.Config.Hosts)
+
+			// Log worker id chosen for this maintenance iteration.
+			workerID, err := w.ID(ap.shutdownCtx)
+			if err != nil {
+				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
+				return
+			}
+			ap.logger.Infof("using worker %s for iteration", workerID)
+
 			// perform wallet maintenance
-			err = ap.c.performWalletMaintenance(ap.shutdownCtx)
+			err = ap.performWalletMaintenance(ap.shutdownCtx)
 			if err != nil {
 				ap.logger.Errorf("wallet maintenance failed, err: %v", err)
 			}
 
+			// build maintenance state
+			state, err := ap.buildState(ap.shutdownCtx)
+			if err != nil {
+				ap.logger.Errorf("aborting maintenance, failed to build state, err: %v", err)
+				return
+			}
+
 			// perform maintenance
-			setChanged, err := ap.c.performContractMaintenance(ap.shutdownCtx, w)
+			setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, w, state)
 			if err != nil && utils.IsErr(err, context.Canceled) {
 				return
 			} else if err != nil {
@@ -315,7 +323,7 @@ func (ap *Autopilot) Run() error {
 			// launch account refills after successful contract maintenance.
 			if maintenanceSuccess {
 				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Debug("account refills loop launched")
+					ap.logger.Info("account refills loop launched")
 					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
 				})
 			}
@@ -324,10 +332,10 @@ func (ap *Autopilot) Run() error {
 			ap.m.tryPerformMigrations(ap.workers)
 
 			// pruning
-			if ap.state.cfg.Contracts.Prune {
-				ap.c.tryPerformPruning(ap.workers)
+			if autopilot.Config.Contracts.Prune {
+				ap.tryPerformPruning(ap.workers)
 			} else {
-				ap.logger.Debug("pruning disabled")
+				ap.logger.Info("pruning disabled")
 			}
 		})
 
@@ -363,12 +371,6 @@ func (ap *Autopilot) StartTime() time.Time {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 	return ap.startTime
-}
-
-func (ap *Autopilot) State() state {
-	ap.stateMu.Lock()
-	defer ap.stateMu.Unlock()
-	return ap.state
 }
 
 func (ap *Autopilot) Trigger(forceScan bool) bool {
@@ -547,79 +549,6 @@ func (ap *Autopilot) isRunning() bool {
 	return !ap.startTime.IsZero()
 }
 
-func (ap *Autopilot) updateState(ctx context.Context) error {
-	// fetch the autopilot from the bus
-	autopilot, err := ap.bus.Autopilot(ctx, ap.id)
-	if err != nil {
-		return err
-	}
-
-	// fetch consensus state
-	cs, err := ap.bus.ConsensusState(ctx)
-	if err != nil {
-		return fmt.Errorf("could not fetch consensus state, err: %v", err)
-	}
-
-	// fetch redundancy settings
-	rs, err := ap.bus.RedundancySettings(ctx)
-	if err != nil {
-		return fmt.Errorf("could not fetch redundancy settings, err: %v", err)
-	}
-
-	// fetch gouging settings
-	gs, err := ap.bus.GougingSettings(ctx)
-	if err != nil {
-		return fmt.Errorf("could not fetch gouging settings, err: %v", err)
-	}
-
-	// fetch recommended transaction fee
-	fee, err := ap.bus.RecommendedFee(ctx)
-	if err != nil {
-		return fmt.Errorf("could not fetch fee, err: %v", err)
-	}
-
-	// fetch our wallet address
-	wi, err := ap.bus.Wallet(ctx)
-	if err != nil {
-		return fmt.Errorf("could not fetch wallet address, err: %v", err)
-	}
-	address := wi.Address
-
-	// update current period if necessary
-	if cs.Synced {
-		if autopilot.CurrentPeriod == 0 {
-			autopilot.CurrentPeriod = cs.BlockHeight
-			err := ap.bus.UpdateAutopilot(ctx, autopilot)
-			if err != nil {
-				return err
-			}
-			ap.logger.Infof("initialised current period to %d", autopilot.CurrentPeriod)
-		} else if nextPeriod := autopilot.CurrentPeriod + autopilot.Config.Contracts.Period; cs.BlockHeight >= nextPeriod {
-			prevPeriod := autopilot.CurrentPeriod
-			autopilot.CurrentPeriod = nextPeriod
-			err := ap.bus.UpdateAutopilot(ctx, autopilot)
-			if err != nil {
-				return err
-			}
-			ap.logger.Infof("updated current period from %d to %d", prevPeriod, nextPeriod)
-		}
-	}
-
-	// update the state
-	ap.stateMu.Lock()
-	ap.state = state{
-		gs:  gs,
-		rs:  rs,
-		cfg: autopilot.Config,
-
-		address: address,
-		fee:     fee,
-		period:  autopilot.CurrentPeriod,
-	}
-	ap.stateMu.Unlock()
-	return nil
-}
-
 func (ap *Autopilot) isStopped() bool {
 	select {
 	case <-ap.shutdownCtx.Done():
@@ -627,6 +556,103 @@ func (ap *Autopilot) isStopped() bool {
 	default:
 		return false
 	}
+}
+
+func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
+	if ap.isStopped() {
+		return nil // skip contract maintenance if we're not synced
+	}
+
+	ap.logger.Info("performing wallet maintenance")
+
+	autopilot, err := ap.Config(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch autopilot config: %w", err)
+	}
+	w, err := ap.bus.Wallet(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch wallet: %w", err)
+	}
+
+	// convenience variables
+	b := ap.bus
+	l := ap.logger
+	cfg := autopilot.Config
+	renewWindow := cfg.Contracts.RenewWindow
+
+	// no contracts - nothing to do
+	if cfg.Contracts.Amount == 0 {
+		l.Warn("wallet maintenance skipped, no contracts wanted")
+		return nil
+	}
+
+	// no allowance - nothing to do
+	if cfg.Contracts.Allowance.IsZero() {
+		l.Warn("wallet maintenance skipped, no allowance set")
+		return nil
+	}
+
+	// fetch consensus state
+	cs, err := ap.bus.ConsensusState(ctx)
+	if err != nil {
+		l.Warnf("wallet maintenance skipped, fetching consensus state failed with err: %v", err)
+		return err
+	}
+
+	// fetch wallet balance
+	wallet, err := b.Wallet(ctx)
+	if err != nil {
+		l.Warnf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
+		return err
+	}
+	balance := wallet.Confirmed
+
+	// register an alert if balance is low
+	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
+		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, cfg.Contracts.Allowance, cs.BlockHeight, renewWindow, autopilot.EndHeight()))
+	} else {
+		ap.DismissAlert(ctx, alertLowBalanceID)
+	}
+
+	// pending maintenance transaction - nothing to do
+	pending, err := b.WalletPending(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, txn := range pending {
+		for _, mTxnID := range ap.maintenanceTxnIDs {
+			if mTxnID == txn.ID() {
+				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
+				return nil
+			}
+		}
+	}
+
+	wantedNumOutputs := 10
+
+	// enough outputs - nothing to do
+	available, err := b.WalletOutputs(ctx)
+	if err != nil {
+		return err
+	}
+	if uint64(len(available)) >= uint64(wantedNumOutputs) {
+		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
+		return nil
+	}
+	wantedNumOutputs -= len(available)
+
+	// figure out the amount per output
+	amount := cfg.Contracts.Allowance.Div64(uint64(wantedNumOutputs))
+
+	// redistribute outputs
+	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, amount)
+	if err != nil {
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", wantedNumOutputs, amount, balance, err)
+	}
+
+	l.Debugf("wallet maintenance succeeded, txns %v", ids)
+	ap.maintenanceTxnIDs = ids
+	return nil
 }
 
 func (ap *Autopilot) configHandlerGET(jc jape.Context) {
@@ -679,20 +705,96 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
-	var hostKey types.PublicKey
-	if jc.DecodeParam("hostKey", &hostKey) != nil {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostKey", &hk) != nil {
 		return
 	}
 
-	host, err := ap.c.HostInfo(jc.Request.Context(), hostKey)
+	state, err := ap.buildState(jc.Request.Context())
+	if jc.Check("failed to build state", err) != nil {
+		return
+	}
+
+	// TODO: remove on next major release
+	if jc.Check("failed to get host", compatV105Host(jc.Request.Context(), state.ContractsConfig(), ap.bus, hk)) != nil {
+		return
+	}
+
+	hi, err := ap.bus.Host(jc.Request.Context(), hk)
 	if jc.Check("failed to get host info", err) != nil {
 		return
 	}
-	jc.Encode(host)
+
+	check, ok := hi.Checks[ap.id]
+	if ok {
+		jc.Encode(api.HostResponse{
+			Host: hi,
+			Checks: &api.HostChecks{
+				Gouging:          check.Gouging.Gouging(),
+				GougingBreakdown: check.Gouging,
+				Score:            check.Score.Score(),
+				ScoreBreakdown:   check.Score,
+				Usable:           check.Usability.IsUsable(),
+				UnusableReasons:  check.Usability.UnusableReasons(),
+			},
+		})
+		return
+	}
+
+	jc.Encode(api.HostResponse{Host: hi})
+}
+
+func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
+	var req api.SearchHostsRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
+		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
+		return
+	}
+
+	// TODO: remove on next major release
+	if jc.Check("failed to get host info", compatV105UsabilityFilterModeCheck(req.UsabilityMode)) != nil {
+		return
+	}
+
+	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), api.SearchHostOptions{
+		AutopilotID:     ap.id,
+		Offset:          req.Offset,
+		Limit:           req.Limit,
+		FilterMode:      req.FilterMode,
+		UsabilityMode:   req.UsabilityMode,
+		AddressContains: req.AddressContains,
+		KeyIn:           req.KeyIn,
+	})
+	if jc.Check("failed to get host info", err) != nil {
+		return
+	}
+	resps := make([]api.HostResponse, len(hosts))
+	for i, host := range hosts {
+		if check, ok := host.Checks[ap.id]; ok {
+			resps[i] = api.HostResponse{
+				Host: host,
+				Checks: &api.HostChecks{
+					Gouging:          check.Gouging.Gouging(),
+					GougingBreakdown: check.Gouging,
+					Score:            check.Score.Score(),
+					ScoreBreakdown:   check.Score,
+					Usable:           check.Usability.IsUsable(),
+					UnusableReasons:  check.Usability.UnusableReasons(),
+				},
+			}
+		} else {
+			resps[i] = api.HostResponse{Host: host}
+		}
+	}
+	jc.Encode(resps)
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
-	pruning, pLastStart := ap.c.Status()
+	ap.mu.Lock()
+	pruning, pLastStart := ap.pruning, ap.pruningLastStart // TODO: move to a 'pruner' type
+	ap.mu.Unlock()
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
 	_, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
@@ -722,185 +824,130 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	})
 }
 
-func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
-	if jc.Decode(&req) != nil {
-		return
+func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
+	// fetch the autopilot from the bus
+	autopilot, err := ap.Config(ctx)
+	if err != nil {
+		return nil, err
 	}
-	hosts, err := ap.c.HostInfos(jc.Request.Context(), req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
-	if jc.Check("failed to get host info", err) != nil {
-		return
+
+	// fetch consensus state
+	cs, err := ap.bus.ConsensusState(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
 	}
-	jc.Encode(hosts)
+
+	// fetch redundancy settings
+	rs, err := ap.bus.RedundancySettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch redundancy settings, err: %v", err)
+	}
+
+	// fetch gouging settings
+	gs, err := ap.bus.GougingSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch gouging settings, err: %v", err)
+	}
+
+	// fetch recommended transaction fee
+	fee, err := ap.bus.RecommendedFee(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch fee, err: %v", err)
+	}
+
+	// fetch our wallet address
+	wi, err := ap.bus.Wallet(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch wallet address, err: %v", err)
+	}
+	address := wi.Address
+
+	// no need to try and form contracts if wallet is completely empty
+	skipContractFormations := wi.Confirmed.IsZero() && wi.Unconfirmed.IsZero()
+	if skipContractFormations {
+		ap.logger.Warn("contract formations skipped, wallet is empty")
+	}
+
+	// update current period if necessary
+	if cs.Synced {
+		if autopilot.CurrentPeriod == 0 {
+			autopilot.CurrentPeriod = cs.BlockHeight
+			err := ap.bus.UpdateAutopilot(ctx, autopilot)
+			if err != nil {
+				return nil, err
+			}
+			ap.logger.Infof("initialised current period to %d", autopilot.CurrentPeriod)
+		} else if nextPeriod := autopilot.CurrentPeriod + autopilot.Config.Contracts.Period; cs.BlockHeight >= nextPeriod {
+			prevPeriod := autopilot.CurrentPeriod
+			autopilot.CurrentPeriod = nextPeriod
+			err := ap.bus.UpdateAutopilot(ctx, autopilot)
+			if err != nil {
+				return nil, err
+			}
+			ap.logger.Infof("updated current period from %d to %d", prevPeriod, nextPeriod)
+		}
+	}
+
+	return &contractor.MaintenanceState{
+		GS: gs,
+		RS: rs,
+		AP: autopilot,
+
+		Address:                address,
+		Fee:                    fee,
+		SkipContractFormations: skipContractFormations,
+	}, nil
 }
 
-func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (usables uint64) {
-	_ = worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
-	_ = rs
-	_ = hosts
-	// for _, _ = range hosts {
-	// usable, _ := isUsableHost(cfg, rs, gc, host, smallestValidScore, 0)
-	// if usable {
-	// 	usables++
-	// }
-	// }
-	return
+// compatV105Host performs some state checks and bus calls we no longer need but
+// are necessary checks to make sure our API is consistent. This should be
+// removed in the next major release.
+func compatV105Host(ctx context.Context, cfg api.ContractsConfig, b Bus, hk types.PublicKey) error {
+	// state checks
+	if cfg.Allowance.IsZero() {
+		return fmt.Errorf("can not score hosts because contracts allowance is zero")
+	}
+	if cfg.Amount == 0 {
+		return fmt.Errorf("can not score hosts because contracts amount is zero")
+	}
+	if cfg.Period == 0 {
+		return fmt.Errorf("can not score hosts because contract period is zero")
+	}
+
+	// fetch host
+	_, err := b.Host(ctx, hk)
+	if err != nil {
+		return fmt.Errorf("failed to fetch requested host from bus: %w", err)
+	}
+
+	// other checks
+	_, err = b.GougingSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
+	}
+	_, err = b.RedundancySettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
+	}
+	_, err = b.ConsensusState(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch consensus state from bus: %w", err)
+	}
+	_, err = b.RecommendedFee(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
+	}
+	return nil
 }
 
-// evaluateConfig evaluates the given configuration and if the gouging settings
-// are too strict for the number of contracts required by 'cfg', it will provide
-// a recommendation on how to loosen it.
-func evaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []hostdb.HostInfo) (resp api.ConfigEvaluationResponse) {
-	_ = worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
-
-	resp.Hosts = uint64(len(hosts))
-	// for _, _ = range hosts {
-	// hi := calculateHostInfo(cfg, rs, gc, host, 0, 0, false)
-	// if hi.Usability.Usable() {
-	// 	resp.Usable++
-	// 	continue
-	// }
-	// // TODO: these hosts are never blocked because we only evaluate non-blocked hosts
-	// if hi.Usability.Blocked {
-	// 	resp.Unusable.Blocked++
-	// }
-	// if usableBreakdown.notacceptingcontracts > 0 {
-	// 	resp.Unusable.NotAcceptingContracts++
-	// }
-	// if usableBreakdown.notcompletingscan > 0 {
-	// 	resp.Unusable.NotScanned++
-	// }
-	// if usableBreakdown.unknown > 0 {
-	// 	resp.Unusable.Unknown++
-	// }
-	// if usableBreakdown.gougingBreakdown.ContractErr != "" {
-	// 	resp.Unusable.Gouging.Contract++
-	// }
-	// if usableBreakdown.gougingBreakdown.DownloadErr != "" {
-	// 	resp.Unusable.Gouging.Download++
-	// }
-	// if usableBreakdown.gougingBreakdown.GougingErr != "" {
-	// 	resp.Unusable.Gouging.Gouging++
-	// }
-	// if usableBreakdown.gougingBreakdown.PruneErr != "" {
-	// 	resp.Unusable.Gouging.Pruning++
-	// }
-	// if usableBreakdown.gougingBreakdown.UploadErr != "" {
-	// 	resp.Unusable.Gouging.Upload++
-	// }
-	// }
-
-	if resp.Usable >= cfg.Contracts.Amount {
-		return // no recommendation needed
+func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
+	switch usabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	case "":
+	default:
+		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
 	}
-
-	// optimise gouging settings
-	maxGS := func() api.GougingSettings {
-		return api.GougingSettings{
-			// these are the fields we optimise one-by-one
-			MaxRPCPrice:      types.MaxCurrency,
-			MaxContractPrice: types.MaxCurrency,
-			MaxDownloadPrice: types.MaxCurrency,
-			MaxUploadPrice:   types.MaxCurrency,
-			MaxStoragePrice:  types.MaxCurrency,
-
-			// these are not optimised, so we keep the same values as the user
-			// provided
-			HostBlockHeightLeeway:         gs.HostBlockHeightLeeway,
-			MinPriceTableValidity:         gs.MinPriceTableValidity,
-			MinAccountExpiry:              gs.MinAccountExpiry,
-			MinMaxEphemeralAccountBalance: gs.MinMaxEphemeralAccountBalance,
-			MigrationSurchargeMultiplier:  gs.MigrationSurchargeMultiplier,
-		}
-	}
-
-	// use the input gouging settings as the starting point and try to optimise
-	// each field independent of the other fields we want to optimise
-	optimisedGS := gs
-	success := false
-
-	// MaxRPCPrice
-	tmpGS := maxGS()
-	tmpGS.MaxRPCPrice = gs.MaxRPCPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxRPCPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
-		optimisedGS.MaxRPCPrice = tmpGS.MaxRPCPrice
-		success = true
-	}
-	// MaxContractPrice
-	tmpGS = maxGS()
-	tmpGS.MaxContractPrice = gs.MaxContractPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxContractPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
-		optimisedGS.MaxContractPrice = tmpGS.MaxContractPrice
-		success = true
-	}
-	// MaxDownloadPrice
-	tmpGS = maxGS()
-	tmpGS.MaxDownloadPrice = gs.MaxDownloadPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxDownloadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
-		optimisedGS.MaxDownloadPrice = tmpGS.MaxDownloadPrice
-		success = true
-	}
-	// MaxUploadPrice
-	tmpGS = maxGS()
-	tmpGS.MaxUploadPrice = gs.MaxUploadPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxUploadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
-		optimisedGS.MaxUploadPrice = tmpGS.MaxUploadPrice
-		success = true
-	}
-	// MaxStoragePrice
-	tmpGS = maxGS()
-	tmpGS.MaxStoragePrice = gs.MaxStoragePrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxStoragePrice, cfg, cs, fee, currentPeriod, rs, hosts) {
-		optimisedGS.MaxStoragePrice = tmpGS.MaxStoragePrice
-		success = true
-	}
-	// If one of the optimisations was successful, we return the optimised
-	// gouging settings
-	if success {
-		resp.Recommendation = &api.ConfigRecommendation{
-			GougingSettings: optimisedGS,
-		}
-	}
-	return
-}
-
-// optimiseGougingSetting tries to optimise one field of the gouging settings to
-// try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, hosts []hostdb.HostInfo) bool {
-	if cfg.Contracts.Amount == 0 {
-		return true // nothing to do
-	}
-	stepSize := []uint64{200, 150, 125, 110, 105}
-	maxSteps := 12
-
-	stepIdx := 0
-	nSteps := 0
-	prevVal := *field // to keep accurate value
-	for {
-		nUsable := countUsableHosts(cfg, cs, fee, currentPeriod, rs, *gs, hosts)
-		targetHit := nUsable >= cfg.Contracts.Amount
-
-		if targetHit && nSteps == 0 {
-			return true // target already hit without optimising
-		} else if targetHit && stepIdx == len(stepSize)-1 {
-			return true // target hit after optimising
-		} else if targetHit {
-			// move one step back and decrease step size
-			stepIdx++
-			nSteps--
-			*field = prevVal
-		} else if nSteps >= maxSteps {
-			return false // ran out of steps
-		}
-
-		// apply next step
-		prevVal = *field
-		newValue, overflow := prevVal.Mul64WithOverflow(stepSize[stepIdx])
-		if overflow {
-			return false
-		}
-		newValue = newValue.Div64(100)
-		*field = newValue
-		nSteps++
-	}
+	return nil
 }

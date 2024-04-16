@@ -194,13 +194,11 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 			// fetch packed slab to upload
 			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
 			if err != nil {
-				return "", fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
-			}
-
-			// upload packed slab
-			if len(packedSlabs) > 0 {
+				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
+			} else if len(packedSlabs) > 0 {
+				// upload packed slab
 				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
-					w.logger.Error(err)
+					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
 			}
 		}
@@ -276,14 +274,13 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 
 	// wait for all threads to finish
 	wg.Wait()
-	return
 }
 
 func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
-		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+		return fmt.Errorf("couldn't fetch contracts from bus: %v", err)
 	}
 
 	// fetch upload params
@@ -604,7 +601,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -642,27 +639,14 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 	// overwrite the shards with the newly uploaded ones
 	for i, si := range shardIndices {
 		s.Shards[si].LatestHost = uploaded[i].LatestHost
-
-		knownContracts := make(map[types.FileContractID]struct{})
-		for _, fcids := range s.Shards[si].Contracts {
-			for _, fcid := range fcids {
-				knownContracts[fcid] = struct{}{}
-			}
-		}
+		s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
 		for hk, fcids := range uploaded[i].Contracts {
-			for _, fcid := range fcids {
-				if _, exists := knownContracts[fcid]; !exists {
-					if s.Shards[si].Contracts == nil {
-						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
-					}
-					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
-				}
-			}
+			s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcids...)
 		}
 	}
 
 	// update the slab
-	return mgr.os.UpdateSlab(ctx, *s, contractSet)
+	return mgr.os.UpdateSlab(ctx, s, contractSet)
 }
 
 func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader) {

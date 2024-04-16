@@ -8,7 +8,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 )
@@ -53,7 +52,7 @@ func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, h
 }
 
 // RHPPriceTable fetches a price table for a host.
-func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (pt hostdb.HostPriceTable, err error) {
+func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (pt api.HostPriceTable, err error) {
 	req := api.RHPPriceTableRequest{
 		HostKey:    hostKey,
 		SiamuxAddr: siamuxAddr,

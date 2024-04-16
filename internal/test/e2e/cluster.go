@@ -886,6 +886,7 @@ func testNetwork() (*consensus.Network, types.Block) {
 
 func testBusCfg() node.BusConfig {
 	network, genesis := testNetwork()
+
 	return node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year

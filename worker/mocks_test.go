@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -260,13 +259,16 @@ var errSectorOutOfBounds = errors.New("sector out of bounds")
 
 type hostMock struct {
 	hk types.PublicKey
-	hi hostdb.HostInfo
+	hi api.Host
 }
 
 func newHostMock(hk types.PublicKey) *hostMock {
 	return &hostMock{
 		hk: hk,
-		hi: hostdb.HostInfo{Host: hostdb.Host{PublicKey: hk, Scanned: true}},
+		hi: api.Host{
+			PublicKey: hk,
+			Scanned:   true,
+		},
 	}
 }
 
@@ -282,22 +284,22 @@ func newHostStoreMock() *hostStoreMock {
 	return &hostStoreMock{hosts: make(map[types.PublicKey]*hostMock)}
 }
 
-func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (hostdb.HostInfo, error) {
+func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 
 	h, ok := hs.hosts[hostKey]
 	if !ok {
-		return hostdb.HostInfo{}, api.ErrHostNotFound
+		return api.Host{}, api.ErrHostNotFound
 	}
 	return h.hi, nil
 }
 
-func (hs *hostStoreMock) RecordHostScans(ctx context.Context, scans []hostdb.HostScan) error {
+func (hs *hostStoreMock) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
 	return nil
 }
 
-func (hs *hostStoreMock) RecordPriceTables(ctx context.Context, priceTableUpdate []hostdb.PriceTableUpdate) error {
+func (hs *hostStoreMock) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
 	return nil
 }
 
@@ -388,6 +390,21 @@ func (os *objectStoreMock) TrackUpload(ctx context.Context, uID api.UploadID) er
 func (os *objectStoreMock) FinishUpload(ctx context.Context, uID api.UploadID) error { return nil }
 
 func (os *objectStoreMock) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+
+	for _, objects := range os.objects {
+		for _, object := range objects {
+			for _, slab := range object.Slabs {
+				for _, shard := range slab.Slab.Shards {
+					if shard.Root == root {
+						delete(shard.Contracts, hk)
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -503,10 +520,33 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 
 	os.forEachObject(func(bucket, path string, o object.Object) {
 		for i, slab := range o.Slabs {
-			if slab.Key.String() == s.Key.String() {
-				os.objects[bucket][path].Slabs[i].Slab = s
-				return
+			if slab.Key.String() != s.Key.String() {
+				continue
 			}
+			// update slab
+			shards := os.objects[bucket][path].Slabs[i].Slab.Shards
+			for sI := range shards {
+				// overwrite latest host
+				shards[sI].LatestHost = s.Shards[sI].LatestHost
+
+				// merge contracts for each shard
+				existingContracts := make(map[types.FileContractID]struct{})
+				for _, fcids := range shards[sI].Contracts {
+					for _, fcid := range fcids {
+						existingContracts[fcid] = struct{}{}
+					}
+				}
+				for hk, fcids := range s.Shards[sI].Contracts {
+					for _, fcid := range fcids {
+						if _, exists := existingContracts[fcid]; exists {
+							continue
+						}
+						shards[sI].Contracts[hk] = append(shards[sI].Contracts[hk], fcids...)
+					}
+				}
+			}
+			os.objects[bucket][path].Slabs[i].Slab.Shards = shards
+			return
 		}
 	})
 
