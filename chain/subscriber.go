@@ -20,6 +20,10 @@ const (
 	updatesBatchSize = 1000
 )
 
+var (
+	errClosed = errors.New("subscriber closed")
+)
+
 type (
 	ChainManager interface {
 		Tip() types.ChainIndex
@@ -65,11 +69,11 @@ type (
 
 		csUnsubscribeFn func()
 		syncSig         chan struct{}
-		wg              sync.WaitGroup
 
-		mu             sync.Mutex
-		closedChan     chan struct{}
-		knownContracts map[types.FileContractID]struct{}
+		mu               sync.Mutex
+		closedChan       chan struct{}
+		syncLoopDoneChan chan struct{}
+		knownContracts   map[types.FileContractID]struct{}
 	}
 
 	revision struct {
@@ -128,7 +132,9 @@ func (s *Subscriber) Close() error {
 	s.csUnsubscribeFn()
 
 	// wait for sync loop to finish
-	s.wg.Wait()
+	if s.syncLoopDoneChan != nil {
+		<-s.syncLoopDoneChan
+	}
 	return nil
 }
 
@@ -142,11 +148,16 @@ func (s *Subscriber) Run() (func(), error) {
 		return nil, fmt.Errorf("failed to subscribe to chain manager: %w", err)
 	}
 
-	// start sync loop
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	// create done chan
+	s.mu.Lock()
+	s.syncLoopDoneChan = make(chan struct{})
+	s.mu.Unlock()
 
+	go func() {
+		// close done chan when sync loop exits
+		defer close(s.syncLoopDoneChan)
+
+		// start sync loop
 		for {
 			select {
 			case <-s.closedChan:
@@ -160,7 +171,7 @@ func (s *Subscriber) Run() (func(), error) {
 				continue
 			}
 			err = s.sync(ci)
-			if err != nil {
+			if err != nil && !errors.Is(err, errClosed) {
 				s.logger.Errorf("failed to sync: %v", err)
 			}
 		}
@@ -292,6 +303,13 @@ func (s *Subscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUpdate)
 
 func (s *Subscriber) sync(index types.ChainIndex) error {
 	for index != s.cm.Tip() {
+		// check if subscriber was closed
+		select {
+		case <-s.closedChan:
+			return errClosed
+		default:
+		}
+
 		// fetch updates
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
 		if err != nil {

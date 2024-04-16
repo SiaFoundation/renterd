@@ -2297,22 +2297,31 @@ func TestBusRecordedMetrics(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
 	})
-	defer cluster.Shutdown()
+	defer func() {
+		cluster.Shutdown()
+	}()
 
-	// Get contract set metrics.
-	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-	cluster.tt.OK(err)
+	// Get contract metrics.
+	var err error
+	var csMetrics []api.ContractSetMetric
+	cluster.tt.Retry(1, 100*time.Millisecond, func() error {
+		// Retry fetching metrics since they are buffered.
+		csMetrics, err = cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
+		cluster.tt.OK(err)
 
-	for i := 0; i < len(csMetrics); i++ {
 		// Remove metrics from before contract was formed.
-		if csMetrics[i].Contracts > 0 {
-			csMetrics = csMetrics[i:]
-			break
+		for i := 0; i < len(csMetrics); i++ {
+			if csMetrics[i].Contracts > 0 {
+				csMetrics = csMetrics[i:]
+				break
+			}
 		}
-	}
-	if len(csMetrics) == 0 {
-		t.Fatal("expected at least 1 metric with contracts")
-	}
+		if len(csMetrics) == 0 {
+			return fmt.Errorf("expected at least 1 metric with contracts, got %v", len(csMetrics))
+		}
+		return nil
+	})
+
 	for _, m := range csMetrics {
 		if m.Contracts != 1 {
 			t.Fatalf("expected 1 contract, got %v", m.Contracts)
@@ -2326,7 +2335,6 @@ func TestBusRecordedMetrics(t *testing.T) {
 	// Get churn metrics. Should have 1 for the new contract.
 	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetChurnMetricsQueryOpts{})
 	cluster.tt.OK(err)
-
 	if len(cscMetrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
 	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
