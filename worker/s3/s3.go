@@ -23,7 +23,7 @@ type Opts struct {
 	HostBucketEnabled bool
 }
 
-type bus interface {
+type Bus interface {
 	Bucket(ctx context.Context, bucketName string) (api.Bucket, error)
 	CreateBucket(ctx context.Context, bucketName string, opts api.CreateBucketOptions) error
 	DeleteBucket(ctx context.Context, bucketName string) error
@@ -46,7 +46,7 @@ type bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
-type worker interface {
+type Worker interface {
 	GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error)
 	HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error)
 	UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error)
@@ -66,7 +66,7 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 	}
 }
 
-func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
+func New(b Bus, w Worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
 	namedLogger := logger.Named("s3")
 	s3Backend := &s3{
 		b:      b,

@@ -140,6 +140,8 @@ func TestUploadPackedSlab(t *testing.T) {
 	// create upload params
 	params := testParameters(t.Name())
 	params.packing = true
+	opts := testOpts()
+	opts = append(opts, WithPacking(true))
 
 	// create test data
 	data := frand.Bytes(128)
@@ -220,7 +222,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	uploadBytes := func(n int) {
 		t.Helper()
 		params.path = fmt.Sprintf("%s_%d", t.Name(), c)
-		_, err := w.upload(context.Background(), bytes.NewReader(frand.Bytes(n)), w.Contracts(), params)
+		_, err := w.upload(context.Background(), params.bucket, params.path, bytes.NewReader(frand.Bytes(n)), w.Contracts(), opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -502,10 +504,11 @@ func TestRefreshUploaders(t *testing.T) {
 
 	// create upload params
 	params := testParameters(t.Name())
+	opts := testOpts()
 
 	// upload data
 	contracts := w.Contracts()
-	_, err := w.upload(context.Background(), bytes.NewReader(data), contracts, params)
+	_, err := w.upload(context.Background(), params.bucket, t.Name(), bytes.NewReader(data), contracts, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +610,7 @@ func TestUploadRegression(t *testing.T) {
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := w.upload(ctx, bytes.NewReader(data), w.Contracts(), params)
+	_, err := w.upload(ctx, params.bucket, params.path, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -616,7 +619,7 @@ func TestUploadRegression(t *testing.T) {
 	unblock()
 
 	// upload data
-	_, err = w.upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
+	_, err = w.upload(context.Background(), params.bucket, params.path, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,5 +681,12 @@ func testParameters(path string) uploadParameters {
 
 		contractSet: testContractSet,
 		rs:          testRedundancySettings,
+	}
+}
+
+func testOpts() []UploadOption {
+	return []UploadOption{
+		WithContractSet(testContractSet),
+		WithRedundancySettings(testRedundancySettings),
 	}
 }

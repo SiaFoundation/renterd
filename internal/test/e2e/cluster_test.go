@@ -410,8 +410,11 @@ func TestObjectEntries(t *testing.T) {
 		}
 		for _, entry := range got {
 			if !strings.HasSuffix(entry.Name, "/") {
-				if err := w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
+				buf := new(bytes.Buffer)
+				if err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
 					t.Fatal(err)
+				} else if buf.Len() != int(entry.Size) {
+					t.Fatal("unexpected", buf.Len(), entry.Size)
 				}
 			}
 		}
@@ -585,7 +588,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	for i := int64(0); i < 4; i++ {
 		offset := i * 32
 		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{Range: api.DownloadRange{Offset: offset, Length: 32}}))
+		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: offset, Length: 32}}))
 		if !bytes.Equal(data[offset:offset+32], buffer.Bytes()) {
 			fmt.Println(data[offset : offset+32])
 			fmt.Println(buffer.Bytes())
@@ -1559,7 +1562,7 @@ func TestUploadPacking(t *testing.T) {
 			&buffer,
 			api.DefaultBucketName,
 			path,
-			api.DownloadObjectOptions{Range: api.DownloadRange{Offset: offset, Length: length}},
+			api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: offset, Length: length}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -2128,7 +2131,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// Download a range of the object
-	gor, err = w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{Range: api.DownloadRange{Offset: 0, Length: 1}})
+	gor, err = w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: 0, Length: 1}})
 	tt.OK(err)
 	if gor.Range == nil || gor.Range.Offset != 0 || gor.Range.Length != 1 {
 		t.Fatal("unexpected range:", gor.Range)
