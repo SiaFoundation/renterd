@@ -139,6 +139,9 @@ func (s *Subscriber) Close() error {
 }
 
 func (s *Subscriber) Run() (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// perform an initial sync
 	index, err := s.cs.ChainIndex()
 	if err != nil {
@@ -149,9 +152,7 @@ func (s *Subscriber) Run() (func(), error) {
 	}
 
 	// create done chan
-	s.mu.Lock()
 	s.syncLoopDoneChan = make(chan struct{})
-	s.mu.Unlock()
 
 	go func() {
 		// close done chan when sync loop exits
@@ -316,8 +317,16 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
 
-		// process updates in a retry loop
+		// start retry loop
 		for i := 1; i <= len(s.retryTxIntervals)+1; i++ {
+			// check if subscriber was closed
+			select {
+			case <-s.closedChan:
+				return errClosed
+			default:
+			}
+
+			// process updates
 			index, err = s.processUpdates(crus, caus)
 			if err == nil {
 				break
