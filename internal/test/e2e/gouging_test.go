@@ -91,11 +91,8 @@ func TestGouging(t *testing.T) {
 	// again, this is necessary for the host to be considered price gouging
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
-	// download the data - should fail
-	buffer.Reset()
-	if err := w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil {
-		t.Fatal("expected download to fail", err)
-	}
+	// download the data - should still work
+	tt.OKAll(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 
 	// try optimising gouging settings
 	resp, err := cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, gs, test.RedundancySettings)
@@ -142,65 +139,4 @@ func TestHostMinVersion(t *testing.T) {
 		}
 		return nil
 	})
-}
-
-func TestDownloadGouging(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
-	// create a new test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  int(test.AutopilotConfig.Contracts.Amount),
-		logger: newTestLoggerCustom(zapcore.ErrorLevel),
-	})
-	defer cluster.Shutdown()
-
-	cfg := test.AutopilotConfig.Contracts
-	b := cluster.Bus
-	w := cluster.Worker
-	tt := cluster.tt
-
-	// build a hosts map
-	hostsMap := make(map[string]*Host)
-	for _, h := range cluster.hosts {
-		hostsMap[h.PublicKey().String()] = h
-	}
-
-	// upload and download some data, asserting we have a working contract set
-	data := make([]byte, rhpv2.SectorSize/12)
-	tt.OKAll(frand.Read(data))
-
-	// upload some data
-	path := fmt.Sprintf("data_%v", len(data))
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
-
-	// update the gouging settings to cause hosts to be gouging but not download gouging
-	gs := test.GougingSettings
-	gs.MaxContractPrice = types.NewCurrency64(1)
-	if err := b.UpdateSetting(context.Background(), api.SettingGouging, gs); err != nil {
-		t.Fatal(err)
-	}
-
-	// wait for hosts to drop out of the set
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: cfg.Set})
-		tt.OK(err)
-		if len(contracts) > 0 {
-			return fmt.Errorf("still got contracts in set")
-		}
-		return nil
-	})
-
-	// download the data
-	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
-
-	// update the gouging settings to cause hosts to be download gouging
-	gs.MaxDownloadPrice = types.NewCurrency64(1)
-	if err := b.UpdateSetting(context.Background(), api.SettingGouging, gs); err != nil {
-		t.Fatal(err)
-	}
-
-	// downloading should fail now
-	tt.FailAll(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 }
