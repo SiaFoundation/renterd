@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/config"
@@ -36,6 +37,8 @@ import (
 
 	"go.sia.tech/renterd/worker"
 	stypes "go.sia.tech/siad/types"
+	gormlogger "gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -242,6 +245,18 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		apSettings = *opts.autopilotSettings
 	}
 
+	// default database logger
+	if busCfg.DBLogger == nil {
+		busCfg.DBLogger = zapgorm2.Logger{
+			ZapLogger:                 logger.Named("SQL"),
+			LogLevel:                  gormlogger.Warn,
+			SlowThreshold:             100 * time.Millisecond,
+			SkipCallerLookup:          false,
+			IgnoreRecordNotFoundError: true,
+			Context:                   nil,
+		}
+	}
+
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
 	uri, user, password, _ := stores.DBConfigFromEnv()
@@ -422,7 +437,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
 		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
 	}))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled:               enableUploadPacking,
+		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
+	}))
 
 	// Fund the bus.
 	if funding {

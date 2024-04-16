@@ -366,13 +366,24 @@ func (s *SQLStore) retryAbortFn(err error) bool {
 
 func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {
 	var err error
-	for i := 0; i < len(intervals); i++ {
+	attempts := len(intervals) + 1
+	for i := 0; i < attempts; i++ {
+		// execute the transaction
 		err = db.WithContext(ctx).Transaction(fn)
 		if abortFn(err) {
 			return err
 		}
-		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(intervals), intervals[i], err))
-		time.Sleep(intervals[i])
+
+		// if this was the last attempt, return the error
+		if i == len(intervals) {
+			logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, attempts, err))
+			return err
+		}
+
+		// log the failed attempt and sleep before retrying
+		interval := intervals[i]
+		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, attempts, interval, err))
+		time.Sleep(interval)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
 }
