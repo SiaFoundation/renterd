@@ -235,10 +235,11 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			}
 
 			// check whether we have money left in the contract
-			if pt.FundAccountCost.Cmp(rev.ValidRenterPayout()) >= 0 {
-				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), pt.FundAccountCost)
+			cost := types.NewCurrency64(1)
+			if cost.Cmp(rev.ValidRenterPayout()) >= 0 {
+				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), cost)
 			}
-			availableFunds := rev.ValidRenterPayout().Sub(pt.FundAccountCost)
+			availableFunds := rev.ValidRenterPayout().Sub(cost)
 
 			// cap the deposit amount by the money that's left in the contract
 			if deposit.Cmp(availableFunds) > 0 {
@@ -246,7 +247,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			}
 
 			// create the payment
-			amount := deposit.Add(pt.FundAccountCost)
+			amount := deposit.Add(cost)
 			payment, err := payByContract(rev, amount, rhpv3.Account{}, h.renterKey) // no account needed for funding
 			if err != nil {
 				return err
@@ -254,7 +255,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 			// fund the account
 			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
-				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, pt.FundAccountCost, err)
+				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, cost, err)
 			}
 
 			// record the spend
@@ -277,7 +278,7 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			payment, err := payByContract(rev, types.NewCurrency64(1), h.acc.id, h.renterKey)
 			if err != nil {
 				return err
 			}
