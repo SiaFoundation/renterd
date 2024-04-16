@@ -2494,6 +2494,9 @@ func TestWalletRedistribute(t *testing.T) {
 	}
 	cluster.MineBlocks(1)
 
+	// avoid NDFs
+	time.Sleep(time.Second)
+
 	// assert we have 5 outputs with 10 SC
 	outputs, err := cluster.Bus.WalletOutputs(context.Background())
 	if err != nil {
