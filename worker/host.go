@@ -88,8 +88,8 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	if err != nil {
 		return err
 	}
-	if breakdown := gc.Check(nil, &hpt); breakdown.Gouging() {
-		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
+	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
+		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown.DownloadErr)
 	}
 
 	// return errBalanceInsufficient if balance insufficient
