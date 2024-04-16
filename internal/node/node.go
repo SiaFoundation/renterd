@@ -162,12 +162,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	// start the chain subscriber
-	unsubscribeFn, err := cs.Run()
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
 	// bootstrap the syncer
 	if cfg.Bootstrap {
 		if cfg.Network == nil {
@@ -195,6 +189,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 
 	// start the syncer
 	go s.Run()
+
+	// start the subscriber
+	unsubscribeFn, err := cs.Run()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 
 	shutdownFn := func(ctx context.Context) error {
 		unsubscribeFn()
