@@ -1160,6 +1160,26 @@ func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, upd
 	return nil
 }
 
+func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) {
+	var allowlist []dbAllowlistEntry
+	if err := tx.
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
+		Error; err != nil {
+		return nil, nil, err
+	}
+
+	var blocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		return nil, nil, err
+	}
+
+	return allowlist, blocklist, nil
+}
+
 func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
 	// fetch the host
 	var host dbHost
