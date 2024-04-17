@@ -612,7 +612,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	// mine a block to get the revisions mined.
 	cluster.MineBlocks(1)
 
-	// check the revision height was updated.
+	// check the revision height and size were updated.
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		// fetch the contracts.
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
@@ -623,10 +623,21 @@ func TestUploadDownloadBasic(t *testing.T) {
 		for _, c := range contracts {
 			if c.RevisionHeight == 0 {
 				return errors.New("revision height should be > 0")
+			} else if c.Size != rhpv2.SectorSize {
+				return fmt.Errorf("size should be %v, got %v", rhpv2.SectorSize, c.Size)
 			}
 		}
 		return nil
 	})
+
+	// Check that stored data on hosts was updated
+	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+	tt.OK(err)
+	for _, host := range hosts {
+		if host.StoredData != rhpv2.SectorSize {
+			t.Fatalf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+		}
+	}
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
