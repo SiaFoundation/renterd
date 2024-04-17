@@ -1368,6 +1368,12 @@ func TestContractArchival(t *testing.T) {
 			return err
 		}
 		if len(contracts) != 0 {
+			// trigger contract maintenance again, there's an NDF where we use
+			// the keep leeway because we can't fetch the revision preventing
+			// the contract from being archived
+			_, err := cluster.Autopilot.Trigger(false)
+			tt.OK(err)
+
 			cs, _ := cluster.Bus.ConsensusState(context.Background())
 			return fmt.Errorf("expected 0 contracts, got %v (bh: %v we: %v)", len(contracts), cs.BlockHeight, contracts[0].WindowEnd)
 		}
