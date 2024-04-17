@@ -282,7 +282,7 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 		usedHosts[contract.HostKey] = struct{}{}
 	}
 
-	// compile map of stored data per host
+	// compile map of stored data per contract
 	contractData := make(map[types.FileContractID]uint64)
 	for _, c := range contracts {
 		contractData[c.ID] = c.FileSize()
