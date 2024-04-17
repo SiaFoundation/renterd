@@ -145,7 +145,7 @@ func (s *Subscriber) Run() (func(), error) {
 		return nil, fmt.Errorf("failed to subscribe to chain manager: %w", err)
 	}
 
-	// // start sync loop in separate goroutine
+	// start sync loop in separate goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -398,7 +398,9 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 func (s *Subscriber) triggerSync() {
 	select {
 	case s.syncSig <- struct{}{}:
+		fmt.Println("DEBUG PJ: sync triggered")
 	default:
+		fmt.Println("DEBUG PJ: already syncing")
 	}
 }
 
