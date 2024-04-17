@@ -339,9 +339,12 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 }
 
 func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, err error) {
+	start := time.Now()
+
 	// begin a new chain update
 	tx := s.cs.BeginChainUpdateTx()
 	defer func() {
+		fmt.Printf("DEBUG PJ: processUpdates took %v, err %v\n", time.Since(start), err)
 		if err != nil {
 			tx.Rollback()
 		}

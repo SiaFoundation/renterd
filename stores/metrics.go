@@ -226,6 +226,10 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n ui
 }
 
 func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
 	dbMetrics := make([]dbContractMetric, len(metrics))
 	for i, metric := range metrics {
 		dbMetrics[i] = dbContractMetric{
