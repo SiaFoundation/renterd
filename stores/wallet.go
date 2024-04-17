@@ -95,7 +95,10 @@ func (s *SQLStore) Tip() (types.ChainIndex, error) {
 // SingleWalletStore interface which up until this point only had methods for
 // querying the wallet.
 func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
-	tx := s.BeginChainUpdateTx()
+	tx, err := s.BeginChainUpdateTx()
+	if err != nil {
+		return err
+	}
 	if err := wallet.UpdateChainState(tx, s.walletAddress, applied, reverted); err != nil {
 		tx.Rollback()
 		return err

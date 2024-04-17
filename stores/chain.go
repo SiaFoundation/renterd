@@ -24,8 +24,12 @@ type chainUpdateTx struct {
 
 // BeginChainUpdateTx starts a transaction and wraps it in a chainUpdateTx. This
 // transaction will be used to process a chain update in the subscriber.
-func (s *SQLStore) BeginChainUpdateTx() chain.ChainUpdateTx {
-	return &chainUpdateTx{tx: s.db.Begin()}
+func (s *SQLStore) BeginChainUpdateTx() (chain.ChainUpdateTx, error) {
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return &chainUpdateTx{tx: tx}, nil
 }
 
 // ApplyIndex is called with the chain index that is being applied. Any

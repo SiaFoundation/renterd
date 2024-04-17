@@ -32,7 +32,7 @@ type (
 	}
 
 	ChainStore interface {
-		BeginChainUpdateTx() ChainUpdateTx
+		BeginChainUpdateTx() (ChainUpdateTx, error)
 		ChainIndex() (types.ChainIndex, error)
 	}
 
@@ -338,43 +338,52 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 	return nil
 }
 
-func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, err error) {
-	start := time.Now()
-
+func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, _ error) {
 	// begin a new chain update
-	tx := s.cs.BeginChainUpdateTx()
+	tx, err := s.cs.BeginChainUpdateTx()
+	if err != nil {
+		return types.ChainIndex{}, fmt.Errorf("failed to begin chain update: %w", err)
+	}
+
+	// rollback on panic
 	defer func() {
-		fmt.Printf("DEBUG PJ: processUpdates took %v, err %v\n", time.Since(start), err)
-		if err != nil {
+		if r := recover(); r != nil {
 			tx.Rollback()
+			err = fmt.Errorf("processUpdates panic: %v", r)
+			return
 		}
 	}()
 
 	// process wallet updates
 	if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
+		tx.Rollback()
 		return types.ChainIndex{}, err
 	}
 
 	// process revert updates
 	for _, cru := range crus {
 		if err := s.revertChainUpdate(tx, cru); err != nil {
+			tx.Rollback()
 			return types.ChainIndex{}, fmt.Errorf("failed to revert chain update: %w", err)
 		}
 	}
 
 	// process apply updates
 	if err := s.applyChainUpdates(tx, caus); err != nil {
+		tx.Rollback()
 		return types.ChainIndex{}, fmt.Errorf("failed to apply chain updates: %w", err)
 	}
 
 	// update chain index
 	index = caus[len(caus)-1].State.Index
 	if err := tx.UpdateChainIndex(index); err != nil {
+		tx.Rollback()
 		return types.ChainIndex{}, fmt.Errorf("failed to update chain index: %w", err)
 	}
 
 	// update failed contracts
 	if err := tx.UpdateFailedContracts(index.Height); err != nil {
+		tx.Rollback()
 		return types.ChainIndex{}, fmt.Errorf("failed to update failed contracts: %w", err)
 	}
 
