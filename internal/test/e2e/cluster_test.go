@@ -2300,39 +2300,19 @@ func TestBusRecordedMetrics(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	// get contract metrics in a retry loop to avoid NDFs
-	var err error
-	var csMetrics []api.ContractSetMetric
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
-		// fetch contract set metrics
-		csMetrics, err = cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-		cluster.tt.OK(err)
+	// fetch contract set metrics
+	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
+	cluster.tt.OK(err)
 
-		// remove metrics from before contract was formed
-		for i := 0; i < len(csMetrics); i++ {
-			if csMetrics[i].Contracts > 0 {
-				csMetrics = csMetrics[i:]
-				break
-			}
-		}
-
-		// expect at least 1 metric with contracts
-		if len(csMetrics) == 0 {
-			_, err = cluster.Autopilot.Trigger(false)
-			cluster.tt.OK(err)
-			return fmt.Errorf("expected at least 1 metric with contracts, got %v", len(csMetrics))
-		}
-		return nil
-	})
-
-	for _, m := range csMetrics {
-		if m.Contracts != 1 {
-			t.Fatalf("expected 1 contract, got %v", m.Contracts)
-		} else if m.Name != test.ContractSet {
-			t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
-		} else if m.Timestamp.Std().Before(startTime) {
-			t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-		}
+	// expect at least 1 metric with contracts
+	if len(csMetrics) == 0 {
+		t.Fatalf("expected at least 1 metric with contracts, got %v", len(csMetrics))
+	} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
+		t.Fatalf("expected 1 contract, got %v", m.Contracts)
+	} else if m.Name != test.ContractSet {
+		t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
+	} else if m.Timestamp.Std().Before(startTime) {
+		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}
 
 	// get churn metrics, should have 1 for the new contract
