@@ -942,7 +942,7 @@ func testApCfg() node.AutopilotConfig {
 		ID: api.DefaultAutopilotID,
 		Autopilot: config.Autopilot{
 			AccountsRefillInterval:         time.Second,
-			Heartbeat:                      time.Second,
+			Heartbeat:                      200 * time.Millisecond,
 			MigrationHealthCutoff:          0.99,
 			MigratorParallelSlabsPerWorker: 1,
 			RevisionSubmissionBuffer:       0,

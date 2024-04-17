@@ -750,7 +750,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: test.RedundancySettings.TotalShards,
+		hosts:  test.RedundancySettings.TotalShards,
+		logger: newTestLoggerCustom(zapcore.DebugLevel),
 	})
 	defer cluster.Shutdown()
 
