@@ -27,7 +27,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -1453,9 +1452,7 @@ func TestWalletTransactions(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -1709,9 +1706,7 @@ func TestWallet(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -1916,9 +1911,7 @@ func TestAlerts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
