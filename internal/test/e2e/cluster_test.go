@@ -2302,23 +2302,30 @@ func TestBusRecordedMetrics(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	// sleep to ensure metrics are recorded
-	time.Sleep(2 * testBusFlushInterval)
+	// get contract metrics in a retry loop to avoid NDFs
+	var err error
+	var csMetrics []api.ContractSetMetric
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		// fetch contract set metrics
+		csMetrics, err = cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
+		cluster.tt.OK(err)
 
-	// get contract metrics
-	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-	cluster.tt.OK(err)
-
-	// remove metrics from before contract was formed
-	for i := 0; i < len(csMetrics); i++ {
-		if csMetrics[i].Contracts > 0 {
-			csMetrics = csMetrics[i:]
-			break
+		// remove metrics from before contract was formed
+		for i := 0; i < len(csMetrics); i++ {
+			if csMetrics[i].Contracts > 0 {
+				csMetrics = csMetrics[i:]
+				break
+			}
 		}
-	}
-	if len(csMetrics) == 0 {
-		t.Fatalf("expected at least 1 metric with contracts, got %v", len(csMetrics))
-	}
+
+		// expect at least 1 metric with contracts
+		if len(csMetrics) == 0 {
+			_, err = cluster.Autopilot.Trigger(false)
+			cluster.tt.OK(err)
+			return fmt.Errorf("expected at least 1 metric with contracts, got %v", len(csMetrics))
+		}
+		return nil
+	})
 
 	for _, m := range csMetrics {
 		if m.Contracts != 1 {
