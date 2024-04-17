@@ -45,6 +45,7 @@ type BusConfig struct {
 	SlabPruningCooldown         time.Duration
 	SyncerSyncInterval          time.Duration
 	SyncerPeerDiscoveryInterval time.Duration
+	RetryTxIntervals            []time.Duration
 }
 
 type AutopilotConfig struct {
@@ -55,17 +56,6 @@ type AutopilotConfig struct {
 type (
 	RunFn      = func() error
 	ShutdownFn = func(context.Context) error
-)
-
-var (
-	retryTxIntervals = []time.Duration{
-		200 * time.Millisecond,
-		500 * time.Millisecond,
-		time.Second,
-		3 * time.Second,
-		10 * time.Second,
-		10 * time.Second,
-	}
 )
 
 func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, *chain.Subscriber, error) {
@@ -107,7 +97,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        logger.Sugar(),
 		GormLogger:                    cfg.DBLogger,
-		RetryTransactionIntervals:     retryTxIntervals,
+		RetryTransactionIntervals:     cfg.RetryTxIntervals,
 		WalletAddress:                 types.StandardUnlockHash(seed.PublicKey()),
 	})
 	if err != nil {
@@ -167,7 +157,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, retryTxIntervals, logger.Named("chainsubscriber"))
+	cs, err := chain.NewSubscriber(cm, sqlStore, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, cfg.RetryTxIntervals, logger.Named("chainsubscriber"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

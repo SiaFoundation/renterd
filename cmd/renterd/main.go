@@ -438,7 +438,16 @@ func main() {
 		Genesis:             genesis,
 		SlabPruningInterval: time.Hour,
 		SlabPruningCooldown: 30 * time.Second,
+		RetryTxIntervals: []time.Duration{
+			200 * time.Millisecond,
+			500 * time.Millisecond,
+			time.Second,
+			3 * time.Second,
+			10 * time.Second,
+			10 * time.Second,
+		},
 	}
+
 	// Init db dialector
 	if cfg.Database.MySQL.URI != "" {
 		busCfg.DBDialector = stores.NewMySQLConnection(

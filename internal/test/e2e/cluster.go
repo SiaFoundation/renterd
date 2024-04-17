@@ -934,6 +934,14 @@ func testBusCfg() node.BusConfig {
 		SlabPruningCooldown:         10 * time.Millisecond,
 		SyncerSyncInterval:          100 * time.Millisecond,
 		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
+		RetryTxIntervals: []time.Duration{
+			100 * time.Millisecond,
+			200 * time.Millisecond,
+			300 * time.Millisecond,
+			400 * time.Millisecond,
+			500 * time.Millisecond,
+			time.Second,
+		},
 	}
 }
 
