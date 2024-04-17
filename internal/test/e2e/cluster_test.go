@@ -116,6 +116,8 @@ func TestNewTestCluster(t *testing.T) {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			t.Fatal(err)
+		} else if len(contracts) != 1 {
+			return fmt.Errorf("unexpected number of contracts %d != 1", len(contracts))
 		}
 		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, 0)
 		if err != nil {
