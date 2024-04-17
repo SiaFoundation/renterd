@@ -27,7 +27,8 @@ func TestBlocklist(t *testing.T) {
 	tt := cluster.tt
 
 	// fetch contracts
-	contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
+	opts := api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set}
+	contracts, err := b.Contracts(ctx, opts)
 	tt.OK(err)
 	if len(contracts) != 3 {
 		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
@@ -37,14 +38,15 @@ func TestBlocklist(t *testing.T) {
 	hk1 := contracts[0].HostKey
 	hk2 := contracts[1].HostKey
 	hk3 := contracts[2].HostKey
-	b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
+	err = b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
+	tt.OK(err)
 
 	// assert h3 is no longer in the contract set
-	tt.Retry(5, time.Second, func() error {
-		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := b.Contracts(ctx, opts)
 		tt.OK(err)
 		if len(contracts) != 2 {
-			return fmt.Errorf("unexpected number of contracts, %v != 2", len(contracts))
+			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 2", opts.ContractSet, len(contracts))
 		}
 		for _, c := range contracts {
 			if c.HostKey == hk3 {
@@ -60,11 +62,11 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false))
 
 	// assert h1 is no longer in the contract set
-	tt.Retry(5, time.Second, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		if len(contracts) != 1 {
-			return fmt.Errorf("unexpected number of contracts, %v != 1", len(contracts))
+			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 1", opts.ContractSet, len(contracts))
 		}
 		for _, c := range contracts {
 			if c.HostKey == hk1 {
@@ -77,11 +79,11 @@ func TestBlocklist(t *testing.T) {
 	// clear the allowlist and blocklist and assert we have 3 contracts again
 	tt.OK(b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false))
 	tt.OK(b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false))
-	tt.Retry(5, time.Second, func() error {
-		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := b.Contracts(ctx, opts)
 		tt.OK(err)
 		if len(contracts) != 3 {
-			return fmt.Errorf("unexpected number of contracts, %v != 3", len(contracts))
+			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 3", opts.ContractSet, len(contracts))
 		}
 		return nil
 	})
