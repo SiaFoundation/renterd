@@ -364,14 +364,8 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 		return types.ChainIndex{}, fmt.Errorf("failed to apply chain updates: %w", err)
 	}
 
-	// get the last index
-	if len(caus) > 0 {
-		index = caus[len(caus)-1].State.Index
-	} else if len(crus) > 0 {
-		index = crus[len(crus)-1].State.Index
-	}
-
 	// update chain index
+	index = caus[len(caus)-1].State.Index
 	if err := tx.UpdateChainIndex(index); err != nil {
 		return types.ChainIndex{}, fmt.Errorf("failed to update chain index: %w", err)
 	}
