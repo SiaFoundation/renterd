@@ -45,7 +45,6 @@ type BusConfig struct {
 	DBDialector         gorm.Dialector
 	DBMetricsDialector  gorm.Dialector
 	SlabPruningInterval time.Duration
-	SlabPruningCooldown time.Duration
 }
 
 type AutopilotConfig struct {

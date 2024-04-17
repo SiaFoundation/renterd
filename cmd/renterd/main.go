@@ -436,7 +436,6 @@ func main() {
 		Bus:                 cfg.Bus,
 		Network:             network,
 		SlabPruningInterval: time.Hour,
-		SlabPruningCooldown: 30 * time.Second,
 	}
 	// Init db dialector
 	if cfg.Database.MySQL.URI != "" {
