@@ -56,14 +56,11 @@ func TestHostPruning(t *testing.T) {
 	// scan the host (lastScan needs to be > 0 for downtime to start counting)
 	tt.OKAll(w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0))
 
-	// block the host
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1.PublicKey().String()}, nil, false))
-
-	// remove it from the cluster manually
-	cluster.RemoveHost(h1)
-
 	// shut down the worker manually, this will flush any interactions
 	cluster.ShutdownWorker(context.Background())
+
+	// remove the host from the cluster
+	cluster.RemoveHost(h1)
 
 	// record 9 failed interactions, right before the pruning threshold, and
 	// wait for the autopilot loop to finish at least once

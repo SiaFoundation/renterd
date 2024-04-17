@@ -464,6 +464,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
+		cluster.WaitForPeers()
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
@@ -657,6 +658,19 @@ func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
 		}
 		if len(csc) != n {
 			return fmt.Errorf("contract set does not contain the desired number of contracts, %v!=%v", len(csc), n)
+		}
+		return nil
+	})
+}
+
+func (c *TestCluster) WaitForPeers() {
+	c.tt.Helper()
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
+		peers, err := c.Bus.SyncerPeers(context.Background())
+		if err != nil {
+			return err
+		} else if len(peers) == 0 {
+			return errors.New("no peers found")
 		}
 		return nil
 	})
@@ -942,7 +956,7 @@ func testApCfg() node.AutopilotConfig {
 		ID: api.DefaultAutopilotID,
 		Autopilot: config.Autopilot{
 			AccountsRefillInterval:         time.Second,
-			Heartbeat:                      200 * time.Millisecond,
+			Heartbeat:                      500 * time.Millisecond,
 			MigrationHealthCutoff:          0.99,
 			MigratorParallelSlabsPerWorker: 1,
 			RevisionSubmissionBuffer:       0,
