@@ -1340,7 +1340,7 @@ func TestContractArchival(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:  1,
-		logger: zap.NewNop(),
+		logger: newTestLoggerCustom(zapcore.DebugLevel),
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -1368,7 +1368,8 @@ func TestContractArchival(t *testing.T) {
 			return err
 		}
 		if len(contracts) != 0 {
-			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
+			cs, _ := cluster.Bus.ConsensusState(context.Background())
+			return fmt.Errorf("expected 0 contracts, got %v (bh: %v we: %v)", len(contracts), cs.BlockHeight, contracts[0].WindowEnd)
 		}
 		return nil
 	})
