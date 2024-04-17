@@ -36,13 +36,15 @@ import (
 
 type BusConfig struct {
 	config.Bus
-	Network             *consensus.Network
-	Genesis             types.Block
-	DBLogger            logger.Interface
-	DBDialector         gorm.Dialector
-	DBMetricsDialector  gorm.Dialector
-	SlabPruningInterval time.Duration
-	SlabPruningCooldown time.Duration
+	Network                     *consensus.Network
+	Genesis                     types.Block
+	DBLogger                    logger.Interface
+	DBDialector                 gorm.Dialector
+	DBMetricsDialector          gorm.Dialector
+	SlabPruningInterval         time.Duration
+	SlabPruningCooldown         time.Duration
+	SyncerSyncInterval          time.Duration
+	SyncerPeerDiscoveryInterval time.Duration
 }
 
 type AutopilotConfig struct {
@@ -150,7 +152,15 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}
-	s := syncer.New(l, cm, sqlStore, header, syncer.WithSyncInterval(100*time.Millisecond), syncer.WithPeerDiscoveryInterval(100*time.Millisecond), syncer.WithLogger(logger.Named("syncer")))
+
+	opts := []syncer.Option{syncer.WithLogger(logger.Named("syncer"))}
+	if cfg.SyncerSyncInterval > 0 {
+		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
+	}
+	if cfg.SyncerPeerDiscoveryInterval > 0 {
+		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
+	}
+	s := syncer.New(l, cm, sqlStore, header, opts...)
 
 	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {

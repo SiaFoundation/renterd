@@ -914,10 +914,12 @@ func testBusCfg() node.BusConfig {
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
-		Network:             network,
-		Genesis:             genesis,
-		SlabPruningInterval: time.Second,
-		SlabPruningCooldown: 10 * time.Millisecond,
+		Network:                     network,
+		Genesis:                     genesis,
+		SlabPruningInterval:         time.Second,
+		SlabPruningCooldown:         10 * time.Millisecond,
+		SyncerSyncInterval:          100 * time.Millisecond,
+		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
 	}
 }
 
