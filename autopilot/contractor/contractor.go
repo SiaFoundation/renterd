@@ -617,6 +617,7 @@ func (c *Contractor) runContractChecks(ctx *mCtx, hostChecks map[types.PublicKey
 			"toArchive", len(toArchive),
 			"toRefresh", len(toRefresh),
 			"toRenew", len(toRenew),
+			"bh", bh,
 		)
 	}()
 
