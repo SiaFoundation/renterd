@@ -236,7 +236,7 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64, storedData uint64) *api.HostCheck {
+func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64) *api.HostCheck {
 	if rs.Validate() != nil {
 		panic("invalid redundancy settings were supplied - developer error")
 	}
@@ -278,7 +278,7 @@ func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.Gou
 			// not gouging, this because the core package does not have overflow
 			// checks in its cost calculations needed to calculate the period
 			// cost
-			sb = hostScore(cfg, h, storedData, rs.Redundancy())
+			sb = hostScore(cfg, h, rs.Redundancy())
 			if sb.Score() < minScore {
 				ub.LowScore = true
 			}

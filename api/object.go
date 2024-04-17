@@ -91,12 +91,12 @@ type (
 
 	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
 	HeadObjectResponse struct {
-		ContentType  string             `json:"contentType"`
-		Etag         string             `json:"eTag"`
-		LastModified string             `json:"lastModified"`
-		Range        *DownloadRange     `json:"range,omitempty"`
-		Size         int64              `json:"size"`
-		Metadata     ObjectUserMetadata `json:"metadata"`
+		ContentType  string
+		Etag         string
+		LastModified TimeRFC3339
+		Range        *ContentRange
+		Size         int64
+		Metadata     ObjectUserMetadata
 	}
 
 	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
@@ -149,12 +149,6 @@ func ExtractObjectUserMetadataFrom(metadata map[string]string) ObjectUserMetadat
 		}
 	}
 	return oum
-}
-
-// LastModified returns the object's ModTime formatted for use in the
-// 'Last-Modified' header
-func (o ObjectMetadata) LastModified() string {
-	return o.ModTime.Std().Format(http.TimeFormat)
 }
 
 // ContentType returns the object's MimeType for use in the 'Content-Type'
@@ -214,12 +208,12 @@ type (
 
 	HeadObjectOptions struct {
 		IgnoreDelim bool
-		Range       DownloadRange
+		Range       *DownloadRange
 	}
 
 	DownloadObjectOptions struct {
 		GetObjectOptions
-		Range DownloadRange
+		Range *DownloadRange
 	}
 
 	GetObjectOptions struct {
@@ -247,7 +241,6 @@ type (
 
 	// UploadObjectOptions is the options type for the worker client.
 	UploadObjectOptions struct {
-		Offset        int
 		MinShards     int
 		TotalShards   int
 		ContractSet   string
@@ -257,15 +250,15 @@ type (
 	}
 
 	UploadMultipartUploadPartOptions struct {
+		ContractSet      string
+		MinShards        int
+		TotalShards      int
 		EncryptionOffset *int
 		ContentLength    int64
 	}
 )
 
 func (opts UploadObjectOptions) ApplyValues(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
 	if opts.MinShards != 0 {
 		values.Set("minshards", fmt.Sprint(opts.MinShards))
 	}
@@ -290,6 +283,15 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	if opts.EncryptionOffset != nil {
 		values.Set("offset", fmt.Sprint(*opts.EncryptionOffset))
 	}
+	if opts.MinShards != 0 {
+		values.Set("minshards", fmt.Sprint(opts.MinShards))
+	}
+	if opts.TotalShards != 0 {
+		values.Set("totalshards", fmt.Sprint(opts.TotalShards))
+	}
+	if opts.ContractSet != "" {
+		values.Set("contractset", opts.ContractSet)
+	}
 }
 
 func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
@@ -297,7 +299,7 @@ func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
 }
 
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
-	if opts.Range != (DownloadRange{}) {
+	if opts.Range != nil {
 		if opts.Range.Length == -1 {
 			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
 		} else {
@@ -319,7 +321,7 @@ func (opts HeadObjectOptions) Apply(values url.Values) {
 }
 
 func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
-	if opts.Range != (DownloadRange{}) {
+	if opts.Range != nil {
 		if opts.Range.Length == -1 {
 			h.Set("Range", fmt.Sprintf("bytes=%v-", opts.Range.Offset))
 		} else {

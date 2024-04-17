@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/gotd/contrib/http_range"
 	"go.sia.tech/renterd/api"
 )
 
@@ -24,14 +23,12 @@ type (
 	}
 )
 
-var errMultiRangeNotSupported = errors.New("multipart ranges are not supported")
-
-func newContentReader(r io.Reader, obj api.Object, offset int64) io.ReadSeeker {
+func newContentReader(r io.Reader, size int64, offset int64) io.ReadSeeker {
 	return &contentReader{
 		r:          r,
 		dataOffset: offset,
 		seekOffset: offset,
-		size:       obj.Size,
+		size:       size,
 	}
 }
 
@@ -58,67 +55,18 @@ func (cr *contentReader) Read(p []byte) (int, error) {
 	return cr.r.Read(p)
 }
 
-func serveContent(rw http.ResponseWriter, req *http.Request, obj api.Object, downloadFn func(w io.Writer, offset, length int64) error) (int, error) {
-	// parse offset and length from the request range header
-	offset, length, err := parseRangeHeader(req, obj)
-	if err != nil {
-		return http.StatusRequestedRangeNotSatisfiable, err
-	}
-
-	// launch the download in a goroutine
-	pr, pw := io.Pipe()
-	defer pr.Close()
-	go func() {
-		if err := downloadFn(pw, offset, length); err != nil {
-			pw.CloseWithError(err)
-		} else {
-			pw.Close()
-		}
-	}()
-
-	// fetch the content type, if not set and we can't infer it from object's
-	// name we default to application/octet-stream, that is important because we
-	// have to avoid http.ServeContent to sniff the content type as it would
-	// require a seek
-	contentType := obj.ContentType()
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	rw.Header().Set("Content-Type", contentType)
-
-	// set the response headers, no need to set Last-Modified header as
-	// serveContent does that for us
-	rw.Header().Set("ETag", api.FormatETag(obj.ETag))
+func serveContent(rw http.ResponseWriter, req *http.Request, name string, content io.Reader, hor api.HeadObjectResponse) {
+	// set content type and etag
+	rw.Header().Set("Content-Type", hor.ContentType)
+	rw.Header().Set("ETag", api.FormatETag(hor.Etag))
 
 	// set the user metadata headers
-	for k, v := range obj.Metadata {
+	for k, v := range hor.Metadata {
 		rw.Header().Set(fmt.Sprintf("%s%s", api.ObjectMetadataPrefix, k), v)
 	}
 
 	// create a content reader
-	rs := newContentReader(pr, obj, offset)
+	rs := newContentReader(content, hor.Size, hor.Range.Offset)
 
-	http.ServeContent(rw, req, obj.Name, obj.ModTime.Std(), rs)
-	return http.StatusOK, nil
-}
-
-func parseRangeHeader(req *http.Request, obj api.Object) (int64, int64, error) {
-	// parse the request range
-	ranges, err := http_range.ParseRange(req.Header.Get("Range"), obj.Size)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// extract requested offset and length
-	offset := int64(0)
-	length := obj.Size
-	if len(ranges) == 1 {
-		offset, length = ranges[0].Start, ranges[0].Length
-		if offset < 0 || length < 0 || offset+length > obj.Size {
-			return 0, 0, fmt.Errorf("%w: %v %v", http_range.ErrInvalid, offset, length)
-		}
-	} else if len(ranges) > 1 {
-		return 0, 0, errMultiRangeNotSupported
-	}
-	return offset, length, nil
+	http.ServeContent(rw, req, name, hor.LastModified.Std(), rs)
 }

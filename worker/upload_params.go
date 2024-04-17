@@ -38,22 +38,6 @@ func defaultParameters(bucket, path string) uploadParameters {
 	}
 }
 
-func multipartParameters(bucket, path, uploadID string, partNumber int) uploadParameters {
-	return uploadParameters{
-		bucket: bucket,
-		path:   path,
-
-		multipart:  true,
-		uploadID:   uploadID,
-		partNumber: partNumber,
-
-		ec:               object.GenerateEncryptionKey(), // random key
-		encryptionOffset: 0,                              // from the beginning
-
-		rs: build.DefaultRedundancySettings,
-	}
-}
-
 type UploadOption func(*uploadParameters)
 
 func WithBlockHeight(bh uint64) UploadOption {
@@ -92,9 +76,22 @@ func WithPacking(packing bool) UploadOption {
 	}
 }
 
+func WithPartNumber(partNumber int) UploadOption {
+	return func(up *uploadParameters) {
+		up.partNumber = partNumber
+	}
+}
+
 func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
 	return func(up *uploadParameters) {
 		up.rs = rs
+	}
+}
+
+func WithUploadID(uploadID string) UploadOption {
+	return func(up *uploadParameters) {
+		up.uploadID = uploadID
+		up.multipart = true
 	}
 }
 

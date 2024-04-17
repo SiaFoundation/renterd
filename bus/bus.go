@@ -1362,7 +1362,7 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	jc.ResponseWriter.Header().Set("Last-Modified", om.LastModified())
+	jc.ResponseWriter.Header().Set("Last-Modified", om.ModTime.Std().Format(http.TimeFormat))
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(om.ETag))
 	jc.Encode(om)
 }

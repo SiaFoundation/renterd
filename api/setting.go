@@ -24,6 +24,10 @@ const (
 )
 
 var (
+	// ErrInvalidRedundancySettings is returned if the redundancy settings are
+	// not valid
+	ErrInvalidRedundancySettings = errors.New("invalid redundancy settings")
+
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
@@ -136,13 +140,13 @@ func (rs RedundancySettings) SlabSizeNoRedundancy() uint64 {
 // valid.
 func (rs RedundancySettings) Validate() error {
 	if rs.MinShards < 1 {
-		return errors.New("MinShards must be greater than 0")
+		return fmt.Errorf("%w: MinShards must be greater than 0", ErrInvalidRedundancySettings)
 	}
 	if rs.TotalShards < rs.MinShards {
-		return errors.New("TotalShards must be at least MinShards")
+		return fmt.Errorf("%w: TotalShards must be at least MinShards", ErrInvalidRedundancySettings)
 	}
 	if rs.TotalShards > 255 {
-		return errors.New("TotalShards must be less than 256")
+		return fmt.Errorf("%w: TotalShards must be less than 256", ErrInvalidRedundancySettings)
 	}
 	return nil
 }

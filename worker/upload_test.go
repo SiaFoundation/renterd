@@ -140,6 +140,8 @@ func TestUploadPackedSlab(t *testing.T) {
 	// create upload params
 	params := testParameters(t.Name())
 	params.packing = true
+	opts := testOpts()
+	opts = append(opts, WithPacking(true))
 
 	// create test data
 	data := frand.Bytes(128)
@@ -220,7 +222,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	uploadBytes := func(n int) {
 		t.Helper()
 		params.path = fmt.Sprintf("%s_%d", t.Name(), c)
-		_, err := w.upload(context.Background(), bytes.NewReader(frand.Bytes(n)), w.Contracts(), params)
+		_, err := w.upload(context.Background(), params.bucket, params.path, bytes.NewReader(frand.Bytes(n)), w.Contracts(), opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -502,10 +504,11 @@ func TestRefreshUploaders(t *testing.T) {
 
 	// create upload params
 	params := testParameters(t.Name())
+	opts := testOpts()
 
 	// upload data
 	contracts := w.Contracts()
-	_, err := w.upload(context.Background(), bytes.NewReader(data), contracts, params)
+	_, err := w.upload(context.Background(), params.bucket, t.Name(), bytes.NewReader(data), contracts, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +610,7 @@ func TestUploadRegression(t *testing.T) {
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := w.upload(ctx, bytes.NewReader(data), w.Contracts(), params)
+	_, err := w.upload(ctx, params.bucket, params.path, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -616,7 +619,7 @@ func TestUploadRegression(t *testing.T) {
 	unblock()
 
 	// upload data
-	_, err = w.upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
+	_, err = w.upload(context.Background(), params.bucket, params.path, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,6 +640,37 @@ func TestUploadRegression(t *testing.T) {
 	}
 }
 
+func TestUploadSingleSectorSlowHosts(t *testing.T) {
+	// create test worker
+	w := newTestWorker(t)
+
+	// add hosts to worker
+	minShards := 10
+	totalShards := 30
+	slowHosts := 5
+	w.uploadManager.maxOverdrive = uint64(slowHosts)
+	w.uploadManager.overdriveTimeout = time.Second
+	hosts := w.AddHosts(totalShards + slowHosts)
+
+	for i := 0; i < slowHosts; i++ {
+		hosts[i].uploadDelay = time.Hour
+	}
+
+	// create test data
+	data := frand.Bytes(rhpv2.SectorSize * minShards)
+
+	// create upload params
+	params := testParameters(t.Name())
+	params.rs.MinShards = minShards
+	params.rs.TotalShards = totalShards
+
+	// upload data
+	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testParameters(path string) uploadParameters {
 	return uploadParameters{
 		bucket: testBucket,
@@ -647,5 +681,12 @@ func testParameters(path string) uploadParameters {
 
 		contractSet: testContractSet,
 		rs:          testRedundancySettings,
+	}
+}
+
+func testOpts() []UploadOption {
+	return []UploadOption{
+		WithContractSet(testContractSet),
+		WithRedundancySettings(testRedundancySettings),
 	}
 }
