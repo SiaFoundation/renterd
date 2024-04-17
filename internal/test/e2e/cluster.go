@@ -896,7 +896,6 @@ func testBusCfg() node.BusConfig {
 		},
 		Network:             testNetwork(),
 		SlabPruningInterval: time.Second,
-		SlabPruningCooldown: 10 * time.Millisecond,
 	}
 }
 
