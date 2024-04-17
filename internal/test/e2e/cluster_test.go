@@ -27,7 +27,6 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -750,8 +749,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1342,8 +1340,7 @@ func TestContractArchival(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  1,
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
+		hosts: 1,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -1454,9 +1451,7 @@ func TestWalletTransactions(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -1711,9 +1706,7 @@ func TestWallet(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -1918,9 +1911,7 @@ func TestAlerts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt

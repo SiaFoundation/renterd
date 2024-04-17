@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestBlocklist(t *testing.T) {
@@ -21,8 +20,7 @@ func TestBlocklist(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  3,
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
+		hosts: 3,
 	})
 	defer cluster.Shutdown()
 	b := cluster.Bus
