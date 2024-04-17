@@ -60,21 +60,21 @@ type (
 	}
 
 	Subscriber struct {
-		cm     ChainManager
-		cs     ChainStore
-		logger *zap.SugaredLogger
+		cm              ChainManager
+		cs              ChainStore
+		csUnsubscribeFn func()
+		logger          *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
 		retryTxIntervals   []time.Duration
 		walletAddress      types.Address
 
-		csUnsubscribeFn func()
-		syncSig         chan struct{}
+		closedChan chan struct{}
+		syncSig    chan struct{}
+		wg         sync.WaitGroup
 
-		mu               sync.Mutex
-		closedChan       chan struct{}
-		syncLoopDoneChan chan struct{}
-		knownContracts   map[types.FileContractID]struct{}
+		mu             sync.Mutex
+		knownContracts map[types.FileContractID]struct{}
 	}
 
 	revision struct {
@@ -123,9 +123,6 @@ func (s *Subscriber) AddContractID(id types.FileContractID) {
 }
 
 func (s *Subscriber) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// signal we are closing
 	close(s.closedChan)
 
@@ -133,16 +130,12 @@ func (s *Subscriber) Close() error {
 	s.csUnsubscribeFn()
 
 	// wait for sync loop to finish
-	if s.syncLoopDoneChan != nil {
-		<-s.syncLoopDoneChan
-	}
+	s.wg.Wait()
+
 	return nil
 }
 
 func (s *Subscriber) Run() (func(), error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// perform an initial sync
 	index, err := s.cs.ChainIndex()
 	if err != nil {
@@ -152,14 +145,11 @@ func (s *Subscriber) Run() (func(), error) {
 		return nil, fmt.Errorf("failed to subscribe to chain manager: %w", err)
 	}
 
-	// create done chan
-	s.syncLoopDoneChan = make(chan struct{})
-
+	// // start sync loop in separate goroutine
+	s.wg.Add(1)
 	go func() {
-		// close done chan when sync loop exits
-		defer close(s.syncLoopDoneChan)
+		defer s.wg.Done()
 
-		// start sync loop
 		for {
 			select {
 			case <-s.closedChan:
