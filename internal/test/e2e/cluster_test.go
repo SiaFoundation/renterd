@@ -73,6 +73,7 @@ func TestNewTestCluster(t *testing.T) {
 	cluster.MineToRenewWindow()
 
 	// Wait for the contract to be renewed.
+	var renewalID types.FileContractID
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
@@ -93,6 +94,7 @@ func TestNewTestCluster(t *testing.T) {
 		if contracts[0].State != api.ContractStatePending {
 			return fmt.Errorf("contract should be pending but was %v", contracts[0].State)
 		}
+		renewalID = contracts[0].ID
 		return nil
 	})
 
@@ -111,14 +113,7 @@ func TestNewTestCluster(t *testing.T) {
 	tt.Retry(20, time.Second, func() error {
 		cluster.MineBlocks(1)
 
-		// Fetch renewed contract and make sure we caught the proof and revision.
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-		if err != nil {
-			t.Fatal(err)
-		} else if len(contracts) != 1 {
-			return fmt.Errorf("unexpected number of contracts %d != 1", len(contracts))
-		}
-		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, 0)
+		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), renewalID, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +130,7 @@ func TestNewTestCluster(t *testing.T) {
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
 		}
-		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, math.MaxUint32)
+		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), renewalID, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
