@@ -155,22 +155,26 @@ func (s *Subscriber) Run() (func(), error) {
 			case <-s.closedChan:
 				return
 			case <-s.syncSig:
+				fmt.Printf("%v | DEBUG PJ: sync triggered\n", time.Now().Format(time.StampMilli))
 			}
+			start := time.Now()
 
 			ci, err := s.cs.ChainIndex()
 			if err != nil {
 				s.logger.Errorf("failed to get chain index: %v", err)
+				fmt.Printf("%v | DEBUG PJ: can't get chain index, err %v\n", time.Now().Format(time.StampMilli), err)
 				continue
 			}
 			err = s.sync(ci)
 			if err != nil && !errors.Is(err, errClosed) {
 				s.logger.Errorf("failed to sync: %v", err)
 			}
+			fmt.Printf("%v | DEBUG PJ: sync took %v\n", time.Now().Format(time.StampMilli), time.Since(start))
 		}
 	}()
 
 	// trigger a sync on reorgs
-	return s.cm.OnReorg(func(_ types.ChainIndex) { s.triggerSync() }), nil
+	return s.cm.OnReorg(func(index types.ChainIndex) { s.triggerSync(index) }), nil
 }
 
 func (s *Subscriber) applyChainUpdates(tx ChainUpdateTx, caus []chain.ApplyUpdate) (err error) {
@@ -395,12 +399,12 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 	return
 }
 
-func (s *Subscriber) triggerSync() {
+func (s *Subscriber) triggerSync(todoRemoveMe types.ChainIndex) {
 	select {
 	case s.syncSig <- struct{}{}:
-		fmt.Println("DEBUG PJ: sync triggered")
+		fmt.Printf("%v | DEBUG PJ: sync triggered at %v\n", time.Now().Format(time.StampMilli), todoRemoveMe.Height)
 	default:
-		fmt.Println("DEBUG PJ: already syncing")
+		fmt.Printf("%v | DEBUG PJ: already syncing, ignoring %v\n", time.Now().Format(time.StampMilli), todoRemoveMe.Height)
 	}
 }
 
