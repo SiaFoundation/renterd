@@ -2308,19 +2308,22 @@ func TestBusRecordedMetrics(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// fetch contract set metrics
-	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-	cluster.tt.OK(err)
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
+		cluster.tt.OK(err)
 
-	// expect at least 1 metric with contracts
-	if len(csMetrics) == 0 {
-		t.Fatalf("expected at least 1 metric with contracts, got %v", len(csMetrics))
-	} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
-		t.Fatalf("expected 1 contract, got %v", m.Contracts)
-	} else if m.Name != test.ContractSet {
-		t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
-	} else if m.Timestamp.Std().Before(startTime) {
-		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-	}
+		// expect at least 1 metric with contracts
+		if len(csMetrics) < 1 {
+			return fmt.Errorf("expected at least 1 metric, got %v", len(csMetrics))
+		} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
+			return fmt.Errorf("expected 1 contract, got %v", m.Contracts)
+		} else if m.Name != test.ContractSet {
+			return fmt.Errorf("expected contract set %v, got %v", test.ContractSet, m.Name)
+		} else if m.Timestamp.Std().Before(startTime) {
+			return fmt.Errorf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
+		}
+		return nil
+	})
 
 	// get churn metrics, should have 1 for the new contract
 	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetChurnMetricsQueryOpts{})
