@@ -566,16 +566,21 @@ func (c *TestCluster) MineBlocks(n uint64) {
 		return
 	}
 
-	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
-	// hosts by too many blocks.
+	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
+	// with hosts by too many blocks.
 	for mined := uint64(0); mined < n; {
 		toMine := n - mined
 		if toMine > 10 {
 			toMine = 10
 		}
 		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
-		c.Sync()
 		mined += toMine
+
+		// we briefly sleep here to allow the subscriber to catch up processing
+		// new updates and avoid lagging behind the tip too much when mining a
+		// bunch of blocks at once
+		time.Sleep(10 * time.Millisecond)
+		c.Sync()
 	}
 }
 
