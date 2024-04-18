@@ -111,8 +111,6 @@ func TestNewTestCluster(t *testing.T) {
 	// Now wait for the revision and proof to be caught by the hostdb.
 	var ac api.ArchivedContract
 	tt.Retry(20, time.Second, func() error {
-		cluster.MineBlocks(1)
-
 		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), renewalID, 0)
 		if err != nil {
 			t.Fatal(err)

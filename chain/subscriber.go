@@ -396,6 +396,8 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 		return types.ChainIndex{}, fmt.Errorf("failed to commit chain update: %w", err)
 	}
 
+	fmt.Printf("%v | DEBUG PJ: synced up to %v\n", time.Now().Format(time.StampMilli), index.Height)
+
 	return
 }
 
