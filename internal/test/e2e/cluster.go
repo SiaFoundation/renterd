@@ -18,7 +18,7 @@ import (
 	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/testutil"
+	"go.sia.tech/coreutils"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
@@ -868,8 +868,9 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 
 func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
 	for i := uint64(0); i < n; i++ {
-		block := testutil.MineBlock(c.cm, addr)
-		if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
+		if block, found := coreutils.MineBlock(c.cm, addr, 5*time.Second); !found {
+			c.tt.Fatal("failed to mine block")
+		} else if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
 			return err
 		}
 	}
