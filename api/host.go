@@ -158,6 +158,7 @@ type (
 		Scanned          bool                 `json:"scanned"`
 		Blocked          bool                 `json:"blocked"`
 		Checks           map[string]HostCheck `json:"checks"`
+		StoredData       uint64               `json:"storedData"`
 	}
 
 	HostAddress struct {

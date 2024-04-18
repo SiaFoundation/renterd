@@ -9,7 +9,7 @@ import (
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		hc := checkHost(cfg, rs, gc, host, minValidScore, 0)
+		hc := checkHost(cfg, rs, gc, host, minValidScore)
 		if hc.Usability.IsUsable() {
 			usables++
 		}
@@ -25,7 +25,7 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 
 	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
-		hc := checkHost(cfg, rs, gc, host, 0, 0)
+		hc := checkHost(cfg, rs, gc, host, 0)
 		if hc.Usability.IsUsable() {
 			resp.Usable++
 			continue

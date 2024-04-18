@@ -124,8 +124,7 @@ func newContractMock(hk types.PublicKey, fcid types.FileContractID) *contractMoc
 	}
 }
 
-func (c *contractMock) AddSector(sector *[rhpv2.SectorSize]byte) (root types.Hash256) {
-	root = rhpv2.SectorRoot(sector)
+func (c *contractMock) AddSector(root types.Hash256, sector *[rhpv2.SectorSize]byte) {
 	c.mu.Lock()
 	c.sectors[root] = sector
 	c.mu.Unlock()

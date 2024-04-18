@@ -28,8 +28,8 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
-	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
@@ -330,7 +330,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
-	w, wShutdownFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
+	w, s3Handler, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
 
 	workerAuth := jape.BasicAuth(workerPassword)
@@ -343,9 +343,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	workerShutdownFns = append(workerShutdownFns, wShutdownFn)
 
 	// Create S3 API.
-	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{})
-	tt.OK(err)
-
 	s3Server := http.Server{
 		Handler: s3Handler,
 	}
@@ -931,7 +928,6 @@ func testBusCfg() node.BusConfig {
 		Network:                     network,
 		Genesis:                     genesis,
 		SlabPruningInterval:         time.Second,
-		SlabPruningCooldown:         10 * time.Millisecond,
 		SyncerSyncInterval:          100 * time.Millisecond,
 		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
 		RetryTxIntervals: []time.Duration{

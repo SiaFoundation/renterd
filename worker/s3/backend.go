@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"go.sia.tech/gofakes3"
@@ -29,8 +30,8 @@ var (
 )
 
 type s3 struct {
-	b      bus
-	w      worker
+	b      Bus
+	w      Worker
 	logger *zap.SugaredLogger
 }
 
@@ -249,7 +250,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 		if rangeRequest.End >= 0 {
 			length = rangeRequest.End - rangeRequest.Start + 1
 		}
-		opts.Range = api.DownloadRange{Offset: rangeRequest.Start, Length: length}
+		opts.Range = &api.DownloadRange{Offset: rangeRequest.Start, Length: length}
 	}
 
 	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)
@@ -277,7 +278,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 
 	// decorate metadata
 	res.Metadata["Content-Type"] = res.ContentType
-	res.Metadata["Last-Modified"] = res.LastModified
+	res.Metadata["Last-Modified"] = res.LastModified.Std().Format(http.TimeFormat)
 
 	// etag to bytes
 	etag, err := hex.DecodeString(res.Etag)
@@ -322,7 +323,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 
 	// decorate metadata
 	metadata["Content-Type"] = res.ContentType
-	metadata["Last-Modified"] = res.LastModified
+	metadata["Last-Modified"] = res.LastModified.Std().Format(http.TimeFormat)
 
 	// etag to bytes
 	hash, err := hex.DecodeString(res.Etag)

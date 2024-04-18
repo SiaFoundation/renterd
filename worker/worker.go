@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -872,32 +873,45 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 		return
 	}
 
-	// fetch object metadata
-	res, err := w.bus.Object(jc.Request.Context(), bucket, path, api.GetObjectOptions{
-		IgnoreDelim:  ignoreDelim,
-		OnlyMetadata: true,
-	})
-	if utils.IsErr(err, api.ErrObjectNotFound) {
-		jc.Error(err, http.StatusNotFound)
+	var off int
+	if jc.DecodeForm("offset", &off) != nil {
+		return
+	}
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+
+	dr, err := api.ParseDownloadRange(jc.Request)
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
-	} else if res.Object == nil {
-		jc.Error(api.ErrObjectNotFound, http.StatusInternalServerError) // should never happen but checking because we deref. later
+	}
+
+	// fetch object metadata
+	hor, err := w.HeadObject(jc.Request.Context(), bucket, path, api.HeadObjectOptions{
+		IgnoreDelim: ignoreDelim,
+		Range:       &dr,
+	})
+	if utils.IsErr(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, http_range.ErrInvalid) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("couldn't get object", err) != nil {
 		return
 	}
 
 	// serve the content to ensure we're setting the exact same headers as we
 	// would for a GET request
-	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, func(io.Writer, int64, int64) error { return nil })
-	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
-		jc.Error(err, http.StatusBadRequest)
-	} else if errors.Is(err, http_range.ErrNoOverlap) {
-		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
-	} else if err != nil {
-		jc.Error(err, status)
-	}
+	serveContent(jc.ResponseWriter, jc.Request, path, bytes.NewReader(nil), *hor)
 }
 
 func (w *worker) objectsHandlerGET(jc jape.Context) {
@@ -949,60 +963,48 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	path := jc.PathParam("path")
-	res, err := w.bus.Object(ctx, bucket, path, opts)
-	if utils.IsErr(err, api.ErrObjectNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't get object or entries", err) != nil {
-		return
-	}
 	if path == "" || strings.HasSuffix(path, "/") {
+		// list directory
+		res, err := w.bus.Object(ctx, bucket, path, opts)
+		if utils.IsErr(err, api.ErrObjectNotFound) {
+			jc.Error(err, http.StatusNotFound)
+			return
+		} else if jc.Check("couldn't get object or entries", err) != nil {
+			return
+		}
 		jc.Encode(res.Entries)
 		return
 	}
 
-	// return early if the object is empty
-	if len(res.Object.Slabs) == 0 {
+	dr, err := api.ParseDownloadRange(jc.Request)
+	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
+		jc.Error(err, http.StatusBadRequest)
 		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
+	} else if errors.Is(err, http_range.ErrNoOverlap) {
+		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
 		return
-	}
-
-	// fetch all contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 
-	// create a download function
-	downloadFn := func(wr io.Writer, offset, length int64) (err error) {
-		ctx = WithGougingChecker(ctx, w.bus, gp)
-		err = w.downloadManager.DownloadObject(ctx, wr, *res.Object.Object, uint64(offset), uint64(length), contracts)
-		if err != nil {
-			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) &&
-				!errors.Is(err, errDownloadCancelled) &&
-				!errors.Is(err, io.ErrClosedPipe) {
-				w.registerAlert(newDownloadFailedAlert(bucket, path, prefix, marker, offset, length, int64(len(contracts)), err))
-			}
-		}
+	gor, err := w.GetObject(ctx, bucket, path, api.DownloadObjectOptions{
+		GetObjectOptions: opts,
+		Range:            &dr,
+	})
+	if utils.IsErr(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, http_range.ErrInvalid) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("couldn't get object", err) != nil {
 		return
 	}
+	defer gor.Content.Close()
 
 	// serve the content
-	status, err := serveContent(jc.ResponseWriter, jc.Request, *res.Object, downloadFn)
-	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, errMultiRangeNotSupported) {
-		jc.Error(err, http.StatusBadRequest)
-	} else if errors.Is(err, http_range.ErrNoOverlap) {
-		jc.Error(err, http.StatusRequestedRangeNotSatisfiable)
-	} else if err != nil {
-		jc.Error(err, status)
-	}
+	serveContent(jc.ResponseWriter, jc.Request, path, gor.Content, gor.HeadObjectResponse)
 }
 
 func (w *worker) objectsHandlerPUT(jc jape.Context) {
@@ -1012,18 +1014,10 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	// grab the path
 	path := jc.PathParam("path")
 
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
-		return
-	}
-
 	// decode the contract set from the query string
 	var contractset string
 	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// decode the mimetype from the query string
@@ -1038,35 +1032,12 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// return early if the bucket does not exist
-	_, err = w.bus.Bucket(ctx, bucket)
-	if utils.IsErr(err, api.ErrBucketNotFound) {
-		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
-		return
-	}
-
-	// cancel the upload if no contract set is specified
-	if up.ContractSet == "" {
-		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
-		return
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
-		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
-		return
-	}
-
 	// allow overriding the redundancy settings
-	rs := up.RedundancySettings
-	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+	var minShards, totalShards int
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
-	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
-		return
-	}
-	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
 
@@ -1078,40 +1049,33 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	// build options
-	opts := []UploadOption{
-		WithBlockHeight(up.CurrentHeight),
-		WithContractSet(up.ContractSet),
-		WithMimeType(mimeType),
-		WithPacking(up.UploadPacking),
-		WithRedundancySettings(up.RedundancySettings),
-		WithObjectUserMetadata(metadata),
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
-	}
-
 	// upload the object
-	params := defaultParameters(bucket, path)
-	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
-	if err := jc.Check("couldn't upload object", err); err != nil {
-		if err != nil {
-			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
-				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, mimeType, rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, false, err))
-			}
-		}
+	resp, err := w.UploadObject(ctx, jc.Request.Body, bucket, path, api.UploadObjectOptions{
+		MinShards:     minShards,
+		TotalShards:   totalShards,
+		ContractSet:   contractset,
+		ContentLength: jc.Request.ContentLength,
+		MimeType:      mimeType,
+		Metadata:      metadata,
+	})
+	if utils.IsErr(err, api.ErrInvalidRedundancySettings) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
+		jc.Error(err, http.StatusServiceUnavailable)
+		return
+	} else if jc.Check("couldn't upload object", err) != nil {
 		return
 	}
 
 	// set etag header
-	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(eTag))
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
 func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
@@ -1121,46 +1085,15 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	// grab the path
 	path := jc.PathParam("path")
 
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
-		return
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// cancel the upload if no contract set is specified
-	if up.ContractSet == "" {
-		jc.Error(api.ErrContractSetNotSpecified, http.StatusBadRequest)
-		return
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		w.logger.Errorf("upload cancelled, err: %v", api.ErrConsensusNotSynced)
-		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
-		return
-	}
-
 	// decode the contract set from the query string
 	var contractset string
 	if jc.DecodeForm("contractset", &contractset) != nil {
 		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
 	}
 
 	// decode the bucket from the query string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-
-	// return early if the bucket does not exist
-	_, err = w.bus.Bucket(ctx, bucket)
-	if utils.IsErr(err, api.ErrBucketNotFound) {
-		jc.Error(fmt.Errorf("bucket '%s' not found; %w", bucket, err), http.StatusNotFound)
 		return
 	}
 
@@ -1180,76 +1113,57 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// allow overriding the redundancy settings
-	rs := up.RedundancySettings
-	if jc.DecodeForm("minshards", &rs.MinShards) != nil {
+	var minShards, totalShards int
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
-	if jc.DecodeForm("totalshards", &rs.TotalShards) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
-	if jc.Check("invalid redundancy settings", rs.Validate()) != nil {
-		return
+
+	// prepare options
+	opts := api.UploadMultipartUploadPartOptions{
+		ContractSet:      contractset,
+		MinShards:        minShards,
+		TotalShards:      totalShards,
+		EncryptionOffset: nil,
+		ContentLength:    jc.Request.ContentLength,
 	}
 
 	// get the offset
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
-	} else if offset < 0 {
-		jc.Error(errors.New("offset must be positive"), http.StatusBadRequest)
-		return
-	}
-
-	// fetch upload from bus
-	upload, err := w.bus.MultipartUpload(ctx, uploadID)
-	if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch multipart upload", err) != nil {
-		return
-	}
-
-	// built options
-	opts := []UploadOption{
-		WithBlockHeight(up.CurrentHeight),
-		WithContractSet(up.ContractSet),
-		WithPacking(up.UploadPacking),
-		WithRedundancySettings(up.RedundancySettings),
-		WithCustomKey(upload.Key),
-	}
-
-	// make sure only one of the following is set
-	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && jc.Request.FormValue("offset") == "" {
-		jc.Error(errors.New("if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set"), http.StatusBadRequest)
-		return
-	} else if encryptionEnabled {
-		opts = append(opts, WithCustomEncryptionOffset(uint64(offset)))
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
+	} else if jc.Request.FormValue("offset") != "" {
+		opts.EncryptionOffset = &offset
 	}
 
 	// upload the multipart
-	params := multipartParameters(bucket, path, uploadID, partNumber)
-	eTag, err := w.upload(ctx, jc.Request.Body, contracts, params, opts...)
-	if jc.Check("couldn't upload object", err) != nil {
-		if err != nil {
-			w.logger.Error(err)
-			if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) {
-				w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", rs.MinShards, rs.TotalShards, len(contracts), up.UploadPacking, true, err))
-			}
-		}
+	resp, err := w.UploadMultipartUploadPart(ctx, jc.Request.Body, bucket, path, uploadID, partNumber, opts)
+	if utils.IsErr(err, api.ErrInvalidRedundancySettings) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
+		jc.Error(err, http.StatusServiceUnavailable)
+		return
+	} else if utils.IsErr(err, api.ErrMultipartUploadNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if utils.IsErr(err, api.ErrInvalidMultipartEncryptionSettings) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("couldn't upload multipart part", err) != nil {
 		return
 	}
 
 	// set etag header
-	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(eTag))
+	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
 func (w *worker) objectsHandlerDELETE(jc jape.Context) {
@@ -1580,4 +1494,239 @@ func isErrHostUnreachable(err error) bool {
 		utils.IsErr(err, errors.New("connection refused")) ||
 		utils.IsErr(err, errors.New("unknown port")) ||
 		utils.IsErr(err, errors.New("cannot assign requested address"))
+}
+
+func (w *worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.ObjectsResponse, error) {
+	// fetch object
+	res, err := w.bus.Object(ctx, bucket, path, api.GetObjectOptions{
+		IgnoreDelim:  opts.IgnoreDelim,
+		OnlyMetadata: onlyMetadata,
+	})
+	if err != nil {
+		return nil, api.ObjectsResponse{}, fmt.Errorf("couldn't fetch object: %w", err)
+	} else if res.Object == nil {
+		return nil, api.ObjectsResponse{}, errors.New("object is a directory")
+	}
+
+	// adjust length
+	if opts.Range == nil {
+		opts.Range = &api.DownloadRange{Offset: 0, Length: -1}
+	}
+	if opts.Range.Length == -1 {
+		opts.Range.Length = res.Object.Size - opts.Range.Offset
+	}
+
+	// check size of object against range
+	if opts.Range.Offset+opts.Range.Length > res.Object.Size {
+		return nil, api.ObjectsResponse{}, http_range.ErrInvalid
+	}
+
+	return &api.HeadObjectResponse{
+		ContentType:  res.Object.MimeType,
+		Etag:         res.Object.ETag,
+		LastModified: res.Object.ModTime,
+		Range:        opts.Range.ContentRange(res.Object.Size),
+		Size:         res.Object.Size,
+		Metadata:     res.Object.Metadata,
+	}, res, nil
+}
+
+func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
+	// head object
+	hor, res, err := w.headObject(ctx, bucket, path, false, api.HeadObjectOptions{
+		IgnoreDelim: opts.IgnoreDelim,
+		Range:       opts.Range,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch object: %w", err)
+	}
+	obj := *res.Object.Object
+
+	// adjust range
+	if opts.Range == nil {
+		opts.Range = &api.DownloadRange{}
+	}
+	opts.Range.Offset = hor.Range.Offset
+	opts.Range.Length = hor.Range.Length
+
+	// fetch gouging params
+	gp, err := w.bus.GougingParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
+	}
+
+	// fetch all contracts
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// prepare the content
+	var content io.ReadCloser
+	if opts.Range.Length == 0 || obj.TotalSize() == 0 {
+		// if the object has no content or the requested range is 0, return an
+		// empty reader
+		content = io.NopCloser(bytes.NewReader(nil))
+	} else {
+		// otherwise return a pipe reader
+		downloadFn := func(wr io.Writer, offset, length int64) error {
+			ctx = WithGougingChecker(ctx, w.bus, gp)
+			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts)
+			if err != nil {
+				w.logger.Error(err)
+				if !errors.Is(err, ErrShuttingDown) &&
+					!errors.Is(err, errDownloadCancelled) &&
+					!errors.Is(err, io.ErrClosedPipe) {
+					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+				}
+				return fmt.Errorf("failed to download object: %w", err)
+			}
+			return nil
+		}
+		pr, pw := io.Pipe()
+		go func() {
+			err := downloadFn(pw, opts.Range.Offset, opts.Range.Length)
+			pw.CloseWithError(err)
+		}()
+		content = pr
+	}
+
+	return &api.GetObjectResponse{
+		Content:            content,
+		HeadObjectResponse: *hor,
+	}, nil
+}
+
+func (w *worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
+	res, _, err := w.headObject(ctx, bucket, path, true, opts)
+	return res, err
+}
+
+func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
+	// prepare upload params
+	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
+	if err != nil {
+		return nil, err
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// fetch contracts
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// upload
+	eTag, err := w.upload(ctx, bucket, path, r, contracts,
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithMimeType(opts.MimeType),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+		WithObjectUserMetadata(opts.Metadata),
+	)
+	if err != nil {
+		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
+		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
+			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+		}
+		return nil, fmt.Errorf("couldn't upload object: %w", err)
+	}
+	return &api.UploadObjectResponse{
+		ETag: eTag,
+	}, nil
+}
+
+func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
+	// prepare upload params
+	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
+	if err != nil {
+		return nil, err
+	}
+
+	// fetch upload from bus
+	upload, err := w.bus.MultipartUpload(ctx, uploadID)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch multipart upload: %w", err)
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	// prepare opts
+	uploadOpts := []UploadOption{
+		WithBlockHeight(up.CurrentHeight),
+		WithContractSet(up.ContractSet),
+		WithPacking(up.UploadPacking),
+		WithRedundancySettings(up.RedundancySettings),
+		WithCustomKey(upload.Key),
+		WithPartNumber(partNumber),
+		WithUploadID(uploadID),
+	}
+
+	// make sure only one of the following is set
+	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
+		return nil, fmt.Errorf("%w: if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set", api.ErrInvalidMultipartEncryptionSettings)
+	} else if opts.EncryptionOffset != nil && *opts.EncryptionOffset < 0 {
+		return nil, fmt.Errorf("%w: encryption offset must be positive", api.ErrInvalidMultipartEncryptionSettings)
+	} else if encryptionEnabled {
+		uploadOpts = append(uploadOpts, WithCustomEncryptionOffset(uint64(*opts.EncryptionOffset)))
+	}
+
+	// fetch contracts
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+
+	// upload
+	eTag, err := w.upload(ctx, bucket, path, r, contracts, uploadOpts...)
+	if err != nil {
+		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
+		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
+			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+		}
+		return nil, fmt.Errorf("couldn't upload object: %w", err)
+	}
+	return &api.UploadMultipartUploadPartResponse{
+		ETag: eTag,
+	}, nil
+}
+
+func (w *worker) prepareUploadParams(ctx context.Context, bucket string, contractSet string, minShards, totalShards int) (api.UploadParams, error) {
+	// return early if the bucket does not exist
+	_, err := w.bus.Bucket(ctx, bucket)
+	if err != nil {
+		return api.UploadParams{}, fmt.Errorf("bucket '%s' not found; %w", bucket, err)
+	}
+
+	// fetch the upload parameters
+	up, err := w.bus.UploadParams(ctx)
+	if err != nil {
+		return api.UploadParams{}, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
+	} else if contractSet != "" {
+		up.ContractSet = contractSet
+	} else if up.ContractSet == "" {
+		return api.UploadParams{}, api.ErrContractSetNotSpecified
+	}
+
+	// cancel the upload if consensus is not synced
+	if !up.ConsensusState.Synced {
+		return api.UploadParams{}, api.ErrConsensusNotSynced
+	}
+
+	// allow overriding the redundancy settings
+	if minShards != 0 {
+		up.RedundancySettings.MinShards = minShards
+	}
+	if totalShards != 0 {
+		up.RedundancySettings.TotalShards = totalShards
+	}
+	err = api.RedundancySettings{MinShards: up.RedundancySettings.MinShards, TotalShards: up.RedundancySettings.TotalShards}.Validate()
+	if err != nil {
+		return api.UploadParams{}, err
+	}
+	return up, nil
 }

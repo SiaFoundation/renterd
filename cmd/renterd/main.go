@@ -28,9 +28,9 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"golang.org/x/sys/cpu"
@@ -437,7 +437,6 @@ func main() {
 		Network:             network,
 		Genesis:             genesis,
 		SlabPruningInterval: time.Hour,
-		SlabPruningCooldown: 30 * time.Second,
 		RetryTxIntervals: []time.Duration{
 			200 * time.Millisecond,
 			500 * time.Millisecond,
@@ -583,7 +582,10 @@ func main() {
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, fn, err := node.NewWorker(cfg.Worker, bc, seed, logger)
+			w, s3Handler, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
+				AuthDisabled:      cfg.S3.DisableAuth,
+				HostBucketEnabled: cfg.S3.HostBucketEnabled,
+			}, bc, seed, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
@@ -598,13 +600,6 @@ func main() {
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
-				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
-					AuthDisabled:      cfg.S3.DisableAuth,
-					HostBucketEnabled: cfg.S3.HostBucketEnabled,
-				})
-				if err != nil {
-					log.Fatal("failed to create s3 client", err)
-				}
 				s3Srv = &http.Server{
 					Addr:    cfg.S3.Address,
 					Handler: s3Handler,

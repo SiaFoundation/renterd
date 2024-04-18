@@ -282,12 +282,10 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 		usedHosts[contract.HostKey] = struct{}{}
 	}
 
-	// compile map of stored data per host
+	// compile map of stored data per contract
 	contractData := make(map[types.FileContractID]uint64)
-	hostData := make(map[types.PublicKey]uint64)
 	for _, c := range contracts {
 		contractData[c.ID] = c.FileSize()
-		hostData[c.HostKey] += c.FileSize()
 	}
 
 	// fetch all hosts
@@ -310,7 +308,7 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	}
 
 	// fetch candidate hosts
-	candidates, unusableHosts, err := c.candidateHosts(mCtx, hosts, usedHosts, hostData, minValidScore) // avoid 0 score hosts
+	candidates, unusableHosts, err := c.candidateHosts(mCtx, hosts, usedHosts, minValidScore) // avoid 0 score hosts
 	if err != nil {
 		return false, err
 	}
@@ -324,7 +322,7 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	}
 
 	// run host checks
-	checks, err := c.runHostChecks(mCtx, hosts, hostData, minScore)
+	checks, err := c.runHostChecks(mCtx, hosts, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run host checks, err: %v", err)
 	}
@@ -743,7 +741,7 @@ LOOP:
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew
 }
 
-func (c *Contractor) runHostChecks(ctx *mCtx, hosts []api.Host, hostData map[types.PublicKey]uint64, minScore float64) (map[types.PublicKey]*api.HostCheck, error) {
+func (c *Contractor) runHostChecks(ctx *mCtx, hosts []api.Host, minScore float64) (map[types.PublicKey]*api.HostCheck, error) {
 	// fetch consensus state
 	cs, err := c.bus.ConsensusState(ctx)
 	if err != nil {
@@ -757,7 +755,7 @@ func (c *Contractor) runHostChecks(ctx *mCtx, hosts []api.Host, hostData map[typ
 	checks := make(map[types.PublicKey]*api.HostCheck)
 	for _, h := range hosts {
 		h.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
-		checks[h.PublicKey] = checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore, hostData[h.PublicKey])
+		checks[h.PublicKey] = checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore)
 	}
 	return checks, nil
 }
@@ -985,7 +983,16 @@ func (c *Contractor) runContractRenewals(ctx *mCtx, w Worker, toRenew []contract
 		contract := toRenew[i].contract.ContractMetadata
 		renewed, proceed, err := c.renewContract(ctx, w, toRenew[i], budget)
 		if err != nil {
-			c.alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
+			// don't register an alert for hosts that are out of funds since the
+			// user can't do anything about it
+			if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+				c.alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
+			}
+			c.logger.With(zap.Error(err)).
+				With("fcid", toRenew[i].contract.ID).
+				With("hostKey", toRenew[i].contract.HostKey).
+				With("proceed", proceed).
+				Errorw("failed to renew contract")
 			if toRenew[i].usable {
 				toKeep = append(toKeep, toRenew[i].contract.ContractMetadata)
 			}
@@ -1221,7 +1228,7 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	return minScore
 }
 
-func (c *Contractor) candidateHosts(ctx *mCtx, hosts []api.Host, usedHosts map[types.PublicKey]struct{}, storedData map[types.PublicKey]uint64, minScore float64) ([]scoredHost, unusableHostsBreakdown, error) {
+func (c *Contractor) candidateHosts(ctx *mCtx, hosts []api.Host, usedHosts map[types.PublicKey]struct{}, minScore float64) ([]scoredHost, unusableHostsBreakdown, error) {
 	start := time.Now()
 
 	// fetch consensus state
@@ -1274,7 +1281,7 @@ func (c *Contractor) candidateHosts(ctx *mCtx, hosts []api.Host, usedHosts map[t
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		hc := checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore, storedData[h.PublicKey])
+		hc := checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore)
 		if hc.Usability.IsUsable() {
 			candidates = append(candidates, scoredHost{h, hc.Score.Score()})
 			continue
