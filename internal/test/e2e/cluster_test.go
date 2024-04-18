@@ -27,13 +27,14 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.
 func TestNewTestCluster(t *testing.T) {
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{logger: newTestLoggerCustom(zapcore.WarnLevel)})
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt

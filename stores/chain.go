@@ -199,24 +199,43 @@ func (u *chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 // UpdateContract updates the revision height, revision number, and size the
 // contract with given fcid.
 func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
-	updates := map[string]interface{}{
-		"revision_height": revisionHeight,
-		"revision_number": fmt.Sprint(revisionNumber),
-		"size":            size,
+	// shouldUpdate indicates whether the given revision number is greater than
+	// the contract's rev number
+	shouldUpdate := func(rev string) bool {
+		var currRev uint64
+		_, _ = fmt.Sscan(rev, &currRev)
+		return currRev < revisionNumber
 	}
 
+	// update either active or archived contract
+	var update interface{}
+	var c dbContract
 	if err := u.tx.
 		Model(&dbContract{}).
-		Where("fcid = ? AND revision_number < ?", fileContractID(fcid), revisionNumber).
-		Updates(updates).
-		Error; err != nil {
-		return err
+		Where("fcid = ?", fileContractID(fcid)).
+		Take(&c).Error; err == nil && shouldUpdate(c.RevisionNumber) {
+		c.RevisionHeight = revisionHeight
+		c.RevisionNumber = fmt.Sprint(revisionNumber)
+		c.Size = size
+		update = c
+	} else if err == gorm.ErrRecordNotFound {
+		// try archived contracts
+		var ac dbArchivedContract
+		if err := u.tx.
+			Model(&dbArchivedContract{}).
+			Where("fcid = ?", fileContractID(fcid)).
+			Take(&ac).Error; err == nil && shouldUpdate(ac.RevisionNumber) {
+			ac.RevisionHeight = revisionHeight
+			ac.RevisionNumber = fmt.Sprint(revisionNumber)
+			ac.Size = size
+			update = ac
+		}
 	}
-	return u.tx.
-		Model(&dbArchivedContract{}).
-		Where("fcid = ? AND revision_number < ?", fileContractID(fcid), revisionNumber).
-		Updates(updates).
-		Error
+	if update == nil {
+		return nil
+	}
+
+	return u.tx.Save(update).Error
 }
 
 // UpdateContractState updates the state of the contract with given fcid.
