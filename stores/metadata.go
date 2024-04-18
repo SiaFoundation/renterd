@@ -2050,7 +2050,7 @@ UPDATE objects SET health = (
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-time.After(time.Second):
 		}
 	}

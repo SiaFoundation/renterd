@@ -731,7 +731,7 @@ loop:
 		case <-s.mgr.shutdownCtx.Done():
 			return nil, false, errors.New("download stopped")
 		case <-ctx.Done():
-			return nil, false, ctx.Err()
+			return nil, false, context.Cause(ctx)
 		case <-resps.c:
 			resetOverdrive()
 		}
