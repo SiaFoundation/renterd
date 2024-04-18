@@ -201,24 +201,20 @@ func (u *chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
 	updates := map[string]interface{}{
 		"revision_height": revisionHeight,
-	}
-	if revisionNumber > 0 {
-		updates["revision_number"] = fmt.Sprint(revisionNumber)
-	}
-	if size > 0 {
-		updates["size"] = size
+		"revision_number": fmt.Sprint(revisionNumber),
+		"size":            size,
 	}
 
 	if err := u.tx.
 		Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid = ? AND revision_number < ?", fileContractID(fcid), revisionNumber).
 		Updates(updates).
 		Error; err != nil {
 		return err
 	}
 	return u.tx.
 		Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid = ? AND revision_number < ?", fileContractID(fcid), revisionNumber).
 		Updates(updates).
 		Error
 }

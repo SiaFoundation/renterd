@@ -4117,6 +4117,9 @@ func TestSlabCleanup(t *testing.T) {
 		return nil
 	})
 
+	// wait for slabs to be pruned in the background
+	time.Sleep(time.Second)
+
 	// create another object that references a slab with buffer
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
 	bufferedSlab := dbSlab{
