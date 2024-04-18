@@ -975,29 +975,16 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{})
+	// Create cluster
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
-	// add host
-	nodes := cluster.AddHosts(1)
-	host := nodes[0]
+	// Shut down the autopilot to prevent it from interfering.
+	cluster.ShutdownAutopilot(context.Background())
 
-	// make the cost of fetching a revision 0. That allows us to check for exact
-	// balances when funding the account and avoid NDFs.
-	settings := host.settings.Settings()
-	settings.BaseRPCPrice = types.ZeroCurrency
-	settings.EgressPrice = types.ZeroCurrency
-	if err := host.settings.UpdateSettings(settings); err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for contracts to form.
-	var contract api.Contract
-	contracts := cluster.WaitForContracts()
-	contract = contracts[0]
-
-	// Wait for account to appear.
+	// Wait for contract and accounts.
+	contract := cluster.WaitForContracts()[0]
 	accounts := cluster.WaitForAccounts()
 
 	// Shut down the autopilot to prevent it from interfering with the test.
@@ -1011,7 +998,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		} else if acc.RequiresSync {
 			t.Fatal("new account should not require a sync")
 		}
-		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, acc.Balance); err != nil {
+		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, types.Siacoins(1).Big()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1021,13 +1008,13 @@ func TestEphemeralAccounts(t *testing.T) {
 	tt.OK(err)
 
 	acc := accounts[0]
-	minExpectedBalance := types.Siacoins(1).Sub(types.NewCurrency64(1))
-	if acc.Balance.Cmp(minExpectedBalance.Big()) < 0 {
+	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
 		t.Fatalf("wrong balance %v", acc.Balance)
 	}
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
 	}
+	host := cluster.hosts[0]
 	if acc.HostKey != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
 	}
