@@ -591,13 +591,16 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// check that stored data on hosts was updated
-	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
-	tt.OK(err)
-	for _, host := range hosts {
-		if host.StoredData != rhpv2.SectorSize {
-			t.Fatalf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+		tt.OK(err)
+		for _, host := range hosts {
+			if host.StoredData != rhpv2.SectorSize {
+				return fmt.Errorf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+			}
 		}
-	}
+		return nil
+	})
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
