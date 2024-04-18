@@ -80,7 +80,6 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 		},
 		Miner:               node.NewMiner(client),
 		SlabPruningInterval: time.Minute,
-		SlabPruningCooldown: time.Minute,
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err

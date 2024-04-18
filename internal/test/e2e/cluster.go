@@ -168,7 +168,7 @@ type testClusterOptions struct {
 
 // newTestLogger creates a console logger used for testing.
 func newTestLogger() *zap.Logger {
-	return newTestLoggerCustom(zapcore.ErrorLevel)
+	return newTestLoggerCustom(zapcore.DebugLevel)
 }
 
 // newTestLoggerCustom creates a console logger used for testing and allows
@@ -896,7 +896,6 @@ func testBusCfg() node.BusConfig {
 		},
 		Network:             testNetwork(),
 		SlabPruningInterval: time.Second,
-		SlabPruningCooldown: 10 * time.Millisecond,
 	}
 }
 
