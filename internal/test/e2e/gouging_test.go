@@ -23,7 +23,6 @@ func TestGouging(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  int(test.AutopilotConfig.Contracts.Amount),
 		logger: newTestLoggerCustom(zapcore.ErrorLevel),
 	})
 	defer cluster.Shutdown()
@@ -35,6 +34,10 @@ func TestGouging(t *testing.T) {
 
 	// mine enough blocks for the current period to become > period
 	cluster.MineBlocks(int(cfg.Period) * 2)
+
+	// add hosts
+	tt.OKAll(cluster.AddHostsBlocking(int(test.AutopilotConfig.Contracts.Amount)))
+	cluster.WaitForAccounts()
 
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
