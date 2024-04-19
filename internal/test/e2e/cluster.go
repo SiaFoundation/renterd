@@ -742,9 +742,9 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.Retry(10, time.Second, func() error {
 		c.tt.Helper()
 
-		c.MineBlocks(1)
 		_, err = c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
+			c.MineBlocks(1)
 			return err
 		}
 		return nil

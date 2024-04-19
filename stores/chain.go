@@ -329,18 +329,29 @@ func (u *chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement
 // UpdateStateElements updates the proofs of all state elements affected by the
 // update.
 func (u *chainUpdateTx) UpdateStateElements(elements []types.StateElement) error {
+	if len(elements) == 0 {
+		return nil
+	}
+
+	var entities []dbWalletOutput
+	if err := u.tx.Model(&dbWalletOutput{}).Find(&entities).Error; err != nil {
+		return err
+	} else if len(entities) == 0 {
+		return nil
+	}
+
+	indices := make(map[types.Hash256]int)
+	for i, e := range entities {
+		indices[types.Hash256(e.OutputID)] = i
+	}
+
 	for _, se := range elements {
-		if err := u.tx.
-			Model(&dbWalletOutput{}).
-			Where("output_id", hash256(se.ID)).
-			Updates(map[string]interface{}{
-				"merkle_proof": merkleProof{proof: se.MerkleProof},
-				"leaf_index":   se.LeafIndex,
-			}).Error; err != nil {
-			return err
+		if index, ok := indices[se.ID]; ok {
+			entities[index].LeafIndex = se.LeafIndex
+			entities[index].MerkleProof = merkleProof{proof: se.MerkleProof}
 		}
 	}
-	return nil
+	return u.tx.Save(&entities).Error
 }
 
 // WalletStateElements implements the ChainStore interface and returns all state

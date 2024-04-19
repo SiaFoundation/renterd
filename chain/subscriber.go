@@ -162,8 +162,8 @@ func (s *Subscriber) Run() (func(), error) {
 				s.logger.Errorf("failed to get chain index: %v", err)
 				continue
 			}
-			err = s.sync(ci)
-			if err != nil && !errors.Is(err, errClosed) {
+
+			if err := s.sync(ci); err != nil && !errors.Is(err, errClosed) {
 				s.logger.Errorf("failed to sync: %v", err)
 			}
 		}
