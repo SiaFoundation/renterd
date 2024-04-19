@@ -101,6 +101,24 @@ func TestChainUpdateTx(t *testing.T) {
 		we = c.WindowEnd
 	}
 
+	// assert we only update revision height if the rev number doesn't increase
+	tx, err = ss.BeginChainUpdateTx()
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	} else if err := tx.UpdateContract(fcid, 2, 2, 4); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if err := tx.Commit(); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if c, err := ss.contract(context.Background(), fileContractID(fcid)); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if c.RevisionHeight != 2 {
+		t.Fatal("unexpected revision height", c.RevisionHeight)
+	} else if c.RevisionNumber != "2" {
+		t.Fatal("unexpected revision number", c.RevisionNumber)
+	} else if c.Size != 3 {
+		t.Fatal("unexpected size", c.Size)
+	}
+
 	// assert update failed contracts is successful
 	tx, err = ss.BeginChainUpdateTx()
 	if err != nil {
