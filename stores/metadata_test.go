@@ -125,7 +125,7 @@ func TestObjectBasic(t *testing.T) {
 }
 
 func TestObjectMetadata(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	ss := newTestSQLStore(t, synchronousTestSQLStoreConfig)
 	defer ss.Close()
 
 	// create 2 hosts
@@ -923,7 +923,7 @@ func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.C
 
 // TestSQLMetadataStore tests basic MetadataStore functionality.
 func TestSQLMetadataStore(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	ss := newTestSQLStore(t, synchronousTestSQLStoreConfig)
 	defer ss.Close()
 
 	// Create 2 hosts
@@ -1058,9 +1058,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 1
+	expectedObj.Slabs[0].DBSlabID = 3
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 2
+	expectedObj.Slabs[1].DBSlabID = 4
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1082,7 +1082,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   1,
+				DBSlabID:   3,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1122,7 +1122,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   2,
+				DBSlabID:   4,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -1219,18 +1219,18 @@ func TestSQLMetadataStore(t *testing.T) {
 		}
 		return nil
 	}
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		return countCheck(1, 1, 1, 1)
-	})
+	if err := countCheck(1, 1, 1, 1); err != nil {
+		t.Fatal(err)
+	}
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
 	if err := ss.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		return countCheck(0, 0, 0, 0)
-	})
+	if err := countCheck(0, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestObjectHealth verifies the object's health is returned correctly by all
@@ -1967,7 +1967,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 // TestContractSectors is a test for the contract_sectors join table. It
 // verifies that deleting contracts or sectors also cleans up the join table.
 func TestContractSectors(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	ss := newTestSQLStore(t, synchronousTestSQLStoreConfig)
 	defer ss.Close()
 
 	// Create a host, contract and sector to upload to that host into the
@@ -2866,7 +2866,7 @@ func TestPartialSlab(t *testing.T) {
 }
 
 func TestContractSizes(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	ss := newTestSQLStore(t, synchronousTestSQLStoreConfig)
 	defer ss.Close()
 
 	// define a helper function that calculates the amount of data that can be
@@ -2947,15 +2947,12 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// assert there's one sector that can be pruned and assert it's from fcid 1
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if n := prunableData(nil); n != rhpv2.SectorSize {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		}
-		if n := prunableData(&fcids[1]); n != 0 {
-			return fmt.Errorf("expected no prunable data %v", n)
-		}
-		return nil
-	})
+	if n := prunableData(nil); n != rhpv2.SectorSize {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	}
+	if n := prunableData(&fcids[1]); n != 0 {
+		t.Fatalf("expected no prunable data %v", n)
+	}
 
 	// remove the second object
 	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
@@ -2963,16 +2960,13 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// assert there's now two sectors that can be pruned
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if n := prunableData(nil); n != rhpv2.SectorSize*2 {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		}
-		return nil
-	})
+	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	}
 
 	if size, err := ss.ContractSize(context.Background(), fcids[0]); err != nil {
 		t.Fatal("unexpected err", err)
@@ -3132,7 +3126,7 @@ func TestBuckets(t *testing.T) {
 }
 
 func TestBucketObjects(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	ss := newTestSQLStore(t, synchronousTestSQLStoreConfig)
 	defer ss.Close()
 
 	// Adding an object to a bucket that doesn't exist shouldn't work.
@@ -4029,7 +4023,7 @@ func TestRefreshHealth(t *testing.T) {
 }
 
 func TestSlabCleanup(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	ss := newTestSQLStore(t, synchronousTestSQLStoreConfig)
 	defer ss.Close()
 
 	// create contract set
@@ -4100,14 +4094,11 @@ func TestSlabCleanup(t *testing.T) {
 
 	// check slice count
 	var slabCntr int64
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			return err
-		} else if slabCntr != 1 {
-			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
-		}
-		return nil
-	})
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
 
 	// delete second object
 	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
@@ -4115,14 +4106,11 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			return err
-		} else if slabCntr != 0 {
-			return fmt.Errorf("expected 0 slabs, got %v", slabCntr)
-		}
-		return nil
-	})
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 0 {
+		t.Fatalf("expected 0 slabs, got %v", slabCntr)
+	}
 
 	// create another object that references a slab with buffer
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
@@ -4163,14 +4151,11 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			return err
-		} else if slabCntr != 1 {
-			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
-		}
-		return nil
-	})
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
+	}
 }
 
 func TestUpsertSectors(t *testing.T) {

@@ -53,18 +53,22 @@ type testSQLStore struct {
 }
 
 type testSQLStoreConfig struct {
-	dbURI           string
-	dbUser          string
-	dbPassword      string
-	dbName          string
-	dbMetricsName   string
-	dir             string
-	persistent      bool
-	skipMigrate     bool
-	skipContractSet bool
+	dbURI                   string
+	dbUser                  string
+	dbPassword              string
+	dbName                  string
+	dbMetricsName           string
+	dir                     string
+	persistent              bool
+	skipMigrate             bool
+	skipContractSet         bool
+	disableAsyncSlabPruning bool
 }
 
-var defaultTestSQLStoreConfig = testSQLStoreConfig{}
+var (
+	defaultTestSQLStoreConfig     = testSQLStoreConfig{}
+	synchronousTestSQLStoreConfig = testSQLStoreConfig{disableAsyncSlabPruning: true}
+)
 
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
@@ -134,6 +138,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		Logger:                        zap.NewNop().Sugar(),
 		GormLogger:                    newTestLogger(),
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
+		DisableAsyncSlabPruning:       cfg.disableAsyncSlabPruning,
 	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)

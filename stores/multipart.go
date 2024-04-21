@@ -306,8 +306,7 @@ func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string
 			return errors.New("failed to delete multipart upload for unknown reason")
 		}
 		// Prune the dangling slabs.
-		s.triggerSlabPruning()
-		return nil
+		return s.pruneSlabs(tx)
 	})
 }
 
@@ -457,8 +456,7 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		}
 
 		// Prune the slabs.
-		s.triggerSlabPruning()
-		return nil
+		return s.pruneSlabs(tx)
 	})
 	if err != nil {
 		return api.MultipartCompleteResponse{}, err

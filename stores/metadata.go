@@ -2762,6 +2762,14 @@ AND slabs.db_buffered_slab_id IS NULL
 `).Error
 }
 
+func (s *SQLStore) pruneSlabs(tx *gorm.DB) error {
+	if s.slabPruneAsync {
+		s.triggerSlabPruning()
+		return nil
+	}
+	return pruneSlabs(tx)
+}
+
 func (s *SQLStore) triggerSlabPruning() {
 	select {
 	case s.slabPruneSigChan <- struct{}{}:
@@ -2796,8 +2804,8 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 	if numDeleted == 0 {
 		return 0, nil // nothing to prune if no object was deleted
 	}
-	s.triggerSlabPruning()
-	return numDeleted, nil
+
+	return numDeleted, s.pruneSlabs(tx)
 }
 
 // deleteObjects deletes a batch of objects from the database. The order of
@@ -2826,10 +2834,13 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 			if err := res.Error; err != nil {
 				return res.Error
 			}
+
 			// prune slabs if we deleted an object
 			rowsAffected = res.RowsAffected
 			if rowsAffected > 0 {
-				s.triggerSlabPruning()
+				if err := s.pruneSlabs(tx); err != nil {
+					return err
+				}
 			}
 			duration = time.Since(start)
 			return nil

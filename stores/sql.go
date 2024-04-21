@@ -57,6 +57,7 @@ type (
 		Logger                        *zap.SugaredLogger
 		GormLogger                    glogger.Interface
 		RetryTransactionIntervals     []time.Duration
+		DisableAsyncSlabPruning       bool // only applies to SQLite databases
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -100,6 +101,7 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
+		slabPruneAsync   bool
 		slabPruneSigChan chan struct{}
 
 		wg           sync.WaitGroup
@@ -249,6 +251,12 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		isOurContract[types.FileContractID(fcid)] = struct{}{}
 	}
 
+	// Only allow disabling async slab pruning for SQLite databases.
+	var disableAsyncSlabPruning bool
+	if isSQLite(db) {
+		disableAsyncSlabPruning = cfg.DisableAsyncSlabPruning
+	}
+
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:                 cfg.Alerts,
@@ -261,7 +269,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		allowListCnt:           uint64(allowlistCnt),
 		blockListCnt:           uint64(blocklistCnt),
 		settings:               make(map[string]string),
-		slabPruneSigChan:       make(chan struct{}, 1),
 		unappliedContractState: make(map[types.FileContractID]contractState),
 		unappliedHostKeys:      make(map[types.PublicKey]struct{}),
 		unappliedRevisions:     make(map[types.FileContractID]revisionUpdate),
@@ -275,6 +282,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 			ID:     types.BlockID(ci.BlockID),
 		},
 
+		slabPruneAsync:   !disableAsyncSlabPruning,
+		slabPruneSigChan: make(chan struct{}, 1),
+
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
 		shutdownCtx:       shutdownCtx,
@@ -285,6 +295,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+
 	if err := ss.initSlabPruning(); err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
@@ -310,11 +321,13 @@ func (ss *SQLStore) hasAllowlist() bool {
 
 func (s *SQLStore) initSlabPruning() error {
 	// start pruning loop
-	s.wg.Add(1)
-	go func() {
-		s.pruneSlabsLoop()
-		s.wg.Done()
-	}()
+	if s.slabPruneAsync {
+		s.wg.Add(1)
+		go func() {
+			s.pruneSlabsLoop()
+			s.wg.Done()
+		}()
+	}
 
 	// prune once to guarantee consistency on startup
 	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
