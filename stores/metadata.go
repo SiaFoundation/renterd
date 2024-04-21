@@ -1389,7 +1389,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
 			var contract dbContract
 			err := tx.Model(&dbContract{}).
-				Where("fcid = ?", fileContractID(fcid)).
+				Where("fcid", fileContractID(fcid)).
 				Joins("Host").
 				Take(&contract).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {

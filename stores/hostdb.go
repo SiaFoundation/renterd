@@ -1184,10 +1184,10 @@ func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint6
 
 func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
 	err1 := tx.Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Updates(updates).Error
 	err2 := tx.Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Updates(updates).Error
 	if err1 != nil || err2 != nil {
 		return fmt.Errorf("%s; %s", err1, err2)
