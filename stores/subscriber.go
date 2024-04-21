@@ -538,8 +538,10 @@ func (cs *chainSubscriber) AddEvents(events []wallet.Event) error {
 				MaturityHeight: event.MaturityHeight,
 				Source:         string(event.Source),
 				Timestamp:      event.Timestamp.Unix(),
-				Height:         event.Index.Height,
-				BlockID:        hash256(event.Index.ID),
+				DBChainIndex: dbChainIndex{
+					Height:  event.Index.Height,
+					BlockID: hash256(event.Index.ID),
+				},
 			},
 		})
 	}
@@ -562,8 +564,10 @@ func (cs *chainSubscriber) AddSiacoinElements(elements []wallet.SiacoinElement) 
 				Value:          currency(el.SiacoinOutput.Value),
 				Address:        hash256(el.SiacoinOutput.Address),
 				MaturityHeight: el.MaturityHeight,
-				Height:         el.Index.Height,
-				BlockID:        hash256(el.Index.ID),
+				DBChainIndex: dbChainIndex{
+					Height:  el.Index.Height,
+					BlockID: hash256(el.Index.ID),
+				},
 			},
 		}
 	}
@@ -620,7 +624,7 @@ func (cs *chainSubscriber) RevertIndex(index types.ChainIndex) error {
 	// remove any events that were added in the reverted block
 	filtered := cs.events[:0]
 	for i := range cs.events {
-		if cs.events[i].event.Index() != index {
+		if cs.events[i].event.DBChainIndex.convert() != index {
 			filtered = append(filtered, cs.events[i])
 		}
 	}
@@ -628,7 +632,7 @@ func (cs *chainSubscriber) RevertIndex(index types.ChainIndex) error {
 
 	// remove any siacoin elements that were added in the reverted block
 	for id, el := range cs.outputs {
-		if el.se.Index() == index {
+		if el.se.DBChainIndex.convert() == index {
 			delete(cs.outputs, id)
 		}
 	}

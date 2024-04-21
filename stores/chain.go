@@ -36,6 +36,15 @@ func (s *SQLStore) BeginChainUpdateTx() (chain.ChainUpdateTx, error) {
 // transactions and siacoin elements that were created by the index should be
 // added and any siacoin elements that were spent should be removed.
 func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event) error {
+	// create chain index
+	ci := &dbChainIndex{
+		Height:  index.Height,
+		BlockID: hash256(index.ID),
+	}
+	if err := u.tx.Create(&ci).Error; err != nil {
+		return err
+	}
+
 	// remove spent outputs
 	for _, e := range spent {
 		if res := u.tx.
@@ -61,8 +70,7 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 				Value:          currency(e.SiacoinOutput.Value),
 				Address:        hash256(e.SiacoinOutput.Address),
 				MaturityHeight: e.MaturityHeight,
-				Height:         index.Height,
-				BlockID:        hash256(index.ID),
+				DBChainIndexID: ci.ID,
 			}).Error; err != nil {
 			return nil
 		}
@@ -83,8 +91,7 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 				MaturityHeight: e.MaturityHeight,
 				Source:         string(e.Source),
 				Timestamp:      e.Timestamp.Unix(),
-				Height:         e.Index.Height,
-				BlockID:        hash256(e.Index.ID),
+				DBChainIndexID: ci.ID,
 			}).Error; err != nil {
 			return err
 		}
@@ -145,6 +152,17 @@ func (u *chainUpdateTx) RemoveSiacoinElements(ids []types.SiacoinOutputID) error
 // transactions and siacoin elements that were created by the index should be
 // removed.
 func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement) error {
+	// find the index to revert
+	var ci dbChainIndex
+	if err := u.tx.
+		Model(&dbChainIndex{}).
+		Where("height", index.Height).
+		Where("block_id", hash256(index.ID)).
+		Take(&ci).
+		Error; err != nil {
+		return err
+	}
+
 	// recreate unspent outputs
 	for _, e := range unspent {
 		if err := u.tx.
@@ -159,29 +177,14 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 				Value:          currency(e.SiacoinOutput.Value),
 				Address:        hash256(e.SiacoinOutput.Address),
 				MaturityHeight: e.MaturityHeight,
-				Height:         index.Height,
-				BlockID:        hash256(index.ID),
+				DBChainIndexID: ci.ID,
 			}).Error; err != nil {
 			return nil
 		}
 	}
 
-	// remove outputs created at the reverted index
-	for _, e := range removed {
-		if err := u.tx.
-			Where("output_id", hash256(e.ID)).
-			Delete(&dbWalletOutput{}).
-			Error; err != nil {
-			return err
-		}
-	}
-
-	// remove events created at the reverted index
-	return u.tx.
-		Model(&dbWalletEvent{}).
-		Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).
-		Delete(&dbWalletEvent{}).
-		Error
+	// remove the chain index, this cascades down to the outputs and events
+	return u.tx.Delete(&ci).Error
 }
 
 // UpdateChainIndex updates the chain index in the database.

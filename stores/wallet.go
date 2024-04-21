@@ -24,8 +24,8 @@ type (
 		Timestamp      int64             `gorm:"index:idx_wallet_events_timestamp"`
 
 		// chain index
-		Height  uint64  `gorm:"index:idx_wallet_events_height"`
-		BlockID hash256 `gorm:"size:32"`
+		DBChainIndexID uint
+		DBChainIndex   dbChainIndex
 	}
 
 	dbWalletOutput struct {
@@ -40,8 +40,15 @@ type (
 		MaturityHeight uint64  `gorm:"index:idx_wallet_outputs_maturity_height"`
 
 		// chain index
-		Height  uint64  `gorm:"index:idx_wallet_outputs_height"`
-		BlockID hash256 `gorm:"size:32"`
+		DBChainIndexID uint
+		DBChainIndex   dbChainIndex
+	}
+
+	dbChainIndex struct {
+		Model
+
+		Height  uint64
+		BlockID hash256
 	}
 
 	outputChange struct {
@@ -56,6 +63,11 @@ type (
 )
 
 // TableName implements the gorm.Tabler interface.
+func (dbChainIndex) TableName() string {
+	return "chain_indices"
+}
+
+// TableName implements the gorm.Tabler interface.
 func (dbWalletEvent) TableName() string {
 	return "wallet_events"
 }
@@ -65,17 +77,11 @@ func (dbWalletOutput) TableName() string {
 	return "wallet_outputs"
 }
 
-func (e dbWalletEvent) Index() types.ChainIndex {
+// convert returns a types.ChainIndex from a dbChainIndex.
+func (ci dbChainIndex) convert() types.ChainIndex {
 	return types.ChainIndex{
-		Height: e.Height,
-		ID:     types.BlockID(e.BlockID),
-	}
-}
-
-func (se dbWalletOutput) Index() types.ChainIndex {
-	return types.ChainIndex{
-		Height: se.Height,
-		ID:     types.BlockID(se.BlockID),
+		Height: ci.Height,
+		ID:     types.BlockID(ci.BlockID),
 	}
 }
 
@@ -88,7 +94,7 @@ func (s *SQLStore) Tip() (types.ChainIndex, error) {
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
 func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 	var dbElems []dbWalletOutput
-	if err := s.db.Find(&dbElems).Error; err != nil {
+	if err := s.db.Find(&dbElems).Preload("DBChainIndexID").Error; err != nil {
 		return nil, err
 	}
 
@@ -107,11 +113,7 @@ func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
 					Value:   types.Currency(el.Value),
 				},
 			},
-			Index: types.ChainIndex{
-				Height: el.Height,
-				ID:     types.BlockID(el.BlockID),
-			},
-			// TODO: Index missing
+			Index: el.DBChainIndex.convert(),
 		}
 	}
 	return elements, nil
@@ -125,8 +127,13 @@ func (s *SQLStore) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	}
 
 	var dbEvents []dbWalletEvent
-	err := s.db.Raw("SELECT * FROM wallet_events ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-		limit, offset).Scan(&dbEvents).
+	err := s.db.
+		Model(&dbWalletEvent{}).
+		Preload("DBChainIndex").
+		Order("timestamp DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&dbEvents).
 		Error
 	if err != nil {
 		return nil, err
@@ -135,11 +142,8 @@ func (s *SQLStore) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	events := make([]wallet.Event, len(dbEvents))
 	for i, e := range dbEvents {
 		events[i] = wallet.Event{
-			ID: types.Hash256(e.EventID),
-			Index: types.ChainIndex{
-				Height: e.Height,
-				ID:     types.BlockID(e.BlockID),
-			},
+			ID:             types.Hash256(e.EventID),
+			Index:          e.DBChainIndex.convert(),
 			Inflow:         types.Currency(e.Inflow),
 			Outflow:        types.Currency(e.Outflow),
 			Transaction:    e.Transaction,
@@ -161,6 +165,9 @@ func (s *SQLStore) WalletEventCount() (uint64, error) {
 }
 
 func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbWalletOutput) error {
+	if err := tx.FirstOrCreate(&sco.DBChainIndex).Error; err != nil {
+		return err
+	}
 	return tx.
 		Clauses(clause.OnConflict{
 			DoNothing: true,
@@ -175,6 +182,9 @@ func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
 }
 
 func applyUnappliedEventAdditions(tx *gorm.DB, event dbWalletEvent) error {
+	if err := tx.FirstOrCreate(&event.DBChainIndex).Error; err != nil {
+		return err
+	}
 	return tx.
 		Clauses(clause.OnConflict{
 			DoNothing: true,
