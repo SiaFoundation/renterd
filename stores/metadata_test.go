@@ -4152,13 +4152,7 @@ func TestSlabCleanup(t *testing.T) {
 		HealthValidUntil: 100,
 	}
 	if err := ss.db.Create(&bufferedSlab).Error; err != nil {
-		if strings.Contains(err.Error(), "database table is locked") {
-			time.Sleep(time.Second) // wait for slabs to be pruned in the background
-			err = ss.db.Create(&bufferedSlab).Error
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
+		t.Fatal(err)
 	}
 	obj3 := dbObject{
 		ObjectID:   "3",
