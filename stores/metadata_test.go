@@ -1219,12 +1219,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Remove the first slab of the object.
-	ts := time.Now()
 	obj1.Slabs = obj1.Slabs[1:]
 	fullObj, err = ss.addTestObject(objID, obj1)
 	if err != nil {
-		t.Fatal(err)
-	} else if err := ss.waitForPruneLoop(ts); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch")

@@ -2748,12 +2748,12 @@ func (s *SQLStore) pruneSlabsLoop() {
 			})
 		} else {
 			s.alerts.DismissAlerts(s.shutdownCtx, pruneSlabsAlertID)
+
+			s.mu.Lock()
+			s.lastPrunedAt = time.Now()
+			s.mu.Unlock()
 		}
 		cancel()
-
-		s.mu.Lock()
-		s.lastPrunedAt = time.Now()
-		s.mu.Unlock()
 	}
 }
 
