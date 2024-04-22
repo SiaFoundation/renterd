@@ -152,36 +152,24 @@ func (u *chainUpdateTx) RemoveSiacoinElements(ids []types.SiacoinOutputID) error
 // transactions and siacoin elements that were created by the index should be
 // removed.
 func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement) error {
-	// find the index to revert
-	var ci dbChainIndex
-	if err := u.tx.
-		Model(&dbChainIndex{}).
+	// remove the index from the database - cascades to outputs and events
+	if res := u.tx.
 		Where("height", index.Height).
 		Where("block_id", hash256(index.ID)).
-		Take(&ci).
-		Error; err != nil {
-		return err
+		Delete(&dbChainIndex{}); res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected != 1 {
+		return fmt.Errorf("chain index '%v' at height %v not found", index.ID, index.Height)
 	}
 
-	// remove events for the index
-	if err := u.tx.
-		Model(&dbWalletEvent{}).
-		Where("db_chain_index_id", ci.ID).
-		Delete(&dbWalletEvent{}).
-		Error; err != nil {
+	// recreate unspent outputs (TODO: recreating the index is horrible)
+	ci := &dbChainIndex{
+		Height:  index.Height,
+		BlockID: hash256(index.ID),
+	}
+	if err := u.tx.Create(&ci).Error; err != nil {
 		return err
 	}
-
-	// remove outputs for the index
-	if err := u.tx.
-		Model(&dbWalletOutput{}).
-		Where("db_chain_index_id", ci.ID).
-		Delete(&dbWalletOutput{}).
-		Error; err != nil {
-		return err
-	}
-
-	// recreate unspent outputs
 	for _, e := range unspent {
 		if err := u.tx.
 			Clauses(clause.OnConflict{
