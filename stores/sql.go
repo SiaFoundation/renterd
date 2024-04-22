@@ -106,6 +106,7 @@ type (
 		mu           sync.Mutex
 		allowListCnt uint64
 		blockListCnt uint64
+		lastPrunedAt time.Time
 		closed       bool
 
 		knownContracts map[types.FileContractID]struct{}
@@ -275,6 +276,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 			ID:     types.BlockID(ci.BlockID),
 		},
 
+		lastPrunedAt:              time.Now(),
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
 		shutdownCtx:       shutdownCtx,

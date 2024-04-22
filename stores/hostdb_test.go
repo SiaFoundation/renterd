@@ -34,6 +34,7 @@ func (s *SQLStore) insertTestAnnouncement(hk types.PublicKey, a hostdb.Announcem
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
 	if ss.ccid != modules.ConsensusChangeBeginning {
 		t.Fatal("wrong ccid", ss.ccid, modules.ConsensusChangeBeginning)
 	}

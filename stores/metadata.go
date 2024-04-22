@@ -1813,11 +1813,11 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 	})
 }
 
-func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
+func (s *SQLStore) RemoveObject(ctx context.Context, bucket, path string) error {
 	var rowsAffected int64
 	var err error
 	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		rowsAffected, err = s.deleteObject(tx, bucket, key)
+		rowsAffected, err = s.deleteObject(tx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("RemoveObject: failed to delete object: %w", err)
 		}
@@ -1827,7 +1827,7 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 		return err
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("%w: key: %s", api.ErrObjectNotFound, key)
+		return fmt.Errorf("%w: key: %s", api.ErrObjectNotFound, path)
 	}
 	return nil
 }
@@ -2750,6 +2750,10 @@ func (s *SQLStore) pruneSlabsLoop() {
 			s.alerts.DismissAlerts(s.shutdownCtx, pruneSlabsAlertID)
 		}
 		cancel()
+
+		s.mu.Lock()
+		s.lastPrunedAt = time.Now()
+		s.mu.Unlock()
 	}
 }
 
