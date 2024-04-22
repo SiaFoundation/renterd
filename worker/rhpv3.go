@@ -237,7 +237,7 @@ func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicK
 	case <-ctx.Done():
 		conn.Close()
 		<-done
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	case <-done:
 		return t, err
 	}

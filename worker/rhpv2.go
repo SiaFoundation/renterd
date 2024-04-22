@@ -645,8 +645,8 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	}()
 	defer func() {
 		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
+		if context.Cause(ctx) != nil {
+			err = context.Cause(ctx)
 		}
 	}()
 	t, err := rhpv2.NewRenterTransport(conn, hostKey)
