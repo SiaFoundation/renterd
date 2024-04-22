@@ -6,8 +6,8 @@ import (
 	"go.sia.tech/renterd/worker"
 )
 
-func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
-	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
+	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
 		hc := checkHost(cfg, rs, gc, host, minValidScore)
 		if hc.Usability.IsUsable() {
@@ -20,8 +20,9 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // EvaluateConfig evaluates the given configuration and if the gouging settings
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
-func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, currentPeriod uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse) {
-	gc := worker.NewGougingChecker(gs, cs, fee, currentPeriod, cfg.Contracts.RenewWindow)
+func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse) {
+	period := cfg.Contracts.Period
+	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
 	for _, host := range hosts {
@@ -88,35 +89,35 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 	// MaxRPCPrice
 	tmpGS := maxGS()
 	tmpGS.MaxRPCPrice = gs.MaxRPCPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxRPCPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxRPCPrice, cfg, cs, fee, period, rs, hosts) {
 		optimisedGS.MaxRPCPrice = tmpGS.MaxRPCPrice
 		success = true
 	}
 	// MaxContractPrice
 	tmpGS = maxGS()
 	tmpGS.MaxContractPrice = gs.MaxContractPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxContractPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxContractPrice, cfg, cs, fee, period, rs, hosts) {
 		optimisedGS.MaxContractPrice = tmpGS.MaxContractPrice
 		success = true
 	}
 	// MaxDownloadPrice
 	tmpGS = maxGS()
 	tmpGS.MaxDownloadPrice = gs.MaxDownloadPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxDownloadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxDownloadPrice, cfg, cs, fee, period, rs, hosts) {
 		optimisedGS.MaxDownloadPrice = tmpGS.MaxDownloadPrice
 		success = true
 	}
 	// MaxUploadPrice
 	tmpGS = maxGS()
 	tmpGS.MaxUploadPrice = gs.MaxUploadPrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxUploadPrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxUploadPrice, cfg, cs, fee, period, rs, hosts) {
 		optimisedGS.MaxUploadPrice = tmpGS.MaxUploadPrice
 		success = true
 	}
 	// MaxStoragePrice
 	tmpGS = maxGS()
 	tmpGS.MaxStoragePrice = gs.MaxStoragePrice
-	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxStoragePrice, cfg, cs, fee, currentPeriod, rs, hosts) {
+	if optimiseGougingSetting(&tmpGS, &tmpGS.MaxStoragePrice, cfg, cs, fee, period, rs, hosts) {
 		optimisedGS.MaxStoragePrice = tmpGS.MaxStoragePrice
 		success = true
 	}
