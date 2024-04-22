@@ -39,7 +39,6 @@ CREATE TABLE `wallet_outputs` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `output_id` (`output_id`),
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`),
-  KEY `idx_wallet_outputs_height` (`height`),
   CONSTRAINT `fk_wallet_outputs_chain_index` FOREIGN KEY (`db_chain_index_id`) REFERENCES `chain_indices` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

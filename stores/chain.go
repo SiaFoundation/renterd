@@ -163,6 +163,24 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 		return err
 	}
 
+	// remove events for the index
+	if err := u.tx.
+		Model(&dbWalletEvent{}).
+		Where("db_chain_index_id", ci.ID).
+		Delete(&dbWalletEvent{}).
+		Error; err != nil {
+		return err
+	}
+
+	// remove outputs for the index
+	if err := u.tx.
+		Model(&dbWalletOutput{}).
+		Where("db_chain_index_id", ci.ID).
+		Delete(&dbWalletOutput{}).
+		Error; err != nil {
+		return err
+	}
+
 	// recreate unspent outputs
 	for _, e := range unspent {
 		if err := u.tx.
@@ -183,8 +201,7 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 		}
 	}
 
-	// remove the chain index, this cascades down to the outputs and events
-	return u.tx.Delete(&ci).Error
+	return nil
 }
 
 // UpdateChainIndex updates the chain index in the database.
