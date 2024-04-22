@@ -252,9 +252,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	// Only allow disabling async slab pruning for SQLite databases.
-	var disableAsyncSlabPruning bool
-	if isSQLite(db) {
-		disableAsyncSlabPruning = cfg.DisableAsyncSlabPruning
+	enableAsyncSlabPruning := true
+	if isSQLite(db) && cfg.DisableAsyncSlabPruning {
+		enableAsyncSlabPruning = false
 	}
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
@@ -282,7 +282,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 			ID:     types.BlockID(ci.BlockID),
 		},
 
-		slabPruneAsync:   !disableAsyncSlabPruning,
+		slabPruneAsync:   enableAsyncSlabPruning,
 		slabPruneSigChan: make(chan struct{}, 1),
 
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
