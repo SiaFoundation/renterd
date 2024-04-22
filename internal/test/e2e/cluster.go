@@ -686,16 +686,16 @@ func (c *TestCluster) AddHost(h *Host) {
 	// Add the host
 	c.hosts = append(c.hosts, h)
 
-	// Fund host from bus.
-	fundAmt := types.Siacoins(100e3)
+	// Fund host with one blockreward
+	fundAmt := types.Siacoins(25e3)
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt,
+			Value:   fundAmt.Div64(10),
 			Address: h.WalletAddress(),
 		})
 	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, false))
+	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
 
 	// Mine transaction.
 	c.MineBlocks(1)
