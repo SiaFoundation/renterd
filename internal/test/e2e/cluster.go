@@ -459,6 +459,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
+		cluster.WaitForPeers()
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
@@ -657,6 +658,19 @@ func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
 	})
 }
 
+func (c *TestCluster) WaitForPeers() {
+	c.tt.Helper()
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
+		peers, err := c.Bus.SyncerPeers(context.Background())
+		if err != nil {
+			return err
+		} else if len(peers) == 0 {
+			return errors.New("no peers found")
+		}
+		return nil
+	})
+}
+
 func (c *TestCluster) RemoveHost(host *Host) {
 	c.tt.Helper()
 	c.tt.OK(host.Close())
@@ -686,7 +700,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	// Add the host
 	c.hosts = append(c.hosts, h)
 
-	// Fund host with one blockreward
+	// Fund host from bus.
 	fundAmt := types.Siacoins(25e3)
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {

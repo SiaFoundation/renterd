@@ -20,12 +20,11 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 
 	// convenience variables
 	b := cluster.Bus
-	w := cluster.Worker
 	a := cluster.Autopilot
 	tt := cluster.tt
 
@@ -45,25 +44,12 @@ func TestHostPruning(t *testing.T) {
 		tt.OK(b.RecordHostScans(context.Background(), his))
 	}
 
-	// add a host
-	hosts := cluster.AddHosts(1)
-	h1 := hosts[0]
-
-	// fetch the host
-	h, err := b.Host(context.Background(), h1.PublicKey())
-	tt.OK(err)
-
-	// scan the host (lastScan needs to be > 0 for downtime to start counting)
-	tt.OKAll(w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0))
-
-	// block the host
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1.PublicKey().String()}, nil, false))
-
-	// remove it from the cluster manually
-	cluster.RemoveHost(h1)
-
 	// shut down the worker manually, this will flush any interactions
 	cluster.ShutdownWorker(context.Background())
+
+	// remove it from the cluster manually
+	h1 := cluster.hosts[0]
+	cluster.RemoveHost(h1)
 
 	// record 9 failed interactions, right before the pruning threshold, and
 	// wait for the autopilot loop to finish at least once
