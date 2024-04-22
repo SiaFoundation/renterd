@@ -19,18 +19,21 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
-	"go.sia.tech/renterd/s3"
 	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
+	gormlogger "gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -165,7 +168,7 @@ type testClusterOptions struct {
 
 // newTestLogger creates a console logger used for testing.
 func newTestLogger() *zap.Logger {
-	return newTestLoggerCustom(zapcore.ErrorLevel)
+	return newTestLoggerCustom(zapcore.DebugLevel)
 }
 
 // newTestLoggerCustom creates a console logger used for testing and allows
@@ -237,6 +240,18 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	apSettings := test.AutopilotConfig
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
+	}
+
+	// default database logger
+	if busCfg.DBLogger == nil {
+		busCfg.DBLogger = zapgorm2.Logger{
+			ZapLogger:                 logger.Named("SQL"),
+			LogLevel:                  gormlogger.Warn,
+			SlowThreshold:             100 * time.Millisecond,
+			SkipCallerLookup:          false,
+			IgnoreRecordNotFoundError: true,
+			Context:                   nil,
+		}
 	}
 
 	// Check if we are testing against an external database. If so, we create a
@@ -315,7 +330,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bStopFn)
 
 	// Create worker.
-	w, wShutdownFn, err := node.NewWorker(workerCfg, busClient, wk, logger)
+	w, s3Handler, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
 
 	workerAuth := jape.BasicAuth(workerPassword)
@@ -328,9 +343,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	workerShutdownFns = append(workerShutdownFns, wShutdownFn)
 
 	// Create S3 API.
-	s3Handler, err := s3.New(busClient, workerClient, logger.Sugar(), s3.Opts{})
-	tt.OK(err)
-
 	s3Server := http.Server{
 		Handler: s3Handler,
 	}
@@ -421,7 +433,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
 		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
 	}))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{Enabled: enableUploadPacking}))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
+		Enabled:               enableUploadPacking,
+		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
+	}))
 
 	// Fund the bus.
 	if funding {
@@ -674,18 +689,15 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	res, err := c.Bus.Wallet(context.Background())
-	c.tt.OK(err)
-
-	fundAmt := res.Confirmed.Div64(2).Div64(uint64(len(c.hosts))) // 50% of bus balance
+	fundAmt := types.Siacoins(100e3)
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt.Div64(10),
+			Value:   fundAmt,
 			Address: h.WalletAddress(),
 		})
 	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
+	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, false))
 
 	// Mine transaction.
 	c.MineBlocks(1)
@@ -705,7 +717,7 @@ func (c *TestCluster) AddHost(h *Host) {
 		c.tt.Helper()
 
 		c.MineBlocks(1)
-		_, err = c.Bus.Host(context.Background(), h.PublicKey())
+		_, err := c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
 			return err
 		}
@@ -881,7 +893,6 @@ func testBusCfg() node.BusConfig {
 		},
 		Network:             testNetwork(),
 		SlabPruningInterval: time.Second,
-		SlabPruningCooldown: 10 * time.Millisecond,
 	}
 }
 

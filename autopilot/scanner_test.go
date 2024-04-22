@@ -9,17 +9,17 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 type mockBus struct {
-	hosts []hostdb.Host
+	hosts []api.Host
 	reqs  []string
 }
 
-func (b *mockBus) Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb.Host, error) {
+func (b *mockBus) SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error) {
 	b.reqs = append(b.reqs, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
 
 	start := opts.Offset
@@ -35,17 +35,17 @@ func (b *mockBus) Hosts(ctx context.Context, opts api.GetHostsOptions) ([]hostdb
 	return b.hosts[start:end], nil
 }
 
-func (b *mockBus) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]hostdb.HostAddress, error) {
-	hosts, err := b.Hosts(ctx, api.GetHostsOptions{
+func (b *mockBus) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error) {
+	hosts, err := b.SearchHosts(ctx, api.SearchHostOptions{
 		Offset: opts.Offset,
 		Limit:  opts.Limit,
 	})
 	if err != nil {
 		return nil, err
 	}
-	var hostAddresses []hostdb.HostAddress
+	var hostAddresses []api.HostAddress
 	for _, h := range hosts {
-		hostAddresses = append(hostAddresses, hostdb.HostAddress{
+		hostAddresses = append(hostAddresses, api.HostAddress{
 			NetAddress: h.NetAddress,
 			PublicKey:  h.PublicKey,
 		})
@@ -76,18 +76,18 @@ func (w *mockWorker) RHPScan(ctx context.Context, hostKey types.PublicKey, hostI
 	return api.RHPScanResponse{}, nil
 }
 
-func (w *mockWorker) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (hostdb.HostPriceTable, error) {
-	return hostdb.HostPriceTable{}, nil
+func (w *mockWorker) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string) (api.HostPriceTable, error) {
+	return api.HostPriceTable{}, nil
 }
 
 func TestScanner(t *testing.T) {
 	// prepare 100 hosts
-	hosts := newTestHosts(100)
+	hosts := test.NewHosts(100)
 
 	// init new scanner
 	b := &mockBus{hosts: hosts}
 	w := &mockWorker{blockChan: make(chan struct{})}
-	s := newTestScanner(b, w)
+	s := newTestScanner(b)
 
 	// assert it started a host scan
 	s.tryPerformHostScan(context.Background(), w, false)
@@ -139,7 +139,7 @@ func (s *scanner) isScanning() bool {
 	return s.scanning
 }
 
-func newTestScanner(b *mockBus, w *mockWorker) *scanner {
+func newTestScanner(b *mockBus) *scanner {
 	ap := &Autopilot{}
 	ap.shutdownCtx, ap.shutdownCtxCancel = context.WithCancel(context.Background())
 	return &scanner{

@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -61,26 +62,26 @@ func TestIPResolver(t *testing.T) {
 
 	// test lookup error
 	r.setNextErr(errors.New("unknown error"))
-	if _, err := ipr.lookup("example.com:1234"); !isErr(err, errors.New("unknown error")) {
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, errors.New("unknown error")) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test IO timeout - no cache entry
-	r.setNextErr(errIOTimeout)
-	if _, err := ipr.lookup("example.com:1234"); !isErr(err, errIOTimeout) {
+	r.setNextErr(ErrIOTimeout)
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, ErrIOTimeout) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test IO timeout - expired cache entry
 	ipr.cache["example.com:1234"] = ipCacheEntry{subnets: []string{"a"}}
-	r.setNextErr(errIOTimeout)
-	if _, err := ipr.lookup("example.com:1234"); !isErr(err, errIOTimeout) {
+	r.setNextErr(ErrIOTimeout)
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, ErrIOTimeout) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test IO timeout - live cache entry
 	ipr.cache["example.com:1234"] = ipCacheEntry{created: time.Now(), subnets: []string{"a"}}
-	r.setNextErr(errIOTimeout)
+	r.setNextErr(ErrIOTimeout)
 	if subnets, err := ipr.lookup("example.com:1234"); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if len(subnets) != 1 || subnets[0] != "a" {
@@ -89,19 +90,19 @@ func TestIPResolver(t *testing.T) {
 
 	// test too many addresses - more than two
 	r.setAddr("example.com", []net.IPAddr{{}, {}, {}})
-	if _, err := ipr.lookup("example.com:1234"); !isErr(err, errTooManyAddresses) {
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, errTooManyAddresses) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test too many addresses - two of the same type
 	r.setAddr("example.com", []net.IPAddr{{IP: net.IPv4(1, 2, 3, 4)}, {IP: net.IPv4(1, 2, 3, 4)}})
-	if _, err := ipr.lookup("example.com:1234"); !isErr(err, errTooManyAddresses) {
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, errTooManyAddresses) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// test invalid addresses
 	r.setAddr("example.com", []net.IPAddr{{IP: ipv4Localhost}, {IP: net.IP{127, 0, 0, 2}}})
-	if _, err := ipr.lookup("example.com:1234"); !isErr(err, errTooManyAddresses) {
+	if _, err := ipr.lookup("example.com:1234"); !utils.IsErr(err, errTooManyAddresses) {
 		t.Fatal("unexpected error", err)
 	}
 

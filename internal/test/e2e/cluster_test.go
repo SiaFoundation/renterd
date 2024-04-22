@@ -23,12 +23,10 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -166,8 +164,11 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, api.Host{}) {
 			t.Fatal("host wasn't set")
+		}
+		if hi.Host.Settings.Release == "" {
+			t.Fatal("release should be set")
 		}
 	}
 	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
@@ -188,7 +189,7 @@ func TestNewTestCluster(t *testing.T) {
 		if len(hi.Checks.UnusableReasons) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		}
-		if reflect.DeepEqual(hi.Host, hostdb.HostInfo{}) {
+		if reflect.DeepEqual(hi.Host, api.Host{}) {
 			t.Fatal("host wasn't set")
 		}
 		allHosts[hi.Host.PublicKey] = struct{}{}
@@ -408,8 +409,11 @@ func TestObjectEntries(t *testing.T) {
 		}
 		for _, entry := range got {
 			if !strings.HasSuffix(entry.Name, "/") {
-				if err := w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
+				buf := new(bytes.Buffer)
+				if err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
 					t.Fatal(err)
+				} else if buf.Len() != int(entry.Size) {
+					t.Fatal("unexpected", buf.Len(), entry.Size)
 				}
 			}
 		}
@@ -583,7 +587,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	for i := int64(0); i < 4; i++ {
 		offset := i * 32
 		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{Range: api.DownloadRange{Offset: offset, Length: 32}}))
+		tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: offset, Length: 32}}))
 		if !bytes.Equal(data[offset:offset+32], buffer.Bytes()) {
 			fmt.Println(data[offset : offset+32])
 			fmt.Println(buffer.Bytes())
@@ -607,7 +611,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 	// mine a block to get the revisions mined.
 	cluster.MineBlocks(1)
 
-	// check the revision height was updated.
+	// check the revision height and size were updated.
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		// fetch the contracts.
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
@@ -618,10 +622,21 @@ func TestUploadDownloadBasic(t *testing.T) {
 		for _, c := range contracts {
 			if c.RevisionHeight == 0 {
 				return errors.New("revision height should be > 0")
+			} else if c.Size != rhpv2.SectorSize {
+				return fmt.Errorf("size should be %v, got %v", rhpv2.SectorSize, c.Size)
 			}
 		}
 		return nil
 	})
+
+	// Check that stored data on hosts was updated
+	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+	tt.OK(err)
+	for _, host := range hosts {
+		if host.StoredData != rhpv2.SectorSize {
+			t.Fatalf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+		}
+	}
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
@@ -1098,7 +1113,7 @@ func TestParallelUpload(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	upload := func() error {
+	upload := func() {
 		t.Helper()
 		// prepare some data - make sure it's more than one sector
 		data := make([]byte, rhpv2.SectorSize)
@@ -1107,7 +1122,6 @@ func TestParallelUpload(t *testing.T) {
 		// upload the data
 		path := fmt.Sprintf("/dir/data_%v", hex.EncodeToString(data[:16]))
 		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
-		return nil
 	}
 
 	// Upload in parallel
@@ -1116,10 +1130,7 @@ func TestParallelUpload(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := upload(); err != nil {
-				t.Error(err)
-				return
-			}
+			upload()
 		}()
 	}
 	wg.Wait()
@@ -1441,9 +1452,7 @@ func TestWalletTransactions(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -1561,7 +1570,7 @@ func TestUploadPacking(t *testing.T) {
 			&buffer,
 			api.DefaultBucketName,
 			path,
-			api.DownloadObjectOptions{Range: api.DownloadRange{Offset: offset, Length: length}},
+			api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: offset, Length: length}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1697,9 +1706,7 @@ func TestWallet(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -1904,9 +1911,7 @@ func TestAlerts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.DebugLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
@@ -2066,6 +2071,9 @@ func TestMultipartUploads(t *testing.T) {
 	etag1 := putPart(1, 0, data1)
 	etag3 := putPart(3, len(data1)+len(data2), data3)
 	size := int64(len(data1) + len(data2) + len(data3))
+	expectedData := data1
+	expectedData = append(expectedData, data2...)
+	expectedData = append(expectedData, data3...)
 
 	// List parts
 	mup, err := b.MultipartUploadParts(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, 0, 0)
@@ -2107,7 +2115,7 @@ func TestMultipartUploads(t *testing.T) {
 			PartNumber: 3,
 			ETag:       etag3,
 		},
-	})
+	}, api.CompleteMultipartOptions{})
 	tt.OK(err)
 	if ui.ETag == "" {
 		t.Fatal("unexpected response:", ui)
@@ -2122,12 +2130,12 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal("unexpected size:", gor.Size)
 	} else if data, err := io.ReadAll(gor.Content); err != nil {
 		t.Fatal(err)
-	} else if expectedData := append(data1, append(data2, data3...)...); !bytes.Equal(data, expectedData) {
+	} else if !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
 	}
 
 	// Download a range of the object
-	gor, err = w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{Range: api.DownloadRange{Offset: 0, Length: 1}})
+	gor, err = w.GetObject(context.Background(), api.DefaultBucketName, objPath, api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: 0, Length: 1}})
 	tt.OK(err)
 	if gor.Range == nil || gor.Range.Offset != 0 || gor.Range.Length != 1 {
 		t.Fatal("unexpected range:", gor.Range)
@@ -2421,6 +2429,11 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	})
 	tt.OK(err)
 
+	// combine all parts data
+	expectedData := part1Data
+	expectedData = append(expectedData, part2Data...)
+	expectedData = append(expectedData, part3Data...)
+
 	// finish the upload
 	tt.OKAll(b.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, objPath, mpr.UploadID, []api.MultipartCompletedPart{
 		{
@@ -2435,12 +2448,11 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 			PartNumber: 3,
 			ETag:       resp3.ETag,
 		},
-	}))
+	}, api.CompleteMultipartOptions{}))
 
 	// download the object and verify its integrity
 	dst := new(bytes.Buffer)
 	tt.OK(w.DownloadObject(context.Background(), dst, api.DefaultBucketName, objPath, api.DownloadObjectOptions{}))
-	expectedData := append(part1Data, append(part2Data, part3Data...)...)
 	receivedData := dst.Bytes()
 	if len(receivedData) != len(expectedData) {
 		t.Fatalf("expected %v bytes, got %v", len(expectedData), len(receivedData))

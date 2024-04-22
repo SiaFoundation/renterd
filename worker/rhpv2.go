@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/crypto"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -217,8 +219,14 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 		return rhpv2.ContractRevision{}, nil, err
 	}
 
-	txn.Signatures = append(renterContractSignatures, hostSigs.ContractSignatures...)
-	signedTxnSet := append(resp.Parents, append(parents, txn)...)
+	txn.Signatures = make([]types.TransactionSignature, 0, len(renterContractSignatures)+len(hostSigs.ContractSignatures))
+	txn.Signatures = append(txn.Signatures, renterContractSignatures...)
+	txn.Signatures = append(txn.Signatures, hostSigs.ContractSignatures...)
+
+	signedTxnSet := make([]types.Transaction, 0, len(resp.Parents)+len(parents)+1)
+	signedTxnSet = append(signedTxnSet, resp.Parents...)
+	signedTxnSet = append(signedTxnSet, parents...)
+	signedTxnSet = append(signedTxnSet, txn)
 	return rhpv2.ContractRevision{
 		Revision: initRevision,
 		Signatures: [2]types.TransactionSignature{
@@ -277,7 +285,7 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
 	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-			return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 				// perform gouging checks
 				gc, err := GougingCheckerFromContext(ctx, false)
 				if err != nil {
@@ -333,7 +341,15 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 }
 
 func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
-	w.logger.Debugw(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
+	id := frand.Entropy128()
+	logger := w.logger.
+		With("id", hex.EncodeToString(id[:])).
+		With("hostKey", rev.HostKey()).
+		With("hostVersion", settings.Version).
+		With("fcid", rev.ID()).
+		With("revisionNumber", rev.Revision.RevisionNumber).
+		Named("deleteContractRoots")
+	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
 	if len(indices) == 0 {
@@ -374,9 +390,9 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 		if err = func() error {
 			var cost types.Currency
 			start := time.Now()
-			w.logger.Debugw(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
+			logger.Infow(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
 			defer func() {
-				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
+				logger.Infow(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
 			}()
 
 			numSectors := rev.NumSectors()
@@ -456,7 +472,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 				return err
 			} else if err := t.ReadResponse(&merkleResp, minMessageSize+responseSize); err != nil {
 				err := fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
-				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
+				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				return err
 			}
 
@@ -466,7 +482,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
 			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
 				err := fmt.Errorf("couldn't verify delete proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
-				w.logger.Debugw(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
+				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				t.WriteResponseErr(err)
 				return err
 			}
@@ -510,7 +526,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 
 func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return w.withRevisionV2(ctx, defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+		return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			gc, err := GougingCheckerFromContext(ctx, false)
 			if err != nil {
 				return err
@@ -629,8 +645,8 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	}()
 	defer func() {
 		close(done)
-		if ctx.Err() != nil {
-			err = ctx.Err()
+		if context.Cause(ctx) != nil {
+			err = context.Cause(ctx)
 		}
 	}()
 	t, err := rhpv2.NewRenterTransport(conn, hostKey)
@@ -641,7 +657,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withRevisionV2(ctx context.Context, lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
+func (w *worker) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
 	renterKey := w.deriveRenterKey(hk)
 
 	// execute lock RPC

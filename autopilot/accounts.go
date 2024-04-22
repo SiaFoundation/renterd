@@ -10,6 +10,7 @@ import (
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
@@ -103,7 +104,11 @@ func (a *accounts) refillWorkersAccountsLoop(ctx context.Context) {
 // until the previously launched goroutine returns.
 func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 	// fetch config
-	state := a.ap.State()
+	cfg, err := a.ap.Config(ctx)
+	if err != nil {
+		a.l.Errorw(fmt.Sprintf("failed to fetch config for refill: %v", err))
+		return
+	}
 
 	// fetch worker id
 	workerID, err := w.ID(ctx)
@@ -122,7 +127,7 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 	}
 
 	// fetch all contract set contracts
-	contractSetContracts, err := a.c.Contracts(ctx, api.ContractsOpts{ContractSet: state.cfg.Contracts.Set})
+	contractSetContracts, err := a.c.Contracts(ctx, api.ContractsOpts{ContractSet: cfg.Config.Contracts.Set})
 	if err != nil {
 		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
 		return
@@ -141,16 +146,20 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 			go func(contract api.ContractMetadata) {
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
-				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, workerID, contract)
+				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, contract)
 				if rerr != nil {
 					if rerr.Is(errMaxDriftExceeded) {
 						// register the alert if error is errMaxDriftExceeded
 						a.ap.RegisterAlert(ctx, newAccountRefillAlert(accountID, contract, *rerr))
 					}
-					a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+					if _, inSet := inContractSet[contract.ID]; inSet {
+						a.l.Errorw(rerr.err.Error(), rerr.keysAndValues...)
+					} else {
+						a.l.Debugw(rerr.err.Error(), rerr.keysAndValues...)
+					}
 				} else {
 					// dismiss alerts on success
-					a.ap.DismissAlert(ctx, alertIDForAccount(alertAccountRefillID, accountID))
+					a.ap.DismissAlert(ctx, alerts.IDForAccount(alertAccountRefillID, accountID))
 
 					// log success
 					if refilled {
@@ -184,7 +193,7 @@ func (err *refillError) Is(target error) bool {
 	return errors.Is(err.err, target)
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, workerID string, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
 	wrapErr := func(err error, keysAndValues ...interface{}) *refillError {
 		if err == nil {
 			return nil

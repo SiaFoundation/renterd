@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
@@ -97,7 +99,7 @@ func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
 	return time.Duration(totalNumMS) * time.Millisecond
 }
 
-func (m *migrator) tryPerformMigrations(ctx context.Context, wp *workerPool) {
+func (m *migrator) tryPerformMigrations(wp *workerPool) {
 	m.mu.Lock()
 	if m.migrating || m.ap.isStopped() {
 		m.mu.Unlock()
@@ -153,20 +155,28 @@ func (m *migrator) performMigrations(p *workerPool) {
 						start := time.Now()
 						res, err := j.execute(ctx, w)
 						m.statsSlabMigrationSpeedMS.Track(float64(time.Since(start).Milliseconds()))
-
 						if err != nil {
 							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
-							skipAlert := isErr(err, api.ErrSlabNotFound)
+							skipAlert := utils.IsErr(err, api.ErrSlabNotFound)
 							if !skipAlert {
-								if res.SurchargeApplied {
-									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, err))
+								// fetch all object IDs for the slab we failed to migrate
+								var objectIds map[string][]string
+								if res, err := m.objectIDsForSlabKey(ctx, j.Key); err != nil {
+									m.logger.Errorf("failed to fetch object ids for slab key; %w", err)
 								} else {
-									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, err))
+									objectIds = res
+								}
+
+								// register the alert
+								if res.SurchargeApplied {
+									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, objectIds, err))
+								} else {
+									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, objectIds, err))
 								}
 							}
 						} else {
 							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
-							m.ap.DismissAlert(ctx, alertIDForSlab(alertMigrationID, j.Key))
+							m.ap.DismissAlert(ctx, alerts.IDForSlab(alertMigrationID, j.Key))
 							if res.SurchargeApplied {
 								// this alert confirms the user his gouging
 								// settings are working, it will be dismissed
@@ -191,7 +201,12 @@ func (m *migrator) performMigrations(p *workerPool) {
 OUTER:
 	for {
 		// fetch currently configured set
-		set := m.ap.State().cfg.Contracts.Set
+		autopilot, err := m.ap.Config(m.ap.shutdownCtx)
+		if err != nil {
+			m.logger.Errorf("failed to fetch autopilot config: %w", err)
+			return
+		}
+		set := autopilot.Config.Contracts.Set
 		if set == "" {
 			m.logger.Error("could not perform migrations, no contract set configured")
 			return
@@ -204,7 +219,7 @@ OUTER:
 			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
 			return
 		}
-		m.logger.Debugf("recomputed slab health in %v", time.Since(start))
+		m.logger.Infof("recomputed slab health in %v", time.Since(start))
 
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, set, migratorBatchSize)
@@ -212,7 +227,7 @@ OUTER:
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
 		}
-		m.logger.Debugf("%d potential slabs fetched for migration", len(toMigrateNew))
+		m.logger.Infof("%d potential slabs fetched for migration", len(toMigrateNew))
 
 		// merge toMigrateNew with toMigrate
 		// NOTE: when merging, we remove all slabs from toMigrate that don't
@@ -247,7 +262,7 @@ OUTER:
 		migrateNewMap = nil // free map
 
 		// log the updated list of slabs to migrate
-		m.logger.Debugf("%d slabs to migrate", len(toMigrate))
+		m.logger.Infof("%d slabs to migrate", len(toMigrate))
 
 		// register an alert to notify users about ongoing migrations.
 		if len(toMigrate) > 0 {
@@ -272,4 +287,35 @@ OUTER:
 
 		return
 	}
+}
+
+func (m *migrator) objectIDsForSlabKey(ctx context.Context, key object.EncryptionKey) (map[string][]string, error) {
+	// fetch all buckets
+	//
+	// NOTE:at the time of writing the bus does not support fetching objects by
+	// slab key across all buckets at once, therefor we have to list all buckets
+	// and loop over them, revisit on the next major release
+	buckets, err := m.ap.bus.ListBuckets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w; failed to list buckets", err)
+	}
+
+	// fetch all objects per bucket
+	idsPerBucket := make(map[string][]string)
+	for _, bucket := range buckets {
+		objects, err := m.ap.bus.ObjectsBySlabKey(ctx, bucket.Name, key)
+		if err != nil {
+			m.logger.Errorf("failed to fetch objects for slab key in bucket %v; %w", bucket, err)
+			continue
+		} else if len(objects) == 0 {
+			continue
+		}
+
+		idsPerBucket[bucket.Name] = make([]string, len(objects))
+		for i, object := range objects {
+			idsPerBucket[bucket.Name][i] = object.Name
+		}
+	}
+
+	return idsPerBucket, nil
 }

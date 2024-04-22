@@ -204,7 +204,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// If there is still data left, create a new buffer.
 	if len(data) > 0 {
 		var sb *SlabBuffer
-		err = mgr.s.retryTransaction(func(tx *gorm.DB) error {
+		err = mgr.s.retryTransaction(ctx, func(tx *gorm.DB) error {
 			sb, err = createSlabBuffer(tx, contractSet, mgr.dir, minShards, totalShards)
 			return err
 		})

@@ -23,6 +23,147 @@ API documentation can be found [here](https://api.sia.tech/renterd).<br>
 Setup guides are available on our [website](https://docs.sia.tech/renting/setting-up-renterd).<br>
 A project roadmap is available on [GitHub](https://github.com/orgs/SiaFoundation/projects/5).
 
+## Backups
+
+This section provides a step-by-step guide covering the procedures for creating
+and restoring backups for `renterd`. Regularly backing up your renter's metadata
+and verifying its restorability are essential practices to ensure your data's
+integrity and availability in the event of a disaster scenario. Ensure backups
+are stored on a different machine than the one running `renterd` to avoid data
+loss in case of hardware failure.
+
+---
+**IMPORTANT NOTE**
+
+It is important to note that having a backup is not enough to ensure the data
+can be recovered from the network. The renter has to be online enough of the
+time to ensure data gets migrated away from hosts that went offline.
+
+---
+
+### Creating a backup
+
+#### Step 1: shut down renter
+
+It's strongly recommended to shut down the renter before creating a backup to
+ensure data consistency. This precaution addresses the "upload packing" feature
+(enabled by default), which relies on on-disk buffers. To capture a consistent
+state between the database and on-disk data, shut down `renterd` first. Even if
+the feature is not enabled, it is best to shut down the renter before taking a
+backup to be on the safe side and ensure consistency.
+
+#### Step 2: backing up the database
+
+`renterd` uses two SQL databases: a main database for contracts, host metadata
+and object metadata essential for data retrieval, and a metrics database for UI
+features. Both are critical but prioritize the main database for file recovery.
+
+Depending on how the renter is configured, the databases are either SQLite
+(default) or MySQL databases. By default, the SQLite databases are called
+`db.sqlite` and `metrics.sqlite` and are located in a folder called `db`, right
+in the renter's root directory.
+
+**SQLite**
+
+Use the `.backup` command to create a backup of the SQLite databases.
+
+```bash
+sqlite3 db.sqlite ".backup 'db.bkp'"
+sqlite3 metrics.sqlite ".backup 'metrics.bkp'"
+```
+
+There should only be two files in the `db` folder, if you encounter write-ahead
+log files or index files (usually named `-wal` or `-shm`) it indicates the
+renter was not shut down gracefully. In that case it's best to restart the
+renter and shut it down again.
+
+**MySQL**
+
+Use the `mysqldump` command to create a backup of the MySQL databases. It's a
+utility provided by MySQL to backup or transfer a MySQL database and it's
+usually installed alongside the MySQL cient tools. Replace placeholders with
+actual user and password.
+
+```bash
+mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd > renterd_bkp.sql
+mysqldump -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics > renterd_metrics_bkp.sql
+```
+
+#### Step 3: backing up partial slabs
+
+If "upload packing" is enabled, back up the `partial_slabs` folder located in
+the renter's root directory. These files contain data that has not been uploaded
+to the network yet, losing these files means an immediate loss of your data.
+
+```bash
+tar -cvf partial_slabs.tar partial_slabs/
+```
+
+### Restoring from a backup
+
+If the goal is to install `renterd` from a backup on a new machine, the easiest
+way is to do a fresh `renterd` install and then overwrite the empty database
+with the backup. Use the same `RENTERD_SEED` as the original installation.
+
+#### Step 1: shutdown renter
+
+Same as before we advise to shut down the renter before reinstating a backup to
+ensure consistency. It's a good idea to backup the database right before trying
+to restore a backup to be safe and have a way out in case overwriting the
+database renders it corrupt somehow.
+
+#### Step 2: restore the database backup
+
+**SQLite**
+
+For SQLite we can reinstate the database by replacing both `.sqlite` files with
+our backups. Make sure to rename them to their original filename `db.sqlite` and
+`metrics.sqlite`. These filenames are configurable, so make sure you match the
+configured values.
+
+**MySQL**
+
+Depending on when the backup was taken its schema might be out of date. To
+maximize the chance the schema migrations go smoothly, it's advisable to
+recreate the databases before importing the backup. Take a backup before doing
+this.
+
+```bash
+# log in to MySQL shell
+mysql -u [RENTERD_DB_USER] -p
+
+# recreate renterd database
+DROP DATABASE IF EXISTS renterd;
+CREATE DATABASE renterd;
+
+# recreate renterd_metrics database
+DROP DATABASE IF EXISTS renterd_metrics;
+CREATE DATABASE renterd_metrics;
+```
+
+The backups can then be imported using the following commands:
+
+```
+cat renterd_bkp.sql | mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd
+cat renterd_metrics_bkp.sql | mysql -u [RENTERD_DB_USER] --password=[RENTERD_DB_PASSWORD] renterd_metrics
+```
+
+#### Step 3: restore the partial slabs
+
+If applicable, remove the contents of the `partial_slabs` directory and replace it with your backup.
+
+```bash
+rm -rf partial_slabs
+tar -xvf partial_slabs.tar
+```
+
+#### Step 4: start the renter
+
+After starting the renter it is possible it has to run through migrations to its
+database schema. Depending on when the backup was taken, this might take some
+time. If we restored the backup on a fresh `renterd` install, it will take some
+time for consensus to sync.
+
 ## Docker Support
 
 `renterd` includes a `Dockerfile` which can be used for building and running
@@ -250,7 +391,6 @@ updated using the settings API:
 	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TiB
 	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
 	"minAccountExpiry": 86400000000000,                           // 1 day
-	"minMaxCollateral": "10000000000000000000000000",             // at least up to 10 SC per contract
 	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
 	"minPriceTableValidity": 300000000000                         // 5 minutes
 }

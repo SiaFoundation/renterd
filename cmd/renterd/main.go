@@ -3,14 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -24,14 +27,17 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
-	"go.sia.tech/renterd/s3"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
+	"golang.org/x/sys/cpu"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 const (
@@ -64,18 +70,15 @@ Usage:
 
 var (
 	cfg = config.Config{
-		Directory: ".",
-		Seed:      os.Getenv("RENTERD_SEED"),
+		Directory:     ".",
+		Seed:          os.Getenv("RENTERD_SEED"),
+		AutoOpenWebUI: true,
 		HTTP: config.HTTP{
 			Address:  build.DefaultAPIAddress,
 			Password: os.Getenv("RENTERD_API_PASSWORD"),
 		},
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
-			Log: config.DatabaseLog{
-				IgnoreRecordNotFoundError: true,
-				SlowThreshold:             100 * time.Millisecond,
-			},
 			MySQL: config.MySQL{
 				Database:        "renterd",
 				User:            "renterd",
@@ -83,7 +86,23 @@ var (
 			},
 		},
 		Log: config.Log{
-			Level: "warn",
+			Path:  "", // deprecated. included for compatibility.
+			Level: "",
+			File: config.LogFile{
+				Enabled: true,
+				Format:  "json",
+				Path:    os.Getenv("RENTERD_LOG_FILE"),
+			},
+			StdOut: config.StdOut{
+				Enabled:    true,
+				Format:     "human",
+				EnableANSI: runtime.GOOS != "windows",
+			},
+			Database: config.DatabaseLog{
+				Enabled:                   true,
+				IgnoreRecordNotFoundError: true,
+				SlowThreshold:             100 * time.Millisecond,
+			},
 		},
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
@@ -127,17 +146,11 @@ var (
 			KeypairsV4:  nil,
 		},
 	}
-	seed types.PrivateKey
+	disableStdin bool
 )
 
-func check(context string, err error) {
-	if err != nil {
-		log.Fatalf("%v: %v", context, err)
-	}
-}
-
 func mustLoadAPIPassword() {
-	if len(cfg.HTTP.Password) != 0 {
+	if cfg.HTTP.Password != "" {
 		return
 	}
 
@@ -148,25 +161,6 @@ func mustLoadAPIPassword() {
 		log.Fatal(err)
 	}
 	cfg.HTTP.Password = string(pw)
-}
-
-func getSeed() types.PrivateKey {
-	if seed == nil {
-		phrase := cfg.Seed
-		if phrase == "" {
-			fmt.Print("Enter seed: ")
-			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-			check("Could not read seed phrase:", err)
-			fmt.Println()
-			phrase = string(pw)
-		}
-		var rawSeed [32]byte
-		if err := wallet.SeedFromPhrase(&rawSeed, phrase); err != nil {
-			panic(err)
-		}
-		seed = wallet.KeyFromSeed(&rawSeed, 0)
-	}
-	return seed
 }
 
 func mustParseWorkers(workers, password string) {
@@ -190,7 +184,7 @@ func mustParseWorkers(workers, password string) {
 // loaded.
 func tryLoadConfig() {
 	configPath := "renterd.yml"
-	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
 		configPath = str
 	}
 
@@ -224,7 +218,7 @@ func parseEnvVar(s string, v interface{}) {
 
 func listenTCP(logger *zap.Logger, addr string) (net.Listener, error) {
 	l, err := net.Listen("tcp", addr)
-	if err != nil && strings.Contains(err.Error(), "no such host") && strings.Contains(addr, "localhost") {
+	if utils.IsErr(err, errors.New("no such host")) && strings.Contains(addr, "localhost") {
 		// fall back to 127.0.0.1 if 'localhost' doesn't work
 		_, port, err := net.SplitHostPort(addr)
 		if err != nil {
@@ -246,21 +240,36 @@ func main() {
 	// overwrite anything set in the config file.
 	tryLoadConfig()
 
+	// deprecated - these go first so that they can be overwritten by the non-deprecated flags
+	flag.StringVar(&cfg.Log.Database.Level, "db.logger.logLevel", cfg.Log.Database.Level, "(deprecated) Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
+	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "(deprecated) Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
+	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "(deprecated) Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
+	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "(deprecated) Path to directory for logs (overrides with RENTERD_LOG_PATH)")
+
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
-	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "Path for logs (overrides with RENTERD_LOG_PATH)")
+	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
+	flag.BoolVar(&cfg.AutoOpenWebUI, "openui", cfg.AutoOpenWebUI, "automatically open the web UI on startup")
+
+	// logger
+	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
+	flag.BoolVar(&cfg.Log.File.Enabled, "log.file.enabled", cfg.Log.File.Enabled, "Enables logging to disk. Defaults to 'true'. (overrides with RENTERD_LOG_FILE_ENABLED)")
+	flag.StringVar(&cfg.Log.File.Format, "log.file.format", cfg.Log.File.Format, "Format of log file (json|human). Defaults to 'json' (overrides with RENTERD_LOG_FILE_FORMAT)")
+	flag.StringVar(&cfg.Log.File.Path, "log.file.path", cfg.Log.File.Path, "Path of log file. Defaults to 'renterd.log' within the renterd directory. (overrides with RENTERD_LOG_FILE_PATH)")
+	flag.BoolVar(&cfg.Log.StdOut.Enabled, "log.stdout.enabled", cfg.Log.StdOut.Enabled, "Enables logging to stdout. Defaults to 'true'. (overrides with RENTERD_LOG_STDOUT_ENABLED)")
+	flag.StringVar(&cfg.Log.StdOut.Format, "log.stdout.format", cfg.Log.StdOut.Format, "Format of log output (json|human). Defaults to 'human' (overrides with RENTERD_LOG_STDOUT_FORMAT)")
+	flag.BoolVar(&cfg.Log.StdOut.EnableANSI, "log.stdout.enableANSI", cfg.Log.StdOut.EnableANSI, "Enables ANSI color codes in log output. Defaults to 'true' on non-Windows systems. (overrides with RENTERD_LOG_STDOUT_ENABLE_ANSI)")
+	flag.BoolVar(&cfg.Log.Database.Enabled, "log.database.enabled", cfg.Log.Database.Enabled, "Enable logging database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_ENABLED)")
+	flag.StringVar(&cfg.Log.Database.Level, "log.database.level", cfg.Log.Database.Level, "Logger level for database queries (info|warn|error). Defaults to 'warn' (overrides with RENTERD_LOG_LEVEL and RENTERD_LOG_DATABASE_LEVEL)")
+	flag.BoolVar(&cfg.Log.Database.IgnoreRecordNotFoundError, "log.database.ignoreRecordNotFoundError", cfg.Log.Database.IgnoreRecordNotFoundError, "Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR)")
+	flag.DurationVar(&cfg.Log.Database.SlowThreshold, "log.database.slowThreshold", cfg.Log.Database.SlowThreshold, "Threshold for slow queries in logger. Defaults to 100ms (overrides with RENTERD_LOG_DATABASE_SLOW_THRESHOLD)")
 
 	// db
 	flag.StringVar(&cfg.Database.MySQL.URI, "db.uri", cfg.Database.MySQL.URI, "Database URI for the bus (overrides with RENTERD_DB_URI)")
 	flag.StringVar(&cfg.Database.MySQL.User, "db.user", cfg.Database.MySQL.User, "Database username for the bus (overrides with RENTERD_DB_USER)")
 	flag.StringVar(&cfg.Database.MySQL.Database, "db.name", cfg.Database.MySQL.Database, "Database name for the bus (overrides with RENTERD_DB_NAME)")
 	flag.StringVar(&cfg.Database.MySQL.MetricsDatabase, "db.metricsName", cfg.Database.MySQL.MetricsDatabase, "Database for metrics (overrides with RENTERD_DB_METRICS_NAME)")
-
-	// db logger
-	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
-	flag.StringVar(&cfg.Log.Level, "db.logger.logLevel", cfg.Log.Level, "Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
-	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
 
 	// bus
 	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
@@ -369,6 +378,42 @@ func main() {
 	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
 
+	parseEnvVar("RENTERD_LOG_LEVEL", &cfg.Log.Level)
+	parseEnvVar("RENTERD_LOG_FILE_ENABLED", &cfg.Log.File.Enabled)
+	parseEnvVar("RENTERD_LOG_FILE_FORMAT", &cfg.Log.File.Format)
+	parseEnvVar("RENTERD_LOG_FILE_PATH", &cfg.Log.File.Path)
+	parseEnvVar("RENTERD_LOG_STDOUT_ENABLED", &cfg.Log.StdOut.Enabled)
+	parseEnvVar("RENTERD_LOG_STDOUT_FORMAT", &cfg.Log.StdOut.Format)
+	parseEnvVar("RENTERD_LOG_STDOUT_ENABLE_ANSI", &cfg.Log.StdOut.EnableANSI)
+	parseEnvVar("RENTERD_LOG_DATABASE_ENABLED", &cfg.Log.Database.Enabled)
+	parseEnvVar("RENTERD_LOG_DATABASE_LEVEL", &cfg.Log.Database.Level)
+	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
+	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
+
+	// check that the API password is set
+	if cfg.HTTP.Password == "" {
+		if disableStdin {
+			stdoutFatalError("API password must be set via environment variable or config file when --env flag is set")
+			return
+		}
+		setAPIPassword()
+	}
+
+	// check that the seed is set
+	if cfg.Seed == "" {
+		if disableStdin {
+			stdoutFatalError("Seed must be set via environment variable or config file when --env flag is set")
+			return
+		}
+		setSeedPhrase()
+	}
+
+	var rawSeed [32]byte
+	if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
+		log.Fatal("failed to load wallet", zap.Error(err))
+	}
+	seed := wallet.KeyFromSeed(&rawSeed, 0)
+
 	if cfg.S3.Enabled {
 		var keyPairsV4 string
 		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
@@ -391,7 +436,6 @@ func main() {
 		Bus:                 cfg.Bus,
 		Network:             network,
 		SlabPruningInterval: time.Hour,
-		SlabPruningCooldown: 30 * time.Second,
 	}
 	// Init db dialector
 	if cfg.Database.MySQL.URI != "" {
@@ -409,37 +453,57 @@ func main() {
 		)
 	}
 
+	// Log level for db
+	lvlStr := cfg.Log.Level
+	if cfg.Log.Database.Level != "" {
+		lvlStr = cfg.Log.Database.Level
+	}
 	var level logger.LogLevel
-	switch strings.ToLower(cfg.Log.Level) {
-	case "silent":
-		level = logger.Silent
+	switch strings.ToLower(lvlStr) {
+	case "":
+		level = logger.Warn // default to 'warn' if not set
 	case "error":
 		level = logger.Error
 	case "warn":
 		level = logger.Warn
 	case "info":
 		level = logger.Info
+	case "debug":
+		level = logger.Info
 	default:
 		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
 	}
+	if !cfg.Log.Database.Enabled {
+		level = logger.Silent
+	}
 
 	// Create logger.
-	renterdLog := filepath.Join(cfg.Directory, "renterd.log")
-	if cfg.Log.Path != "" {
-		renterdLog = cfg.Log.Path
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info" // default to 'info' if not set
 	}
-	logger, closeFn, err := node.NewLogger(renterdLog)
+	logger, closeFn, err := NewLogger(cfg.Directory, cfg.Log)
 	if err != nil {
 		log.Fatalln("failed to create logger:", err)
 	}
 	defer closeFn(context.Background())
 
 	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", build.NetworkName()), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
+	if runtime.GOARCH == "amd64" && !cpu.X86.HasAVX2 {
+		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
+	}
 
-	busCfg.DBLoggerConfig = stores.LoggerConfig{
+	// configure database logger
+	dbLogCfg := cfg.Log.Database
+	if cfg.Database.Log != (config.DatabaseLog{}) {
+		dbLogCfg = cfg.Database.Log
+	}
+	busCfg.DBLogger = zapgorm2.Logger{
+		ZapLogger:                 logger.Named("SQL"),
 		LogLevel:                  level,
-		IgnoreRecordNotFoundError: cfg.Database.Log.IgnoreRecordNotFoundError,
-		SlowThreshold:             cfg.Database.Log.SlowThreshold,
+		SlowThreshold:             dbLogCfg.SlowThreshold,
+		SkipCallerLookup:          false,
+		IgnoreRecordNotFoundError: dbLogCfg.IgnoreRecordNotFoundError,
+		Context:                   nil,
 	}
 
 	type shutdownFn struct {
@@ -483,7 +547,7 @@ func main() {
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, err := node.NewBus(busCfg, cfg.Directory, getSeed(), logger)
+		b, fn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
@@ -508,7 +572,10 @@ func main() {
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, fn, err := node.NewWorker(cfg.Worker, bc, getSeed(), logger)
+			w, s3Handler, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
+				AuthDisabled:      cfg.S3.DisableAuth,
+				HostBucketEnabled: cfg.S3.HostBucketEnabled,
+			}, bc, seed, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
@@ -523,13 +590,6 @@ func main() {
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
-				s3Handler, err := s3.New(bc, wc, logger.Sugar(), s3.Opts{
-					AuthDisabled:      cfg.S3.DisableAuth,
-					HostBucketEnabled: cfg.S3.HostBucketEnabled,
-				})
-				if err != nil {
-					log.Fatal("failed to create s3 client", err)
-				}
 				s3Srv = &http.Server{
 					Addr:    cfg.S3.Address,
 					Handler: s3Handler,
@@ -624,6 +684,16 @@ func main() {
 		}
 	}
 
+	if cfg.AutoOpenWebUI {
+		time.Sleep(time.Millisecond) // give the web server a chance to start
+		_, port, err := net.SplitHostPort(l.Addr().String())
+		if err != nil {
+			logger.Debug("failed to parse API address", zap.Error(err))
+		} else if err := openBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
+			logger.Debug("failed to open browser", zap.Error(err))
+		}
+	}
+
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	select {
@@ -654,6 +724,19 @@ func main() {
 	}
 	logger.Info("Shutdown complete")
 	os.Exit(exitCode)
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform %q", runtime.GOOS)
+	}
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {

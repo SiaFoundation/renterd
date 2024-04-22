@@ -20,26 +20,31 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
 	"go.sia.tech/siad/sync"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/blake2b"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+type Bus interface {
+	worker.Bus
+	s3.Bus
+}
 
 type BusConfig struct {
 	config.Bus
 	Network             *consensus.Network
 	Miner               *Miner
-	DBLoggerConfig      stores.LoggerConfig
+	DBLogger            logger.Interface
 	DBDialector         gorm.Dialector
 	DBMetricsDialector  gorm.Dialector
 	SlabPruningInterval time.Duration
-	SlabPruningCooldown time.Duration
 }
 
 type AutopilotConfig struct {
@@ -106,7 +111,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 
 	alertsMgr := alerts.NewManager()
-	sqlLogger := stores.NewSQLLogger(l.Named("db"), cfg.DBLoggerConfig)
 	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
@@ -121,7 +125,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		WalletAddress:                 walletAddr,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        l.Sugar(),
-		GormLogger:                    sqlLogger,
+		GormLogger:                    cfg.DBLogger,
 		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
 	})
 	if err != nil {
@@ -137,11 +141,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 	cancelSubscribe := make(chan struct{})
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
 		subscribeErr := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe)
 		if errors.Is(subscribeErr, modules.ErrInvalidConsensusChangeID) {
 			l.Warn("Invalid consensus change ID detected - resyncing consensus")
 			// Reset the consensus state within the database and rescan.
-			if err := sqlStore.ResetConsensusSubscription(); err != nil {
+			if err := sqlStore.ResetConsensusSubscription(ctx); err != nil {
 				l.Fatal(fmt.Sprintf("Failed to reset consensus subscription of SQLStore: %v", err))
 				return
 			}
@@ -177,11 +184,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 
 	shutdownFn := func(ctx context.Context) error {
+		close(cancelSubscribe)
 		return errors.Join(
-			func() error {
-				close(cancelSubscribe)
-				return nil
-			}(),
 			g.Close(),
 			cs.Close(),
 			tp.Close(),
@@ -192,14 +196,18 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg config.Worker, b worker.Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, l)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-
-	return w.Handler(), w.Shutdown, nil
+	s3Handler, err := s3.New(b, w, l.Named("s3").Sugar(), s3Opts)
+	if err != nil {
+		err = errors.Join(err, w.Shutdown(context.Background()))
+		return nil, nil, nil, fmt.Errorf("failed to create s3 handler: %w", err)
+	}
+	return w.Handler(), s3Handler, w.Shutdown, nil
 }
 
 func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
@@ -208,44 +216,4 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Work
 		return nil, nil, nil, err
 	}
 	return ap.Handler(), ap.Run, ap.Shutdown, nil
-}
-
-func NewLogger(path string) (*zap.Logger, func(context.Context) error, error) {
-	writer, closeFn, err := zap.Open(path)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// console
-	config := zap.NewProductionEncoderConfig()
-	config.EncodeTime = zapcore.RFC3339TimeEncoder
-	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	config.StacktraceKey = ""
-	consoleEncoder := zapcore.NewConsoleEncoder(config)
-
-	// file
-	config = zap.NewProductionEncoderConfig()
-	config.EncodeTime = zapcore.RFC3339TimeEncoder
-	config.CallerKey = ""     // hide
-	config.StacktraceKey = "" // hide
-	config.NameKey = "component"
-	config.TimeKey = "date"
-	fileEncoder := zapcore.NewJSONEncoder(config)
-
-	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, writer, zapcore.DebugLevel),
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel),
-	)
-
-	logger := zap.New(
-		core,
-		zap.AddCaller(),
-		zap.AddStacktrace(zapcore.ErrorLevel),
-	)
-
-	return logger, func(_ context.Context) error {
-		_ = logger.Sync() // ignore Error
-		closeFn()
-		return nil
-	}, nil
 }

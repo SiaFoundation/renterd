@@ -112,7 +112,7 @@ func (c *Client) SearchObjects(ctx context.Context, bucket string, opts api.Sear
 }
 
 func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string, force bool) (err error) {
-	err = c.c.POST("/objects/rename", api.ObjectsRenameRequest{
+	err = c.c.WithContext(ctx).POST("/objects/rename", api.ObjectsRenameRequest{
 		Bucket: bucket,
 		Force:  force,
 		From:   from,

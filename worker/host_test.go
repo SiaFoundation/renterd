@@ -13,7 +13,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
@@ -22,7 +21,8 @@ type (
 	testHost struct {
 		*hostMock
 		*contractMock
-		hptFn func() hostdb.HostPriceTable
+		hptFn       func() api.HostPriceTable
+		uploadDelay time.Duration
 	}
 
 	testHostManager struct {
@@ -57,7 +57,7 @@ func newTestHost(h *hostMock, c *contractMock) *testHost {
 	return newTestHostCustom(h, c, newTestHostPriceTable)
 }
 
-func newTestHostCustom(h *hostMock, c *contractMock, hptFn func() hostdb.HostPriceTable) *testHost {
+func newTestHostCustom(h *hostMock, c *contractMock, hptFn func() api.HostPriceTable) *testHost {
 	return &testHost{
 		hostMock:     h,
 		contractMock: c,
@@ -65,11 +65,11 @@ func newTestHostCustom(h *hostMock, c *contractMock, hptFn func() hostdb.HostPri
 	}
 }
 
-func newTestHostPriceTable() hostdb.HostPriceTable {
+func newTestHostPriceTable() api.HostPriceTable {
 	var uid rhpv3.SettingsID
 	frand.Read(uid[:])
 
-	return hostdb.HostPriceTable{
+	return api.HostPriceTable{
 		HostPriceTable: rhpv3.HostPriceTable{UID: uid, HostBlockHeight: 100, Validity: time.Minute},
 		Expiry:         time.Now().Add(time.Minute),
 	}
@@ -92,7 +92,14 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 }
 
 func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
-	h.AddSector(sector)
+	h.AddSector(sectorRoot, sector)
+	if h.uploadDelay > 0 {
+		select {
+		case <-time.After(h.uploadDelay):
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
+	}
 	return nil
 }
 
@@ -103,7 +110,7 @@ func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 	return rev, nil
 }
 
-func (h *testHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hostdb.HostPriceTable, error) {
+func (h *testHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, error) {
 	return h.hptFn(), nil
 }
 

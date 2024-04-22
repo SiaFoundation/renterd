@@ -81,16 +81,14 @@ func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
 func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
 	c.c.Custom("HEAD", fmt.Sprintf("/objects/%s", path), nil, nil)
 
-	if strings.HasSuffix(path, "/") {
-		return nil, errors.New("the given path is a directory, HEAD can only be performed on objects")
-	}
-
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
+	opts.Apply(values)
+	path = api.ObjectPathEscape(path)
 	path += "?" + values.Encode()
 
 	// TODO: support HEAD in jape client
-	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), http.NoBody)
 	if err != nil {
 		panic(err)
 	}
@@ -102,9 +100,13 @@ func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.H
 		return nil, err
 	}
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		err, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, errors.New(string(err))
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			return nil, api.ErrObjectNotFound
+		default:
+			return nil, errors.New(http.StatusText(resp.StatusCode))
+		}
 	}
 
 	head, err := parseObjectResponseHeaders(resp.Header)
@@ -273,7 +275,7 @@ func (c *Client) object(ctx context.Context, bucket, path string, opts api.Downl
 	path += "?" + values.Encode()
 
 	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, path), http.NoBody)
 	if err != nil {
 		panic(err)
 	}
@@ -301,9 +303,9 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 	}
 
 	// parse range
-	var r *api.DownloadRange
+	var r *api.ContentRange
 	if cr := header.Get("Content-Range"); cr != "" {
-		dr, err := api.ParseDownloadRange(cr)
+		dr, err := api.ParseContentRange(cr)
 		if err != nil {
 			return api.HeadObjectResponse{}, err
 		}
@@ -323,9 +325,14 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 		}
 	}
 
+	modTime, err := time.Parse(http.TimeFormat, header.Get("Last-Modified"))
+	if err != nil {
+		return api.HeadObjectResponse{}, fmt.Errorf("failed to parse Last-Modified header: %w", err)
+	}
 	return api.HeadObjectResponse{
 		ContentType:  header.Get("Content-Type"),
-		LastModified: header.Get("Last-Modified"),
+		Etag:         trimEtag(header.Get("ETag")),
+		LastModified: api.TimeRFC3339(modTime),
 		Range:        r,
 		Size:         size,
 		Metadata:     api.ExtractObjectUserMetadataFrom(headers),
@@ -346,4 +353,9 @@ func sizeFromSeeker(r io.Reader) (int64, error) {
 		return 0, err
 	}
 	return size, nil
+}
+
+func trimEtag(etag string) string {
+	etag = strings.TrimPrefix(etag, "\"")
+	return strings.TrimSuffix(etag, "\"")
 }

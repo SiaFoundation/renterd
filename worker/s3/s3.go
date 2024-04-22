@@ -23,7 +23,7 @@ type Opts struct {
 	HostBucketEnabled bool
 }
 
-type bus interface {
+type Bus interface {
 	Bucket(ctx context.Context, bucketName string) (api.Bucket, error)
 	CreateBucket(ctx context.Context, bucketName string, opts api.CreateBucketOptions) error
 	DeleteBucket(ctx context.Context, bucketName string) error
@@ -36,7 +36,7 @@ type bus interface {
 	Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.ObjectsResponse, err error)
 
 	AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
-	CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart) (_ api.MultipartCompleteResponse, err error)
+	CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
 	CreateMultipartUpload(ctx context.Context, bucket, path string, opts api.CreateMultipartOptions) (api.MultipartCreateResponse, error)
 	MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
@@ -46,8 +46,9 @@ type bus interface {
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
-type worker interface {
+type Worker interface {
 	GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error)
+	HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error)
 	UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error)
 	UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error)
 }
@@ -60,12 +61,14 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 		l.l.Warn(fmt.Sprint(v...))
 	case gofakes3.LogInfo:
 		l.l.Info(fmt.Sprint(v...))
+	case gofakes3.LogDebug:
+		l.l.Debug(fmt.Sprint(v...))
 	default:
 		panic("unknown level")
 	}
 }
 
-func New(b bus, w worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
+func New(b Bus, w Worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
 	namedLogger := logger.Named("s3")
 	s3Backend := &s3{
 		b:      b,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -22,7 +23,6 @@ func TestGouging(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  int(test.AutopilotConfig.Contracts.Amount),
 		logger: newTestLoggerCustom(zapcore.ErrorLevel),
 	})
 	defer cluster.Shutdown()
@@ -31,6 +31,13 @@ func TestGouging(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
+
+	// mine enough blocks for the current period to become > period
+	cluster.MineBlocks(int(cfg.Period) * 2)
+
+	// add hosts
+	tt.OKAll(cluster.AddHostsBlocking(int(test.AutopilotConfig.Contracts.Amount)))
+	cluster.WaitForAccounts()
 
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
@@ -90,25 +97,63 @@ func TestGouging(t *testing.T) {
 	// again, this is necessary for the host to be considered price gouging
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
-	// download the data - should fail
-	buffer.Reset()
-	if err := w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}); err == nil {
-		t.Fatal("expected download to fail", err)
-	}
+	// download the data - should still work
+	tt.OKAll(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 
 	// try optimising gouging settings
 	resp, err := cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, gs, test.RedundancySettings)
 	tt.OK(err)
 	if resp.Recommendation == nil {
 		t.Fatal("expected recommendation")
+	} else if resp.Unusable.Gouging.Gouging != 3 {
+		t.Fatalf("expected 3 gouging errors, got %v", resp.Unusable.Gouging)
 	}
 
 	// set optimised settings
 	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
 
+	// evaluate optimised settings
+	resp, err = cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, resp.Recommendation.GougingSettings, test.RedundancySettings)
+	tt.OK(err)
+	if resp.Recommendation != nil {
+		t.Fatal("expected no recommendation")
+	} else if resp.Usable != 3 {
+		t.Fatalf("expected 3 usable hosts, got %v", resp.Usable)
+	}
+
 	// upload some data - should work now once contract maintenance is done
 	tt.Retry(30, time.Second, func() error {
 		_, err := w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{})
 		return err
+	})
+}
+
+func TestHostMinVersion(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a new test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: int(test.AutopilotConfig.Contracts.Amount),
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	// set min version to a high value
+	cfg := test.AutopilotConfig
+	cfg.Hosts.MinProtocolVersion = "99.99.99"
+	cluster.UpdateAutopilotConfig(context.Background(), cfg)
+
+	// contracts in set should drop to 0
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
+			ContractSet: test.AutopilotConfig.Contracts.Set,
+		})
+		tt.OK(err)
+		if len(contracts) != 0 {
+			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
+		}
+		return nil
 	})
 }

@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -152,8 +154,9 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters, opts ...UploadOption) (_ string, err error) {
+func (w *worker) upload(ctx context.Context, bucket, path string, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
 	// apply the options
+	up := defaultParameters(bucket, path)
 	for _, opt := range opts {
 		opt(&up)
 	}
@@ -192,20 +195,18 @@ func (w *worker) upload(ctx context.Context, r io.Reader, contracts []api.Contra
 			// fetch packed slab to upload
 			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
 			if err != nil {
-				return "", fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
-			}
-
-			// upload packed slab
-			if len(packedSlabs) > 0 {
+				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
+			} else if len(packedSlabs) > 0 {
+				// upload packed slab
 				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
-					w.logger.Error(err)
+					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
 			}
 		}
-
-		// make sure there's a goroutine uploading the remainder of the packed slabs
-		go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
 	}
+
+	// make sure there's a goroutine uploading any packed slabs
+	go w.threadedUploadPackedSlabs(up.rs, up.contractSet, lockingPriorityBackgroundUpload)
 
 	return eTag, nil
 }
@@ -274,14 +275,13 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 
 	// wait for all threads to finish
 	wg.Wait()
-	return
 }
 
 func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
-		return fmt.Errorf("couldn't fetch packed slabs from bus: %v", err)
+		return fmt.Errorf("couldn't fetch contracts from bus: %v", err)
 	}
 
 	// fetch upload params
@@ -390,6 +390,11 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the object
 	o := object.NewObject(up.ec)
 
+	// create the md5 hasher for the etag
+	// NOTE: we use md5 since it's s3 compatible and clients expect it to be md5
+	hasher := md5.New()
+	r = io.TeeReader(r, hasher)
+
 	// create the cipher reader
 	cr, err := o.Encrypt(r, up.encryptionOffset)
 	if err != nil {
@@ -397,7 +402,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, up.rs.TotalShards, contracts, up.bh, lockPriority)
+	upload, err := mgr.newUpload(up.rs.TotalShards, contracts, up.bh, lockPriority)
 	if err != nil {
 		return false, "", err
 	}
@@ -520,7 +525,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	}
 
 	// compute etag
-	eTag = o.ComputeETag()
+	eTag = hex.EncodeToString(hasher.Sum(nil))
 
 	// add partial slabs
 	if len(partialSlab) > 0 {
@@ -558,7 +563,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -597,13 +602,13 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// create the upload
-	upload, err := mgr.newUpload(ctx, len(shards), contracts, bh, lockPriority)
+	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
 	if err != nil {
 		return err
 	}
@@ -635,27 +640,14 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s *object.Slab, shar
 	// overwrite the shards with the newly uploaded ones
 	for i, si := range shardIndices {
 		s.Shards[si].LatestHost = uploaded[i].LatestHost
-
-		knownContracts := make(map[types.FileContractID]struct{})
-		for _, fcids := range s.Shards[si].Contracts {
-			for _, fcid := range fcids {
-				knownContracts[fcid] = struct{}{}
-			}
-		}
+		s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
 		for hk, fcids := range uploaded[i].Contracts {
-			for _, fcid := range fcids {
-				if _, exists := knownContracts[fcid]; !exists {
-					if s.Shards[si].Contracts == nil {
-						s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
-					}
-					s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcid)
-				}
-			}
+			s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcids...)
 		}
 	}
 
 	// update the slab
-	return mgr.os.UpdateSlab(ctx, *s, contractSet)
+	return mgr.os.UpdateSlab(ctx, s, contractSet)
 }
 
 func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader) {
@@ -675,7 +667,7 @@ func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (cand
 	return
 }
 
-func (mgr *uploadManager) newUpload(ctx context.Context, totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
+func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMetadata, bh uint64, lockPriority int) (*upload, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
@@ -881,7 +873,7 @@ loop:
 		case <-u.shutdownCtx.Done():
 			return nil, 0, 0, ErrShuttingDown
 		case <-ctx.Done():
-			return nil, 0, 0, ctx.Err()
+			return nil, 0, 0, context.Cause(ctx)
 		case resp := <-respChan:
 			// receive the response
 			used, done = slab.receive(resp)
@@ -959,7 +951,7 @@ loop:
 func (s *slabUpload) canOverdrive(overdriveTimeout time.Duration) bool {
 	// overdrive is not kicking in yet
 	remaining := s.numSectors - s.numUploaded
-	if remaining >= s.maxOverdrive {
+	if remaining > s.maxOverdrive {
 		return false
 	}
 
@@ -1055,14 +1047,23 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 	s.numInflight--
 
-	// failed reqs can't complete the upload
-	if resp.err != nil {
-		s.errs[req.hk] = resp.err
+	// redundant sectors can't complete the upload
+	if sector.isUploaded() {
+		// release the candidate
+		for _, candidate := range s.candidates {
+			if candidate.req == req {
+				candidate.req = nil
+				break
+			}
+		}
 		return false, false
 	}
 
-	// redundant sectors can't complete the upload
-	if sector.uploaded.Root != (types.Hash256{}) {
+	// failed reqs can't complete the upload, we do this after the isUploaded
+	// check since any error returned for a redundant sector is probably a
+	// result of the sector ctx being closed
+	if resp.err != nil {
+		s.errs[req.hk] = resp.err
 		return false, false
 	}
 
@@ -1075,13 +1076,6 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// update uploaded sectors
 	s.numUploaded++
-
-	// release all other candidates for this sector
-	for _, candidate := range s.candidates {
-		if candidate.req != nil && candidate.req != req && candidate.req.sector.index == sector.index {
-			candidate.req = nil
-		}
-	}
 
 	// release memory
 	s.mem.ReleaseSome(rhpv2.SectorSize)

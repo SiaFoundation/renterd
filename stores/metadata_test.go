@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,10 +24,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-func generateMultisigUC(m, n uint64, salt string) types.UnlockConditions {
+func randomMultisigUC() types.UnlockConditions {
 	uc := types.UnlockConditions{
-		PublicKeys:         make([]types.UnlockKey, n),
-		SignaturesRequired: uint64(m),
+		PublicKeys:         make([]types.UnlockKey, 2),
+		SignaturesRequired: 1,
 	}
 	for i := range uc.PublicKeys {
 		uc.PublicKeys[i].Algorithm = types.SpecifierEd25519
@@ -224,7 +225,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Create random unlock conditions for the host.
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
@@ -439,12 +440,12 @@ func TestContractsForHost(t *testing.T) {
 	}
 
 	contracts, _ := contractsForHost(ss.db, hosts[0])
-	if len(contracts) != 1 || contracts[0].Host.convert().PublicKey.String() != hosts[0].convert().PublicKey.String() {
+	if len(contracts) != 1 || types.PublicKey(contracts[0].Host.PublicKey).String() != types.PublicKey(hosts[0].PublicKey).String() {
 		t.Fatal("unexpected", len(contracts), contracts)
 	}
 
 	contracts, _ = contractsForHost(ss.db, hosts[1])
-	if len(contracts) != 1 || contracts[0].Host.convert().PublicKey.String() != hosts[1].convert().PublicKey.String() {
+	if len(contracts) != 1 || types.PublicKey(contracts[0].Host.PublicKey).String() != types.PublicKey(hosts[1].PublicKey).String() {
 		t.Fatalf("unexpected contracts, %+v", contracts)
 	}
 }
@@ -519,11 +520,11 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Create random unlock conditions for the hosts.
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 
-	uc2 := generateMultisigUC(1, 2, "salt")
+	uc2 := randomMultisigUC()
 	uc2.PublicKeys[1].Key = hk2[:]
 	uc2.Timelock = 192837
 
@@ -873,7 +874,7 @@ func TestArchiveContracts(t *testing.T) {
 }
 
 func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.ContractRevision {
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	uc.PublicKeys[1].Key = hk[:]
 	uc.Timelock = 192837
 	return rhpv2.ContractRevision{
@@ -1057,9 +1058,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 3
+	expectedObj.Slabs[0].DBSlabID = 1
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 4
+	expectedObj.Slabs[1].DBSlabID = 2
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1081,7 +1082,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   3,
+				DBSlabID:   1,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1121,7 +1122,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   4,
+				DBSlabID:   2,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -1867,7 +1868,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(context.Background(), ss.db, []fileContractID{fileContractID(fcid1)})
+	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3285,7 +3286,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// See if we can fetch the object by slab.
 	var ec object.EncryptionKey
-	if obj, err := ss.objectRaw(context.Background(), ss.db, b1, "/bar"); err != nil {
+	if obj, err := ss.objectRaw(ss.db, b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if err := ec.UnmarshalBinary(obj[0].SlabKey); err != nil {
 		t.Fatal(err)
@@ -3390,7 +3391,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// renew the contract.
 	fcidRenewed := types.FileContractID{2, 2, 2, 2, 2}
-	uc := generateMultisigUC(1, 2, "salt")
+	uc := randomMultisigUC()
 	rev := rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID:         fcidRenewed,
@@ -3490,6 +3491,13 @@ func TestListObjects(t *testing.T) {
 		{"/foo", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
+	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].ETag = testETag
+			tests[i].want[j].MimeType = testMimeType
+		}
 	}
 	for _, test := range tests {
 		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
@@ -4020,7 +4028,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 }
 
-func TestSlabCleanupTrigger(t *testing.T) {
+func TestSlabCleanup(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -4092,11 +4100,14 @@ func TestSlabCleanupTrigger(t *testing.T) {
 
 	// check slice count
 	var slabCntr int64
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 1 {
-		t.Fatalf("expected 1 slabs, got %v", slabCntr)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 1 {
+			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 
 	// delete second object
 	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
@@ -4104,11 +4115,14 @@ func TestSlabCleanupTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 0 {
-		t.Fatalf("expected 0 slabs, got %v", slabCntr)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 0 {
+			return fmt.Errorf("expected 0 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 
 	// create another object that references a slab with buffer
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
@@ -4148,11 +4162,15 @@ func TestSlabCleanupTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-		t.Fatal(err)
-	} else if slabCntr != 1 {
-		t.Fatalf("expected 1 slabs, got %v", slabCntr)
-	}
+
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+			return err
+		} else if slabCntr != 1 {
+			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
+		}
+		return nil
+	})
 }
 
 func TestUpsertSectors(t *testing.T) {
@@ -4530,7 +4548,7 @@ func TestTypeCurrency(t *testing.T) {
 		var result bool
 		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
 		if !isSQLite(ss.db) {
-			query = strings.Replace(query, "?", "HEX(?)", -1)
+			query = strings.ReplaceAll(query, "?", "HEX(?)")
 		}
 		if err := ss.db.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
 			t.Fatal(err)
@@ -4543,5 +4561,186 @@ func TestTypeCurrency(t *testing.T) {
 		} else if test.cmp == "=" && types.Currency(test.a).Cmp(types.Currency(test.b)) != 0 {
 			t.Fatal("invalid result")
 		}
+	}
+}
+
+// TestUpdateObjectParallel calls UpdateObject from multiple threads in parallel
+// while retries are disabled to make sure calling the same method from multiple
+// threads won't cause deadlocks.
+//
+// NOTE: This test only covers the optimistic case of inserting objects without
+// overwriting them. As soon as combining deletions and insertions within the
+// same transaction, deadlocks become more likely due to the gap locks MySQL
+// uses.
+func TestUpdateObjectParallel(t *testing.T) {
+	cfg := defaultTestSQLStoreConfig
+
+	dbURI, _, _, _ := DBConfigFromEnv()
+	if dbURI == "" {
+		// it's pretty much impossile to optimise for both sqlite and mysql at
+		// the same time so we skip this test for SQLite for now
+		// TODO: once we moved away from gorm and implement separate interfaces
+		// for SQLite and MySQL, we have more control over the used queries and
+		// can revisit this
+		t.SkipNow()
+	}
+	ss := newTestSQLStore(t, cfg)
+	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
+	defer ss.Close()
+
+	// create 2 hosts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2 := hks[0], hks[1]
+
+	// create 2 contracts
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1, fcid2 := fcids[0], fcids[1]
+
+	c := make(chan string)
+	ctx, cancel := context.WithCancel(context.Background())
+	work := func() {
+		t.Helper()
+		defer cancel()
+		for name := range c {
+			// create an object
+			obj := object.Object{
+				Key: object.GenerateEncryptionKey(),
+				Slabs: []object.SlabSlice{
+					{
+						Slab: object.Slab{
+							Health:    1.0,
+							Key:       object.GenerateEncryptionKey(),
+							MinShards: 1,
+							Shards:    newTestShards(hk1, fcid1, frand.Entropy256()),
+						},
+						Offset: 10,
+						Length: 100,
+					},
+					{
+						Slab: object.Slab{
+							Health:    1.0,
+							Key:       object.GenerateEncryptionKey(),
+							MinShards: 2,
+							Shards:    newTestShards(hk2, fcid2, frand.Entropy256()),
+						},
+						Offset: 20,
+						Length: 200,
+					},
+				},
+			}
+
+			// update the object
+			if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			work()
+			wg.Done()
+		}()
+	}
+
+	// create 1000 objects and then overwrite them
+	for i := 0; i < 1000; i++ {
+		select {
+		case c <- fmt.Sprintf("object-%d", i):
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	close(c)
+	wg.Wait()
+}
+
+// TestFetchUsedContracts is a unit test that verifies the functionality of
+// fetchUsedContracts
+func TestFetchUsedContracts(t *testing.T) {
+	// create store
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add test host
+	hk1 := types.PublicKey{1}
+	err := ss.addTestHost(hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add test contract
+	fcid1 := types.FileContractID{1}
+	_, err = ss.addTestContract(fcid1, hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert empty map returns no contracts
+	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
+	contracts, err := fetchUsedContracts(ss.db, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("expected 0 contracts", len(contracts))
+	}
+
+	// add an entry for fcid1
+	usedContracts[hk1] = make(map[types.FileContractID]struct{})
+	usedContracts[hk1][types.FileContractID{1}] = struct{}{}
+
+	// assert we get the used contract
+	contracts, err = fetchUsedContracts(ss.db, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	} else if _, ok := contracts[fcid1]; !ok {
+		t.Fatal("contract not found")
+	}
+
+	// renew the contract
+	fcid2 := types.FileContractID{2}
+	_, err = ss.addTestRenewedContract(fcid2, fcid1, hk1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert used contracts contains one entry and it points to the renewal
+	contracts, err = fetchUsedContracts(ss.db, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	} else if contract, ok := contracts[fcid1]; !ok {
+		t.Fatal("contract not found")
+	} else if contract.convert().ID != fcid2 {
+		t.Fatal("contract should point to the renewed contract")
+	}
+
+	// add an entry for fcid2
+	usedContracts[hk1][types.FileContractID{2}] = struct{}{}
+
+	// assert used contracts now contains an entry for both contracts and both
+	// point to the renewed contract
+	contracts, err = fetchUsedContracts(ss.db, usedContracts)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 2 {
+		t.Fatal("expected 2 contracts", len(contracts))
+	} else if !reflect.DeepEqual(contracts[types.FileContractID{1}], contracts[types.FileContractID{2}]) {
+		t.Fatal("contracts should match")
+	} else if contracts[types.FileContractID{1}].convert().ID != fcid2 {
+		t.Fatal("contracts should point to the renewed contract")
 	}
 }

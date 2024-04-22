@@ -41,6 +41,7 @@ func readInput(context string) string {
 }
 
 // wrapANSI wraps the output in ANSI escape codes if enabled.
+// nolint: unparam
 func wrapANSI(prefix, output, suffix string) string {
 	if enableANSI {
 		return prefix + output + suffix
@@ -375,7 +376,7 @@ func cmdBuildConfig() {
 
 	// write the config file
 	configPath := "renterd.yml"
-	if str := os.Getenv("RENTERD_CONFIG_FILE"); len(str) != 0 {
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
 		configPath = str
 	}
 

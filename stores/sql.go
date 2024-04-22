@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -105,8 +104,8 @@ type (
 
 		wg           sync.WaitGroup
 		mu           sync.Mutex
-		hasAllowlist bool
-		hasBlocklist bool
+		allowListCnt uint64
+		blockListCnt uint64
 		closed       bool
 
 		knownContracts map[types.FileContractID]struct{}
@@ -259,8 +258,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
 		persistInterval:        cfg.PersistInterval,
-		hasAllowlist:           allowlistCnt > 0,
-		hasBlocklist:           blocklistCnt > 0,
+		allowListCnt:           uint64(allowlistCnt),
+		blockListCnt:           uint64(blocklistCnt),
 		settings:               make(map[string]string),
 		slabPruneSigChan:       make(chan struct{}, 1),
 		unappliedContractState: make(map[types.FileContractID]contractState),
@@ -286,6 +285,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
+	if err := ss.initSlabPruning(); err != nil {
+		return nil, modules.ConsensusChangeID{}, err
+	}
 	return ss, ccid, nil
 }
 
@@ -300,6 +302,24 @@ func isSQLite(db *gorm.DB) bool {
 	}
 }
 
+func (ss *SQLStore) hasAllowlist() bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.allowListCnt > 0
+}
+
+func (s *SQLStore) initSlabPruning() error {
+	// start pruning loop
+	s.wg.Add(1)
+	go func() {
+		s.pruneSlabsLoop()
+		s.wg.Done()
+	}()
+
+	// prune once to guarantee consistency on startup
+	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
+}
+
 func (ss *SQLStore) updateHasAllowlist(err *error) {
 	if *err != nil {
 		return
@@ -312,8 +332,14 @@ func (ss *SQLStore) updateHasAllowlist(err *error) {
 	}
 
 	ss.mu.Lock()
-	ss.hasAllowlist = cnt > 0
+	ss.allowListCnt = uint64(cnt)
 	ss.mu.Unlock()
+}
+
+func (ss *SQLStore) hasBlocklist() bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.blockListCnt > 0
 }
 
 func (ss *SQLStore) updateHasBlocklist(err *error) {
@@ -328,7 +354,7 @@ func (ss *SQLStore) updateHasBlocklist(err *error) {
 	}
 
 	ss.mu.Lock()
-	ss.hasBlocklist = cnt > 0
+	ss.blockListCnt = uint64(cnt)
 	ss.mu.Unlock()
 }
 
@@ -446,7 +472,7 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 		ss.logger.Error(fmt.Sprintf("failed to fetch blocklist, err: %v", err))
 	}
 
-	err := ss.retryTransaction(func(tx *gorm.DB) (err error) {
+	err := ss.retryTransaction(context.Background(), func(tx *gorm.DB) (err error) {
 		if len(ss.unappliedAnnouncements) > 0 {
 			if err = insertAnnouncements(tx, ss.unappliedAnnouncements); err != nil {
 				return fmt.Errorf("%w; failed to insert %d announcements", err, len(ss.unappliedAnnouncements))
@@ -514,9 +540,10 @@ func (ss *SQLStore) applyUpdates(force bool) error {
 	return nil
 }
 
-func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
 	abortRetry := func(err error) bool {
 		if err == nil ||
+			errors.Is(err, context.Canceled) ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
 			errors.Is(err, errInvalidNumberOfShards) ||
 			errors.Is(err, errShardRootChanged) ||
@@ -537,14 +564,26 @@ func (s *SQLStore) retryTransaction(fc func(tx *gorm.DB) error, opts ...*sql.TxO
 		}
 		return false
 	}
+
 	var err error
-	for i := 0; i < len(s.retryTransactionIntervals); i++ {
-		err = s.db.Transaction(fc, opts...)
+	attempts := len(s.retryTransactionIntervals) + 1
+	for i := 0; i < attempts; i++ {
+		// execute the transaction
+		err = s.db.WithContext(ctx).Transaction(fc)
 		if abortRetry(err) {
 			return err
 		}
-		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, len(s.retryTransactionIntervals), s.retryTransactionIntervals[i], err))
-		time.Sleep(s.retryTransactionIntervals[i])
+
+		// if this was the last attempt, return the error
+		if i == len(s.retryTransactionIntervals) {
+			s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, attempts, err))
+			return err
+		}
+
+		// log the failed attempt and sleep before retrying
+		interval := s.retryTransactionIntervals[i]
+		s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, attempts, interval, err))
+		time.Sleep(interval)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
 }
@@ -566,10 +605,10 @@ func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID,
 	return ci, ccid, nil
 }
 
-func (s *SQLStore) ResetConsensusSubscription() error {
+func (s *SQLStore) ResetConsensusSubscription(ctx context.Context) error {
 	// empty tables and reinit consensus_infos
 	var ci dbConsensusInfo
-	err := s.retryTransaction(func(tx *gorm.DB) error {
+	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		if err := s.db.Exec("DELETE FROM consensus_infos").Error; err != nil {
 			return err
 		} else if err := s.db.Exec("DELETE FROM siacoin_elements").Error; err != nil {
@@ -592,4 +631,12 @@ func (s *SQLStore) ResetConsensusSubscription() error {
 	}
 	s.persistMu.Unlock()
 	return nil
+}
+
+func sumDurations(durations []time.Duration) time.Duration {
+	var sum time.Duration
+	for _, d := range durations {
+		sum += d
+	}
+	return sum
 }

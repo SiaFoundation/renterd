@@ -24,6 +24,10 @@ const (
 )
 
 var (
+	// ErrInvalidRedundancySettings is returned if the redundancy settings are
+	// not valid
+	ErrInvalidRedundancySettings = errors.New("invalid redundancy settings")
+
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
@@ -38,10 +42,6 @@ type (
 
 	// GougingSettings contain some price settings used in price gouging.
 	GougingSettings struct {
-		// MinMaxCollateral is the minimum value for 'MaxCollateral' in the host's
-		// price settings
-		MinMaxCollateral types.Currency `json:"minMaxCollateral"`
-
 		// MaxRPCPrice is the maximum allowed base price for RPCs
 		MaxRPCPrice types.Currency `json:"maxRPCPrice"`
 
@@ -140,13 +140,13 @@ func (rs RedundancySettings) SlabSizeNoRedundancy() uint64 {
 // valid.
 func (rs RedundancySettings) Validate() error {
 	if rs.MinShards < 1 {
-		return errors.New("MinShards must be greater than 0")
+		return fmt.Errorf("%w: MinShards must be greater than 0", ErrInvalidRedundancySettings)
 	}
 	if rs.TotalShards < rs.MinShards {
-		return errors.New("TotalShards must be at least MinShards")
+		return fmt.Errorf("%w: TotalShards must be at least MinShards", ErrInvalidRedundancySettings)
 	}
 	if rs.TotalShards > 255 {
-		return errors.New("TotalShards must be less than 256")
+		return fmt.Errorf("%w: TotalShards must be less than 256", ErrInvalidRedundancySettings)
 	}
 	return nil
 }
@@ -155,11 +155,11 @@ func (rs RedundancySettings) Validate() error {
 // valid.
 func (s3as S3AuthenticationSettings) Validate() error {
 	for accessKeyID, secretAccessKey := range s3as.V4Keypairs {
-		if len(accessKeyID) == 0 {
+		if accessKeyID == "" {
 			return fmt.Errorf("AccessKeyID cannot be empty")
 		} else if len(accessKeyID) < S3MinAccessKeyLen || len(accessKeyID) > S3MaxAccessKeyLen {
 			return fmt.Errorf("AccessKeyID must be between %d and %d characters long but was %d", S3MinAccessKeyLen, S3MaxAccessKeyLen, len(accessKeyID))
-		} else if len(secretAccessKey) == 0 {
+		} else if secretAccessKey == "" {
 			return fmt.Errorf("SecretAccessKey cannot be empty")
 		} else if len(secretAccessKey) != S3SecretKeyLen {
 			return fmt.Errorf("SecretAccessKey must be %d characters long but was %d", S3SecretKeyLen, len(secretAccessKey))

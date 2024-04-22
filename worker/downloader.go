@@ -245,7 +245,7 @@ func (d *downloader) processBatch(batch []*sectorDownloadReq) chan struct{} {
 	return doneChan
 }
 
-func (d *downloader) processQueue(hp HostManager) {
+func (d *downloader) processQueue() {
 outer:
 	for {
 		// wait for work

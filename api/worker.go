@@ -3,9 +3,12 @@ package api
 import (
 	"errors"
 	"fmt"
+	"math"
+	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/gotd/contrib/http_range"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -23,6 +26,10 @@ var (
 	// ErrHostOnPrivateNetwork is returned by the worker API when a host can't
 	// be scanned since it is on a private network.
 	ErrHostOnPrivateNetwork = errors.New("host is on a private network")
+
+	// ErrMultiRangeNotSupported is returned by the worker API when a request
+	// tries to download multiple ranges at once.
+	ErrMultiRangeNotSupported = errors.New("multipart ranges are not supported")
 )
 
 type (
@@ -49,8 +56,11 @@ type (
 
 	// ContractsResponse is the response type for the /rhp/contracts endpoint.
 	ContractsResponse struct {
-		Contracts []Contract `json:"contracts"`
-		Error     string     `json:"error,omitempty"`
+		Contracts []Contract                 `json:"contracts"`
+		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
+
+		// deprecated
+		Error string `json:"error,omitempty"`
 	}
 
 	MemoryResponse struct {
@@ -213,41 +223,76 @@ type (
 	}
 )
 
-type DownloadRange struct {
+// ContentRange represents a content range returned via the "Content-Range"
+// header.
+type ContentRange struct {
 	Offset int64
 	Length int64
 	Size   int64
 }
 
-func ParseDownloadRange(contentRange string) (DownloadRange, error) {
+// DownloadRange represents a requested range for a download via the "Range"
+// header.
+type DownloadRange struct {
+	Offset int64
+	Length int64
+}
+
+func (r *DownloadRange) ContentRange(size int64) *ContentRange {
+	return &ContentRange{
+		Offset: r.Offset,
+		Length: r.Length,
+		Size:   size,
+	}
+}
+
+func ParseContentRange(contentRange string) (ContentRange, error) {
 	parts := strings.Split(contentRange, " ")
 	if len(parts) != 2 || parts[0] != "bytes" {
-		return DownloadRange{}, errors.New("missing 'bytes' prefix in range header")
+		return ContentRange{}, errors.New("missing 'bytes' prefix in range header")
 	}
 	parts = strings.Split(parts[1], "/")
 	if len(parts) != 2 {
-		return DownloadRange{}, fmt.Errorf("invalid Content-Range header: %s", contentRange)
+		return ContentRange{}, fmt.Errorf("invalid Content-Range header: %s", contentRange)
 	}
 	rangeStr := parts[0]
 	rangeParts := strings.Split(rangeStr, "-")
 	if len(rangeParts) != 2 {
-		return DownloadRange{}, errors.New("invalid Content-Range header")
+		return ContentRange{}, errors.New("invalid Content-Range header")
 	}
 	start, err := strconv.ParseInt(rangeParts[0], 10, 64)
 	if err != nil {
-		return DownloadRange{}, err
+		return ContentRange{}, err
 	}
 	end, err := strconv.ParseInt(rangeParts[1], 10, 64)
 	if err != nil {
-		return DownloadRange{}, err
+		return ContentRange{}, err
 	}
 	size, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
-		return DownloadRange{}, err
+		return ContentRange{}, err
 	}
-	return DownloadRange{
+	return ContentRange{
 		Offset: start,
 		Length: end - start + 1,
 		Size:   size,
 	}, nil
+}
+
+func ParseDownloadRange(req *http.Request) (DownloadRange, error) {
+	// parse the request range we pass math.MaxInt64 since a range header in a
+	// request doesn't have a size
+	ranges, err := http_range.ParseRange(req.Header.Get("Range"), math.MaxInt64)
+	if err != nil {
+		return DownloadRange{}, err
+	}
+
+	// extract requested offset and length
+	dr := DownloadRange{Offset: 0, Length: -1}
+	if len(ranges) == 1 {
+		dr.Offset, dr.Length = ranges[0].Start, ranges[0].Length
+	} else if len(ranges) > 1 {
+		return DownloadRange{}, ErrMultiRangeNotSupported
+	}
+	return dr, nil
 }

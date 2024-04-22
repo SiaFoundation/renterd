@@ -24,7 +24,6 @@ var (
 	//
 	// NOTE: default gouging settings for testnet are identical to mainnet.
 	DefaultGougingSettings = api.GougingSettings{
-		MinMaxCollateral:              types.Siacoins(10),                                  // at least up to 10 SC per contract
 		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
 		MaxContractPrice:              types.Siacoins(15),                                  // 15 SC per contract
 		MaxDownloadPrice:              types.Siacoins(3000),                                // 3000 SC per 1 TiB

@@ -3,8 +3,10 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"reflect"
 	"testing"
+	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
@@ -55,16 +57,27 @@ func TestObjectMetadata(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gor.Metadata, opts.Metadata) {
 		t.Fatal("metadata mismatch", gor.Metadata)
+	} else if gor.Etag == "" {
+		t.Fatal("missing etag")
+	}
+
+	// HeadObject retrieves the modtime from a http header so it's not as
+	// accurate as the modtime from the object GET endpoint which returns it in
+	// the body.
+	orModtime, err := time.Parse(http.TimeFormat, or.Object.ModTime.Std().Format(http.TimeFormat))
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// perform a HEAD request and assert the headers are all present
-	hor, err := w.HeadObject(context.Background(), api.DefaultBucketName, t.Name(), api.HeadObjectOptions{Range: api.DownloadRange{Offset: 1, Length: 1}})
+	hor, err := w.HeadObject(context.Background(), api.DefaultBucketName, t.Name(), api.HeadObjectOptions{Range: &api.DownloadRange{Offset: 1, Length: 1}})
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{
 		ContentType:  or.Object.ContentType(),
-		LastModified: or.Object.LastModified(),
-		Range:        &api.DownloadRange{Offset: 1, Length: 1, Size: int64(len(data))},
+		Etag:         gor.Etag,
+		LastModified: api.TimeRFC3339(orModtime),
+		Range:        &api.ContentRange{Offset: 1, Length: 1, Size: int64(len(data))},
 		Size:         int64(len(data)),
 		Metadata:     gor.Metadata,
 	}) {

@@ -12,7 +12,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +22,7 @@ type (
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
-		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error)
+		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error)
 		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
@@ -89,8 +88,8 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	if err != nil {
 		return err
 	}
-	if breakdown := gc.Check(nil, &hpt); breakdown.Gouging() {
-		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
+	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
+		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown.DownloadErr)
 	}
 
 	// return errBalanceInsufficient if balance insufficient
@@ -163,7 +162,7 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	if err == nil {
 		pt = &hpt.HostPriceTable
 	} else {
-		h.logger.Debugf("unable to fetch price table for renew: %v", err)
+		h.logger.Infof("unable to fetch price table for renew: %v", err)
 	}
 
 	var contractPrice types.Currency
@@ -187,12 +186,12 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	return rev, txnSet, contractPrice, renewErr
 }
 
-func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt hostdb.HostPriceTable, err error) {
+func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error) {
 	// fetchPT is a helper function that performs the RPC given a payment function
-	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt hostdb.HostPriceTable, err error) {
+	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt api.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			h.bus.RecordPriceTables(ctx, []hostdb.PriceTableUpdate{
+			h.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
 				{
 					HostKey:    h.hk,
 					Success:    isSuccessfulInteraction(err),
@@ -236,10 +235,11 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			}
 
 			// check whether we have money left in the contract
-			if pt.FundAccountCost.Cmp(rev.ValidRenterPayout()) >= 0 {
-				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), pt.FundAccountCost)
+			cost := types.NewCurrency64(1)
+			if cost.Cmp(rev.ValidRenterPayout()) >= 0 {
+				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), cost)
 			}
-			availableFunds := rev.ValidRenterPayout().Sub(pt.FundAccountCost)
+			availableFunds := rev.ValidRenterPayout().Sub(cost)
 
 			// cap the deposit amount by the money that's left in the contract
 			if deposit.Cmp(availableFunds) > 0 {
@@ -247,7 +247,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			}
 
 			// create the payment
-			amount := deposit.Add(pt.FundAccountCost)
+			amount := deposit.Add(cost)
 			payment, err := payByContract(rev, amount, rhpv3.Account{}, h.renterKey) // no account needed for funding
 			if err != nil {
 				return err
@@ -255,7 +255,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 			// fund the account
 			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
-				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, pt.FundAccountCost, err)
+				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, cost, err)
 			}
 
 			// record the spend
@@ -278,7 +278,7 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
 		var balance types.Currency
 		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			payment, err := payByContract(rev, pt.AccountBalanceCost, h.acc.id, h.renterKey)
+			payment, err := payByContract(rev, types.NewCurrency64(1), h.acc.id, h.renterKey)
 			if err != nil {
 				return err
 			}

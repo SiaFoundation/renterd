@@ -1,4 +1,4 @@
-package autopilot
+package contractor
 
 import (
 	"math"
@@ -9,16 +9,16 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 )
 
 func TestOptimiseGougingSetting(t *testing.T) {
 	// create 10 hosts that should all be usable
-	var hosts []hostdb.Host
+	var hosts []api.Host
 	for i := 0; i < 10; i++ {
-		hosts = append(hosts, hostdb.Host{
+		hosts = append(hosts, api.Host{
+
 			KnownSince: time.Unix(0, 0),
-			PriceTable: hostdb.HostPriceTable{
+			PriceTable: api.HostPriceTable{
 				HostPriceTable: rhpv3.HostPriceTable{
 					CollateralCost: types.Siacoins(1),
 					MaxCollateral:  types.Siacoins(1000),
@@ -30,7 +30,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 				MaxCollateral:      types.Siacoins(1000),
 				Version:            "1.6.0",
 			},
-			Interactions: hostdb.Interactions{
+			Interactions: api.HostInteractions{
 				Uptime:                  time.Hour * 1000,
 				LastScan:                time.Now(),
 				LastScanSuccess:         true,
@@ -39,6 +39,8 @@ func TestOptimiseGougingSetting(t *testing.T) {
 			},
 			LastAnnouncement: time.Unix(0, 0),
 			Scanned:          true,
+			Blocked:          false,
+			Checks:           nil,
 		})
 	}
 
@@ -48,7 +50,6 @@ func TestOptimiseGougingSetting(t *testing.T) {
 			Allowance: types.Siacoins(100000),
 			Amount:    10,
 		},
-		Hosts: api.HostsConfig{},
 	}
 	cs := api.ConsensusState{
 		BlockHeight:   100,

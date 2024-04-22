@@ -3,10 +3,9 @@ package api
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/hostdb"
+	"go.sia.tech/siad/build"
 )
 
 const (
@@ -58,10 +57,17 @@ type (
 	HostsConfig struct {
 		AllowRedundantIPs     bool                        `json:"allowRedundantIPs"`
 		MaxDowntimeHours      uint64                      `json:"maxDowntimeHours"`
+		MinProtocolVersion    string                      `json:"minProtocolVersion"`
 		MinRecentScanFailures uint64                      `json:"minRecentScanFailures"`
 		ScoreOverrides        map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 )
+
+// EndHeight of a contract formed using the AutopilotConfig given the current
+// period.
+func (ap *Autopilot) EndHeight() uint64 {
+	return ap.CurrentPeriod + ap.Config.Contracts.Period + ap.Config.Contracts.RenewWindow
+}
 
 type (
 	// AutopilotTriggerRequest is the request object used by the /trigger
@@ -117,87 +123,16 @@ type (
 			} `json:"gouging"`
 			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
 			NotScanned            uint64 `json:"notScanned"`
-			Unknown               uint64 `json:"unknown"`
-		}
+		} `json:"unusable"`
 		Recommendation *ConfigRecommendation `json:"recommendation,omitempty"`
 	}
-
-	// HostHandlerResponse is the response type for the /host/:hostkey endpoint.
-	HostHandlerResponse struct {
-		Host   hostdb.Host                `json:"host"`
-		Checks *HostHandlerResponseChecks `json:"checks,omitempty"`
-	}
-
-	HostHandlerResponseChecks struct {
-		Gouging          bool                 `json:"gouging"`
-		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
-		Score            float64              `json:"score"`
-		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
-		Usable           bool                 `json:"usable"`
-		UnusableReasons  []string             `json:"unusableReasons"`
-	}
-
-	HostGougingBreakdown struct {
-		ContractErr string `json:"contractErr"`
-		DownloadErr string `json:"downloadErr"`
-		GougingErr  string `json:"gougingErr"`
-		PruneErr    string `json:"pruneErr"`
-		UploadErr   string `json:"uploadErr"`
-	}
-
-	HostScoreBreakdown struct {
-		Age              float64 `json:"age"`
-		Collateral       float64 `json:"collateral"`
-		Interactions     float64 `json:"interactions"`
-		StorageRemaining float64 `json:"storageRemaining"`
-		Uptime           float64 `json:"uptime"`
-		Version          float64 `json:"version"`
-		Prices           float64 `json:"prices"`
-	}
 )
-
-func (sb HostScoreBreakdown) String() string {
-	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
-}
-
-func (hgb HostGougingBreakdown) Gouging() bool {
-	for _, err := range []string{
-		hgb.ContractErr,
-		hgb.DownloadErr,
-		hgb.GougingErr,
-		hgb.PruneErr,
-		hgb.UploadErr,
-	} {
-		if err != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func (hgb HostGougingBreakdown) String() string {
-	var reasons []string
-	for _, errStr := range []string{
-		hgb.ContractErr,
-		hgb.DownloadErr,
-		hgb.GougingErr,
-		hgb.PruneErr,
-		hgb.UploadErr,
-	} {
-		if errStr != "" {
-			reasons = append(reasons, errStr)
-		}
-	}
-	return strings.Join(reasons, ";")
-}
-
-func (sb HostScoreBreakdown) Score() float64 {
-	return sb.Age * sb.Collateral * sb.Interactions * sb.StorageRemaining * sb.Uptime * sb.Version * sb.Prices
-}
 
 func (c AutopilotConfig) Validate() error {
 	if c.Hosts.MaxDowntimeHours > 99*365*24 {
 		return ErrMaxDowntimeHoursTooHigh
+	} else if c.Hosts.MinProtocolVersion != "" && !build.IsVersion(c.Hosts.MinProtocolVersion) {
+		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
 	}
 	return nil
 }
