@@ -873,7 +873,7 @@ loop:
 		case <-u.shutdownCtx.Done():
 			return nil, 0, 0, ErrShuttingDown
 		case <-ctx.Done():
-			return nil, 0, 0, ctx.Err()
+			return nil, 0, 0, context.Cause(ctx)
 		case resp := <-respChan:
 			// receive the response
 			used, done = slab.receive(resp)

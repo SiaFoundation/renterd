@@ -1431,7 +1431,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		// scan: second try
 		select {
 		case <-ctx.Done():
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, ctx.Err()
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
 		case <-time.After(time.Second):
 		}
 		settings, pt, duration, err = scan()
@@ -1449,7 +1449,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// repercussions
 	select {
 	case <-ctx.Done():
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, ctx.Err()
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
 	default:
 	}
 

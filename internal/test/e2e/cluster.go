@@ -687,22 +687,15 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	res, err := c.Bus.Wallet(context.Background())
-	c.tt.OK(err)
-
-	// Fund host with one blockreward
-	fundAmt := c.cm.TipState().BlockReward()
-	for fundAmt.Cmp(res.Confirmed) > 0 {
-		c.tt.Fatal("not enough funds to fund host")
-	}
+	fundAmt := types.Siacoins(100e3)
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt.Div64(10),
+			Value:   fundAmt,
 			Address: h.WalletAddress(),
 		})
 	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
+	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, false))
 
 	// Mine transaction.
 	c.MineBlocks(1)
@@ -722,7 +715,7 @@ func (c *TestCluster) AddHost(h *Host) {
 		c.tt.Helper()
 
 		c.MineBlocks(1)
-		_, err = c.Bus.Host(context.Background(), h.PublicKey())
+		_, err := c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
 			return err
 		}

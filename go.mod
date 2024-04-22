@@ -15,7 +15,7 @@ require (
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.2
 	go.sia.tech/coreutils v0.0.4-0.20240313143809-01b5d444a630
-	go.sia.tech/gofakes3 v0.0.1
+	go.sia.tech/gofakes3 v0.0.2
 	go.sia.tech/hostd v1.0.4
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
@@ -35,7 +35,7 @@ require (
 
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.51.7 // indirect
+	github.com/aws/aws-sdk-go v1.51.21 // indirect
 	github.com/cloudflare/cloudflare-go v0.91.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -80,10 +80,10 @@ require (
 	go.etcd.io/bbolt v1.3.9 // indirect
 	go.sia.tech/web v0.0.0-20240403135501-82ff3a2a3e7c // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.22.0 // indirect
+	golang.org/x/net v0.24.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	golang.org/x/tools v0.16.1 // indirect
+	golang.org/x/tools v0.20.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	nhooyr.io/websocket v1.8.10 // indirect
 )

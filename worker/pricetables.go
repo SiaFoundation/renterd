@@ -137,7 +137,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	} else if ongoing {
 		select {
 		case <-ctx.Done():
-			return api.HostPriceTable{}, fmt.Errorf("%w; %w", errPriceTableUpdateTimedOut, ctx.Err())
+			return api.HostPriceTable{}, fmt.Errorf("%w; %w", errPriceTableUpdateTimedOut, context.Cause(ctx))
 		case <-update.done:
 		}
 		return update.hpt, update.err

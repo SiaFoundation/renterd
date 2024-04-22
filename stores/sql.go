@@ -96,6 +96,7 @@ type (
 		mu           sync.Mutex
 		hasAllowlist bool
 		hasBlocklist bool
+		lastPrunedAt time.Time
 		closed       bool
 	}
 
@@ -225,6 +226,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		settings:         make(map[string]string),
 		slabPruneSigChan: make(chan struct{}, 1),
 
+		lastPrunedAt:              time.Now(),
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
 		shutdownCtx:       shutdownCtx,

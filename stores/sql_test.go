@@ -211,7 +211,7 @@ func newTestLogger() logger.Interface {
 }
 
 func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, error) {
-	if err := s.UpdateObject(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
+	if err := s.UpdateObjectBlocking(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err
 	} else if obj, err := s.Object(context.Background(), api.DefaultBucketName, path); err != nil {
 		return api.Object{}, err
