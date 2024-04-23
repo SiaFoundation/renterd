@@ -313,11 +313,22 @@ CREATE TABLE `multipart_parts` (
   CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- dbDirectory
+CREATE TABLE `directories` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `parent_id` bigint unsigned NOT NULL,
+  `name` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
+  KEY `idx_directories_parent_id` (`parent_id`),
+  UNIQUE KEY `idx_directories_name` (`name`),
+  CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- dbObject
 CREATE TABLE `objects` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `db_bucket_id` bigint unsigned NOT NULL,
+  `db_directory_id` bigint unsigned NOT NULL,
   `object_id` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   `key` longblob,
   `health` double NOT NULL DEFAULT '1',
@@ -333,6 +344,7 @@ CREATE TABLE `objects` (
   KEY `idx_objects_size` (`size`),
   KEY `idx_objects_created_at` (`created_at`),
   CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`)
+  CONSTRAINT `fk_objects_db_directories` FOREIGN KEY (`db_directory_id`) REFERENCES `directories` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbSetting

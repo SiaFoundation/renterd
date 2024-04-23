@@ -115,8 +115,16 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
+	dbDirectory struct {
+		Model
+
+		ParentID uint
+	}
+
 	dbObject struct {
 		Model
+
+		DBDirectoryID uint
 
 		DBBucketID uint `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
 		DBBucket   dbBucket
@@ -1726,6 +1734,19 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 		return nil
 	})
 	return deletedSectors, err
+}
+
+func (s *SQLStore) makeDirsForPath(ctx context.Context, tx *gorm.DB, path string) error {
+	// Create all directories.
+	for i := 1; i < len(path); i++ {
+		if path[i] == '/' {
+			dir := path[:i+1]
+			if err := s.db.Create(dbDirectory{}).Error; err != nil {
+				return fmt.Errorf("failed to create directory %v: %w", dir, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
