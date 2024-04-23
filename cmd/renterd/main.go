@@ -530,8 +530,8 @@ func main() {
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(cfg.HTTP.Password)
-	mux := &treeMux{
-		sub: make(map[string]treeMux),
+	mux := &utils.TreeMux{
+		Sub: make(map[string]utils.TreeMux),
 	}
 
 	// Create the webserver.
@@ -556,12 +556,12 @@ func main() {
 			fn:   fn,
 		})
 
-		mux.sub["/api/bus"] = treeMux{h: auth(b)}
+		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b)}
 		busAddr = cfg.HTTP.Address + "/api/bus"
 		busPassword = cfg.HTTP.Password
 
 		// only serve the UI if a bus is created
-		mux.h = renterd.Handler()
+		mux.Handler = renterd.Handler()
 	} else {
 		logger.Info("connecting to remote bus at " + busAddr)
 	}
@@ -584,7 +584,7 @@ func main() {
 				fn:   fn,
 			})
 
-			mux.sub["/api/worker"] = treeMux{h: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			workerAddr := cfg.HTTP.Address + "/api/worker"
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
@@ -630,7 +630,7 @@ func main() {
 		})
 
 		go func() { autopilotErr <- runFn() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
+		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap)}
 	}
 
 	// Start server.
