@@ -126,6 +126,14 @@ outer:
 				}
 			}
 
+			// track the error, ignore gracefully closed streams and canceled overdrives
+			canceledOverdrive := req.done() && req.overdrive && err != nil
+			if !canceledOverdrive && !isClosedStream(err) {
+				u.trackSectorUpload(err, elapsed)
+			} else {
+				u.logger.Debugw("not tracking sector upload metric", zap.Error(err))
+			}
+
 			// send the response
 			select {
 			case <-req.sector.ctx.Done():
@@ -133,14 +141,6 @@ outer:
 				req: req,
 				err: err,
 			}:
-			}
-
-			// track the error, ignore gracefully closed streams and canceled overdrives
-			canceledOverdrive := req.done() && req.overdrive && err != nil
-			if !canceledOverdrive && !isClosedStream(err) {
-				u.trackSectorUpload(err, elapsed)
-			} else {
-				u.logger.Debugw("not tracking sector upload metric", zap.Error(err))
 			}
 		}
 	}
