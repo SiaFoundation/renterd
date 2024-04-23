@@ -8,6 +8,13 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
+const (
+	// alertLostSectorsThresholdPct defines the the threshold at which we
+	// register the lost sectors alert. A value of 0.01 means that we register
+	// the alert if the host lost 1% (or more) of its stored data.
+	alertLostSectorsThresholdPct = 0.01
+)
+
 var (
 	alertChurnID         = alerts.RandomAlertID() // constant until restarted
 	alertLostSectorsID   = alerts.RandomAlertID() // constant until restarted
@@ -46,4 +53,8 @@ func newLostSectorsAlert(hk types.PublicKey, lostSectors uint64) alerts.Alert {
 		},
 		Timestamp: time.Now(),
 	}
+}
+
+func registerLostSectorsAlert(dataLost, dataStored uint64) bool {
+	return dataLost > 0 && float64(dataLost) >= float64(dataStored)*alertLostSectorsThresholdPct
 }
