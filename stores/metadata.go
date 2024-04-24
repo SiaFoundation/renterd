@@ -118,6 +118,7 @@ type (
 	dbDirectory struct {
 		Model
 
+		Name     string
 		ParentID uint
 	}
 
@@ -249,12 +250,12 @@ type (
 
 	// rawObjectMetadata is used for hydrating object metadata.
 	rawObjectMetadata struct {
-		ETag     string
-		Health   float64
-		MimeType string
-		ModTime  datetime
-		Name     string
-		Size     int64
+		ETag       string
+		Health     float64
+		MimeType   string
+		ModTime    datetime
+		ObjectName string
+		Size       int64
 	}
 )
 
@@ -311,6 +312,9 @@ func (dbContractSector) TableName() string { return "contract_sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbDirectory) TableName() string { return "directories" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
@@ -426,7 +430,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 	return newObjectMetadata(
-		raw.Name,
+		raw.ObjectName,
 		raw.ETag,
 		raw.MimeType,
 		raw.Health,
@@ -1224,64 +1228,77 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		offset = 0
 	}
 
-	indexHint := ""
-	if !isSQLite(s.db) {
-		indexHint = "USE INDEX (idx_object_bucket, idx_objects_created_at)"
+	//	indexHint := ""
+	//	if !isSQLite(s.db) {
+	//		indexHint = "USE INDEX (idx_object_bucket, idx_objects_created_at)"
+	//	}
+
+	//	onameExpr := fmt.Sprintf("CASE INSTR(SUBSTR(object_id, ?), '/') WHEN 0 THEN %s ELSE %s END",
+	//		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
+	//		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
+	//	)
+
+	dirID, err := s.dirID(ctx, s.db, path)
+	if err != nil {
+		return nil, false, err
 	}
 
-	onameExpr := fmt.Sprintf("CASE INSTR(SUBSTR(object_id, ?), '/') WHEN 0 THEN %s ELSE %s END",
-		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
-		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
-	)
+	objectsQuery := `
+SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
+FROM objects o
+INNER JOIN buckets b ON o.db_bucket_id = b.id
+WHERE o.db_directory_id = ? AND b.name = ? 
+	`
 
-	// build objects query & parameters
-	objectsQuery := fmt.Sprintf(`
-SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
-FROM (
-	SELECT
-	ANY_VALUE(etag) AS ETag,
-	MAX(objects.created_at) AS ModTime,
-	%s AS oname,
-	SUM(size) AS Size,
-	MIN(health) as Health,
-	ANY_VALUE(mime_type) as MimeType
-	FROM objects %s
-	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
-	GROUP BY oname
-) baseQuery
-`,
-		onameExpr,
-		indexHint,
-		onameExpr,
-		onameExpr,
-	)
+	//	// build objects query & parameters
+	//	objectsQuery := fmt.Sprintf(`
+	//SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
+	//FROM (
+	//	SELECT
+	//	ANY_VALUE(etag) AS ETag,
+	//	MAX(objects.created_at) AS ModTime,
+	//	%s AS oname,
+	//	SUM(size) AS Size,
+	//	MIN(health) as Health,
+	//	ANY_VALUE(mime_type) as MimeType
+	//	FROM objects %s
+	//	INNER JOIN buckets b ON objects.db_bucket_id = b.id
+	//	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
+	//	GROUP BY oname
+	//) baseQuery
+	//`,
+	//		onameExpr,
+	//		indexHint,
+	//		onameExpr,
+	//		onameExpr,
+	//	)
 
-	if isSQLite(s.db) {
-		objectsQuery = replaceAnyValue(objectsQuery)
-	}
+	//	if isSQLite(s.db) {
+	//		objectsQuery = replaceAnyValue(objectsQuery)
+	//	}
 
 	objectsQueryParams := []interface{}{
-		utf8.RuneCountInString(path) + 1,       // onameExpr
-		path, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+		dirID, bucket,
+		//utf8.RuneCountInString(path) + 1,       // onameExpr
+		//path, utf8.RuneCountInString(path) + 1, // onameExpr
+		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
 
-		path + "%",
+		//path + "%",
 
-		utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		bucket,                       // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		//utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		//path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		//bucket,                       // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
 
-		utf8.RuneCountInString(path) + 1,       // onameExpr
-		path, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+		//utf8.RuneCountInString(path) + 1,       // onameExpr
+		//path, utf8.RuneCountInString(path) + 1, // onameExpr
+		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
 
-		utf8.RuneCountInString(path + prefix),  // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		path + prefix,                          // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		utf8.RuneCountInString(path) + 1,       // onameExpr
-		path, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		//utf8.RuneCountInString(path + prefix),  // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		//path + prefix,                          // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+		//utf8.RuneCountInString(path) + 1,       // onameExpr
+		//path, utf8.RuneCountInString(path) + 1, // onameExpr
+		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+		//path, // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
 	}
 
 	// build marker expr
@@ -1300,10 +1317,10 @@ FROM (
 			}
 
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(Health > ? OR (Health = ? AND Name > ?))"
+				markerExpr = "(Health > ? OR (Health = ? AND ObjectName > ?))"
 				markerParams = []interface{}{markerHealth, markerHealth, marker}
 			} else {
-				markerExpr = "(Health = ? AND Name > ?) OR Health < ?"
+				markerExpr = "(Health = ? AND ObjectName > ?) OR Health < ?"
 				markerParams = []interface{}{markerHealth, marker, markerHealth}
 			}
 		case api.ObjectSortBySize:
@@ -1317,17 +1334,17 @@ FROM (
 			}
 
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(Size > ? OR (Size = ? AND Name > ?))"
+				markerExpr = "(Size > ? OR (Size = ? AND ObjectName > ?))"
 				markerParams = []interface{}{markerSize, markerSize, marker}
 			} else {
-				markerExpr = "(Size = ? AND Name > ?) OR Size < ?"
+				markerExpr = "(Size = ? AND ObjectName > ?) OR Size < ?"
 				markerParams = []interface{}{markerSize, marker, markerSize}
 			}
 		case api.ObjectSortByName:
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "Name > ?"
+				markerExpr = "ObjectName > ?"
 			} else {
-				markerExpr = "Name < ?"
+				markerExpr = "ObjectName < ?"
 			}
 			markerParams = []interface{}{marker}
 		default:
@@ -1338,7 +1355,7 @@ FROM (
 	// build order clause
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
 	if sortBy != api.ObjectSortByName {
-		orderByClause += ", Name"
+		orderByClause += ", ObjectName"
 	}
 
 	var rows []rawObjectMetadata
@@ -1356,6 +1373,27 @@ FROM (
 		Error; err != nil {
 		return
 	}
+
+	// fetch directories
+	var childDirs []dbDirectory
+	if err := s.db.Find(&childDirs, "parent_id = ?", dirID).Error; err != nil {
+		return nil, false, err
+	}
+	var dirRows []rawObjectMetadata
+	err = s.db.Raw(`
+SELECT ? || d.name || '/' as ObjectName, MAX(o.created_at) as ModTime, SUM(o.size) as Size, MIN(o.health) as Health
+FROM objects o
+INNER JOIN buckets b ON o.db_bucket_id = b.id
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(ObjectName)) = ObjectName
+WHERE b.name = ? AND d.parent_id = ?
+GROUP BY d.id 
+ORDER BY ObjectName ASC
+		`, path, bucket, dirID).Scan(&dirRows).Error
+	if err != nil {
+		return nil, false, err
+	}
+	//dirRow.Name = fmt.Sprintf("%s%s/", path, dir.Name)
+	rows = append(rows, dirRows...)
 
 	// trim last element if we have more
 	if len(rows) == limit {
@@ -1736,17 +1774,58 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	return deletedSectors, err
 }
 
-func (s *SQLStore) makeDirsForPath(ctx context.Context, tx *gorm.DB, path string) error {
-	// Create all directories.
-	for i := 1; i < len(path); i++ {
-		if path[i] == '/' {
-			dir := path[:i+1]
-			if err := s.db.Create(dbDirectory{}).Error; err != nil {
-				return fmt.Errorf("failed to create directory %v: %w", dir, err)
-			}
-		}
+func (s *SQLStore) dirID(ctx context.Context, tx *gorm.DB, dirPath string) (uint, error) {
+	if !strings.HasPrefix(dirPath, "/") {
+		return 0, fmt.Errorf("path must start with /")
+	} else if !strings.HasSuffix(dirPath, "/") {
+		return 0, fmt.Errorf("path must end with /")
 	}
-	return nil
+
+	dirID := uint(1)
+	if dirPath == "/" {
+		return dirID, nil // root dir returned
+	}
+
+	splitPath := strings.Split(dirPath[1:len(dirPath)-1], "/")
+	for _, dir := range splitPath[:len(splitPath)-1] {
+		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND parent_id = ?", dir, dirID).
+			Scan(&dirID).Error; err != nil {
+			return 0, fmt.Errorf("failed to fetch root directory: %w", err)
+		}
+		fmt.Println("dirID", dirID)
+	}
+	return dirID, nil
+}
+
+func (s *SQLStore) makeDirsForPath(ctx context.Context, tx *gorm.DB, path string) (uint, error) {
+	if !strings.HasPrefix(path, "/") {
+		return 0, fmt.Errorf("path must start with /")
+	}
+
+	// Create root dir.
+	if err := tx.Exec("INSERT INTO directories (id) VALUES (1) ON CONFLICT DO NOTHING").Error; err != nil {
+		return 0, fmt.Errorf("failed to create root directory: %w", err)
+	}
+	dirID := uint(1)
+
+	// Create remaining directories.
+	splitPath := strings.Split(path[1:], "/")
+	for _, dir := range splitPath[:len(splitPath)-1] {
+		fmt.Println("creating", dir)
+		dbDir := dbDirectory{
+			Name:     dir,
+			ParentID: dirID,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "name"}, {Name: "parent_id"}},
+			UpdateAll: true,
+		}).
+			Create(&dbDir).Error; err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		}
+		dirID = dbDir.ID
+	}
+	return dirID, nil
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
@@ -1780,6 +1859,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
+		// create the dir
+		dirID, err := s.makeDirsForPath(ctx, tx, path)
+		if err != nil {
+			return fmt.Errorf("failed to create directories: %w", err)
+		}
+
 		// Insert a new object.
 		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
@@ -1796,12 +1881,13 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		obj := dbObject{
-			DBBucketID: bucketID,
-			ObjectID:   path,
-			Key:        objKey,
-			Size:       o.TotalSize(),
-			MimeType:   mimeType,
-			Etag:       eTag,
+			DBDirectoryID: dirID,
+			DBBucketID:    bucketID,
+			ObjectID:      path,
+			Key:           objKey,
+			Size:          o.TotalSize(),
+			MimeType:      mimeType,
+			Etag:          eTag,
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -2958,14 +3044,14 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	}
 	var rows []rawObjectMetadata
 	if err := s.db.
-		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
+		Select("o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
 		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
 		Order(orderBy).
 		Order(markerOrderBy).
-		Order("Name ASC").
+		Order("ObjectName ASC").
 		Limit(int(limit)).
 		Scan(&rows).Error; err != nil {
 		return api.ObjectsListResponse{}, err
@@ -2976,7 +3062,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	if len(rows) == limit {
 		hasMore = true
 		rows = rows[:len(rows)-1]
-		nextMarker = rows[len(rows)-1].Name
+		nextMarker = rows[len(rows)-1].ObjectName
 	}
 
 	var objects []api.ObjectMetadata
