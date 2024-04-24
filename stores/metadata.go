@@ -1243,12 +1243,24 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		return nil, false, err
 	}
 
-	objectsQuery := `
+	prefixExpr := "TRUE"
+	if len(prefix) > 0 {
+		prefixExpr = "SUBSTR(o.object_id, 1, ?) = ?"
+	}
+
+	objectsQuery := fmt.Sprintf(`
 SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
 FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
-WHERE o.db_directory_id = ? AND b.name = ? 
-	`
+WHERE o.db_directory_id = ? AND b.name = ? AND %s
+UNION
+SELECT '' as ETag, MAX(o.created_at) as ModTime, ? || d.name || '/' as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
+FROM objects o
+INNER JOIN buckets b ON o.db_bucket_id = b.id
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(ObjectName)) = ObjectName AND %s
+WHERE b.name = ? AND d.parent_id = ?
+GROUP BY d.id
+	`, prefixExpr, prefixExpr)
 
 	//	// build objects query & parameters
 	//	objectsQuery := fmt.Sprintf(`
@@ -1278,7 +1290,7 @@ WHERE o.db_directory_id = ? AND b.name = ?
 	//	}
 
 	objectsQueryParams := []interface{}{
-		dirID, bucket,
+		//utf8.RuneCountInString(prefix), path + prefix,
 		//utf8.RuneCountInString(path) + 1,       // onameExpr
 		//path, utf8.RuneCountInString(path) + 1, // onameExpr
 		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
@@ -1299,6 +1311,21 @@ WHERE o.db_directory_id = ? AND b.name = ?
 		//path, utf8.RuneCountInString(path) + 1, // onameExpr
 		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
 		//path, // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+	}
+	if len(prefix) > 0 {
+		objectsQueryParams = append(objectsQueryParams, []interface{}{
+			dirID, bucket,
+			utf8.RuneCountInString(path + prefix), path + prefix,
+			path,
+			utf8.RuneCountInString(path + prefix), path + prefix,
+			bucket, dirID,
+		}...)
+	} else {
+		objectsQueryParams = append(objectsQueryParams, []interface{}{
+			dirID, bucket,
+			path,
+			bucket, dirID,
+		}...)
 	}
 
 	// build marker expr
@@ -1353,6 +1380,9 @@ WHERE o.db_directory_id = ? AND b.name = ?
 	}
 
 	// build order clause
+	if sortBy == api.ObjectSortByName {
+		sortBy = "ObjectName"
+	}
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
 	if sortBy != api.ObjectSortByName {
 		orderByClause += ", ObjectName"
@@ -1375,25 +1405,25 @@ WHERE o.db_directory_id = ? AND b.name = ?
 	}
 
 	// fetch directories
-	var childDirs []dbDirectory
-	if err := s.db.Find(&childDirs, "parent_id = ?", dirID).Error; err != nil {
-		return nil, false, err
-	}
-	var dirRows []rawObjectMetadata
-	err = s.db.Raw(`
-SELECT ? || d.name || '/' as ObjectName, MAX(o.created_at) as ModTime, SUM(o.size) as Size, MIN(o.health) as Health
-FROM objects o
-INNER JOIN buckets b ON o.db_bucket_id = b.id
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(ObjectName)) = ObjectName
-WHERE b.name = ? AND d.parent_id = ?
-GROUP BY d.id 
-ORDER BY ObjectName ASC
-		`, path, bucket, dirID).Scan(&dirRows).Error
-	if err != nil {
-		return nil, false, err
-	}
-	//dirRow.Name = fmt.Sprintf("%s%s/", path, dir.Name)
-	rows = append(rows, dirRows...)
+	//	var childDirs []dbDirectory
+	//	if err := s.db.Find(&childDirs, "parent_id = ?", dirID).Error; err != nil {
+	//		return nil, false, err
+	//	}
+	//	var dirRows []rawObjectMetadata
+	//	err = s.db.Raw(`
+	//SELECT ? || d.name || '/' as ObjectName, MAX(o.created_at) as ModTime, SUM(o.size) as Size, MIN(o.health) as Health
+	//FROM objects o
+	//INNER JOIN buckets b ON o.db_bucket_id = b.id
+	//INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(ObjectName)) = ObjectName
+	//WHERE b.name = ? AND d.parent_id = ?
+	//GROUP BY d.id
+	//ORDER BY ObjectName ASC
+	//		`, path, bucket, dirID).Scan(&dirRows).Error
+	//	if err != nil {
+	//		return nil, false, err
+	//	}
+	//	//dirRow.Name = fmt.Sprintf("%s%s/", path, dir.Name)
+	//	rows = append(rows, dirRows...)
 
 	// trim last element if we have more
 	if len(rows) == limit {
@@ -1787,7 +1817,7 @@ func (s *SQLStore) dirID(ctx context.Context, tx *gorm.DB, dirPath string) (uint
 	}
 
 	splitPath := strings.Split(dirPath[1:len(dirPath)-1], "/")
-	for _, dir := range splitPath[:len(splitPath)-1] {
+	for _, dir := range splitPath {
 		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND parent_id = ?", dir, dirID).
 			Scan(&dirID).Error; err != nil {
 			return 0, fmt.Errorf("failed to fetch root directory: %w", err)
