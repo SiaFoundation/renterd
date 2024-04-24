@@ -1742,16 +1742,11 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 			Scan(&dirID).Error; err != nil {
 			return 0, fmt.Errorf("failed to fetch root directory: %w", err)
 		}
-		fmt.Println("dirID", dirID)
 	}
 	return dirID, nil
 }
 
 func (s *SQLStore) makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
-	if !strings.HasPrefix(path, "/") {
-		return 0, fmt.Errorf("path must start with /")
-	}
-
 	// Create root dir.
 	if err := tx.Exec("INSERT INTO directories (id) VALUES (1) ON CONFLICT DO NOTHING").Error; err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
@@ -1759,9 +1754,8 @@ func (s *SQLStore) makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	dirID := uint(1)
 
 	// Create remaining directories.
-	splitPath := strings.Split(path[1:], "/")
+	splitPath := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for _, dir := range splitPath[:len(splitPath)-1] {
-		fmt.Println("creating", dir)
 		dbDir := dbDirectory{
 			Name:     dir,
 			ParentID: dirID,
