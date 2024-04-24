@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1173,11 +1172,6 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return objects, nil
 }
 
-func replaceAnyValue(query string) string {
-	re := regexp.MustCompile(`ANY_VALUE\((.*?)\)`)
-	return re.ReplaceAllString(query, "$1")
-}
-
 func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -1228,26 +1222,21 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		offset = 0
 	}
 
-	//	indexHint := ""
-	//	if !isSQLite(s.db) {
-	//		indexHint = "USE INDEX (idx_object_bucket, idx_objects_created_at)"
-	//	}
-
-	//	onameExpr := fmt.Sprintf("CASE INSTR(SUBSTR(object_id, ?), '/') WHEN 0 THEN %s ELSE %s END",
-	//		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
-	//		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
-	//	)
-
-	dirID, err := s.dirID(ctx, s.db, path)
+	// fetch id of directory to query
+	dirID, err := s.dirID(s.db, path)
 	if err != nil {
 		return nil, false, err
 	}
 
+	// build prefix expression
 	prefixExpr := "TRUE"
-	if len(prefix) > 0 {
+	if prefix != "" {
 		prefixExpr = "SUBSTR(o.object_id, 1, ?) = ?"
 	}
 
+	// objectsQuery consists of 2 parts
+	// 1. fetch all objects in requested directory
+	// 2. fetch all sub-directories
 	objectsQuery := fmt.Sprintf(`
 SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
 FROM objects o
@@ -1262,70 +1251,22 @@ WHERE b.name = ? AND d.parent_id = ?
 GROUP BY d.id
 	`, prefixExpr, prefixExpr)
 
-	//	// build objects query & parameters
-	//	objectsQuery := fmt.Sprintf(`
-	//SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
-	//FROM (
-	//	SELECT
-	//	ANY_VALUE(etag) AS ETag,
-	//	MAX(objects.created_at) AS ModTime,
-	//	%s AS oname,
-	//	SUM(size) AS Size,
-	//	MIN(health) as Health,
-	//	ANY_VALUE(mime_type) as MimeType
-	//	FROM objects %s
-	//	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	//	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
-	//	GROUP BY oname
-	//) baseQuery
-	//`,
-	//		onameExpr,
-	//		indexHint,
-	//		onameExpr,
-	//		onameExpr,
-	//	)
-
-	//	if isSQLite(s.db) {
-	//		objectsQuery = replaceAnyValue(objectsQuery)
-	//	}
-
-	objectsQueryParams := []interface{}{
-		//utf8.RuneCountInString(prefix), path + prefix,
-		//utf8.RuneCountInString(path) + 1,       // onameExpr
-		//path, utf8.RuneCountInString(path) + 1, // onameExpr
-		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
-
-		//path + "%",
-
-		//utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		//path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		//bucket,                       // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-
-		//utf8.RuneCountInString(path) + 1,       // onameExpr
-		//path, utf8.RuneCountInString(path) + 1, // onameExpr
-		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
-
-		//utf8.RuneCountInString(path + prefix),  // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		//path + prefix,                          // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		//utf8.RuneCountInString(path) + 1,       // onameExpr
-		//path, utf8.RuneCountInString(path) + 1, // onameExpr
-		//path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
-		//path, // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-	}
-	if len(prefix) > 0 {
-		objectsQueryParams = append(objectsQueryParams, []interface{}{
+	// build query params
+	var objectsQueryParams []interface{}
+	if prefix != "" {
+		objectsQueryParams = []interface{}{
 			dirID, bucket,
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			path,
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			bucket, dirID,
-		}...)
+		}
 	} else {
-		objectsQueryParams = append(objectsQueryParams, []interface{}{
+		objectsQueryParams = []interface{}{
 			dirID, bucket,
 			path,
 			bucket, dirID,
-		}...)
+		}
 	}
 
 	// build marker expr
@@ -1337,7 +1278,7 @@ GROUP BY d.id
 			var markerHealth float64
 			if err = s.db.
 				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Health FROM (%s WHERE oname >= ? ORDER BY oname LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Health FROM (SELECT * FROM (%s) WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerHealth).
 				Error; err != nil {
 				return
@@ -1354,7 +1295,7 @@ GROUP BY d.id
 			var markerSize float64
 			if err = s.db.
 				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Size FROM (%s WHERE oname >= ? ORDER BY oname LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Size FROM (SELECT * FROM (%s) WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerSize).
 				Error; err != nil {
 				return
@@ -1403,27 +1344,6 @@ GROUP BY d.id
 		Error; err != nil {
 		return
 	}
-
-	// fetch directories
-	//	var childDirs []dbDirectory
-	//	if err := s.db.Find(&childDirs, "parent_id = ?", dirID).Error; err != nil {
-	//		return nil, false, err
-	//	}
-	//	var dirRows []rawObjectMetadata
-	//	err = s.db.Raw(`
-	//SELECT ? || d.name || '/' as ObjectName, MAX(o.created_at) as ModTime, SUM(o.size) as Size, MIN(o.health) as Health
-	//FROM objects o
-	//INNER JOIN buckets b ON o.db_bucket_id = b.id
-	//INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(ObjectName)) = ObjectName
-	//WHERE b.name = ? AND d.parent_id = ?
-	//GROUP BY d.id
-	//ORDER BY ObjectName ASC
-	//		`, path, bucket, dirID).Scan(&dirRows).Error
-	//	if err != nil {
-	//		return nil, false, err
-	//	}
-	//	//dirRow.Name = fmt.Sprintf("%s%s/", path, dir.Name)
-	//	rows = append(rows, dirRows...)
 
 	// trim last element if we have more
 	if len(rows) == limit {
@@ -1804,7 +1724,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	return deletedSectors, err
 }
 
-func (s *SQLStore) dirID(ctx context.Context, tx *gorm.DB, dirPath string) (uint, error) {
+func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 	if !strings.HasPrefix(dirPath, "/") {
 		return 0, fmt.Errorf("path must start with /")
 	} else if !strings.HasSuffix(dirPath, "/") {
@@ -1827,7 +1747,7 @@ func (s *SQLStore) dirID(ctx context.Context, tx *gorm.DB, dirPath string) (uint
 	return dirID, nil
 }
 
-func (s *SQLStore) makeDirsForPath(ctx context.Context, tx *gorm.DB, path string) (uint, error) {
+func (s *SQLStore) makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	if !strings.HasPrefix(path, "/") {
 		return 0, fmt.Errorf("path must start with /")
 	}
@@ -1890,7 +1810,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// create the dir
-		dirID, err := s.makeDirsForPath(ctx, tx, path)
+		dirID, err := s.makeDirsForPath(tx, path)
 		if err != nil {
 			return fmt.Errorf("failed to create directories: %w", err)
 		}
