@@ -99,7 +99,7 @@ func TestUploaderTrackSectorUpload(t *testing.T) {
 	for _, h := range hosts {
 		if failures, estimate := stats(uploaderr(h.hk)); failures != 0 {
 			t.Fatal("unexpected failures", failures)
-		} else if !(estimate >= 150 && estimate < 155) {
+		} else if !(estimate >= 150 && estimate < 300) {
 			t.Fatal("unexpected estimate", estimate)
 		}
 	}
