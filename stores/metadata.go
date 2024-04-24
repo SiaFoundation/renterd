@@ -2527,7 +2527,7 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey 
 
 	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Raw(`
-SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
+SELECT DISTINCT obj.object_id as ObjectName, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
 INNER JOIN objects obj ON sli.db_object_id = obj.id
