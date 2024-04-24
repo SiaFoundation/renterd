@@ -479,6 +479,7 @@ func TestRetryTransaction(t *testing.T) {
 	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Microsecond)
+	defer cancel()
 	time.Sleep(time.Millisecond)
 	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
 	if len(observedLogs.All()) != len(want) {
