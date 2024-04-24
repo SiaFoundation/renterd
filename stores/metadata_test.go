@@ -1047,11 +1047,12 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	one := uint(1)
 	expectedObj := dbObject{
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
-		ObjectID:   objID,
-		Key:        obj1Key,
-		Size:       obj1.TotalSize(),
+		DBDirectoryID: 1,
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
+		ObjectID:      objID,
+		Key:           obj1Key,
+		Size:          obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID:  &one,
@@ -4081,19 +4082,26 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	dirID, err := ss.makeDirsForPath(ss.db, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// create objects
 	obj1 := dbObject{
-		ObjectID:   "1",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: dirID,
+		ObjectID:      "1",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj1).Error; err != nil {
 		t.Fatal(err)
 	}
 	obj2 := dbObject{
-		ObjectID:   "2",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: dirID,
+		ObjectID:      "2",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj2).Error; err != nil {
 		t.Fatal(err)
@@ -4128,7 +4136,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4164,9 +4172,10 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj3 := dbObject{
-		ObjectID:   "3",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: dirID,
+		ObjectID:      "3",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj3).Error; err != nil {
 		t.Fatal(err)
