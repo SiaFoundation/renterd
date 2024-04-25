@@ -546,6 +546,7 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 	abortRetry := func(err error) bool {
 		if err == nil ||
 			errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
 			errors.Is(err, errInvalidNumberOfShards) ||
 			errors.Is(err, errShardRootChanged) ||
