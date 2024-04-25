@@ -4857,7 +4857,7 @@ func TestDirectories(t *testing.T) {
 	var n int64
 	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {
 		t.Fatal(err)
-	} else if n != 0 {
-		t.Fatal("expected 0 dirs, got", n)
+	} else if n != 1 {
+		t.Fatal("expected 1 dir, got", n)
 	}
 }

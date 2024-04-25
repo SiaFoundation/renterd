@@ -2859,7 +2859,8 @@ func pruneDirs(tx *gorm.DB) error {
 		res := tx.Exec(`
 DELETE
 FROM directories
-WHERE NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
+WHERE directories.id != 1
+AND NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
 AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.parent_id = directories.id) i)
 `)
 		if res.Error != nil {
