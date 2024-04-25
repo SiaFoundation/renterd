@@ -1794,6 +1794,8 @@ func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND parent_id = ?", dir, dirID).
 			Scan(&childID).Error; err != nil {
 			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if childID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
 		}
 		dirID = childID
 	}
