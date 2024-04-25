@@ -4773,3 +4773,91 @@ func TestFetchUsedContracts(t *testing.T) {
 		t.Fatal("contracts should point to the renewed contract")
 	}
 }
+
+func TestDirectories(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	objects := []string{
+		"/foo",
+		"/bar/baz",
+		"///somefile",
+		"/dir/fakedir/",
+		"/",
+		"/bar/fileinsamedirasbefore",
+	}
+
+	for _, o := range objects {
+		dirID, err := makeDirsForPath(ss.db, o)
+		if err != nil {
+			t.Fatal(err)
+		} else if dirID == 0 {
+			t.Fatalf("unexpected dir id %v", dirID)
+		}
+	}
+
+	expectedDirs := []struct {
+		name     string
+		id       uint
+		parentID uint
+	}{
+		{
+			name:     "",
+			id:       1,
+			parentID: 0,
+		},
+		{
+			name:     "bar",
+			id:       2,
+			parentID: 1,
+		},
+		{
+			name:     "",
+			id:       3,
+			parentID: 1,
+		},
+		{
+			name:     "",
+			id:       4,
+			parentID: 3,
+		},
+		{
+			name:     "dir",
+			id:       2,
+			parentID: 1,
+		},
+		{
+			name:     "fakedir",
+			id:       4,
+			parentID: 3,
+		},
+	}
+
+	var dbDirs []dbDirectory
+	if err := ss.db.Find(&dbDirs).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbDirs) != len(expectedDirs) {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), len(dbDirs))
+	}
+
+	for i, dbDir := range dbDirs {
+		if dbDir.ID != uint(i+1) {
+			t.Fatalf("unexpected id %v", dbDir.ID)
+		} else if dbDir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected name '%v' != '%v'", dbDir.Name, expectedDirs[i].name)
+		}
+	}
+
+	now := time.Now()
+	ss.triggerSlabPruning()
+	if err := ss.waitForPruneLoop(now); err != nil {
+		t.Fatal(err)
+	}
+
+	var n int64
+	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal("expected 0 dirs, got", n)
+	}
+}

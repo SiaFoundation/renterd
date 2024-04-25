@@ -2814,13 +2814,20 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
-		err := s.retryTransaction(ctx, pruneSlabs)
+		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
+			if err := pruneSlabs(tx); err != nil {
+				return fmt.Errorf("failed to prune slabs: %w", err)
+			} else if err := pruneDirs(tx); err != nil {
+				return fmt.Errorf("failed to prune directories: %w", err)
+			}
+			return nil
+		})
 		if err != nil {
-			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+			s.logger.Errorw("pruning failed", zap.Error(err))
 			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
 				ID:        pruneSlabsAlertID,
 				Severity:  alerts.SeverityWarning,
-				Message:   "Failed to prune slabs from database",
+				Message:   "Failed to prune database",
 				Timestamp: time.Now(),
 				Data: map[string]interface{}{
 					"error": err.Error(),
@@ -2845,6 +2852,22 @@ FROM slabs
 WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
 AND slabs.db_buffered_slab_id IS NULL
 `).Error
+}
+
+func pruneDirs(tx *gorm.DB) error {
+	for {
+		res := tx.Exec(`
+DELETE
+FROM directories
+WHERE NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
+AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.parent_id = directories.id) i)
+`)
+		if res.Error != nil {
+			return res.Error
+		} else if res.RowsAffected == 0 {
+			return nil
+		}
+	}
 }
 
 func (s *SQLStore) triggerSlabPruning() {
