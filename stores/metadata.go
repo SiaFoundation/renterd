@@ -1246,7 +1246,7 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
 FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
-WHERE o.db_directory_id = ? AND b.name = ? AND %s
+WHERE o.object_id != ? AND o.db_directory_id = ? AND b.name = ? AND %s
 UNION
 SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
@@ -1266,6 +1266,7 @@ GROUP BY d.id
 	var objectsQueryParams []interface{}
 	if prefix != "" {
 		objectsQueryParams = []interface{}{
+			path,
 			dirID, bucket,
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			path,
@@ -1277,6 +1278,7 @@ GROUP BY d.id
 		}
 	} else {
 		objectsQueryParams = []interface{}{
+			path,
 			dirID, bucket,
 			path,
 			path,
