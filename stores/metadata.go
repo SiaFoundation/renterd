@@ -1234,6 +1234,11 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		prefixExpr = "SUBSTR(o.object_id, 1, ?) = ?"
 	}
 
+	lengthFn := "CHAR_LENGTH"
+	if isSQLite(s.db) {
+		lengthFn = "LENGTH"
+	}
+
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
 	// 2. fetch all sub-directories
@@ -1246,11 +1251,12 @@ UNION
 SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(%s)) = %s AND %s
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(%s)) = %s AND %s
 WHERE b.name = ? AND d.parent_id = ?
 GROUP BY d.id
 	`, prefixExpr,
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
+		lengthFn,
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
 		prefixExpr)
@@ -1286,7 +1292,7 @@ GROUP BY d.id
 			var markerHealth float64
 			if err = s.db.
 				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Health FROM (SELECT * FROM (%s) WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Health FROM (SELECT * FROM (%s) h WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerHealth).
 				Error; err != nil {
 				return
@@ -1303,7 +1309,7 @@ GROUP BY d.id
 			var markerSize float64
 			if err = s.db.
 				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Size FROM (SELECT * FROM (%s) WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Size FROM (SELECT * FROM (%s) s WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerSize).
 				Error; err != nil {
 				return
