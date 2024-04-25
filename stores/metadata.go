@@ -1251,11 +1251,12 @@ UNION
 SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(%s)) = %s AND %s
+INNER JOIN directories d ON o.object_id LIKE %s AND SUBSTR(o.object_id, 1, %s(%s)) = %s AND %s
 WHERE b.name = ? AND d.parent_id = ?
 GROUP BY d.id
 	`, prefixExpr,
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/%'"),
 		lengthFn,
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
@@ -1270,12 +1271,14 @@ GROUP BY d.id
 			path,
 			path,
 			path,
+			path,
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			bucket, dirID,
 		}
 	} else {
 		objectsQueryParams = []interface{}{
 			dirID, bucket,
+			path,
 			path,
 			path,
 			path,
