@@ -1763,7 +1763,7 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 	return dirID, nil
 }
 
-func (s *SQLStore) makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
+func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	// Create root dir.
 	dirID := uint(1)
 	if err := tx.Model(&dbDirectory{}).
@@ -1829,7 +1829,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		// create the dir
-		dirID, err := s.makeDirsForPath(tx, path)
+		dirID, err := makeDirsForPath(tx, path)
 		if err != nil {
 			return fmt.Errorf("failed to create directories: %w", err)
 		}

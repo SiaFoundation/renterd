@@ -4082,7 +4082,7 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dirID, err := ss.makeDirsForPath(ss.db, "1")
+	dirID, err := makeDirsForPath(ss.db, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
