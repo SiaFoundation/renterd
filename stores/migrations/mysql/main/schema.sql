@@ -316,6 +316,7 @@ CREATE TABLE `multipart_parts` (
 -- dbDirectory
 CREATE TABLE `directories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) DEFAULT NULL,
   `parent_id` bigint unsigned,
   `name` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   PRIMARY KEY (`id`),
