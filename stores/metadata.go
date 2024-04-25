@@ -1748,10 +1748,15 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 
 func (s *SQLStore) makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	// Create root dir.
-	if err := tx.Exec("INSERT INTO directories (id) VALUES (1) ON CONFLICT DO NOTHING").Error; err != nil {
+	dirID := uint(1)
+	if err := tx.Model(&dbDirectory{}).
+		Clauses(clause.OnConflict{
+			DoNothing: true,
+		}).Create(map[string]any{
+		"id": dirID,
+	}).Error; err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
-	dirID := uint(1)
 
 	// Create remaining directories.
 	splitPath := strings.Split(strings.TrimPrefix(path, "/"), "/")
