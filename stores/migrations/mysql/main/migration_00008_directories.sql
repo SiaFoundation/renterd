@@ -10,5 +10,7 @@ CREATE TABLE `directories` (
   CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-ALTER TABLE `objects` ADD COLUMN `db_directory_id` bigint unsigned NOT NULL;
+ALTER TABLE `objects`
+ADD COLUMN `db_directory_id` bigint unsigned NOT NULL;
+ADD CONSTRAINT `fk_objects_db_directory_id` FOREIGN KEY (`db_directory_id`) REFERENCES `directories` (`id`);
 CREATE INDEX `idx_objects_db_directory_id` ON `objects` (`db_directory_id`);

@@ -75,7 +75,11 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 					return fmt.Errorf("failed to migrate: %v", err)
 				}
 				// loop over all objects one-by-one and create the corresponding directory
+				logger.Info("beginning post-migration directory creation, this might take a while")
 				for offset := 0; ; offset++ {
+					if offset > 0 && offset%1000 == 0 {
+						logger.Infof("processed %v objects", offset)
+					}
 					var obj dbObject
 					if err := tx.Offset(offset).Limit(1).Take(&obj).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 						break // done
@@ -90,6 +94,7 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 						return fmt.Errorf("failed to update object %s: %w", obj.ObjectID, err)
 					}
 				}
+				logger.Info("post-migration directory creation complete")
 				return nil
 			},
 		},

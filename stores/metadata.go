@@ -1776,7 +1776,8 @@ func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	}
 
 	// Create remaining directories.
-	splitPath := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	path = strings.TrimPrefix(path, "/")
+	splitPath := strings.Split(path, "/")
 	for _, dir := range splitPath[:len(splitPath)-1] {
 		if err := tx.Clauses(clause.OnConflict{
 			DoNothing: true,
