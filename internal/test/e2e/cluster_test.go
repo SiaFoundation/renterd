@@ -251,14 +251,15 @@ func TestObjectEntries(t *testing.T) {
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			if entries[i].MimeType == "" {
-				t.Fatal("mime type should be set", entries[i].MimeType, entries[i].Name)
+			isDir := strings.HasSuffix(entries[i].Name, "/")
+			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
+				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
 			entries[i].MimeType = ""
 
 			// assert etag
-			if entries[i].ETag == "" {
-				t.Fatal("ETag should be set")
+			if isDir != (entries[i].ETag == "") {
+				t.Fatal("etag should be set for files and empty for dirs")
 			}
 			entries[i].ETag = ""
 		}
