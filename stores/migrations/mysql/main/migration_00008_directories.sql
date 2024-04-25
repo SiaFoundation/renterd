@@ -6,7 +6,7 @@ CREATE TABLE `directories` (
   `name` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_directories_parent_id` (`parent_id`),
-  UNIQUE KEY `idx_directories_name` (`name`),
+  UNIQUE KEY `idx_directories_name_parent_id` (`name`, `parent_id`),
   CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
