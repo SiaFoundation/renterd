@@ -68,6 +68,31 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 				return performMigration(tx, dbIdentifier, "00007_host_checks", logger)
 			},
 		},
+		{
+			ID: "00008_directories",
+			Migrate: func(tx *gorm.DB) error {
+				if err := performMigration(tx, dbIdentifier, "00008_directories", logger); err != nil {
+					return fmt.Errorf("failed to migrate: %v", err)
+				}
+				// loop over all objects one-by-one and create the corresponding directory
+				for offset := 0; ; offset++ {
+					var obj dbObject
+					if err := tx.Offset(offset).Limit(1).Take(&obj).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+						break // done
+					} else if err != nil {
+						return fmt.Errorf("failed to fetch object: %v", err)
+					}
+					dirID, err := makeDirsForPath(tx, obj.ObjectID)
+					if err != nil {
+						return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
+					}
+					if err := tx.Where(obj).Update("db_directory_id", dirID).Error; err != nil {
+						return fmt.Errorf("failed to update object %s: %w", obj.ObjectID, err)
+					}
+				}
+				return nil
+			},
+		},
 	}
 
 	// Create migrator.
