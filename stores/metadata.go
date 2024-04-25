@@ -1243,13 +1243,17 @@ FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
 WHERE o.db_directory_id = ? AND b.name = ? AND %s
 UNION
-SELECT '' as ETag, MAX(o.created_at) as ModTime, ? || d.name || '/' as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
+SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(? || d.name || '/')) = ? || d.name || '/' AND %s
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(%s)) = %s AND %s
 WHERE b.name = ? AND d.parent_id = ?
 GROUP BY d.id
-	`, prefixExpr, prefixExpr)
+	`, prefixExpr,
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
+		prefixExpr)
 
 	// build query params
 	var objectsQueryParams []interface{}
@@ -1765,18 +1769,21 @@ func (s *SQLStore) makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	// Create remaining directories.
 	splitPath := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for _, dir := range splitPath[:len(splitPath)-1] {
-		dbDir := dbDirectory{
-			Name:     dir,
-			ParentID: dirID,
-		}
 		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "name"}, {Name: "parent_id"}},
-			UpdateAll: true,
+			DoNothing: true,
 		}).
-			Create(&dbDir).Error; err != nil {
+			Create(&dbDirectory{
+				Name:     dir,
+				ParentID: dirID,
+			}).Error; err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		}
-		dirID = dbDir.ID
+		var childID uint
+		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND parent_id = ?", dir, dirID).
+			Scan(&childID).Error; err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		}
+		dirID = childID
 	}
 	return dirID, nil
 }
