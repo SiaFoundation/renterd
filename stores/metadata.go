@@ -1525,7 +1525,13 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 				return fmt.Errorf("RenameObject: failed to delete object: %w", err)
 			}
 		}
-		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
+		// create new dir
+		dirID, err := makeDirsForPath(tx, keyNew)
+		if err != nil {
+			return err
+		}
+		// update object
+		tx = tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND ?`, keyNew, dirID, keyOld, sqlWhereBucket("objects", bucket))
 		if tx.Error != nil &&
 			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
 			return api.ErrObjectExists
@@ -1535,6 +1541,8 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 		if tx.RowsAffected == 0 {
 			return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
 		}
+		// delete old dir if empty
+		s.triggerSlabPruning()
 		return nil
 	})
 }
@@ -1558,8 +1566,13 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				return err
 			}
 		}
-		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
-			prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+		// create new dir
+		dirID, err := makeDirsForPath(tx, prefixNew)
+		if err != nil {
+			return err
+		}
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+", db_directory_id = ? WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, dirID, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
 		if tx.Error != nil &&
 			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
 			return api.ErrObjectExists
@@ -1569,6 +1582,8 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 		if tx.RowsAffected == 0 {
 			return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 		}
+		// delete old dir if empty
+		s.triggerSlabPruning()
 		return nil
 	})
 }

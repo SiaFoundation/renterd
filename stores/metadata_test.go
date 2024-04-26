@@ -2470,6 +2470,43 @@ func TestRenameObjects(t *testing.T) {
 			t.Fatal("unexpected path", obj.Name)
 		}
 	}
+
+	// Assert directories are correct
+	expectedDirs := []struct {
+		id       uint
+		parentID uint
+		name     string
+	}{
+		{
+			id:       1,
+			parentID: 0,
+			name:     "",
+		},
+		{
+			id:       2,
+			parentID: 1,
+			name:     "fileś",
+		},
+	}
+	var directories []dbDirectory
+	test.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Find(&directories).Error; err != nil {
+			return err
+		} else if len(directories) != len(expectedDirs) {
+			return fmt.Errorf("unexpected number of directories, %v != %v", len(directories), len(expectedDirs))
+		}
+		return nil
+	})
+
+	for i, dir := range directories {
+		if dir.ID != expectedDirs[i].id {
+			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
+		} else if dir.ParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected directory parent id, %v != %v", dir.ParentID, expectedDirs[i].parentID)
+		} else if dir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
+		}
+	}
 }
 
 // TestObjectsStats is a unit test for ObjectsStats.
