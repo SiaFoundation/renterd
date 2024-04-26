@@ -136,6 +136,9 @@ func TestSQLHostDB(t *testing.T) {
 		AppliedBlocks: []stypes.Block{{}},
 		AppliedDiffs:  []modules.ConsensusChangeDiffs{{}},
 	})
+	if err := ss.applyUpdates(true); err != nil {
+		t.Fatal(err)
+	}
 
 	// Connect to the same DB again.
 	hdb2 := ss.Reopen()

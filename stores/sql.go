@@ -245,6 +245,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:                 cfg.Alerts,
+		ccid:                   ccid,
 		db:                     db,
 		dbMetrics:              dbMetrics,
 		logger:                 l,

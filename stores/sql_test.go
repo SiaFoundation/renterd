@@ -44,13 +44,9 @@ var (
 )
 
 type testSQLStore struct {
-	t *testing.T
+	cfg testSQLStoreConfig
+	t   *testing.T
 	*SQLStore
-
-	dbName        string
-	dbMetricsName string
-	dir           string
-	ccid          modules.ConsensusChangeID
 }
 
 type testSQLStoreConfig struct {
@@ -68,7 +64,7 @@ func randomDBName() string {
 	return "db" + hex.EncodeToString(frand.Bytes(16))
 }
 
-func (cfg *testSQLStoreConfig) dbConnections(dir string) (gorm.Dialector, gorm.Dialector, error) {
+func (cfg *testSQLStoreConfig) dbConnections() (gorm.Dialector, gorm.Dialector, error) {
 	// create MySQL connections if URI is set
 	if mysql := config.MySQLConfigFromEnv(); mysql.URI != "" {
 		// sanity check config
@@ -76,12 +72,12 @@ func (cfg *testSQLStoreConfig) dbConnections(dir string) (gorm.Dialector, gorm.D
 			return nil, nil, errors.New("invalid store config, can't use both persistent and dbURI")
 		}
 
-		// generate random db names if they're not provided
+		// use db names from config if not set
 		if mysql.Database == "" {
-			mysql.Database = randomDBName()
+			mysql.Database = cfg.dbName
 		}
 		if mysql.MetricsDatabase == "" {
-			mysql.MetricsDatabase = randomDBName()
+			mysql.MetricsDatabase = cfg.dbMetricsName
 		}
 
 		// use a tmp connection to precreate the two databases
@@ -100,17 +96,9 @@ func (cfg *testSQLStoreConfig) dbConnections(dir string) (gorm.Dialector, gorm.D
 
 	// create SQL connections if we want a persistent store
 	if cfg.persistent {
-		return NewSQLiteConnection(filepath.Join(dir, "db.sqlite")),
-			NewSQLiteConnection(filepath.Join(dir, "metrics.sqlite")),
+		return NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite")),
+			NewSQLiteConnection(filepath.Join(cfg.dir, "metrics.sqlite")),
 			nil
-	}
-
-	// default db names to random strings if not set
-	if cfg.dbName == "" {
-		cfg.dbName = randomDBName()
-	}
-	if cfg.dbMetricsName == "" {
-		cfg.dbMetricsName = randomDBName()
 	}
 
 	// otherwise return ephemeral connections
@@ -122,23 +110,33 @@ func (cfg *testSQLStoreConfig) dbConnections(dir string) (gorm.Dialector, gorm.D
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	t.Helper()
-	dir := cfg.dir
-	if dir == "" {
-		dir = t.TempDir()
+
+	// default dir to tmp dir
+	if cfg.dir == "" {
+		cfg.dir = t.TempDir()
 	}
 
-	conn, connMetrics, err := cfg.dbConnections(dir)
+	// default db names to random strings if not set
+	if cfg.dbName == "" {
+		cfg.dbName = randomDBName()
+	}
+	if cfg.dbMetricsName == "" {
+		cfg.dbMetricsName = randomDBName()
+	}
+
+	// create db connections
+	conn, connMetrics, err := cfg.dbConnections()
 	if err != nil {
 		t.Fatal("failed to create db connections", err)
 	}
 
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(Config{
+	sqlStore, _, err := NewSQLStore(Config{
 		Conn:                          conn,
 		ConnMetrics:                   connMetrics,
 		Alerts:                        alerts,
-		PartialSlabDir:                dir,
+		PartialSlabDir:                cfg.dir,
 		Migrate:                       !cfg.skipMigrate,
 		AnnouncementMaxAge:            time.Hour,
 		PersistInterval:               time.Second,
@@ -159,12 +157,9 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		}
 	}
 	return &testSQLStore{
-		SQLStore:      sqlStore,
-		dbName:        cfg.dbName,
-		dbMetricsName: cfg.dbMetricsName,
-		dir:           dir,
-		ccid:          ccid,
-		t:             t,
+		cfg:      cfg,
+		t:        t,
+		SQLStore: sqlStore,
 	}
 }
 
@@ -189,10 +184,7 @@ func (s *testSQLStore) DefaultBucketID() uint {
 
 func (s *testSQLStore) Reopen() *testSQLStore {
 	s.t.Helper()
-	cfg := defaultTestSQLStoreConfig
-	cfg.dir = s.dir
-	cfg.dbName = s.dbName
-	cfg.dbMetricsName = s.dbMetricsName
+	cfg := s.cfg
 	cfg.skipContractSet = true
 	cfg.skipMigrate = true
 	return newTestSQLStore(s.t, cfg)
