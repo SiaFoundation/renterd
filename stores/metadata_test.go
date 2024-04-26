@@ -41,6 +41,22 @@ func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix str
 	return s.waitForPruneLoop(ts)
 }
 
+func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
+	ts := time.Now()
+	if err := s.RenameObject(ctx, bucket, keyOld, keyNew, force); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
+	ts := time.Now()
+	if err := s.RenameObjects(ctx, bucket, prefixOld, prefixNew, force); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
 func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	var ts time.Time
 	_, err := s.Object(ctx, bucket, path)
@@ -3282,7 +3298,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
+	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3299,7 +3315,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
+	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
