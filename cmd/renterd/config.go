@@ -12,6 +12,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/config"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
@@ -102,6 +103,15 @@ func stdoutError(msg string) {
 		fmt.Println(wrapANSI("\033[31m", msg, "\033[0m"))
 	} else {
 		fmt.Println(msg)
+	}
+}
+
+func setInputValue(context string, value *string) {
+	if *value != "" {
+		context = fmt.Sprintf("%s (default: %q)", context, *value)
+	}
+	if input := readInput(context); input != "" {
+		*value = input
 	}
 }
 
@@ -258,14 +268,13 @@ func setStoreConfig() {
 
 		cfg.Database.MySQL.User = readInput("MySQL username")
 		cfg.Database.MySQL.Password = readPasswordInput("MySQL password")
-		objectDB := readInput("Object database name (default: renterd)")
-		if objectDB != "" {
-			cfg.Database.MySQL.Database = objectDB
-		}
-		metricsDB := readInput("Metrics database name (default: renterd_metrics)")
-		if metricsDB != "" {
-			cfg.Database.MySQL.MetricsDatabase = metricsDB
-		}
+		setInputValue("Object database name", &cfg.Database.MySQL.Database)
+		setInputValue("Metrics database name", &cfg.Database.MySQL.MetricsDatabase)
+		cfg.Database.SQLite = config.SQLite{} // omit defaults
+	case "sqlite":
+		setInputValue("Object database name", &cfg.Database.SQLite.Database)
+		setInputValue("Metrics database name", &cfg.Database.SQLite.MetricsDatabase)
+		cfg.Database.MySQL = config.MySQL{} // omit defaults
 	default:
 		return
 	}

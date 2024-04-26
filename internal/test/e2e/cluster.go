@@ -34,8 +34,6 @@ import (
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
-	gormlogger "gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 const (
@@ -204,7 +202,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	defer cancel()
 
 	// Apply options.
-	dbName := opts.dbName
 	dir := t.TempDir()
 	if opts.dir != "" {
 		dir = opts.dir
@@ -243,35 +240,31 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
 	}
-
-	// default database logger
-	if busCfg.DBLogger == nil {
-		busCfg.DBLogger = zapgorm2.Logger{
-			ZapLogger:                 logger.Named("SQL"),
-			LogLevel:                  gormlogger.Warn,
-			SlowThreshold:             100 * time.Millisecond,
-			SkipCallerLookup:          false,
-			IgnoreRecordNotFoundError: true,
-			Context:                   nil,
-		}
+	if busCfg.Logger == nil {
+		busCfg.Logger = logger
+	}
+	if opts.dbName != "" {
+		busCfg.Database.MySQL.Database = opts.dbName
 	}
 
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
-	uri, user, password, _ := stores.DBConfigFromEnv()
-	if uri != "" {
-		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
-		tt.OK(err)
-
-		if dbName == "" {
-			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
+	if mysql := config.MySQLConfigFromEnv(); mysql.URI != "" {
+		// generate a random database name if none are set
+		if busCfg.Database.MySQL.Database == "" {
+			busCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
-		dbMetricsName := "db" + hex.EncodeToString(frand.Bytes(16))
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbMetricsName)).Error)
+		if busCfg.Database.MySQL.MetricsDatabase == "" {
+			busCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
+		}
 
-		busCfg.DBDialector = stores.NewMySQLConnection(user, password, uri, dbName)
-		busCfg.DBMetricsDialector = stores.NewMySQLConnection(user, password, uri, dbMetricsName)
+		tmpDB, err := gorm.Open(stores.NewMySQLConnection(mysql.User, mysql.Password, mysql.URI, ""))
+		tt.OK(err)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)).Error)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)).Error)
+		tmpDBB, err := tmpDB.DB()
+		tt.OK(err)
+		tt.OK(tmpDBB.Close())
 	}
 
 	// Prepare individual dirs.
@@ -375,7 +368,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	cluster := &TestCluster{
 		apID:    apCfg.ID,
 		dir:     dir,
-		dbName:  dbName,
+		dbName:  busCfg.Database.MySQL.Database,
 		logger:  logger,
 		network: busCfg.Network,
 		miner:   busCfg.Miner,
@@ -906,6 +899,18 @@ func testBusCfg() node.BusConfig {
 			PersistInterval:               testBusPersistInterval,
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
+		},
+		Database: config.Database{
+			SQLite: config.SQLite{
+				Database:        "db.sqlite",
+				MetricsDatabase: "metrics.sqlite",
+			},
+			MySQL: config.MySQLConfigFromEnv(),
+		},
+		DatabaseLog: config.DatabaseLog{
+			Enabled:                   true,
+			IgnoreRecordNotFoundError: true,
+			SlowThreshold:             100 * time.Millisecond,
 		},
 		Network:             testNetwork(),
 		SlabPruningInterval: time.Second,
