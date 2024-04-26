@@ -116,22 +116,35 @@ outer:
 			}
 
 			// execute it
-			elapsed, err := u.execute(req)
-
-			// the uploader's contract got renewed, requeue the request
-			if errors.Is(err, errMaxRevisionReached) {
-				if u.tryRefresh(req.sector.ctx) {
+			start := time.Now()
+			duration, err := u.execute(req)
+			if err == nil {
+				// only track the time it took to upload the sector in the happy case
+				u.trackSectorUpload(true, duration)
+				u.trackConsecutiveFailures(true)
+			} else if errors.Is(err, errMaxRevisionReached) {
+				// the uploader's contract got renewed, requeue the request
+				if err := u.tryRefresh(); err == nil {
 					u.enqueue(req)
 					continue outer
+				} else if !utils.IsErr(err, context.Canceled) {
+					u.logger.Errorf("failed to refresh the uploader's contract %v, err: %v", u.ContractID(), err)
 				}
-			}
-
-			// track the error, ignore gracefully closed streams and canceled overdrives
-			canceledOverdrive := req.done() && req.overdrive && err != nil
-			if !canceledOverdrive && !isClosedStream(err) {
-				u.trackSectorUpload(err, elapsed)
+				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
+			} else if errors.Is(err, errSectorUploadFinished) && !req.overdrive {
+				// punish the slow host by tracking a multiple of the total time
+				// we lost on it, but we only do so if we weren't overdriving,
+				// also note we are not tracking consecutive failures here
+				// because we're not sure if we had a successful host
+				// interaction
+				u.trackSectorUpload(true, time.Since(start)*10)
+			} else if !errors.Is(err, errSectorUploadFinished) {
+				// punish the host for failing the upload
+				u.trackSectorUpload(false, time.Hour)
+				u.trackConsecutiveFailures(false)
+				u.logger.Debugw("penalising host for failing to upload sector", "hk", u.hk, "overdrive", req.overdrive, "err", err)
 			} else {
-				u.logger.Debugw("not tracking sector upload metric", zap.Error(err))
+				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
 			}
 
 			// send the response
@@ -198,6 +211,8 @@ func (u *uploader) estimate() float64 {
 	return numSectors * estimateP90
 }
 
+// execute executes the sector upload request, if the upload was successful it
+// returns the time it took to upload the sector to the host
 func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
 	// grab fields
 	u.mu.Lock()
@@ -233,19 +248,17 @@ func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
 
 	// update the bus
 	if err := u.os.AddUploadingSector(ctx, req.uploadID, fcid, req.sector.root); err != nil {
-		return 0, fmt.Errorf("failed to add uploading sector to contract %v, err: %v", fcid, err)
+		return 0, fmt.Errorf("failed to add uploading sector to contract %v; %w", fcid, err)
 	}
 
 	// upload the sector
 	start := time.Now()
 	err = host.UploadSector(ctx, req.sector.root, req.sector.sectorData(), rev)
 	if err != nil {
-		return 0, fmt.Errorf("failed to upload sector to contract %v, err: %v", fcid, err)
+		return 0, fmt.Errorf("failed to upload sector to contract %v; %w", fcid, err)
 	}
 
-	// calculate elapsed time
-	elapsed := time.Since(start)
-	return elapsed, nil
+	return time.Since(start), nil
 }
 
 func (u *uploader) pop() *sectorUploadReq {
@@ -268,21 +281,34 @@ func (u *uploader) signalWork() {
 	}
 }
 
-func (u *uploader) trackSectorUpload(err error, d time.Duration) {
+func (u *uploader) trackConsecutiveFailures(success bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if err != nil {
-		u.consecutiveFailures++
-		u.statsSectorUploadEstimateInMS.Track(float64(time.Hour.Milliseconds()))
-	} else {
-		ms := d.Milliseconds()
-		if ms == 0 {
-			ms = 1 // avoid division by zero
-		}
 
+	// update consecutive failures
+	if success {
 		u.consecutiveFailures = 0
-		u.statsSectorUploadEstimateInMS.Track(float64(ms))                       // duration in ms
+	} else {
+		u.consecutiveFailures++
+	}
+}
+
+func (u *uploader) trackSectorUpload(success bool, d time.Duration) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	// sanitize input
+	ms := d.Milliseconds()
+	if ms == 0 {
+		ms = 1 // avoid division by zero
+	}
+
+	// update estimates
+	if success {
+		u.statsSectorUploadEstimateInMS.Track(float64(ms))
 		u.statsSectorUploadSpeedBytesPerMS.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
+	} else {
+		u.statsSectorUploadEstimateInMS.Track(float64(ms))
 	}
 }
 
@@ -298,17 +324,18 @@ func (u *uploader) tryRecomputeStats() {
 	u.statsSectorUploadSpeedBytesPerMS.Recompute()
 }
 
-func (u *uploader) tryRefresh(ctx context.Context) bool {
+func (u *uploader) tryRefresh() error {
+	// use a sane timeout
+	ctx, cancel := context.WithTimeout(u.shutdownCtx, 30*time.Second)
+	defer cancel()
+
 	// fetch the renewed contract
 	renewed, err := u.cs.RenewedContract(ctx, u.ContractID())
-	if utils.IsErr(err, api.ErrContractNotFound) || utils.IsErr(err, context.Canceled) {
-		return false
-	} else if err != nil {
-		u.logger.Errorf("failed to fetch renewed contract %v, err: %v", u.ContractID(), err)
-		return false
+	if err != nil {
+		return err
 	}
 
 	// renew the uploader with the renewed contract
 	u.Refresh(renewed)
-	return true
+	return nil
 }

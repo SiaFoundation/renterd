@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -9,9 +8,9 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
-	"lukechampine.com/frand"
 )
 
 func TestUploaderStopped(t *testing.T) {
@@ -41,111 +40,103 @@ func TestUploaderStopped(t *testing.T) {
 }
 
 func TestUploaderTrackSectorUpload(t *testing.T) {
+	// create test worker
 	w := newTestWorker(t)
+	h := w.AddHosts(1)[0]
 
 	// convenience variables
 	um := w.uploadManager
-	rs := testRedundancySettings
 
 	// create custom logger to capture logs
 	observedZapCore, observedLogs := observer.New(zap.DebugLevel)
 	um.logger = zap.New(observedZapCore).Sugar()
 
-	// overdrive immediately after 50ms
-	um.overdriveTimeout = 50 * time.Millisecond
-	um.maxOverdrive = uint64(rs.TotalShards) + 1
+	// create uploader
+	um.refreshUploaders(w.Contracts(), 1)
+	ul := um.uploaders[0]
+	ul.statsSectorUploadEstimateInMS = stats.NoDecay()
 
-	// add hosts and add arificial delay of 150ms
-	hosts := w.AddHosts(rs.TotalShards)
-	for _, host := range hosts {
-		host.uploadDelay = 150 * time.Millisecond
-	}
-
-	// create test data
-	data := frand.Bytes(128)
-
-	// create upload params
-	params := testParameters(t.Name())
-
-	// upload data
-	_, _, err := um.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// define a helper function to fetch an uploader for given host key
-	uploaderr := func(hk types.PublicKey) *uploader {
+	// executeReq is a helper that enqueues a sector upload request and returns
+	// a response, we don't need to alter the request because we'll configure
+	// the test host to see whether we properly handle sector uploads
+	executeReq := func(overdrive bool) sectorUploadResp {
 		t.Helper()
-		um.refreshUploaders(w.Contracts(), 1)
-		for _, uploader := range um.uploaders {
-			if uploader.hk == hk {
-				return uploader
-			}
-		}
-		t.Fatal("uploader not found")
-		return nil
+		responseChan := make(chan sectorUploadResp)
+		ul.enqueue(&sectorUploadReq{
+			contractLockDuration: time.Second,
+			contractLockPriority: lockingPriorityUpload,
+			overdrive:            overdrive,
+			responseChan:         responseChan,
+			sector:               &sectorUpload{ctx: context.Background()},
+		})
+		return <-responseChan
 	}
 
-	// define a helper function to fetch uploader stats
-	stats := func(u *uploader) (uint64, float64) {
-		t.Helper()
-		u.mu.Lock()
-		defer u.mu.Unlock()
-		return u.consecutiveFailures, u.statsSectorUploadEstimateInMS.P90()
+	// assert successful uploads reset consecutive failures and track duration
+	h.uploadDelay = 100 * time.Millisecond
+	ul.consecutiveFailures = 1
+	res := executeReq(false)
+	if res.err != nil {
+		t.Fatal(res.err)
+	} else if ul.consecutiveFailures != 0 {
+		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadEstimateInMS.Len() != 1 {
+		t.Fatal("unexpected number of data points")
+	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); !(100 <= avg && avg < 200) {
+		t.Fatal("unexpected average", avg)
 	}
 
-	// assert all uploaders have 0 failures and an estimate that roughly equals
-	// the upload delay
-	for _, h := range hosts {
-		if failures, estimate := stats(uploaderr(h.hk)); failures != 0 {
-			t.Fatal("unexpected failures", failures)
-		} else if !(estimate >= 150 && estimate < 300) {
-			t.Fatal("unexpected estimate", estimate)
-		}
-	}
-
-	// add a host with a 250ms delay
-	h := w.AddHost()
-	h.uploadDelay = 250 * time.Millisecond
-
-	// make sure its estimate is not 0 and thus is not used for the upload, but
-	// instead it is used for the overdrive
-	ul := uploaderr(h.hk)
-	ul.statsSectorUploadEstimateInMS.Track(float64(h.uploadDelay.Milliseconds()))
-	ul.statsSectorUploadEstimateInMS.Recompute()
-	if ul.statsSectorUploadEstimateInMS.P90() == 0 {
-		t.Fatal("unexpected p90")
-	}
-
-	// upload data
-	_, _, err = um.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(h.uploadDelay)
-
-	// assert the new host has 0 failures and that we logged an entry indicating
-	// we skipped tracking the metric
-	if failures, _ := stats(uploaderr(h.hk)); failures != 0 {
-		t.Fatal("unexpected failures", failures)
-	} else if observedLogs.Filter(func(entry observer.LoggedEntry) bool {
-		return strings.Contains(entry.Message, "not tracking sector upload metric")
-	}).Len() == 0 {
+	// assert we refresh the underlying contract when max rev. is reached
+	h.rev.RevisionNumber = types.MaxRevisionNumber
+	res = executeReq(false)
+	if res.err == nil {
+		t.Fatal("expected error")
+	} else if logs := observedLogs.TakeAll(); len(logs) == 0 {
 		t.Fatal("missing log entry")
+	} else if !strings.Contains(logs[0].Message, "failed to refresh the uploader's contract") {
+		t.Fatal("ununexpected log line")
 	}
 
-	// upload data again but now have the host return an error
+	// assert we punish the host if he was slower than one of the other hosts
+	// overdriving his sector, also assert we don't track consecutive failures
+	ul.consecutiveFailures = 1
+	h.rev.RevisionNumber = 0 // reset
+	h.uploadErr = errSectorUploadFinished
+	res = executeReq(false)
+	if res.err == nil {
+		t.Fatal("expected error")
+	} else if ul.consecutiveFailures != 1 {
+		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadEstimateInMS.Len() != 2 {
+		t.Fatal("unexpected number of data points")
+	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); !(500 <= avg && avg < 750) {
+		t.Fatal("unexpected average", avg)
+	}
+
+	// assert we don't punish the host if it itself was overdriving the sector
+	res = executeReq(true)
+	if res.err == nil {
+		t.Fatal("expected error")
+	} else if ul.consecutiveFailures != 1 {
+		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadEstimateInMS.Len() != 2 {
+		t.Fatal("unexpected number of data points")
+	} else if logs := observedLogs.TakeAll(); len(logs) == 0 {
+		t.Fatal("missing log entry")
+	} else if !strings.Contains(logs[0].Message, "skip tracking sector upload") {
+		t.Fatal("ununexpected log line")
+	}
+
+	// assert we punish the host if it failed the upload for any other reason
 	h.uploadErr = errors.New("host error")
-	_, _, err = um.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert the new host has 1 failure and its estimate includes the penalty
-	uploaderr(h.hk).statsSectorUploadEstimateInMS.Recompute()
-	if failures, estimate := stats(uploaderr(h.hk)); failures != 1 {
-		t.Fatal("unexpected failures", failures)
-	} else if estimate < float64(time.Minute.Milliseconds()) {
-		t.Fatal("unexpected estimate", estimate)
+	res = executeReq(false)
+	if res.err == nil {
+		t.Fatal("expected error")
+	} else if ul.consecutiveFailures != 2 {
+		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadEstimateInMS.Len() != 3 {
+		t.Fatal("unexpected number of data points")
+	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); avg < 1800 {
+		t.Fatal("unexpected average", avg)
 	}
 }

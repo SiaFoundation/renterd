@@ -195,7 +195,7 @@ func newContractStoreMock() *contractStoreMock {
 }
 
 func (*contractStoreMock) RenewedContract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
-	return api.ContractMetadata{}, nil
+	return api.ContractMetadata{}, api.ErrContractNotFound
 }
 
 func (*contractStoreMock) Contract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
