@@ -3,6 +3,8 @@ package stores
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"go.sia.tech/renterd/internal/utils"
@@ -71,37 +73,66 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		{
 			ID: "00008_directories",
 			Migrate: func(tx *gorm.DB) error {
-				if err := performMigration(tx, dbIdentifier, "00008_directories", logger); err != nil {
+				if err := performMigration(tx, dbIdentifier, "00008_directories_1", logger); err != nil {
 					return fmt.Errorf("failed to migrate: %v", err)
 				}
-				// loop over all objects one-by-one and create the corresponding directory
+				// loop over all objects and deduplicate dirs to create
 				logger.Info("beginning post-migration directory creation, this might take a while")
-				for offset := 0; ; offset++ {
-					if offset > 0 && offset%1000 == 0 {
+				batchSize := 10000
+				processedDirs := make(map[string]struct{})
+				for offset := 0; ; offset += batchSize {
+					if offset > 0 && offset%batchSize == 0 {
 						logger.Infof("processed %v objects", offset)
 					}
-					var obj dbObject
-					if err := tx.Offset(offset).Limit(1).Take(&obj).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+					var objBatch []dbObject
+					if err := tx.
+						Offset(offset).
+						Limit(batchSize).
+						Select("id", "object_id").
+						Find(&objBatch).Error; err != nil {
+						return fmt.Errorf("failed to fetch objects: %v", err)
+					} else if len(objBatch) == 0 {
 						break // done
-					} else if err != nil {
-						return fmt.Errorf("failed to fetch object: %v", err)
 					}
-					dirID, err := makeDirsForPath(tx, obj.ObjectID)
-					if err != nil {
-						return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
-					}
-					if err := tx.Where(obj).Update("db_directory_id", dirID).Error; err != nil {
-						return fmt.Errorf("failed to update object %s: %w", obj.ObjectID, err)
+					for _, obj := range objBatch {
+						// check if dir was processed
+						dir := "" // root
+						if i := strings.LastIndex(obj.ObjectID, "/"); i > -1 {
+							dir = obj.ObjectID[:i+1]
+						}
+						_, exists := processedDirs[dir]
+						if exists {
+							continue // already processed
+						}
+						processedDirs[dir] = struct{}{}
+
+						// process
+						dirID, err := makeDirsForPath(tx, obj.ObjectID)
+						if err != nil {
+							return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
+						}
+						if err := tx.Model(&dbObject{}).
+							Where("object_id LIKE ?", dir+"%").                                     // uses index but case sensitive
+							Where("SUBSTR(object_id, 1, ?) = ?", utf8.RuneCountInString(dir), dir). // exact comparison
+							Where("INSTR(SUBSTR(object_id, ?), '/') = 0", utf8.RuneCountInString(dir)+1).
+							Update("db_directory_id", dirID).Error; err != nil {
+							return fmt.Errorf("failed to update object %s: %w", obj.ObjectID, err)
+						}
 					}
 				}
 				logger.Info("post-migration directory creation complete")
+				if err := performMigration(tx, dbIdentifier, "00008_directories_2", logger); err != nil {
+					return fmt.Errorf("failed to migrate: %v", err)
+				}
 				return nil
 			},
 		},
 	}
 
 	// Create migrator.
-	m := gormigrate.New(db, gormigrate.DefaultOptions, migrations)
+	opts := gormigrate.DefaultOptions
+	opts.UseTransaction = true
+	m := gormigrate.New(db, opts, migrations)
 
 	// Set init function.
 	m.InitSchema(initSchema(dbIdentifier, logger))
