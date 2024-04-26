@@ -76,10 +76,7 @@ var (
 		},
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
-			SQLite: config.SQLite{
-				Database:        "db.sqlite",
-				MetricsDatabase: "metrics.sqlite",
-			},
+			SQLite: config.DefaultSQLiteConfig,
 			MySQL: config.MySQL{
 				User:            "renterd",
 				Database:        "renterd",

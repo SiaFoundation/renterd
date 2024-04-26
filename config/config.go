@@ -142,6 +142,11 @@ type (
 	}
 )
 
+var DefaultSQLiteConfig = SQLite{
+	Database:        "db.sqlite",
+	MetricsDatabase: "metrics.sqlite",
+}
+
 func MySQLConfigFromEnv() MySQL {
 	return MySQL{
 		URI:             os.Getenv("RENTERD_DB_URI"),

@@ -78,7 +78,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
-		Database:            config.Database{SQLite: config.SQLite{Database: "db.sqlite", MetricsDatabase: "metrics.sqlite"}},
+		Database:            config.Database{SQLite: config.DefaultSQLiteConfig},
 		Miner:               node.NewMiner(client),
 		SlabPruningInterval: time.Minute,
 		Logger:              zap.NewNop(),
