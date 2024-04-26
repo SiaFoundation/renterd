@@ -78,8 +78,10 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
+		Database:            config.Database{SQLite: config.SQLite{Database: "db.sqlite", MetricsDatabase: "metrics.sqlite"}},
 		Miner:               node.NewMiner(client),
 		SlabPruningInterval: time.Minute,
+		Logger:              zap.NewNop(),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err
