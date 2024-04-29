@@ -901,8 +901,7 @@ func testBusCfg() node.BusConfig {
 			SlabBufferCompletionThreshold: 0,
 		},
 		Database: config.Database{
-			SQLite: config.DefaultSQLiteConfig,
-			MySQL:  config.MySQLConfigFromEnv(),
+			MySQL: config.MySQLConfigFromEnv(),
 		},
 		DatabaseLog: config.DatabaseLog{
 			Enabled:                   true,

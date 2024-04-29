@@ -270,12 +270,8 @@ func setStoreConfig() {
 		cfg.Database.MySQL.Password = readPasswordInput("MySQL password")
 		setInputValue("Object database name", &cfg.Database.MySQL.Database)
 		setInputValue("Metrics database name", &cfg.Database.MySQL.MetricsDatabase)
-		cfg.Database.SQLite = config.SQLite{} // omit defaults
-	case "sqlite":
-		setInputValue("Object database name", &cfg.Database.SQLite.Database)
-		setInputValue("Metrics database name", &cfg.Database.SQLite.MetricsDatabase)
-		cfg.Database.MySQL = config.MySQL{} // omit defaults
 	default:
+		cfg.Database.MySQL = config.MySQL{} // omit defaults
 		return
 	}
 }

@@ -41,8 +41,7 @@ type (
 	Database struct {
 		Log DatabaseLog `yaml:"log,omitempty"` // deprecated. included for compatibility.
 		// optional fields depending on backend
-		SQLite SQLite `yaml:"sqlite,omitempty"`
-		MySQL  MySQL  `yaml:"mysql,omitempty"`
+		MySQL MySQL `yaml:"mysql,omitempty"`
 	}
 
 	// Bus contains the configuration for a bus.
@@ -141,11 +140,6 @@ type (
 		MigratorParallelSlabsPerWorker uint64        `yaml:"migratorParallelSlabsPerWorker,omitempty"`
 	}
 )
-
-var DefaultSQLiteConfig = SQLite{
-	Database:        "db.sqlite",
-	MetricsDatabase: "metrics.sqlite",
-}
 
 func MySQLConfigFromEnv() MySQL {
 	return MySQL{

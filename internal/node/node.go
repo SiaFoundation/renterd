@@ -118,8 +118,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		}
 
 		// create SQLite connections
-		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, cfg.Database.SQLite.Database))
-		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, cfg.Database.SQLite.MetricsDatabase))
+		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
 	}
 
 	// create database logger
