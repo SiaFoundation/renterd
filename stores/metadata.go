@@ -1234,57 +1234,61 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		prefixExpr = "SUBSTR(o.object_id, 1, ?) = ?"
 	}
 
-	lengthFn := "CHAR_LENGTH"
-	if isSQLite(s.db) {
-		lengthFn = "LENGTH"
-	}
-
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
 	// 2. fetch all sub-directories
 	objectsQuery := fmt.Sprintf(`
+WITH RECURSIVE subdirectories AS (
+    SELECT id, parent_id, name, id as root_id
+    FROM directories
+    WHERE parent_id = ?
+    UNION ALL
+    SELECT d.id, d.parent_id, d.name, root_id
+    FROM directories d
+    INNER JOIN subdirectories sd ON sd.id = d.parent_id
+)
 SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
 FROM objects o
 INNER JOIN buckets b ON o.db_bucket_id = b.id
 WHERE o.object_id != ? AND o.db_directory_id = ? AND b.name = ? AND %s
-UNION
-SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
-FROM objects o
-INNER JOIN buckets b ON o.db_bucket_id = b.id
-INNER JOIN directories d ON o.object_id LIKE %s AND SUBSTR(o.object_id, 1, %s(%s)) = %s AND %s
-WHERE b.name = ? AND d.parent_id = ?
-GROUP BY d.id
+UNION ALL
+SELECT '' as ETag, ModTime, %s as ObjectName, Size, Health, '' as MimeType
+FROM directories outer_dirs
+INNER JOIN (
+    SELECT 
+		   d.root_id,
+           MAX(o.created_at) as ModTime, 
+           SUM(o.size) as Size, 
+           MIN(o.health) as Health
+    FROM objects o
+    INNER JOIN buckets b ON o.db_bucket_id = b.id
+    INNER JOIN subdirectories d ON d.id = o.db_directory_id
+    WHERE b.name = ? AND %s
+	GROUP BY d.root_id
+) as aggregated ON outer_dirs.id = aggregated.root_id
+WHERE outer_dirs.parent_id = ?
 	`, prefixExpr,
-		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
-		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/%'"),
-		lengthFn,
-		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
-		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
-		prefixExpr)
+		sqlConcat(s.db, sqlConcat(s.db, "?", "outer_dirs.name"), "'/'"),
+		prefixExpr,
+	)
 
 	// build query params
 	var objectsQueryParams []interface{}
 	if prefix != "" {
 		objectsQueryParams = []interface{}{
+			dirID,
+			path, dirID, bucket, utf8.RuneCountInString(path + prefix), path + prefix,
 			path,
-			dirID, bucket,
-			utf8.RuneCountInString(path + prefix), path + prefix,
-			path,
-			path,
-			path,
-			path,
-			utf8.RuneCountInString(path + prefix), path + prefix,
-			bucket, dirID,
+			bucket, utf8.RuneCountInString(path + prefix), path + prefix,
+			dirID,
 		}
 	} else {
 		objectsQueryParams = []interface{}{
+			dirID,
+			path, dirID, bucket,
 			path,
-			dirID, bucket,
-			path,
-			path,
-			path,
-			path,
-			bucket, dirID,
+			bucket,
+			dirID,
 		}
 	}
 
