@@ -52,6 +52,9 @@ var (
 	// errTransport is used to wrap rpc errors caused by the transport.
 	errTransport = errors.New("transport error")
 
+	// errDialTransport is returned when the worker could not dial the host.
+	errDialTransport = errors.New("could not dial transport")
+
 	// errBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
@@ -175,7 +178,7 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
 		if err != nil {
 			t.mu.Unlock()
-			return nil, fmt.Errorf("DialStream: could not dial transport: %w (%v)", err, time.Since(start))
+			return nil, fmt.Errorf("DialStream: %w: %w (%v)", errDialTransport, err, time.Since(start))
 		}
 		t.t = newTransport
 	}

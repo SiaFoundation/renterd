@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,8 @@ func TestUploaderTrackSectorUpload(t *testing.T) {
 		t.Fatal(res.err)
 	} else if ul.consecutiveFailures != 0 {
 		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadSpeedBytesPerMS.Len() != 1 {
+		t.Fatal("unexpected number of data points")
 	} else if ul.statsSectorUploadEstimateInMS.Len() != 1 {
 		t.Fatal("unexpected number of data points")
 	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); !(100 <= avg && avg < 200) {
@@ -107,6 +110,8 @@ func TestUploaderTrackSectorUpload(t *testing.T) {
 		t.Fatal("expected error")
 	} else if ul.consecutiveFailures != 1 {
 		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadSpeedBytesPerMS.Len() != 1 {
+		t.Fatal("unexpected number of data points")
 	} else if ul.statsSectorUploadEstimateInMS.Len() != 2 {
 		t.Fatal("unexpected number of data points")
 	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); !(500 <= avg && avg < 750) {
@@ -114,17 +119,39 @@ func TestUploaderTrackSectorUpload(t *testing.T) {
 	}
 
 	// assert we don't punish the host if it itself was overdriving the sector
+	h.uploadErr = errSectorUploadFinished
 	res = executeReq(true)
 	if res.err == nil {
 		t.Fatal("expected error")
 	} else if ul.consecutiveFailures != 1 {
 		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadSpeedBytesPerMS.Len() != 1 {
+		t.Fatal("unexpected number of data points")
 	} else if ul.statsSectorUploadEstimateInMS.Len() != 2 {
 		t.Fatal("unexpected number of data points")
-	} else if logs := observedLogs.TakeAll(); len(logs) == 0 {
+	} else if logs := observedLogs.TakeAll(); len(logs) != 1 {
 		t.Fatal("missing log entry")
 	} else if !strings.Contains(logs[0].Message, "skip tracking sector upload") {
 		t.Fatal("ununexpected log line")
+	}
+
+	// assert we punish the host if it was overdriving and it was slow to dial
+	// the host, also assert we track it as a failure
+	h.uploadDelay = time.Second
+	h.uploadErr = fmt.Errorf("%w;%w", errDialTransport, errSectorUploadFinished)
+	res = executeReq(true)
+	if res.err == nil {
+		t.Fatal("expected error")
+	} else if ul.consecutiveFailures != 2 {
+		t.Fatal("unexpected consecutive failures")
+	} else if ul.statsSectorUploadSpeedBytesPerMS.Len() != 1 {
+		t.Fatal("unexpected number of data points")
+	} else if ul.statsSectorUploadEstimateInMS.Len() != 3 {
+		t.Fatal("unexpected number of data points")
+	} else if logs := observedLogs.TakeAll(); len(logs) != 0 {
+		t.Fatal("unexpected log entry")
+	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); avg < float64((10*time.Second).Milliseconds())/3 {
+		t.Fatal("unexpected average", avg)
 	}
 
 	// assert we punish the host if it failed the upload for any other reason
@@ -132,11 +159,13 @@ func TestUploaderTrackSectorUpload(t *testing.T) {
 	res = executeReq(false)
 	if res.err == nil {
 		t.Fatal("expected error")
-	} else if ul.consecutiveFailures != 2 {
+	} else if ul.consecutiveFailures != 3 {
 		t.Fatal("unexpected consecutive failures")
-	} else if ul.statsSectorUploadEstimateInMS.Len() != 3 {
+	} else if ul.statsSectorUploadSpeedBytesPerMS.Len() != 1 {
 		t.Fatal("unexpected number of data points")
-	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); avg < 1800 {
+	} else if ul.statsSectorUploadEstimateInMS.Len() != 4 {
+		t.Fatal("unexpected number of data points")
+	} else if avg := ul.statsSectorUploadEstimateInMS.Average(); avg < float64((time.Hour).Milliseconds())/4 {
 		t.Fatal("unexpected average", avg)
 	}
 }

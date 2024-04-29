@@ -131,13 +131,16 @@ outer:
 					u.logger.Errorf("failed to refresh the uploader's contract %v, err: %v", u.ContractID(), err)
 				}
 				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
-			} else if errors.Is(err, errSectorUploadFinished) && !req.overdrive {
+			} else if errors.Is(err, errSectorUploadFinished) && (!req.overdrive || (errors.Is(err, errDialTransport) && time.Since(start) > time.Second)) {
 				// punish the slow host by tracking a multiple of the total time
 				// we lost on it, but we only do so if we weren't overdriving,
 				// also note we are not tracking consecutive failures here
 				// because we're not sure if we had a successful host
 				// interaction
-				u.trackSectorUpload(true, time.Since(start)*10)
+				u.trackSectorUpload(false, time.Since(start)*10)
+				if req.overdrive {
+					u.trackConsecutiveFailures(false)
+				}
 			} else if !errors.Is(err, errSectorUploadFinished) {
 				// punish the host for failing the upload
 				u.trackSectorUpload(false, time.Hour)
