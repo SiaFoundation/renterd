@@ -125,10 +125,6 @@ func TestSQLHostDB(t *testing.T) {
 		t.Fatal("known since not set")
 	}
 
-	// Wait for the persist interval to pass to make sure an empty consensus
-	// change triggers a persist.
-	time.Sleep(testPersistInterval)
-
 	// Apply a consensus change.
 	ccid2 := modules.ConsensusChangeID{1, 2, 3}
 	ss.ProcessConsensusChange(modules.ConsensusChange{
