@@ -133,10 +133,9 @@ outer:
 				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
 			} else if errors.Is(err, errSectorUploadFinished) && (!req.overdrive || (errors.Is(err, errDialTransport) && time.Since(start) > time.Second)) {
 				// punish the slow host by tracking a multiple of the total time
-				// we lost on it, but we only do so if we weren't overdriving,
-				// also note we are not tracking consecutive failures here
-				// because we're not sure if we had a successful host
-				// interaction
+				// we lost on it, however we only do this if we weren't
+				// overdriving or if we were slow to dial, only consider a slow
+				// dial a host failure
 				u.trackSectorUpload(false, time.Since(start)*10)
 				if req.overdrive {
 					u.trackConsecutiveFailures(false)
