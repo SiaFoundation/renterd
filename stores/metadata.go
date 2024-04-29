@@ -1228,6 +1228,14 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		return nil, false, err
 	}
 
+	// fetch bucket id
+	var dBucket dbBucket
+	if err := s.db.Select("id").
+		Where("name", bucket).
+		Take(&dBucket).Error; err != nil {
+		return nil, false, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
 	// build prefix expression
 	prefixExpr := "TRUE"
 	if prefix != "" {
@@ -1249,8 +1257,7 @@ WITH RECURSIVE subdirectories AS (
 )
 SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
 FROM objects o
-INNER JOIN buckets b ON o.db_bucket_id = b.id
-WHERE o.object_id != ? AND o.db_directory_id = ? AND b.name = ? AND %s
+WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = ? AND %s
 UNION ALL
 SELECT '' as ETag, ModTime, %s as ObjectName, Size, Health, '' as MimeType
 FROM directories outer_dirs
@@ -1261,9 +1268,8 @@ INNER JOIN (
            SUM(o.size) as Size, 
            MIN(o.health) as Health
     FROM objects o
-    INNER JOIN buckets b ON o.db_bucket_id = b.id
     INNER JOIN subdirectories d ON d.id = o.db_directory_id
-    WHERE b.name = ? AND %s
+    WHERE o.db_bucket_id = ? AND %s
 	GROUP BY d.root_id
 ) as aggregated ON outer_dirs.id = aggregated.root_id
 WHERE outer_dirs.parent_id = ?
@@ -1277,17 +1283,17 @@ WHERE outer_dirs.parent_id = ?
 	if prefix != "" {
 		objectsQueryParams = []interface{}{
 			dirID,
-			path, dirID, bucket, utf8.RuneCountInString(path + prefix), path + prefix,
+			path, dirID, dBucket.ID, utf8.RuneCountInString(path + prefix), path + prefix,
 			path,
-			bucket, utf8.RuneCountInString(path + prefix), path + prefix,
+			dBucket.ID, utf8.RuneCountInString(path + prefix), path + prefix,
 			dirID,
 		}
 	} else {
 		objectsQueryParams = []interface{}{
 			dirID,
-			path, dirID, bucket,
+			path, dirID, dBucket.ID,
 			path,
-			bucket,
+			dBucket.ID,
 			dirID,
 		}
 	}
@@ -3065,7 +3071,9 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		Model(&dbObject{}).
 		Table("objects o").
 		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
+		Where("o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)", bucket).
+		Where("?", prefixExpr).
+		Where("?", markerExpr).
 		Order(orderBy).
 		Order(markerOrderBy).
 		Order("ObjectName ASC").
