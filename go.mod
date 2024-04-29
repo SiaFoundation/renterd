@@ -8,7 +8,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.3
 	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/google/go-cmp v0.6.0
-	github.com/gotd/contrib v0.19.0
+	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
 	github.com/minio/minio-go/v7 v7.0.69
 	github.com/montanaflynn/stats v0.7.1
@@ -52,7 +52,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
-	github.com/klauspost/compress v1.17.6 // indirect
+	github.com/klauspost/compress v1.17.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
