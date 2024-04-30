@@ -251,7 +251,7 @@ func TestObjectEntries(t *testing.T) {
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			isDir := strings.HasSuffix(entries[i].Name, "/")
+			isDir := strings.HasSuffix(entries[i].Name, "/") && entries[i].Name != "//double/" // double is a 'fake' dir
 			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
