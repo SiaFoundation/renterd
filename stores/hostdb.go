@@ -1119,11 +1119,46 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 }
 
 func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpdate) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"revision_height": rev.height,
-		"revision_number": fmt.Sprint(rev.number),
-		"size":            rev.size,
-	})
+	// isUpdatedRevision indicates whether the given revision number is greater
+	// than the one currently set on the contract
+	isUpdatedRevision := func(currRevStr string) bool {
+		var currRev uint64
+		_, _ = fmt.Sscan(currRevStr, &currRev)
+		return rev.number > currRev
+	}
+
+	// update either active or archived contract
+	var update interface{}
+	var c dbContract
+	if err := db.
+		Model(&dbContract{}).
+		Where("fcid", fileContractID(fcid)).
+		Take(&c).Error; err == nil {
+		c.RevisionHeight = rev.height
+		if isUpdatedRevision(c.RevisionNumber) {
+			c.RevisionNumber = fmt.Sprint(rev.number)
+			c.Size = rev.size
+		}
+		update = c
+	} else if err == gorm.ErrRecordNotFound {
+		// try archived contracts
+		var ac dbArchivedContract
+		if err := db.
+			Model(&dbArchivedContract{}).
+			Where("fcid", fileContractID(fcid)).
+			Take(&ac).Error; err == nil {
+			ac.RevisionHeight = rev.height
+			if isUpdatedRevision(ac.RevisionNumber) {
+				ac.RevisionNumber = fmt.Sprint(rev.number)
+				ac.Size = rev.size
+			}
+			update = ac
+		}
+	}
+	if update == nil {
+		return nil
+	}
+	return db.Save(update).Error
 }
 
 func updateContractState(db *gorm.DB, fcid types.FileContractID, cs contractState) error {
@@ -1149,15 +1184,35 @@ func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint6
 
 func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
 	err1 := tx.Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Updates(updates).Error
 	err2 := tx.Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Updates(updates).Error
 	if err1 != nil || err2 != nil {
 		return fmt.Errorf("%s; %s", err1, err2)
 	}
 	return nil
+}
+
+func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) {
+	var allowlist []dbAllowlistEntry
+	if err := tx.
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
+		Error; err != nil {
+		return nil, nil, err
+	}
+
+	var blocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		return nil, nil, err
+	}
+
+	return allowlist, blocklist, nil
 }
 
 func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
