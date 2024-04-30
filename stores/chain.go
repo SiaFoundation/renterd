@@ -81,8 +81,6 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 				Value:          currency(e.SiacoinOutput.Value),
 				Address:        hash256(e.SiacoinOutput.Address),
 				MaturityHeight: e.MaturityHeight,
-				Height:         index.Height,
-				BlockID:        hash256(index.ID),
 			}).Error; err != nil {
 			return nil
 		}
@@ -179,8 +177,6 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 				Value:          currency(e.SiacoinOutput.Value),
 				Address:        hash256(e.SiacoinOutput.Address),
 				MaturityHeight: e.MaturityHeight,
-				Height:         index.Height,
-				BlockID:        hash256(index.ID),
 			}).Error; err != nil {
 			return nil
 		}

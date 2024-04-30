@@ -42,10 +42,6 @@ type (
 		Value          currency
 		Address        hash256 `gorm:"size:32"`
 		MaturityHeight uint64  `gorm:"index:idx_wallet_outputs_maturity_height"`
-
-		// chain index
-		Height  uint64  `gorm:"index:idx_wallet_outputs_height"`
-		BlockID hash256 `gorm:"size:32"`
 	}
 )
 
@@ -63,13 +59,6 @@ func (e dbWalletEvent) Index() types.ChainIndex {
 	return types.ChainIndex{
 		Height: e.Height,
 		ID:     types.BlockID(e.BlockID),
-	}
-}
-
-func (se dbWalletOutput) Index() types.ChainIndex {
-	return types.ChainIndex{
-		Height: se.Height,
-		ID:     types.BlockID(se.BlockID),
 	}
 }
 
