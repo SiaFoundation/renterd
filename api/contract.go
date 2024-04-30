@@ -32,6 +32,8 @@ var (
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
 
+type ContractState string
+
 type (
 	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
