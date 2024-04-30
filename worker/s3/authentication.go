@@ -123,31 +123,34 @@ func (b *authenticatedBackend) reloadV4Keys(ctx context.Context) error {
 	return nil
 }
 
-func (b *authenticatedBackend) AuthenticationMiddleware(handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
-		perms := noAccessPerms
-		if rq.Header.Get("Authorization") == "" {
-			// No auth header, we continue without permissions. Request might
-			// still succeed due to bucket policy.
-		} else if err := b.reloadV4Keys(rq.Context()); err != nil {
-			writeResponse(w, signature.APIError{
-				Code:           string(gofakes3.ErrInternal),
-				Description:    fmt.Sprintf("failed to reload v4 keys: %v", err),
-				HTTPStatusCode: http.StatusInternalServerError,
-			})
-			return
-		} else if result := signature.V4SignVerify(rq); result != signature.ErrNone {
-			// Authentication attempted but failed.
-			writeResponse(w, signature.GetAPIError(result))
-			return
-		} else {
-			// Authenticated request, treat as root user.
-			perms = rootPerms
-		}
-		// Add permissions to context.
-		ctx := context.WithValue(rq.Context(), permissionKey, &perms)
-		handler.ServeHTTP(w, rq.WithContext(ctx))
-	})
+func (b *authenticatedBackend) AuthenticateRequest(w http.ResponseWriter, rq *http.Request, bucket string) bool {
+	perms := noAccessPerms
+	if rq.Header.Get("Authorization") == "" && bucket != "" {
+		// No auth header, we continue without permissions. Request might
+		// still succeed due to bucket policy
+	} else if err := b.reloadV4Keys(rq.Context()); err != nil {
+		writeResponse(w, signature.APIError{
+			Code:           string(gofakes3.ErrInternal),
+			Description:    fmt.Sprintf("failed to reload v4 keys: %v", err),
+			HTTPStatusCode: http.StatusInternalServerError,
+		})
+		return false
+	} else if _, result := signature.V4SignVerify(rq); result != signature.ErrNone {
+		// Authentication attempted but failed.
+		writeResponse(w, signature.GetAPIError(result))
+		return false
+	} else {
+		// Authenticated request, treat as root user.
+		perms = rootPerms
+	}
+
+	// apply bucket-specific policies
+	b.applyBucketPolicy(rq.Context(), bucket, &perms)
+
+	// add permissions to context
+	ctx := context.WithValue(rq.Context(), permissionKey, &perms)
+	*rq = *rq.WithContext(ctx)
+	return true
 }
 
 func (b *authenticatedBackend) ListBuckets(ctx context.Context) ([]gofakes3.BucketInfo, error) {
