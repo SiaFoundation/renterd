@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"gorm.io/gorm"
 )
@@ -89,21 +88,6 @@ func (s *SQLStore) Tip() (types.ChainIndex, error) {
 		Height: cs.Height,
 		ID:     types.BlockID(cs.BlockID),
 	}, nil
-}
-
-// TODO: feels wrong to have to implement UpdateChainState on the
-// SingleWalletStore interface which up until this point only had methods for
-// querying the wallet.
-func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
-	tx, err := s.BeginChainUpdateTx()
-	if err != nil {
-		return err
-	}
-	if err := wallet.UpdateChainState(tx, s.walletAddress, applied, reverted); err != nil {
-		tx.Rollback()
-		return err
-	}
-	return tx.Commit()
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs

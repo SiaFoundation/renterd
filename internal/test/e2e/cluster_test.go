@@ -2476,7 +2476,7 @@ func TestWalletRedistribute(t *testing.T) {
 	}
 	cluster.MineBlocks(1)
 
-	// avoid NDFs
+	// sleep a bit to ensure we processed the chain updates
 	time.Sleep(time.Second)
 
 	// assert we have 5 outputs with 10 SC

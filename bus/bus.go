@@ -1773,6 +1773,7 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 
 func (b *bus) consensusState() api.ConsensusState {
 	cs := b.cm.TipState()
+
 	var synced bool
 	if block, ok := b.cm.Block(cs.Index.ID); ok && time.Since(block.Timestamp) < 2*cs.BlockInterval() {
 		synced = true

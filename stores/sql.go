@@ -57,14 +57,11 @@ type (
 		PartialSlabDir                string
 		Migrate                       bool
 		AnnouncementMaxAge            time.Duration
+		WalletAddress                 types.Address
 		SlabBufferCompletionThreshold int64
 		Logger                        *zap.SugaredLogger
 		GormLogger                    glogger.Interface
 		RetryTransactionIntervals     []time.Duration
-
-		// TODO: need this for UpdateChainState, which I'd like to get rid of on
-		// the store
-		WalletAddress types.Address
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.

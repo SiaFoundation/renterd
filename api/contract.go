@@ -32,6 +32,8 @@ var (
 	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
 
+type ContractState string
+
 type (
 	// A Contract wraps the contract metadata with the latest contract revision.
 	Contract struct {
@@ -94,8 +96,6 @@ type (
 		MissedHostPayout  types.Currency `json:"missedHostPayout"`
 		ValidRenterPayout types.Currency `json:"validRenterPayout"`
 	}
-
-	ContractState string
 
 	// An ArchivedContract contains all information about a contract with a host
 	// that has been moved to the archive either due to expiring or being renewed.

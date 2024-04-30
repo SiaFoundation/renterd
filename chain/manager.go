@@ -9,6 +9,8 @@ import (
 type (
 	Manager          = chain.Manager
 	HostAnnouncement = chain.HostAnnouncement
+	ApplyUpdate      = chain.ApplyUpdate
+	RevertUpdate     = chain.RevertUpdate
 )
 
 func TestnetZen() (*consensus.Network, types.Block) {

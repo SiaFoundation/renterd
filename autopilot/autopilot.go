@@ -236,13 +236,10 @@ func (ap *Autopilot) Run() error {
 	var forceScan bool
 	var launchAccountRefillsOnce sync.Once
 	for !ap.isStopped() {
-		start := time.Now()
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.workers.withWorker(func(w Worker) {
-			defer func() {
-				ap.logger.Infow("autopilot iteration ended", "elapsed", time.Since(start))
-			}()
+			defer ap.logger.Info("autopilot iteration ended")
 
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()

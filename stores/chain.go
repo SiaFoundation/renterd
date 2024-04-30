@@ -22,14 +22,34 @@ type chainUpdateTx struct {
 	tx *gorm.DB
 }
 
-// BeginChainUpdateTx starts a transaction and wraps it in a chainUpdateTx. This
-// transaction will be used to process a chain update in the subscriber.
-func (s *SQLStore) BeginChainUpdateTx() (chain.ChainUpdateTx, error) {
+// ProcessChainUpdate returns a callback function that process a chain update
+// inside a transaction.
+func (s *SQLStore) ProcessChainUpdate(fn func(tx chain.ChainUpdateTx) error) (err error) {
+	// begin a transaction
 	tx := s.db.Begin()
-	if tx.Error != nil {
-		return nil, tx.Error
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+	if err := tx.Error; err != nil {
+		return err
 	}
-	return &chainUpdateTx{tx: tx}, nil
+
+	// call the update function with the wrapped tx
+	if err := fn(&chainUpdateTx{tx: tx}); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// commit the changes
+	return tx.Commit().Error
+}
+
+func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
+	return s.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
+	})
 }
 
 // ApplyIndex is called with the chain index that is being applied. Any
