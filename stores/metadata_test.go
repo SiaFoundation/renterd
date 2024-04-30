@@ -2496,12 +2496,12 @@ func TestRenameObjects(t *testing.T) {
 		{
 			id:       1,
 			parentID: 0,
-			name:     "",
+			name:     "/",
 		},
 		{
 			id:       2,
 			parentID: 1,
-			name:     "fileś",
+			name:     "/fileś/",
 		},
 	}
 	var directories []dbDirectory
