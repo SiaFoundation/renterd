@@ -194,10 +194,6 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to get recommended fee", err) != nil {
 		return
 	}
-	cfg, err := ap.Config(ctx)
-	if jc.Check("failed to get autopilot config", err) != nil {
-		return
-	}
 
 	// fetch hosts
 	hosts, err := ap.bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
@@ -206,7 +202,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, cfg.CurrentPeriod, rs, gs, hosts))
+	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts))
 }
 
 func (ap *Autopilot) Run() error {

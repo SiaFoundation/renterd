@@ -38,7 +38,7 @@ type (
 
 	ChainUpdateTx interface {
 		Commit() error
-		Rollback()
+		Rollback() error
 
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		UpdateChainIndex(index types.ChainIndex) error

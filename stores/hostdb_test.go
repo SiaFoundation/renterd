@@ -20,6 +20,7 @@ import (
 // SQLite DB.
 func TestSQLHostDB(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
 
 	// Try to fetch a random host. Should fail.
 	ctx := context.Background()

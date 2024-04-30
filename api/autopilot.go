@@ -123,7 +123,7 @@ type (
 			} `json:"gouging"`
 			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
 			NotScanned            uint64 `json:"notScanned"`
-		}
+		} `json:"unusable"`
 		Recommendation *ConfigRecommendation `json:"recommendation,omitempty"`
 	}
 )

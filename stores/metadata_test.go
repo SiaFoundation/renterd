@@ -17,11 +17,51 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
+
+func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string) error {
+	ts := time.Now()
+	if err := s.RemoveObject(ctx, bucket, path); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix string) error {
+	ts := time.Now()
+	if err := s.RemoveObjects(ctx, bucket, prefix); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
+	var ts time.Time
+	_, err := s.Object(ctx, bucket, path)
+	if err == nil {
+		ts = time.Now()
+	}
+	if err := s.UpdateObject(ctx, bucket, path, contractSet, eTag, mimeType, metadata, o); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) waitForPruneLoop(ts time.Time) error {
+	return test.Retry(100, 100*time.Millisecond, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.lastPrunedAt.Before(ts) {
+			return errors.New("slabs have not been pruned yet")
+		}
+		return nil
+	})
+}
 
 func randomMultisigUC() types.UnlockConditions {
 	uc := types.UnlockConditions{
@@ -193,7 +233,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// remove the object
-	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1182,8 +1222,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	fullObj, err = ss.addTestObject(objID, obj1)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(*fullObj.Object, obj1) {
+	} else if !reflect.DeepEqual(*fullObj.Object, obj1) {
 		t.Fatal("object mismatch")
 	}
 
@@ -1218,18 +1257,18 @@ func TestSQLMetadataStore(t *testing.T) {
 		}
 		return nil
 	}
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		return countCheck(1, 1, 1, 1)
-	})
+	if err := countCheck(1, 1, 1, 1); err != nil {
+		t.Fatal(err)
+	}
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
-	if err := ss.RemoveObject(ctx, api.DefaultBucketName, objID); err != nil {
+	if err := ss.RemoveObjectBlocking(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		return countCheck(0, 0, 0, 0)
-	})
+	if err := countCheck(0, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestObjectHealth verifies the object's health is returned correctly by all
@@ -2029,7 +2068,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Delete the object.
-	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2941,37 +2980,30 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the first object
-	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, "obj_1"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "obj_1"); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert there's one sector that can be pruned and assert it's from fcid 1
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if n := prunableData(nil); n != rhpv2.SectorSize {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		}
-		if n := prunableData(&fcids[1]); n != 0 {
-			return fmt.Errorf("expected no prunable data %v", n)
-		}
-		return nil
-	})
+	if n := prunableData(nil); n != rhpv2.SectorSize {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	} else if n := prunableData(&fcids[1]); n != 0 {
+		t.Fatalf("expected no prunable data %v", n)
+	}
 
 	// remove the second object
-	if err := ss.RemoveObject(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert there's now two sectors that can be pruned
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if n := prunableData(nil); n != rhpv2.SectorSize*2 {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
-			return fmt.Errorf("unexpected amount of prunable data %v", n)
-		}
-		return nil
-	})
+	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
+		t.Fatalf("unexpected amount of prunable data %v", n)
+	}
 
 	if size, err := ss.ContractSize(context.Background(), fcids[0]); err != nil {
 		t.Fatal("unexpected err", err)
@@ -3237,9 +3269,9 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Delete foo/baz in bucket 1 but first try bucket 2 since that should fail.
-	if err := ss.RemoveObject(context.Background(), b2, "/foo/baz"); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RemoveObjectBlocking(context.Background(), b2, "/foo/baz"); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
-	} else if err := ss.RemoveObject(context.Background(), b1, "/foo/baz"); err != nil {
+	} else if err := ss.RemoveObjectBlocking(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3256,7 +3288,7 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if err := ss.RemoveObjects(context.Background(), b2, "/"); err != nil {
+	} else if err := ss.RemoveObjectsBlocking(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3342,6 +3374,7 @@ func TestCopyObject(t *testing.T) {
 
 func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
 
 	// create host.
 	hks, err := ss.addTestHosts(1)
@@ -3655,6 +3688,7 @@ func newTestShard(hk types.PublicKey, fcid types.FileContractID, root types.Hash
 
 func TestUpdateSlabSanityChecks(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
 
 	// create hosts and contracts.
 	hks, err := ss.addTestHosts(5)
@@ -3719,8 +3753,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 
 func TestSlabHealthInvalidation(t *testing.T) {
 	// create db
-	cfg := defaultTestSQLStoreConfig
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	// define a helper to assert the health validity of a given slab
@@ -4086,36 +4119,28 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err := ss.RemoveObject(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// check slice count
 	var slabCntr int64
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			return err
-		} else if slabCntr != 1 {
-			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
-		}
-		return nil
-	})
-
-	// delete second object
-	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj2.ObjectID)
-	if err != nil {
+	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
 	}
 
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			return err
-		} else if slabCntr != 0 {
-			return fmt.Errorf("expected 0 slabs, got %v", slabCntr)
-		}
-		return nil
-	})
+	// delete second object
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj2.ObjectID)
+	if err != nil {
+		t.Fatal(err)
+	} else if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 0 {
+		t.Fatalf("expected 0 slabs, got %v", slabCntr)
+	}
 
 	// wait for slabs to be pruned in the background
 	time.Sleep(time.Second)
@@ -4154,19 +4179,14 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete third object
-	err = ss.RemoveObject(context.Background(), api.DefaultBucketName, obj3.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj3.ObjectID)
 	if err != nil {
 		t.Fatal(err)
+	} else if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+		t.Fatal(err)
+	} else if slabCntr != 1 {
+		t.Fatalf("expected 1 slabs, got %v", slabCntr)
 	}
-
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
-			return err
-		} else if slabCntr != 1 {
-			return fmt.Errorf("expected 1 slabs, got %v", slabCntr)
-		}
-		return nil
-	})
 }
 
 func TestUpsertSectors(t *testing.T) {
@@ -4473,8 +4493,6 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 // same transaction, deadlocks become more likely due to the gap locks MySQL
 // uses.
 func TestUpdateObjectParallel(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-
 	dbURI, _, _, _ := DBConfigFromEnv()
 	if dbURI == "" {
 		// it's pretty much impossile to optimise for both sqlite and mysql at
@@ -4484,7 +4502,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 		// can revisit this
 		t.SkipNow()
 	}
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
 	defer ss.Close()
 

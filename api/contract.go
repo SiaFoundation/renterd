@@ -16,8 +16,6 @@ const (
 	ContractStateFailed   = "failed"
 )
 
-type ContractState string
-
 const (
 	ContractArchivalReasonHostPruned = "hostpruned"
 	ContractArchivalReasonRemoved    = "removed"
@@ -96,6 +94,8 @@ type (
 		MissedHostPayout  types.Currency `json:"missedHostPayout"`
 		ValidRenterPayout types.Currency `json:"validRenterPayout"`
 	}
+
+	ContractState string
 
 	// An ArchivedContract contains all information about a contract with a host
 	// that has been moved to the archive either due to expiring or being renewed.

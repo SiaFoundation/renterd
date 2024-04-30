@@ -207,7 +207,7 @@ func newTestLogger() logger.Interface {
 }
 
 func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, error) {
-	if err := s.UpdateObject(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
+	if err := s.UpdateObjectBlocking(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err
 	} else if obj, err := s.Object(context.Background(), api.DefaultBucketName, path); err != nil {
 		return api.Object{}, err
@@ -383,8 +383,18 @@ func TestRetryTransaction(t *testing.T) {
 		t.Fatal("unexpected logs", cmp.Diff(got, want))
 	}
 
-	// retry transaction that aborts, assert no logs were added
-	ss.retryTransaction(context.Background(), func(tx *gorm.DB) error { return context.Canceled })
+	// retry transaction with cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
+	if len(observedLogs.All()) != len(want) {
+		t.Fatal("expected no logs")
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Microsecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
 	if len(observedLogs.All()) != len(want) {
 		t.Fatal("expected no logs")
 	}

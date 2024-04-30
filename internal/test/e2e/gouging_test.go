@@ -23,7 +23,6 @@ func TestGouging(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  int(test.AutopilotConfig.Contracts.Amount),
 		logger: newTestLoggerCustom(zapcore.ErrorLevel),
 	})
 	defer cluster.Shutdown()
@@ -32,6 +31,13 @@ func TestGouging(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
+
+	// mine enough blocks for the current period to become > period
+	cluster.MineBlocks(cfg.Period * 2)
+
+	// add hosts
+	tt.OKAll(cluster.AddHostsBlocking(int(test.AutopilotConfig.Contracts.Amount)))
+	cluster.WaitForAccounts()
 
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
@@ -99,10 +105,21 @@ func TestGouging(t *testing.T) {
 	tt.OK(err)
 	if resp.Recommendation == nil {
 		t.Fatal("expected recommendation")
+	} else if resp.Unusable.Gouging.Gouging != 3 {
+		t.Fatalf("expected 3 gouging errors, got %v", resp.Unusable.Gouging)
 	}
 
 	// set optimised settings
 	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
+
+	// evaluate optimised settings
+	resp, err = cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, resp.Recommendation.GougingSettings, test.RedundancySettings)
+	tt.OK(err)
+	if resp.Recommendation != nil {
+		t.Fatal("expected no recommendation")
+	} else if resp.Usable != 3 {
+		t.Fatalf("expected 3 usable hosts, got %v", resp.Usable)
+	}
 
 	// upload some data - should work now once contract maintenance is done
 	tt.Retry(30, time.Second, func() error {

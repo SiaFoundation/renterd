@@ -28,8 +28,10 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker/s3"
+	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
@@ -295,7 +297,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotListener, err := net.Listen("tcp", "127.0.0.1:0")
 	tt.OK(err)
 
-	busAddr := "http://" + busListener.Addr().String()
+	busAddr := fmt.Sprintf("http://%s/bus", busListener.Addr().String())
 	workerAddr := "http://" + workerListener.Addr().String()
 	s3Addr := s3Listener.Addr().String() // not fully qualified path
 	autopilotAddr := "http://" + autopilotListener.Addr().String()
@@ -321,8 +323,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
-	busServer := http.Server{
-		Handler: busAuth(b),
+	busServer := &http.Server{
+		Handler: utils.TreeMux{
+			Handler: renterd.Handler(), // ui
+			Sub: map[string]utils.TreeMux{
+				"/bus": {
+					Handler: busAuth(b),
+				},
+			},
+		},
 	}
 
 	var busShutdownFns []func(context.Context) error
@@ -465,6 +474,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
+	}
+
+	// Ping the UI
+	resp, err := http.DefaultClient.Get(fmt.Sprintf("http://%v", busListener.Addr()))
+	tt.OK(err)
+	if resp.StatusCode != http.StatusOK {
+		tt.Fatalf("unexpected status code: %v", resp.StatusCode)
 	}
 
 	return cluster
@@ -708,14 +724,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	res, err := c.Bus.Wallet(context.Background())
-	c.tt.OK(err)
-
-	// Fund host with one blockreward
-	fundAmt := c.cm.TipState().BlockReward()
-	for fundAmt.Cmp(res.Confirmed) > 0 {
-		c.tt.Fatal("not enough funds to fund host")
-	}
+	fundAmt := types.Siacoins(25e3)
 	var scos []types.SiacoinOutput
 	for i := 0; i < 10; i++ {
 		scos = append(scos, types.SiacoinOutput{
@@ -742,7 +751,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.Retry(10, time.Second, func() error {
 		c.tt.Helper()
 
-		_, err = c.Bus.Host(context.Background(), h.PublicKey())
+		_, err := c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
 			c.MineBlocks(1)
 			return err

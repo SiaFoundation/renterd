@@ -61,6 +61,8 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 		l.l.Warn(fmt.Sprint(v...))
 	case gofakes3.LogInfo:
 		l.l.Info(fmt.Sprint(v...))
+	case gofakes3.LogDebug:
+		l.l.Debug(fmt.Sprint(v...))
 	default:
 		panic("unknown level")
 	}

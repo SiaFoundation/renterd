@@ -38,12 +38,12 @@ func (s *SQLStore) BeginChainUpdateTx() (chain.ChainUpdateTx, error) {
 func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event) error {
 	// remove spent outputs
 	for _, e := range spent {
-		// TODO: check if rows affected is > 0?
-		if err := u.tx.
+		if res := u.tx.
 			Where("output_id", hash256(e.ID)).
-			Delete(&dbWalletOutput{}).
-			Error; err != nil {
-			return err
+			Delete(&dbWalletOutput{}); res.Error != nil {
+			return res.Error
+		} else if res.RowsAffected != 1 {
+			return fmt.Errorf("spent output with id %v not found ", e.ID)
 		}
 	}
 
@@ -98,8 +98,8 @@ func (u *chainUpdateTx) Commit() error {
 }
 
 // Rollback rolls back the transaction
-func (u *chainUpdateTx) Rollback() {
-	_ = u.tx.Rollback() // ignore error
+func (u *chainUpdateTx) Rollback() error {
+	return u.tx.Rollback().Error
 }
 
 // ContractState returns the state of a file contract.
@@ -108,7 +108,7 @@ func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractSt
 	err := u.tx.
 		Select("state").
 		Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Scan(&state).
 		Error
 
@@ -116,7 +116,7 @@ func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractSt
 		err = u.tx.
 			Select("state").
 			Model(&dbArchivedContract{}).
-			Where("fcid = ?", fileContractID(fcid)).
+			Where("fcid", fileContractID(fcid)).
 			Scan(&state).
 			Error
 	}
@@ -199,12 +199,12 @@ func (u *chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 // UpdateContract updates the revision height, revision number, and size the
 // contract with given fcid.
 func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
-	// shouldUpdate indicates whether the given revision number is greater than
-	// the contract's rev number
-	shouldUpdate := func(rev string) bool {
+	// isUpdatedRevision indicates whether the given revision number is greater
+	// than the one currently set on the contract
+	isUpdatedRevision := func(currRevStr string) bool {
 		var currRev uint64
-		_, _ = fmt.Sscan(rev, &currRev)
-		return currRev < revisionNumber
+		_, _ = fmt.Sscan(currRevStr, &currRev)
+		return revisionNumber > currRev
 	}
 
 	// update either active or archived contract
@@ -212,22 +212,26 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 	var c dbContract
 	if err := u.tx.
 		Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Take(&c).Error; err == nil && shouldUpdate(c.RevisionNumber) {
+		Where("fcid", fileContractID(fcid)).
+		Take(&c).Error; err == nil {
 		c.RevisionHeight = revisionHeight
-		c.RevisionNumber = fmt.Sprint(revisionNumber)
-		c.Size = size
+		if isUpdatedRevision(c.RevisionNumber) {
+			c.RevisionNumber = fmt.Sprint(revisionNumber)
+			c.Size = size
+		}
 		update = c
 	} else if err == gorm.ErrRecordNotFound {
 		// try archived contracts
 		var ac dbArchivedContract
 		if err := u.tx.
 			Model(&dbArchivedContract{}).
-			Where("fcid = ?", fileContractID(fcid)).
-			Take(&ac).Error; err == nil && shouldUpdate(ac.RevisionNumber) {
+			Where("fcid", fileContractID(fcid)).
+			Take(&ac).Error; err == nil {
 			ac.RevisionHeight = revisionHeight
-			ac.RevisionNumber = fmt.Sprint(revisionNumber)
-			ac.Size = size
+			if isUpdatedRevision(ac.RevisionNumber) {
+				ac.RevisionNumber = fmt.Sprint(revisionNumber)
+				ac.Size = size
+			}
 			update = ac
 		}
 	}
@@ -247,14 +251,14 @@ func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api
 
 	if err := u.tx.
 		Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Update("state", cs).
 		Error; err != nil {
 		return err
 	}
 	return u.tx.
 		Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Update("state", cs).
 		Error
 }
@@ -264,14 +268,14 @@ func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api
 func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
 	if err := u.tx.
 		Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Update("proof_height", proofHeight).
 		Error; err != nil {
 		return err
 	}
 	return u.tx.
 		Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
+		Where("fcid", fileContractID(fcid)).
 		Update("proof_height", proofHeight).
 		Error
 }
@@ -281,7 +285,8 @@ func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, pro
 func (u *chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return u.tx.
 		Model(&dbContract{}).
-		Where("state = ? AND ? > window_end", contractStateActive, blockHeight).
+		Where("window_end <= ?", blockHeight).
+		Where("state", contractStateActive).
 		Update("state", contractStateFailed).
 		Error
 }
@@ -329,29 +334,18 @@ func (u *chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement
 // UpdateStateElements updates the proofs of all state elements affected by the
 // update.
 func (u *chainUpdateTx) UpdateStateElements(elements []types.StateElement) error {
-	if len(elements) == 0 {
-		return nil
-	}
-
-	var entities []dbWalletOutput
-	if err := u.tx.Model(&dbWalletOutput{}).Find(&entities).Error; err != nil {
-		return err
-	} else if len(entities) == 0 {
-		return nil
-	}
-
-	indices := make(map[types.Hash256]int)
-	for i, e := range entities {
-		indices[types.Hash256(e.OutputID)] = i
-	}
-
 	for _, se := range elements {
-		if index, ok := indices[se.ID]; ok {
-			entities[index].LeafIndex = se.LeafIndex
-			entities[index].MerkleProof = merkleProof{proof: se.MerkleProof}
+		if err := u.tx.
+			Model(&dbWalletOutput{}).
+			Where("output_id", hash256(se.ID)).
+			Updates(map[string]interface{}{
+				"merkle_proof": merkleProof{proof: se.MerkleProof},
+				"leaf_index":   se.LeafIndex,
+			}).Error; err != nil {
+			return err
 		}
 	}
-	return u.tx.Save(&entities).Error
+	return nil
 }
 
 // WalletStateElements implements the ChainStore interface and returns all state

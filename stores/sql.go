@@ -95,6 +95,7 @@ type (
 		css          map[[16]byte]chain.ContractStoreSubscriber
 		hasAllowlist bool
 		hasBlocklist bool
+		lastPrunedAt time.Time
 		closed       bool
 	}
 )
@@ -215,6 +216,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		walletAddress: cfg.WalletAddress,
 
 		slabPruneSigChan:          make(chan struct{}, 1),
+		lastPrunedAt:              time.Now(),
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
 		shutdownCtx:       shutdownCtx,
@@ -346,6 +348,7 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 func (s *SQLStore) retryAbortFn(err error) bool {
 	return err == nil ||
 		utils.IsErr(err, context.Canceled) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
 		utils.IsErr(err, gorm.ErrRecordNotFound) ||
 		utils.IsErr(err, errInvalidNumberOfShards) ||
 		utils.IsErr(err, errShardRootChanged) ||
