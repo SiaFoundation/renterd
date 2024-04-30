@@ -28,8 +28,10 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker/s3"
+	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
@@ -294,7 +296,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotListener, err := net.Listen("tcp", "127.0.0.1:0")
 	tt.OK(err)
 
-	busAddr := "http://" + busListener.Addr().String()
+	busAddr := fmt.Sprintf("http://%s/bus", busListener.Addr().String())
 	workerAddr := "http://" + workerListener.Addr().String()
 	s3Addr := s3Listener.Addr().String() // not fully qualified path
 	autopilotAddr := "http://" + autopilotListener.Addr().String()
@@ -320,8 +322,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
-	busServer := http.Server{
-		Handler: busAuth(b),
+	busServer := &http.Server{
+		Handler: utils.TreeMux{
+			Handler: renterd.Handler(), // ui
+			Sub: map[string]utils.TreeMux{
+				"/bus": {
+					Handler: busAuth(b),
+				},
+			},
+		},
 	}
 
 	var busShutdownFns []func(context.Context) error
@@ -462,6 +471,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
+	}
+
+	// Ping the UI
+	resp, err := http.DefaultClient.Get(fmt.Sprintf("http://%v", busListener.Addr()))
+	tt.OK(err)
+	if resp.StatusCode != http.StatusOK {
+		tt.Fatalf("unexpected status code: %v", resp.StatusCode)
 	}
 
 	return cluster

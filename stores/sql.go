@@ -375,6 +375,7 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, func(err error) bool {
 		return err == nil ||
 			utils.IsErr(err, context.Canceled) ||
+			utils.IsErr(err, context.DeadlineExceeded) ||
 			utils.IsErr(err, gorm.ErrRecordNotFound) ||
 			utils.IsErr(err, errInvalidNumberOfShards) ||
 			utils.IsErr(err, errShardRootChanged) ||
