@@ -1228,6 +1228,14 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		return nil, false, err
 	}
 
+	// fetch bucket id
+	var dBucket dbBucket
+	if err := s.db.Select("id").
+		Where("name", bucket).
+		Take(&dBucket).Error; err != nil {
+		return nil, false, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
 	// build prefix expression
 	prefixExpr := "TRUE"
 	if prefix != "" {
@@ -1250,7 +1258,7 @@ UNION
 SELECT '' as ETag, MAX(o.created_at) as ModTime, d.name as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
 INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name AND %s
-WHERE (SELECT id FROM buckets b WHERE b.name = ?) AND d.parent_id = ?
+WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) AND d.parent_id = ?
 GROUP BY d.id
 `, prefixExpr,
 		lengthFn,
@@ -3051,8 +3059,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		Select("o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Where("b.name = (SELECT id FROM buckets b WHERE b.name = ?)", bucket).
+		Where("o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)", bucket).
 		Where("?", prefixExpr).
 		Where("?", markerExpr).
 		Order(orderBy).
