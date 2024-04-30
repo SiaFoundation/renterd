@@ -4855,34 +4855,29 @@ func TestDirectories(t *testing.T) {
 		parentID uint
 	}{
 		{
-			name:     "",
+			name:     "/",
 			id:       1,
 			parentID: 0,
 		},
 		{
-			name:     "bar",
+			name:     "/bar/",
 			id:       2,
 			parentID: 1,
 		},
 		{
-			name:     "",
+			name:     "//",
 			id:       3,
 			parentID: 1,
 		},
 		{
-			name:     "",
+			name:     "///",
 			id:       4,
 			parentID: 3,
 		},
 		{
-			name:     "dir",
+			name:     "/dir/",
 			id:       2,
 			parentID: 1,
-		},
-		{
-			name:     "fakedir",
-			id:       4,
-			parentID: 3,
 		},
 	}
 
