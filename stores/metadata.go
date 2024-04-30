@@ -1224,7 +1224,9 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 
 	// fetch id of directory to query
 	dirID, err := s.dirID(s.db, path)
-	if err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return []api.ObjectMetadata{}, false, nil
+	} else if err != nil {
 		return nil, false, err
 	}
 
@@ -1759,14 +1761,18 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 		return 0, fmt.Errorf("path must end with /")
 	}
 
-	dirID := uint(1)
 	if dirPath == "/" {
-		return dirID, nil // root dir returned
-	} else if err := tx.Raw("SELECT id FROM directories WHERE name = ?", dirPath).
-		Scan(&dirID).Error; err != nil {
-		return 0, fmt.Errorf("failed to fetch root directory: %w", err)
+		return 1, nil // root dir returned
 	}
-	return dirID, nil
+
+	var dir dbDirectory
+	if err := tx.Where("name", dirPath).
+		Select("id").
+		Take(&dir).
+		Error; err != nil {
+		return 0, fmt.Errorf("failed to fetch directory: %w", err)
+	}
+	return dir.ID, nil
 }
 
 func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
