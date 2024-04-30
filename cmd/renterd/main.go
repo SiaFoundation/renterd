@@ -28,7 +28,6 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -36,8 +35,6 @@ import (
 	"golang.org/x/sys/cpu"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
-	"gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 const (
@@ -80,8 +77,8 @@ var (
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
 			MySQL: config.MySQL{
-				Database:        "renterd",
 				User:            "renterd",
+				Database:        "renterd",
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
@@ -431,52 +428,6 @@ func main() {
 		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
 	}
 
-	network, _ := build.Network()
-	busCfg := node.BusConfig{
-		Bus:                 cfg.Bus,
-		Network:             network,
-		SlabPruningInterval: time.Hour,
-	}
-	// Init db dialector
-	if cfg.Database.MySQL.URI != "" {
-		busCfg.DBDialector = stores.NewMySQLConnection(
-			cfg.Database.MySQL.User,
-			cfg.Database.MySQL.Password,
-			cfg.Database.MySQL.URI,
-			cfg.Database.MySQL.Database,
-		)
-		busCfg.DBMetricsDialector = stores.NewMySQLConnection(
-			cfg.Database.MySQL.User,
-			cfg.Database.MySQL.Password,
-			cfg.Database.MySQL.URI,
-			cfg.Database.MySQL.MetricsDatabase,
-		)
-	}
-
-	// Log level for db
-	lvlStr := cfg.Log.Level
-	if cfg.Log.Database.Level != "" {
-		lvlStr = cfg.Log.Database.Level
-	}
-	var level logger.LogLevel
-	switch strings.ToLower(lvlStr) {
-	case "":
-		level = logger.Warn // default to 'warn' if not set
-	case "error":
-		level = logger.Error
-	case "warn":
-		level = logger.Warn
-	case "info":
-		level = logger.Info
-	case "debug":
-		level = logger.Info
-	default:
-		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
-	}
-	if !cfg.Log.Database.Enabled {
-		level = logger.Silent
-	}
-
 	// Create logger.
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info" // default to 'info' if not set
@@ -492,18 +443,18 @@ func main() {
 		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
 	}
 
-	// configure database logger
-	dbLogCfg := cfg.Log.Database
-	if cfg.Database.Log != (config.DatabaseLog{}) {
-		dbLogCfg = cfg.Database.Log
+	if cfg.Log.Database.Level == "" {
+		cfg.Log.Database.Level = cfg.Log.Level
 	}
-	busCfg.DBLogger = zapgorm2.Logger{
-		ZapLogger:                 logger.Named("SQL"),
-		LogLevel:                  level,
-		SlowThreshold:             dbLogCfg.SlowThreshold,
-		SkipCallerLookup:          false,
-		IgnoreRecordNotFoundError: dbLogCfg.IgnoreRecordNotFoundError,
-		Context:                   nil,
+
+	network, _ := build.Network()
+	busCfg := node.BusConfig{
+		Bus:                 cfg.Bus,
+		Database:            cfg.Database,
+		DatabaseLog:         cfg.Log.Database,
+		Logger:              logger,
+		Network:             network,
+		SlabPruningInterval: time.Hour,
 	}
 
 	type shutdownFn struct {
