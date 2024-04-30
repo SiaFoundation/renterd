@@ -170,65 +170,63 @@ func (s *Subscriber) Run() (func(), error) {
 	return s.cm.OnReorg(func(types.ChainIndex) { s.triggerSync() }), nil
 }
 
-func (s *Subscriber) applyChainUpdates(tx ChainUpdateTx, caus []chain.ApplyUpdate) (err error) {
-	for _, cau := range caus {
-		// apply host updates
-		b := cau.Block
-		if time.Since(b.Timestamp) <= s.announcementMaxAge {
-			chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
-				if err != nil {
-					return // error occurred
-				}
-				if ha.NetAddress == "" {
-					return // ignore
-				}
-				err = tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp)
-			})
-			if err != nil {
-				return fmt.Errorf("failed to update host: %w", err)
-			}
-		}
-
-		// v1 contracts
-		cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+func (s *Subscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpdate) (err error) {
+	// apply host updates
+	b := cau.Block
+	if time.Since(b.Timestamp) <= s.announcementMaxAge {
+		chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
 			if err != nil {
 				return // error occurred
 			}
-			curr := &revision{
-				revisionNumber: fce.FileContract.RevisionNumber,
-				fileSize:       fce.FileContract.Filesize,
+			if ha.NetAddress == "" {
+				return // ignore
 			}
-			if rev != nil {
-				curr.revisionNumber = rev.FileContract.RevisionNumber
-				curr.fileSize = rev.FileContract.Filesize
-			}
-			err = s.updateContract(tx, cau.State.Index, types.FileContractID(fce.ID), nil, curr, resolved, valid)
+			err = tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp)
 		})
 		if err != nil {
-			return fmt.Errorf("failed to process v1 contracts: %w", err)
-		}
-
-		// v2 contracts
-		cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-			if err != nil {
-				return // error occurred
-			}
-			curr := &revision{
-				revisionNumber: fce.V2FileContract.RevisionNumber,
-				fileSize:       fce.V2FileContract.Filesize,
-			}
-			if rev != nil {
-				curr.revisionNumber = rev.V2FileContract.RevisionNumber
-				curr.fileSize = rev.V2FileContract.Filesize
-			}
-			resolved, valid := checkFileContract(fce, res)
-			err = s.updateContract(tx, cau.State.Index, types.FileContractID(fce.ID), nil, curr, resolved, valid)
-		})
-		if err != nil {
-			return fmt.Errorf("failed to process v1 contracts: %w", err)
+			return fmt.Errorf("failed to update host: %w", err)
 		}
 	}
-	return
+
+	// v1 contracts
+	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+		if err != nil {
+			return // error occurred
+		}
+		curr := &revision{
+			revisionNumber: fce.FileContract.RevisionNumber,
+			fileSize:       fce.FileContract.Filesize,
+		}
+		if rev != nil {
+			curr.revisionNumber = rev.FileContract.RevisionNumber
+			curr.fileSize = rev.FileContract.Filesize
+		}
+		err = s.updateContract(tx, cau.State.Index, types.FileContractID(fce.ID), nil, curr, resolved, valid)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to process v1 contracts: %w", err)
+	}
+
+	// v2 contracts
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		if err != nil {
+			return // error occurred
+		}
+		curr := &revision{
+			revisionNumber: fce.V2FileContract.RevisionNumber,
+			fileSize:       fce.V2FileContract.Filesize,
+		}
+		if rev != nil {
+			curr.revisionNumber = rev.V2FileContract.RevisionNumber
+			curr.fileSize = rev.V2FileContract.Filesize
+		}
+		resolved, valid := checkFileContract(fce, res)
+		err = s.updateContract(tx, cau.State.Index, types.FileContractID(fce.ID), nil, curr, resolved, valid)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to process v2 contracts: %w", err)
+	}
+	return nil
 }
 
 func (s *Subscriber) isKnownContract(fcid types.FileContractID) bool {
@@ -351,8 +349,10 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 		}
 
 		// process apply updates
-		if err := s.applyChainUpdates(tx, caus); err != nil {
-			return fmt.Errorf("failed to apply chain updates: %w", err)
+		for _, cau := range caus {
+			if err := s.applyChainUpdate(tx, cau); err != nil {
+				return fmt.Errorf("failed to apply chain updates: %w", err)
+			}
 		}
 
 		// update chain index
