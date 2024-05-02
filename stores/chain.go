@@ -364,12 +364,12 @@ func (u *chainUpdateTx) UpdateStateElements(elements []types.StateElement) error
 		lookup[types.Hash256(utxo.OutputID)] = i
 	}
 
-	for _, update := range elements {
-		if _, ok := lookup[update.ID]; ok {
-			u := utxos[lookup[update.ID]]
-			u.LeafIndex = update.LeafIndex
-			u.MerkleProof = merkleProof{proof: update.MerkleProof}
-			utxos[lookup[update.ID]] = u
+	for _, el := range elements {
+		if index, ok := lookup[el.ID]; ok {
+			update := utxos[index]
+			update.LeafIndex = el.LeafIndex
+			update.MerkleProof = merkleProof{proof: el.MerkleProof}
+			utxos[index] = update
 		}
 	}
 

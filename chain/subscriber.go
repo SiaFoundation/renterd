@@ -338,7 +338,7 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 	if err := s.cs.ProcessChainUpdate(func(tx ChainUpdateTx) error {
 		// process wallet updates
 		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
-			return err
+			return fmt.Errorf("failed to process wallet updates: %w", err)
 		}
 
 		// process revert updates
@@ -365,6 +365,7 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 		if err := tx.UpdateFailedContracts(index.Height); err != nil {
 			return fmt.Errorf("failed to update failed contracts: %w", err)
 		}
+
 		return nil
 	}); err != nil {
 		return types.ChainIndex{}, fmt.Errorf("failed to process chain update: %w", err)

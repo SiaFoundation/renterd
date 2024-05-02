@@ -54,7 +54,7 @@ func (w *worker) initContractSpendingRecorder(flushInterval time.Duration) {
 func (r *contractSpendingRecorder) Record(rev types.FileContractRevision, cs api.ContractSpending) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
+	fmt.Println("DEBUG PJ: record spending", rev.ParentID, cs.FundAccount)
 	// record the spending
 	csr, found := r.contractSpendings[rev.ParentID]
 	if !found {

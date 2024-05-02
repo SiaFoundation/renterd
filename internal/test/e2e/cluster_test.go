@@ -770,8 +770,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 	tt.Retry(100, testBusFlushInterval, func() error {
 		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
-		if len(cms) == 0 {
-			t.Fatal("no contracts found")
+		if len(cms) != test.RedundancySettings.TotalShards {
+			t.Fatalf("unexpected number of contracts %v", len(cms))
 		}
 
 		nFunded := 0
