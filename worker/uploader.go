@@ -118,11 +118,7 @@ outer:
 			// execute it
 			start := time.Now()
 			duration, err := u.execute(req)
-			if err == nil {
-				// only track the time it took to upload the sector in the happy case
-				u.trackSectorUpload(true, duration)
-				u.trackConsecutiveFailures(true)
-			} else if errors.Is(err, errMaxRevisionReached) {
+			if errors.Is(err, errMaxRevisionReached) {
 				// the uploader's contract got renewed, requeue the request
 				if err := u.tryRefresh(); err == nil {
 					u.enqueue(req)
@@ -131,23 +127,12 @@ outer:
 					u.logger.Errorf("failed to refresh the uploader's contract %v, err: %v", u.ContractID(), err)
 				}
 				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
-			} else if errors.Is(err, errSectorUploadFinished) && (!req.overdrive || (errors.Is(err, errDialTransport) && time.Since(start) > time.Second)) {
-				// punish the slow host by tracking a multiple of the total time
-				// we lost on it, however we only do this if we weren't
-				// overdriving or if we were slow to dial, only consider a slow
-				// dial a host failure
-				u.trackSectorUpload(false, time.Since(start)*10)
-				if req.overdrive {
-					u.trackConsecutiveFailures(false)
-				}
-			} else if !errors.Is(err, errSectorUploadFinished) {
-				// punish the host for failing the upload
-				u.trackSectorUpload(false, time.Hour)
-				u.trackConsecutiveFailures(false)
-				u.logger.Debugw("penalising host for failing to upload sector", "hk", u.hk, "overdrive", req.overdrive, "err", err)
-			} else {
-				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
 			}
+
+			// track stats
+			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, time.Since(start), req.overdrive, u.logger)
+			u.trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS)
+			u.trackConsecutiveFailures(success, failure)
 
 			// send the response
 			select {
@@ -159,6 +144,46 @@ outer:
 			}
 		}
 	}
+}
+
+func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool, logger *zap.SugaredLogger) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
+	// special case, uploader will refresh and the request will be requeued
+	if errors.Is(uploadErr, errMaxRevisionReached) {
+		return
+	}
+
+	// happy case, upload was successful
+	if uploadErr == nil {
+		ms := uploadDuration.Milliseconds()
+		if ms == 0 {
+			ms = 1 // avoid division by zero
+		}
+		success = true
+		uploadEstimateMS = float64(ms)
+		uploadSpeedBytesPerMS = float64(rhpv2.SectorSize / ms)
+		return
+	}
+
+	// upload failed because the sector was already uploaded by another host, in
+	// this case we want to punish the host for being too slow but only when we
+	// weren't overdriving or when it took too long to dial
+	if errors.Is(uploadErr, errSectorUploadFinished) {
+		slowDial := errors.Is(uploadErr, errDialTransport) && totalDuration > time.Second
+		if !overdrive || slowDial {
+			failure = overdrive
+			uploadEstimateMS = float64(totalDuration.Milliseconds() * 10)
+			logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", totalDuration.Milliseconds()*10)
+		} else {
+			logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
+		}
+		return
+	}
+
+	// in all other cases we want to punish the host for failing the upload
+	failure = true
+	uploadEstimateMS = float64(time.Hour.Milliseconds())
+	logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", time.Hour)
+	return
 }
 
 func (u *uploader) Stop(err error) {
@@ -283,34 +308,26 @@ func (u *uploader) signalWork() {
 	}
 }
 
-func (u *uploader) trackConsecutiveFailures(success bool) {
+func (u *uploader) trackConsecutiveFailures(success, failure bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// update consecutive failures
 	if success {
 		u.consecutiveFailures = 0
-	} else {
+	} else if failure {
 		u.consecutiveFailures++
 	}
 }
 
-func (u *uploader) trackSectorUpload(success bool, d time.Duration) {
+func (u *uploader) trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS float64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// sanitize input
-	ms := d.Milliseconds()
-	if ms == 0 {
-		ms = 1 // avoid division by zero
+	if uploadEstimateMS > 0 {
+		u.statsSectorUploadEstimateInMS.Track(uploadEstimateMS)
 	}
-
-	// update estimates
-	if success {
-		u.statsSectorUploadEstimateInMS.Track(float64(ms))
-		u.statsSectorUploadSpeedBytesPerMS.Track(float64(rhpv2.SectorSize / ms)) // bytes per ms
-	} else {
-		u.statsSectorUploadEstimateInMS.Track(float64(ms))
+	if uploadSpeedBytesPerMS > 0 {
+		u.statsSectorUploadSpeedBytesPerMS.Track(uploadSpeedBytesPerMS)
 	}
 }
 
