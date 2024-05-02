@@ -82,6 +82,6 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-tags=testing;-timeout=30m;-count=100;-Run=^TestUploadDownloadSpending$"
+          args: "-failfast;-race;-tags=testing;-timeout=30m;-count=100;-run=^TestUploadDownloadSpending$"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
