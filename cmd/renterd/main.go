@@ -28,7 +28,6 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -36,8 +35,6 @@ import (
 	"golang.org/x/sys/cpu"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
-	"gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 const (
@@ -80,8 +77,8 @@ var (
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
 			MySQL: config.MySQL{
-				Database:        "renterd",
 				User:            "renterd",
+				Database:        "renterd",
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
@@ -431,52 +428,6 @@ func main() {
 		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
 	}
 
-	network, _ := build.Network()
-	busCfg := node.BusConfig{
-		Bus:                 cfg.Bus,
-		Network:             network,
-		SlabPruningInterval: time.Hour,
-	}
-	// Init db dialector
-	if cfg.Database.MySQL.URI != "" {
-		busCfg.DBDialector = stores.NewMySQLConnection(
-			cfg.Database.MySQL.User,
-			cfg.Database.MySQL.Password,
-			cfg.Database.MySQL.URI,
-			cfg.Database.MySQL.Database,
-		)
-		busCfg.DBMetricsDialector = stores.NewMySQLConnection(
-			cfg.Database.MySQL.User,
-			cfg.Database.MySQL.Password,
-			cfg.Database.MySQL.URI,
-			cfg.Database.MySQL.MetricsDatabase,
-		)
-	}
-
-	// Log level for db
-	lvlStr := cfg.Log.Level
-	if cfg.Log.Database.Level != "" {
-		lvlStr = cfg.Log.Database.Level
-	}
-	var level logger.LogLevel
-	switch strings.ToLower(lvlStr) {
-	case "":
-		level = logger.Warn // default to 'warn' if not set
-	case "error":
-		level = logger.Error
-	case "warn":
-		level = logger.Warn
-	case "info":
-		level = logger.Info
-	case "debug":
-		level = logger.Info
-	default:
-		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
-	}
-	if !cfg.Log.Database.Enabled {
-		level = logger.Silent
-	}
-
 	// Create logger.
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info" // default to 'info' if not set
@@ -492,18 +443,18 @@ func main() {
 		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
 	}
 
-	// configure database logger
-	dbLogCfg := cfg.Log.Database
-	if cfg.Database.Log != (config.DatabaseLog{}) {
-		dbLogCfg = cfg.Database.Log
+	if cfg.Log.Database.Level == "" {
+		cfg.Log.Database.Level = cfg.Log.Level
 	}
-	busCfg.DBLogger = zapgorm2.Logger{
-		ZapLogger:                 logger.Named("SQL"),
-		LogLevel:                  level,
-		SlowThreshold:             dbLogCfg.SlowThreshold,
-		SkipCallerLookup:          false,
-		IgnoreRecordNotFoundError: dbLogCfg.IgnoreRecordNotFoundError,
-		Context:                   nil,
+
+	network, _ := build.Network()
+	busCfg := node.BusConfig{
+		Bus:                 cfg.Bus,
+		Database:            cfg.Database,
+		DatabaseLog:         cfg.Log.Database,
+		Logger:              logger,
+		Network:             network,
+		SlabPruningInterval: time.Hour,
 	}
 
 	type shutdownFn struct {
@@ -530,8 +481,8 @@ func main() {
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(cfg.HTTP.Password)
-	mux := &treeMux{
-		sub: make(map[string]treeMux),
+	mux := &utils.TreeMux{
+		Sub: make(map[string]utils.TreeMux),
 	}
 
 	// Create the webserver.
@@ -556,12 +507,12 @@ func main() {
 			fn:   fn,
 		})
 
-		mux.sub["/api/bus"] = treeMux{h: auth(b)}
+		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b)}
 		busAddr = cfg.HTTP.Address + "/api/bus"
 		busPassword = cfg.HTTP.Password
 
 		// only serve the UI if a bus is created
-		mux.h = renterd.Handler()
+		mux.Handler = renterd.Handler()
 	} else {
 		logger.Info("connecting to remote bus at " + busAddr)
 	}
@@ -584,7 +535,7 @@ func main() {
 				fn:   fn,
 			})
 
-			mux.sub["/api/worker"] = treeMux{h: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			workerAddr := cfg.HTTP.Address + "/api/worker"
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
@@ -630,7 +581,7 @@ func main() {
 		})
 
 		go func() { autopilotErr <- runFn() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
+		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap)}
 	}
 
 	// Start server.

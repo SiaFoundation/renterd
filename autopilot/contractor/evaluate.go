@@ -25,8 +25,9 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
-	for _, host := range hosts {
-		hc := checkHost(cfg, rs, gc, host, 0)
+	for i, host := range hosts {
+		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight // ignore block height
+		hc := checkHost(cfg, rs, gc, host, minValidScore)
 		if hc.Usability.IsUsable() {
 			resp.Usable++
 			continue
