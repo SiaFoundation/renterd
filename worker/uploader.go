@@ -146,7 +146,7 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	// special case, uploader will refresh and the request will be requeued
 	if errors.Is(uploadErr, errMaxRevisionReached) {
 		logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
-		return
+		return false, false, 0, 0
 	}
 
 	// happy case, upload was successful
@@ -155,10 +155,7 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 		if ms == 0 {
 			ms = 1 // avoid division by zero
 		}
-		success = true
-		uploadEstimateMS = float64(ms)
-		uploadSpeedBytesPerMS = float64(rhpv2.SectorSize / ms)
-		return
+		return true, false, float64(ms), float64(rhpv2.SectorSize / ms)
 	}
 
 	// upload failed because the sector was already uploaded by another host, in
@@ -173,14 +170,12 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 		} else {
 			logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
 		}
-		return
+		return false, failure, uploadEstimateMS, 0
 	}
 
 	// in all other cases we want to punish the host for failing the upload
-	failure = true
-	uploadEstimateMS = float64(time.Hour.Milliseconds())
 	logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", time.Hour)
-	return
+	return false, true, float64(time.Hour.Milliseconds()), 0
 }
 
 func (u *uploader) Stop(err error) {
