@@ -232,8 +232,11 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 		Take(&c).Error; err == nil {
 		c.RevisionHeight = revisionHeight
 		if isUpdatedRevision(c.RevisionNumber) {
+			fmt.Printf("DEBUG PJ: updating contract %v: revision number %v -> %v, revision height %v\n", fcid, c.RevisionNumber, revisionNumber, revisionHeight)
 			c.RevisionNumber = fmt.Sprint(revisionNumber)
 			c.Size = size
+		} else {
+			fmt.Printf("DEBUG PJ: updating contract %v: revision height %v\n", fcid, revisionHeight)
 		}
 		update = c
 	} else if err == gorm.ErrRecordNotFound {
@@ -245,8 +248,11 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 			Take(&ac).Error; err == nil {
 			ac.RevisionHeight = revisionHeight
 			if isUpdatedRevision(ac.RevisionNumber) {
+				fmt.Printf("DEBUG PJ: updating archived contract %v: revision number %v -> %v, revision height %v\n", fcid, ac.RevisionNumber, revisionNumber, revisionHeight)
 				ac.RevisionNumber = fmt.Sprint(revisionNumber)
 				ac.Size = size
+			} else {
+				fmt.Printf("DEBUG PJ: updating archived contract %v: revision height %v\n", fcid, revisionHeight)
 			}
 			update = ac
 		}
