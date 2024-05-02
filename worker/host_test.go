@@ -23,7 +23,6 @@ type (
 		*contractMock
 		hptFn       func() api.HostPriceTable
 		uploadDelay time.Duration
-		uploadErr   error
 	}
 
 	testHostManager struct {
@@ -93,7 +92,7 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 }
 
 func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
-	// sleep if necessary
+	h.AddSector(sectorRoot, sector)
 	if h.uploadDelay > 0 {
 		select {
 		case <-time.After(h.uploadDelay):
@@ -101,18 +100,6 @@ func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, s
 			return context.Cause(ctx)
 		}
 	}
-
-	// check for cancellation
-	select {
-	case <-ctx.Done():
-		return context.Cause(ctx)
-	default:
-	}
-
-	if h.uploadErr != nil {
-		return h.uploadErr
-	}
-	h.AddSector(sectorRoot, sector)
 	return nil
 }
 
