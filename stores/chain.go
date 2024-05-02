@@ -20,6 +20,13 @@ var (
 // chainUpdateTx implements the ChainUpdateTx interface.
 type chainUpdateTx struct {
 	tx *gorm.DB
+
+	logs []logEntry // only logged if tx was successfully committed
+}
+
+type logEntry struct {
+	msg           string
+	keysAndValues []interface{}
 }
 
 // ProcessChainUpdate returns a callback function that process a chain update
@@ -37,15 +44,28 @@ func (s *SQLStore) ProcessChainUpdate(fn func(tx chain.ChainUpdateTx) error) (er
 	}
 
 	// call the update function with the wrapped tx
-	if err := fn(&chainUpdateTx{tx: tx}); err != nil {
+	u := &chainUpdateTx{tx: tx}
+	if err := fn(u); err != nil {
 		tx.Rollback()
 		return err
 	}
 
 	// commit the changes
-	return tx.Commit().Error
+	err = tx.Commit().Error
+	if err != nil {
+		return err
+	}
+
+	// debug log
+	l := s.logger.Named("chainupdate")
+	for _, log := range u.logs {
+		l.Debugw(log.msg, log.keysAndValues...)
+	}
+
+	return nil
 }
 
+// UpdateChainState process the given revert and apply updates.
 func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
 	return s.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
 		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
@@ -56,6 +76,8 @@ func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []cha
 // transactions and siacoin elements that were created by the index should be
 // added and any siacoin elements that were spent should be removed.
 func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event) error {
+	u.debug("applying index", "height", index.Height, "block_id", index.ID)
+
 	// remove spent outputs
 	for _, e := range spent {
 		if res := u.tx.
@@ -65,6 +87,7 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 		} else if res.RowsAffected != 1 {
 			return fmt.Errorf("spent output with id %v not found ", e.ID)
 		}
+		u.debug(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 
 	// create outputs
@@ -84,6 +107,7 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 			}).Error; err != nil {
 			return nil
 		}
+		u.debug(fmt.Sprintf("create output %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 
 	// create events
@@ -106,18 +130,9 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 			}).Error; err != nil {
 			return err
 		}
+		u.debug(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 	return nil
-}
-
-// Commit commits the updates to the database.
-func (u *chainUpdateTx) Commit() error {
-	return u.tx.Commit().Error
-}
-
-// Rollback rolls back the transaction
-func (u *chainUpdateTx) Rollback() error {
-	return u.tx.Rollback().Error
 }
 
 // ContractState returns the state of a file contract.
@@ -145,24 +160,12 @@ func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractSt
 	return api.ContractState(state.String()), nil
 }
 
-// RemoveSiacoinElements is called with all siacoin elements that were spent in
-// the update.
-func (u *chainUpdateTx) RemoveSiacoinElements(ids []types.SiacoinOutputID) error {
-	for _, id := range ids {
-		if err := u.tx.
-			Where("output_id", hash256(id)).
-			Delete(&dbWalletOutput{}).
-			Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // RevertIndex is called with the chain index that is being reverted. Any
 // transactions and siacoin elements that were created by the index should be
 // removed.
 func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement) error {
+	u.debug("reverting index", "height", index.Height, "block_id", index.ID)
+
 	// recreate unspent outputs
 	for _, e := range unspent {
 		if err := u.tx.
@@ -180,6 +183,7 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 			}).Error; err != nil {
 			return nil
 		}
+		u.debug(fmt.Sprintf("recreate unspent output %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 
 	// remove outputs created at the reverted index
@@ -190,26 +194,37 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 			Error; err != nil {
 			return err
 		}
+		u.debug(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 
 	// remove events created at the reverted index
-	return u.tx.
+	res := u.tx.
 		Model(&dbWalletEvent{}).
 		Where("height = ? AND block_id = ?", index.Height, hash256(index.ID)).
-		Delete(&dbWalletEvent{}).
-		Error
+		Delete(&dbWalletEvent{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		u.debug(fmt.Sprintf("removed %d events", res.RowsAffected), "height", index.Height, "block_id", index.ID)
+	}
+	return nil
 }
 
 // UpdateChainIndex updates the chain index in the database.
 func (u *chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
-	return u.tx.
+	if err := u.tx.
 		Model(&dbConsensusInfo{}).
 		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		Updates(map[string]interface{}{
 			"height":   index.Height,
 			"block_id": hash256(index.ID),
 		}).
-		Error
+		Error; err != nil {
+		return err
+	}
+	u.debug("updating index", "height", index.Height, "block_id", index.ID)
+	return nil
 }
 
 // UpdateContract updates the revision height, revision number, and size the
@@ -224,20 +239,20 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 	}
 
 	// update either active or archived contract
+	var msg string
 	var update interface{}
 	var c dbContract
 	if err := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
 		Take(&c).Error; err == nil {
+		bkp := c
 		c.RevisionHeight = revisionHeight
 		if isUpdatedRevision(c.RevisionNumber) {
-			fmt.Printf("DEBUG PJ: updating contract %v: revision number %v -> %v, revision height %v\n", fcid, c.RevisionNumber, revisionNumber, revisionHeight)
 			c.RevisionNumber = fmt.Sprint(revisionNumber)
 			c.Size = size
-		} else {
-			fmt.Printf("DEBUG PJ: updating contract %v: revision height %v\n", fcid, revisionHeight)
 		}
+		msg = fmt.Sprintf("update contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, c.RevisionNumber, bkp.RevisionHeight, c.RevisionHeight, bkp.Size, c.Size)
 		update = c
 	} else if err == gorm.ErrRecordNotFound {
 		// try archived contracts
@@ -246,14 +261,13 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 			Model(&dbArchivedContract{}).
 			Where("fcid", fileContractID(fcid)).
 			Take(&ac).Error; err == nil {
+			bkp := ac
 			ac.RevisionHeight = revisionHeight
 			if isUpdatedRevision(ac.RevisionNumber) {
-				fmt.Printf("DEBUG PJ: updating archived contract %v: revision number %v -> %v, revision height %v\n", fcid, ac.RevisionNumber, revisionNumber, revisionHeight)
 				ac.RevisionNumber = fmt.Sprint(revisionNumber)
 				ac.Size = size
-			} else {
-				fmt.Printf("DEBUG PJ: updating archived contract %v: revision height %v\n", fcid, revisionHeight)
 			}
+			msg = fmt.Sprintf("update archived contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, ac.RevisionNumber, bkp.RevisionHeight, ac.RevisionHeight, bkp.Size, ac.Size)
 			update = ac
 		}
 	}
@@ -261,7 +275,11 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 		return nil
 	}
 
-	return u.tx.Save(update).Error
+	if err := u.tx.Save(update).Error; err != nil {
+		return err
+	}
+	u.debug(msg, "fcid", fcid)
+	return nil
 }
 
 // UpdateContractState updates the state of the contract with given fcid.
@@ -271,46 +289,75 @@ func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api
 		return err
 	}
 
-	if err := u.tx.
+	// try update contract
+	res := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Update("state", cs).
-		Error; err != nil {
-		return err
+		Update("state", cs)
+	if res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected == 1 {
+		u.debug(fmt.Sprintf("updated contract state to '%s'", state), "fcid", fcid)
+		return nil
 	}
-	return u.tx.
+
+	// try update archived contract
+	res = u.tx.
 		Model(&dbArchivedContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Update("state", cs).
-		Error
+		Update("state", cs)
+	if res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected == 1 {
+		u.debug(fmt.Sprintf("updated archived contract state to '%s'", state), "fcid", fcid)
+		return nil
+	}
+
+	return nil
 }
 
 // UpdateContractProofHeight updates the proof height of the contract with given
 // fcid.
 func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
-	if err := u.tx.
+	// try update contract
+	res := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Update("proof_height", proofHeight).
-		Error; err != nil {
-		return err
+		Update("proof_height", proofHeight)
+	if res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected == 1 {
+		u.debug(fmt.Sprintf("updated contract proof height to '%d'", proofHeight), "fcid", fcid)
+		return nil
 	}
-	return u.tx.
+
+	// try update archived contract
+	res = u.tx.
 		Model(&dbArchivedContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Update("proof_height", proofHeight).
-		Error
+		Update("proof_height", proofHeight)
+	if res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected == 1 {
+		u.debug(fmt.Sprintf("updated archived contract proof height to '%d'", proofHeight), "fcid", fcid)
+		return nil
+	}
+	return nil
 }
 
 // UpdateFailedContracts marks active contract as failed if the current
 // blockheight surposses their window_end.
 func (u *chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
-	return u.tx.
+	if res := u.tx.
 		Model(&dbContract{}).
 		Where("window_end <= ?", blockHeight).
 		Where("state", contractStateActive).
-		Update("state", contractStateFailed).
-		Error
+		Update("state", contractStateFailed); res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected > 0 {
+		u.debug(fmt.Sprintf("marked %d active contracts as failed", res.RowsAffected), "window_end", blockHeight)
+	}
+	return nil
 }
 
 // UpdateHost creates the announcement and upserts the host in the database.
@@ -415,4 +462,8 @@ func (u *chainUpdateTx) outputs() (outputs []dbWalletOutput, err error) {
 		Find(&outputs).
 		Error
 	return
+}
+
+func (u *chainUpdateTx) debug(msg string, keysAndValues ...interface{}) {
+	u.logs = append(u.logs, logEntry{msg: msg, keysAndValues: keysAndValues})
 }
