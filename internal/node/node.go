@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -30,6 +31,7 @@ import (
 	"golang.org/x/crypto/blake2b"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"moul.io/zapgorm2"
 )
 
 type Bus interface {
@@ -39,11 +41,11 @@ type Bus interface {
 
 type BusConfig struct {
 	config.Bus
+	Database            config.Database
+	DatabaseLog         config.DatabaseLog
 	Network             *consensus.Network
+	Logger              *zap.Logger
 	Miner               *Miner
-	DBLogger            logger.Interface
-	DBDialector         gorm.Dialector
-	DBMetricsDialector  gorm.Dialector
 	SlabPruningInterval time.Duration
 }
 
@@ -92,22 +94,42 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		return nil, nil, err
 	}
 
-	// If no DB dialector was provided, use SQLite.
-	dbConn := cfg.DBDialector
-	if dbConn == nil {
+	// create database connections
+	var dbConn, dbMetricsConn gorm.Dialector
+	if cfg.Database.MySQL.URI != "" {
+		// create MySQL connections
+		dbConn = stores.NewMySQLConnection(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.Database,
+		)
+		dbMetricsConn = stores.NewMySQLConnection(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.MetricsDatabase,
+		)
+	} else {
+		// create database directory
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
 			return nil, nil, err
 		}
+
+		// create SQLite connections
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
-	}
-	dbMetricsConn := cfg.DBMetricsDialector
-	if dbMetricsConn == nil {
-		dbDir := filepath.Join(dir, "db")
-		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
-		}
 		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
+	}
+
+	// create database logger
+	dbLogger := zapgorm2.Logger{
+		ZapLogger:                 cfg.Logger.Named("SQL"),
+		LogLevel:                  gormLogLevel(cfg.DatabaseLog),
+		SlowThreshold:             cfg.DatabaseLog.SlowThreshold,
+		SkipCallerLookup:          false,
+		IgnoreRecordNotFoundError: cfg.DatabaseLog.IgnoreRecordNotFoundError,
+		Context:                   nil,
 	}
 
 	alertsMgr := alerts.NewManager()
@@ -125,7 +147,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		WalletAddress:                 walletAddr,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        l.Sugar(),
-		GormLogger:                    cfg.DBLogger,
+		GormLogger:                    dbLogger,
 		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
 	})
 	if err != nil {
@@ -216,4 +238,25 @@ func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Work
 		return nil, nil, nil, err
 	}
 	return ap.Handler(), ap.Run, ap.Shutdown, nil
+}
+
+func gormLogLevel(cfg config.DatabaseLog) logger.LogLevel {
+	level := logger.Silent
+	if cfg.Enabled {
+		switch strings.ToLower(cfg.Level) {
+		case "":
+			level = logger.Warn // default to 'warn' if not set
+		case "error":
+			level = logger.Error
+		case "warn":
+			level = logger.Warn
+		case "info":
+			level = logger.Info
+		case "debug":
+			level = logger.Info
+		default:
+			log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Level)
+		}
+	}
+	return level
 }

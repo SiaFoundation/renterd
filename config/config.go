@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"time"
 )
 
@@ -80,7 +81,13 @@ type (
 		Database DatabaseLog `yaml:"database,omitempty"`
 	}
 
-	// MySQL contains the configuration for an optional MySQL database.
+	// SQLite contains the configuration for a SQLite database.
+	SQLite struct {
+		Database        string `yaml:"database,omitempty"`
+		MetricsDatabase string `yaml:"metricsDatabase,omitempty"`
+	}
+
+	// MySQL contains the configuration for a MySQL database.
 	MySQL struct {
 		URI             string `yaml:"uri,omitempty"`
 		User            string `yaml:"user,omitempty"`
@@ -133,3 +140,13 @@ type (
 		MigratorParallelSlabsPerWorker uint64        `yaml:"migratorParallelSlabsPerWorker,omitempty"`
 	}
 )
+
+func MySQLConfigFromEnv() MySQL {
+	return MySQL{
+		URI:             os.Getenv("RENTERD_DB_URI"),
+		User:            os.Getenv("RENTERD_DB_USER"),
+		Password:        os.Getenv("RENTERD_DB_PASSWORD"),
+		Database:        os.Getenv("RENTERD_DB_NAME"),
+		MetricsDatabase: os.Getenv("RENTERD_DB_METRICS_NAME"),
+	}
+}
