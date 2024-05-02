@@ -119,14 +119,10 @@ outer:
 			start := time.Now()
 			duration, err := u.execute(req)
 			if errors.Is(err, errMaxRevisionReached) {
-				// the uploader's contract got renewed, requeue the request
-				if err := u.tryRefresh(); err == nil {
+				if u.tryRefresh(req.sector.ctx) {
 					u.enqueue(req)
 					continue outer
-				} else if !utils.IsErr(err, context.Canceled) {
-					u.logger.Errorf("failed to refresh the uploader's contract %v, err: %v", u.ContractID(), err)
 				}
-				u.logger.Debugw("skip tracking sector upload", "total", time.Since(start), "duration", duration, "overdrive", req.overdrive, "err", err)
 			}
 
 			// track stats
@@ -149,6 +145,7 @@ outer:
 func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool, logger *zap.SugaredLogger) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
 	// special case, uploader will refresh and the request will be requeued
 	if errors.Is(uploadErr, errMaxRevisionReached) {
+		logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
 		return
 	}
 
@@ -343,18 +340,17 @@ func (u *uploader) tryRecomputeStats() {
 	u.statsSectorUploadSpeedBytesPerMS.Recompute()
 }
 
-func (u *uploader) tryRefresh() error {
-	// use a sane timeout
-	ctx, cancel := context.WithTimeout(u.shutdownCtx, 30*time.Second)
-	defer cancel()
-
+func (u *uploader) tryRefresh(ctx context.Context) bool {
 	// fetch the renewed contract
 	renewed, err := u.cs.RenewedContract(ctx, u.ContractID())
-	if err != nil {
-		return err
+	if utils.IsErr(err, api.ErrContractNotFound) || utils.IsErr(err, context.Canceled) {
+		return false
+	} else if err != nil {
+		u.logger.Errorf("failed to fetch renewed contract %v, err: %v", u.ContractID(), err)
+		return false
 	}
 
 	// renew the uploader with the renewed contract
 	u.Refresh(renewed)
-	return nil
+	return true
 }
