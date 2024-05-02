@@ -1256,11 +1256,14 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
 FROM objects o
 WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) AND %s
-UNION
+UNION ALL
 SELECT '' as ETag, MAX(o.created_at) as ModTime, d.name as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
 INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name AND %s
-WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) AND d.parent_id = ?
+WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
+AND o.object_id LIKE ?
+AND SUBSTR(o.object_id, 1, ?) = ?
+AND d.parent_id = ?
 GROUP BY d.id
 `, prefixExpr,
 		lengthFn,
@@ -1274,13 +1277,19 @@ GROUP BY d.id
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			utf8.RuneCountInString(path + prefix), path + prefix,
-			bucket, dirID, // b.name = ? AND d.parent_id = ?
+			bucket,                             // b.name = ?
+			path + "%",                         // o.object_id LIKE ?
+			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
+			dirID, // d.parent_id = ?
 		}
 	} else {
 		objectsQueryParams = []interface{}{
 			path,          // o.object_id != ?
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
-			bucket, dirID, // b.name = ? AND d.parent_id = ?
+			bucket,                             // b.name = ?
+			path + "%",                         // o.object_id LIKE ?
+			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
+			dirID, // d.parent_id = ?
 		}
 	}
 
@@ -1340,7 +1349,7 @@ GROUP BY d.id
 		sortBy = "ObjectName"
 	}
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
-	if sortBy != api.ObjectSortByName {
+	if sortBy != "ObjectName" {
 		orderByClause += ", ObjectName"
 	}
 
