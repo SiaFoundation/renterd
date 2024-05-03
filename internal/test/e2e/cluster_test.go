@@ -1451,7 +1451,6 @@ func TestWalletTransactions(t *testing.T) {
 	cluster.MineBlocks(1)
 	time.Sleep(time.Second)
 	cluster.MineBlocks(1)
-	time.Sleep(testBusPersistInterval)
 
 	// Get all transactions of the wallet.
 	allTxns, err := b.WalletTransactions(context.Background())
@@ -2464,7 +2463,7 @@ func TestWalletRedistribute(t *testing.T) {
 	}
 	cluster.MineBlocks(1)
 
-	// sleep a bit to ensure we processed the chain updates
+	// allow time to process chain updates
 	time.Sleep(time.Second)
 
 	// assert we have 5 outputs with 10 SC

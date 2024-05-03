@@ -922,7 +922,6 @@ func testBusCfg() node.BusConfig {
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
 			GatewayAddr:                   "127.0.0.1:0",
-			PersistInterval:               testBusPersistInterval,
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
@@ -961,7 +960,7 @@ func testApCfg() node.AutopilotConfig {
 		ID: api.DefaultAutopilotID,
 		Autopilot: config.Autopilot{
 			AccountsRefillInterval:         time.Second,
-			Heartbeat:                      500 * time.Millisecond,
+			Heartbeat:                      time.Second,
 			MigrationHealthCutoff:          0.99,
 			MigratorParallelSlabsPerWorker: 1,
 			ContractConfirmationDeadline:   144,
