@@ -89,6 +89,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
+	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -244,12 +245,6 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	}
 	c.logger.Info("performing contract maintenance")
 
-	// fetch consensus state
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		return false, fmt.Errorf("failed to fetch consensus state, err: %v", err)
-	}
-
 	// fetch current contract set
 	currentSet, err := c.bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
 	if err != nil && !strings.Contains(err.Error(), api.ErrContractSetNotFound.Error()) {
@@ -335,6 +330,12 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	checks, err := c.runHostChecks(mCtx, hosts, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run host checks, err: %v", err)
+	}
+
+	// fetch consensus state
+	cs, err := c.bus.ConsensusState(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch consensus state, err: %v", err)
 	}
 
 	// run contract checks
@@ -647,6 +648,14 @@ LOOP:
 		// convenience variables
 		fcid := contract.ID
 		hk := contract.HostKey
+
+		// refresh contract metadata
+		metadata, err := c.bus.Contract(ctx, contract.ID)
+		if err != nil {
+			c.logger.Errorf("couldn't fetch contract %v from database, err: %v", contract.ID, err)
+			break LOOP
+		}
+		contract.ContractMetadata = metadata
 
 		// check if contract is ready to be archived.
 		if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
