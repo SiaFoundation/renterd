@@ -856,6 +856,14 @@ func TestAncestorsContracts(t *testing.T) {
 			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
+
+	// Fetch the ancestors with startHeight >= 3. That should return 0 contracts.
+	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 3)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatalf("should have 0 contracts but got %v", len(contracts))
+	}
 }
 
 func TestArchiveContracts(t *testing.T) {

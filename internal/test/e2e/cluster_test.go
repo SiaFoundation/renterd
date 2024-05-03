@@ -128,13 +128,6 @@ func TestNewTestCluster(t *testing.T) {
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
 		}
-		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), renewalID, math.MaxUint32)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(archivedContracts) != 0 {
-			return fmt.Errorf("should have 0 archived contracts but got %v", len(archivedContracts))
-		}
 		return nil
 	})
 
