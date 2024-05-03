@@ -232,7 +232,7 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 			c.Size = size
 		}
 		msg = fmt.Sprintf("update contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, c.RevisionNumber, bkp.RevisionHeight, c.RevisionHeight, bkp.Size, c.Size)
-		update = c
+		update = &c
 	} else if err == gorm.ErrRecordNotFound {
 		// try archived contracts
 		var ac dbArchivedContract
@@ -247,7 +247,7 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 				ac.Size = size
 			}
 			msg = fmt.Sprintf("update archived contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, ac.RevisionNumber, bkp.RevisionHeight, ac.RevisionHeight, bkp.Size, ac.Size)
-			update = ac
+			update = &ac
 		}
 	}
 	if update == nil {

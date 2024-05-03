@@ -595,7 +595,7 @@ func (c *TestCluster) MineBlocks(n uint64) {
 		// we briefly sleep here to allow the subscriber to catch up processing
 		// new updates and avoid lagging behind the tip too much when mining a
 		// bunch of blocks at once
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		c.Sync()
 	}
 }
