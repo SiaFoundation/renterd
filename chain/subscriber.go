@@ -167,7 +167,10 @@ func (s *Subscriber) Run() (func(), error) {
 	}()
 
 	// trigger a sync on reorgs
-	return s.cm.OnReorg(func(types.ChainIndex) { s.triggerSync() }), nil
+	return s.cm.OnReorg(func(ci types.ChainIndex) {
+		triggered := s.triggerSync()
+		s.logger.Debugw("reorg detected", "triggered", triggered, "height", ci.Height, "block_id", ci.ID)
+	}), nil
 }
 
 func (s *Subscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpdate) (err error) {
@@ -289,6 +292,7 @@ func (s *Subscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUpdate)
 }
 
 func (s *Subscriber) sync(index types.ChainIndex) error {
+	s.logger.Debugw("syncing", "height", index.Height, "block_id", index.ID)
 	for index != s.cm.Tip() {
 		// check if subscriber was closed
 		select {
@@ -303,6 +307,8 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
 
+		s.logger.Debugw(fmt.Sprintf("fetched %d apply updates %d revert updates", len(caus), len(crus)), "since_height", index.Height, "since_block_id", index.ID)
+
 		// start retry loop
 		for i := 1; i <= len(s.retryTxIntervals)+1; i++ {
 			// check if subscriber was closed
@@ -315,6 +321,7 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 			// process updates
 			index, err = s.processUpdates(crus, caus)
 			if err == nil {
+				s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID)
 				break
 			}
 
@@ -373,11 +380,13 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 	return index, nil
 }
 
-func (s *Subscriber) triggerSync() {
+func (s *Subscriber) triggerSync() bool {
 	select {
 	case s.syncSig <- struct{}{}:
+		return true
 	default:
 	}
+	return false
 }
 
 func (s *Subscriber) updateContract(tx ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
