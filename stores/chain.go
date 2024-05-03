@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/chain"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -31,43 +33,20 @@ type logEntry struct {
 
 // ProcessChainUpdate returns a callback function that process a chain update
 // inside a transaction.
-func (s *SQLStore) ProcessChainUpdate(fn func(tx chain.ChainUpdateTx) error) (err error) {
-	// begin a transaction
-	tx := s.db.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
+func (s *SQLStore) ProcessChainUpdate(ctx context.Context, fn func(chain.ChainUpdateTx) error) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
+		updateTx := &chainUpdateTx{tx: tx}
+		err := fn(updateTx)
+		if err == nil {
+			updateTx.log(s.logger.Named("ProcessChainUpdate"))
 		}
-	}()
-	if err := tx.Error; err != nil {
 		return err
-	}
-
-	// call the update function with the wrapped tx
-	u := &chainUpdateTx{tx: tx}
-	if err := fn(u); err != nil {
-		tx.Rollback()
-		return err
-	}
-
-	// commit the changes
-	err = tx.Commit().Error
-	if err != nil {
-		return err
-	}
-
-	// debug log
-	l := s.logger.Named("chainupdate")
-	for _, log := range u.logs {
-		l.Debugw(log.msg, log.keysAndValues...)
-	}
-
-	return nil
+	})
 }
 
 // UpdateChainState process the given revert and apply updates.
 func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
-	return s.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	return s.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
 	})
 }
@@ -466,4 +445,11 @@ func (u *chainUpdateTx) outputs() (outputs []dbWalletOutput, err error) {
 
 func (u *chainUpdateTx) debug(msg string, keysAndValues ...interface{}) {
 	u.logs = append(u.logs, logEntry{msg: msg, keysAndValues: keysAndValues})
+}
+
+func (u *chainUpdateTx) log(l *zap.SugaredLogger) {
+	for _, log := range u.logs {
+		l.Debugw(log.msg, log.keysAndValues...)
+	}
+	u.logs = nil
 }

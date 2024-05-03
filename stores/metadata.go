@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -725,46 +724,25 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 		return
 	}
 
-	s.notifyNewContractID(c.ID())
 	return added.convert(), nil
 }
 
-func (s *SQLStore) AddContractStoreSubscriber(ctx context.Context, cs chain.ContractStoreSubscriber) (map[types.FileContractID]struct{}, func(), error) {
-	// fetch all ids
-	var active, archived []fileContractID
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := s.db.Model(&dbContract{}).
-			Select("fcid").
-			Find(&active).Error; err != nil {
-			return err
+func (s *SQLStore) ContractExists(ctx context.Context, fcid types.FileContractID) (bool, error) {
+	var exists bool
+	if err := s.db.WithContext(ctx).
+		Raw(`SELECT EXISTS(SELECT 1 FROM contracts WHERE fcid = ?)`, fileContractID(fcid)).
+		Scan(&exists).
+		Error; err != nil {
+		return false, err
+	} else if !exists {
+		if err := s.db.WithContext(ctx).
+			Raw(`SELECT EXISTS(SELECT 1 FROM archived_contracts WHERE fcid = ?)`, fileContractID(fcid)).
+			Scan(&exists).
+			Error; err != nil {
+			return false, err
 		}
-		if err := s.db.Model(&dbArchivedContract{}).
-			Select("fcid").
-			Find(&archived).Error; err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, nil, err
 	}
-
-	// convert to map
-	fcids := make(map[types.FileContractID]struct{})
-	for _, id := range append(active, archived...) {
-		fcids[types.FileContractID(id)] = struct{}{}
-	}
-
-	// add subscriber
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := frand.Entropy128()
-	s.css[key] = cs
-
-	return fcids, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		delete(s.css, key)
-	}, nil
+	return exists, nil
 }
 
 func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
@@ -891,7 +869,6 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 		return api.ContractMetadata{}, err
 	}
 
-	s.notifyNewContractID(c.ID())
 	return renewed.convert(), nil
 }
 
@@ -1475,7 +1452,6 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			updates["revision_number"] = latestValues[fcid].revision
 			updates["size"] = latestValues[fcid].size
 			err = tx.Model(&contract).Updates(updates).Error
-			fmt.Println("DEBUG PJ: updating rev number", fcid, updates["revision_number"], err)
 			return err
 		})
 		if err != nil {
@@ -2987,14 +2963,6 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		NextMarker: nextMarker,
 		Objects:    objects,
 	}, nil
-}
-
-func (s *SQLStore) notifyNewContractID(fcid types.FileContractID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, sub := range s.css {
-		sub.AddContractID(fcid)
-	}
 }
 
 func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string) (markerExpr clause.Expr, orderBy clause.OrderBy, err error) {

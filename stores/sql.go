@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
@@ -89,7 +88,6 @@ type (
 		wg               sync.WaitGroup
 
 		mu           sync.Mutex
-		css          map[[16]byte]chain.ContractStoreSubscriber
 		hasAllowlist bool
 		hasBlocklist bool
 		lastPrunedAt time.Time
@@ -207,7 +205,6 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		dbMetrics:     dbMetrics,
 		logger:        l,
 		settings:      make(map[string]string),
-		css:           make(map[[16]byte]chain.ContractStoreSubscriber),
 		hasAllowlist:  allowlistCnt > 0,
 		hasBlocklist:  blocklistCnt > 0,
 		walletAddress: cfg.WalletAddress,
@@ -324,9 +321,10 @@ func (s *SQLStore) Close() error {
 }
 
 // ChainIndex returns the last stored chain index.
-func (ss *SQLStore) ChainIndex() (types.ChainIndex, error) {
+func (ss *SQLStore) ChainIndex(ctx context.Context) (types.ChainIndex, error) {
 	var ci dbConsensusInfo
 	if err := ss.db.
+		WithContext(ctx).
 		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		FirstOrCreate(&ci).
 		Error; err != nil {

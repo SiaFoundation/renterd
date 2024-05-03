@@ -30,7 +30,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	fcid := fcids[0]
 
 	// assert contract state returns the correct state
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		if state, err := tx.ContractState(fcid); err != nil {
 			return err
 		} else if state != api.ContractStatePending {
@@ -43,28 +43,28 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// check current index
-	if curr, err := ss.ChainIndex(); err != nil {
+	if curr, err := ss.ChainIndex(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if curr.Height != 0 {
 		t.Fatalf("unexpected height %v", curr.Height)
 	}
 
 	// assert update chain index is successful
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		return tx.UpdateChainIndex(types.ChainIndex{Height: 1})
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
 
 	// check updated index
-	if curr, err := ss.ChainIndex(); err != nil {
+	if curr, err := ss.ChainIndex(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if curr.Height != 1 {
 		t.Fatalf("unexpected height %v", curr.Height)
 	}
 
 	// assert update contract is successful
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		if err := tx.UpdateContract(fcid, 1, 2, 3); err != nil {
 			return err
 		} else if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
@@ -95,7 +95,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert we only update revision height if the rev number doesn't increase
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		return tx.UpdateContract(fcid, 2, 2, 4)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -111,7 +111,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update failed contracts is successful
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		return tx.UpdateFailedContracts(we + 1)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -123,7 +123,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update host is successful
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "foo"}, 1, types.BlockID{}, types.CurrentTimestamp())
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -135,12 +135,12 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert passing empty function is successful
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error { return nil }); err != nil {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error { return nil }); err != nil {
 		t.Fatal("unexpected error", err)
 	}
 
 	// assert we rollback on error
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		if err := tx.UpdateChainIndex(types.ChainIndex{Height: 2}); err != nil {
 			return err
 		}
@@ -150,14 +150,14 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// check chain index was rolled back
-	if curr, err := ss.ChainIndex(); err != nil {
+	if curr, err := ss.ChainIndex(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if curr.Height != 1 {
 		t.Fatalf("unexpected height %v", curr.Height)
 	}
 
 	// assert we recover from panic
-	if err := ss.ProcessChainUpdate(func(tx chain.ChainUpdateTx) error { return nil }); err != nil {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error { return nil }); err != nil {
 		panic("oh no")
 	}
 }

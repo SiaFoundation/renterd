@@ -32,8 +32,8 @@ type (
 	}
 
 	ChainStore interface {
-		ProcessChainUpdate(fn func(ChainUpdateTx) error) error
-		ChainIndex() (types.ChainIndex, error)
+		ProcessChainUpdate(ctx context.Context, fn func(ChainUpdateTx) error) error
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 	}
 
 	ChainUpdateTx interface {
@@ -49,29 +49,25 @@ type (
 	}
 
 	ContractStore interface {
-		AddContractStoreSubscriber(context.Context, ContractStoreSubscriber) (map[types.FileContractID]struct{}, func(), error)
-	}
-
-	ContractStoreSubscriber interface {
-		AddContractID(fcid types.FileContractID)
+		ContractExists(ctx context.Context, fcid types.FileContractID) (bool, error)
 	}
 
 	Subscriber struct {
-		cm              ChainManager
-		cs              ChainStore
-		csUnsubscribeFn func()
-		logger          *zap.SugaredLogger
+		cm     ChainManager
+		cs     ChainStore
+		css    ContractStore
+		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
-		retryTxIntervals   []time.Duration
 		walletAddress      types.Address
 
-		closedChan chan struct{}
-		syncSig    chan struct{}
-		wg         sync.WaitGroup
+		shutdownCtx       context.Context
+		shutdownCtxCancel context.CancelFunc
+		syncSig           chan struct{}
+		wg                sync.WaitGroup
 
 		mu             sync.Mutex
-		knownContracts map[types.FileContractID]struct{}
+		knownContracts map[types.FileContractID]bool
 	}
 
 	revision struct {
@@ -80,61 +76,41 @@ type (
 	}
 )
 
-func NewSubscriber(cm ChainManager, cs ChainStore, contracts ContractStore, walletAddress types.Address, announcementMaxAge time.Duration, retryTxIntervals []time.Duration, logger *zap.Logger) (_ *Subscriber, err error) {
+func NewSubscriber(cm ChainManager, cs ChainStore, css ContractStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *Subscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
 
-	// create chain subscriber
-	subscriber := &Subscriber{
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Subscriber{
 		cm:     cm,
 		cs:     cs,
+		css:    css,
 		logger: logger.Sugar(),
 
 		announcementMaxAge: announcementMaxAge,
-		retryTxIntervals:   retryTxIntervals,
 		walletAddress:      walletAddress,
 
-		syncSig: make(chan struct{}, 1),
+		shutdownCtx:       ctx,
+		shutdownCtxCancel: cancel,
+		syncSig:           make(chan struct{}, 1),
 
-		closedChan: make(chan struct{}),
-	}
-
-	// make sure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// subscribe ourselves to receive new contract ids
-	subscriber.knownContracts, subscriber.csUnsubscribeFn, err = contracts.AddContractStoreSubscriber(ctx, subscriber)
-	if err != nil {
-		return nil, err
-	}
-
-	return subscriber, nil
-}
-
-func (s *Subscriber) AddContractID(id types.FileContractID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.knownContracts[id] = struct{}{}
+		knownContracts: make(map[types.FileContractID]bool),
+	}, nil
 }
 
 func (s *Subscriber) Close() error {
-	// signal we are closing
-	close(s.closedChan)
-
-	// unsubscribe from chain manager
-	s.csUnsubscribeFn()
+	// cancel shutdown context
+	s.shutdownCtxCancel()
 
 	// wait for sync loop to finish
 	s.wg.Wait()
-
 	return nil
 }
 
 func (s *Subscriber) Run() (func(), error) {
 	// perform an initial sync
-	index, err := s.cs.ChainIndex()
+	index, err := s.cs.ChainIndex(s.shutdownCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -149,12 +125,12 @@ func (s *Subscriber) Run() (func(), error) {
 
 		for {
 			select {
-			case <-s.closedChan:
+			case <-s.shutdownCtx.Done():
 				return
 			case <-s.syncSig:
 			}
 
-			ci, err := s.cs.ChainIndex()
+			ci, err := s.cs.ChainIndex(s.shutdownCtx)
 			if err != nil {
 				s.logger.Errorf("failed to get chain index: %v", err)
 				continue
@@ -168,7 +144,12 @@ func (s *Subscriber) Run() (func(), error) {
 
 	// trigger a sync on reorgs
 	return s.cm.OnReorg(func(ci types.ChainIndex) {
-		triggered := s.triggerSync()
+		var triggered bool
+		select {
+		case s.syncSig <- struct{}{}:
+			triggered = true
+		default:
+		}
 		s.logger.Debugw("reorg detected", "triggered", triggered, "height", ci.Height, "block_id", ci.ID)
 	}), nil
 }
@@ -232,11 +213,24 @@ func (s *Subscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpdate) (
 	return nil
 }
 
-func (s *Subscriber) isKnownContract(fcid types.FileContractID) bool {
+func (s *Subscriber) isKnownContract(fcid types.FileContractID) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, known := s.knownContracts[fcid]
-	return known
+
+	// return result from cache
+	known, ok := s.knownContracts[fcid]
+	if ok {
+		return known, nil
+	}
+
+	// check if contract exists in the store
+	known, err := s.css.ContractExists(s.shutdownCtx, fcid)
+	if err != nil {
+		return false, err
+	}
+
+	s.knownContracts[fcid] = known
+	return known, nil
 }
 
 func (s *Subscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUpdate) (err error) {
@@ -296,7 +290,7 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 	for index != s.cm.Tip() {
 		// check if subscriber was closed
 		select {
-		case <-s.closedChan:
+		case <-s.shutdownCtx.Done():
 			return errClosed
 		default:
 		}
@@ -306,43 +300,21 @@ func (s *Subscriber) sync(index types.ChainIndex) error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
+		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID)
 
-		s.logger.Debugw(fmt.Sprintf("fetched %d apply updates %d revert updates", len(caus), len(crus)), "since_height", index.Height, "since_block_id", index.ID)
-
-		// start retry loop
-		for i := 1; i <= len(s.retryTxIntervals)+1; i++ {
-			// check if subscriber was closed
-			select {
-			case <-s.closedChan:
-				return errClosed
-			default:
-			}
-
-			// process updates
-			index, err = s.processUpdates(crus, caus)
-			if err == nil {
-				s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID)
-				break
-			}
-
-			// no more retries left
-			if i-1 == len(s.retryTxIntervals) {
-				s.logger.Error(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i, len(s.retryTxIntervals)+1, err))
-				return fmt.Errorf("failed to process updates after %d attempts: %w", i, err)
-			}
-
-			// sleep
-			interval := s.retryTxIntervals[i-1]
-			s.logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v, err: %v", i, len(s.retryTxIntervals)+1, interval, err))
-			time.Sleep(interval)
+		// process updates
+		index, err = s.processUpdates(s.shutdownCtx, crus, caus)
+		if err != nil {
+			return fmt.Errorf("failed to process updates: %w", err)
 		}
+		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID)
 	}
 	return nil
 }
 
-func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (types.ChainIndex, error) {
+func (s *Subscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (types.ChainIndex, error) {
 	var index types.ChainIndex
-	if err := s.cs.ProcessChainUpdate(func(tx ChainUpdateTx) error {
+	if err := s.cs.ProcessChainUpdate(ctx, func(tx ChainUpdateTx) error {
 		// process wallet updates
 		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
 			return fmt.Errorf("failed to process wallet updates: %w", err)
@@ -380,15 +352,6 @@ func (s *Subscriber) processUpdates(crus []chain.RevertUpdate, caus []chain.Appl
 	return index, nil
 }
 
-func (s *Subscriber) triggerSync() bool {
-	select {
-	case s.syncSig <- struct{}{}:
-		return true
-	default:
-	}
-	return false
-}
-
 func (s *Subscriber) updateContract(tx ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
 	// sanity check at least one is not nil
 	if prev == nil && curr == nil {
@@ -396,7 +359,9 @@ func (s *Subscriber) updateContract(tx ChainUpdateTx, index types.ChainIndex, fc
 	}
 
 	// ignore unknown contracts
-	if !s.isKnownContract(fcid) {
+	if known, err := s.isKnownContract(fcid); err != nil {
+		return fmt.Errorf("failed to check if contract exists: %w", err)
+	} else if !known {
 		return nil
 	}
 
