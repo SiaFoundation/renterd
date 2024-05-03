@@ -536,6 +536,8 @@ func (c *TestCluster) sync(hosts []*Host) {
 			return err
 		} else if !cs.Synced {
 			return fmt.Errorf("bus is not synced, last block %v at %v", cs.BlockHeight, cs.LastBlockTime) // can't be synced if bus itself isn't synced
+		} else if cs.SyncHeight < cs.BlockHeight {
+			return fmt.Errorf("bus is not synced, sync height %v < block height %v", cs.SyncHeight, cs.BlockHeight)
 		}
 
 		for _, h := range hosts {

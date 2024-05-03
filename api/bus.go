@@ -10,6 +10,7 @@ type (
 		BlockHeight   uint64      `json:"blockHeight"`
 		LastBlockTime TimeRFC3339 `json:"lastBlockTime"`
 		Synced        bool        `json:"synced"`
+		SyncHeight    uint64      `json:"syncHeight"`
 	}
 
 	// ConsensusNetwork holds the name of the network.

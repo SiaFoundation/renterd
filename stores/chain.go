@@ -287,21 +287,18 @@ func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api
 		Update("state", cs)
 
 	// try archived contract
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
 		res = u.tx.
 			Model(&dbArchivedContract{}).
 			Where("fcid", fileContractID(fcid)).
 			Update("state", cs)
 	}
 
-	// handle errors
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+	// wrap ErrContractNotFound
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
 		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
-	} else if res.Error == nil && res.RowsAffected == 0 {
-		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
-	} else {
-		return res.Error
 	}
+	return res.Error
 }
 
 // UpdateContractProofHeight updates the proof height of the contract with given
@@ -316,21 +313,18 @@ func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, pro
 		Update("proof_height", proofHeight)
 
 	// try archived contract
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
 		res = u.tx.
 			Model(&dbArchivedContract{}).
 			Where("fcid", fileContractID(fcid)).
 			Update("proof_height", proofHeight)
 	}
 
-	// handle errors
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+	// wrap api.ErrContractNotFound
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
 		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
-	} else if res.Error == nil && res.RowsAffected == 0 {
-		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
-	} else {
-		return res.Error
 	}
+	return res.Error
 }
 
 // UpdateFailedContracts marks active contract as failed if the current
