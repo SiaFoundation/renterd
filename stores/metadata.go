@@ -1257,16 +1257,18 @@ SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.siz
 FROM objects o
 WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) AND %s
 UNION ALL
-SELECT '' as ETag, MAX(o.created_at) as ModTime, d.name as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
+SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name AND %s
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = %s AND %s
 WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
 AND o.object_id LIKE ?
 AND SUBSTR(o.object_id, 1, ?) = ?
 AND d.parent_id = ?
 GROUP BY d.id
 `, prefixExpr,
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
 		lengthFn,
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/%'"),
 		prefixExpr)
 
 	// build query params
@@ -1286,6 +1288,7 @@ GROUP BY d.id
 		objectsQueryParams = []interface{}{
 			path,          // o.object_id != ?
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
+			path, path,
 			bucket,                             // b.name = ?
 			path + "%",                         // o.object_id LIKE ?
 			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
@@ -1769,19 +1772,19 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 	} else if !strings.HasSuffix(dirPath, "/") {
 		return 0, fmt.Errorf("path must end with /")
 	}
-
+	dirID := uint(1)
 	if dirPath == "/" {
-		return 1, nil // root dir returned
+		return dirID, nil // root dir returned
 	}
 
-	var dir dbDirectory
-	if err := tx.Where("name", dirPath).
-		Select("id").
-		Take(&dir).
-		Error; err != nil {
-		return 0, fmt.Errorf("failed to fetch directory: %w", err)
+	splitPath := strings.Split(dirPath[1:len(dirPath)-1], "/")
+	for _, dir := range splitPath {
+		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND parent_id = ?", dir, dirID).
+			Scan(&dirID).Error; err != nil {
+			return 0, fmt.Errorf("failed to fetch root directory: %w", err)
+		}
 	}
-	return dir.ID, nil
+	return dirID, nil
 }
 
 func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
@@ -1791,25 +1794,15 @@ func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 		Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).Create(map[string]any{
-		"id":   dirID,
-		"name": "/",
+		"id": dirID,
 	}).Error; err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
 	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
+	path = strings.TrimPrefix(path, "/")
+	splitPath := strings.Split(path, "/")
+	for _, dir := range splitPath[:len(splitPath)-1] {
 		if err := tx.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).
