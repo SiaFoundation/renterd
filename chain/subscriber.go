@@ -244,7 +244,7 @@ func (s *Subscriber) sync() error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
-		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "dur", time.Since(start))
+		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(start).Milliseconds())
 
 		// process updates
 		start = time.Now()
@@ -252,7 +252,7 @@ func (s *Subscriber) sync() error {
 		if err != nil {
 			return fmt.Errorf("failed to process updates: %w", err)
 		}
-		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "dur", time.Since(start))
+		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "ms", time.Since(start).Milliseconds())
 	}
 
 	return nil

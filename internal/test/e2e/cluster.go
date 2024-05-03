@@ -539,34 +539,20 @@ func (c *TestCluster) MineToRenewWindow() {
 func (c *TestCluster) sync(hosts []*Host) {
 	c.tt.Helper()
 	c.tt.Retry(100, 100*time.Millisecond, func() error {
-		synced, err := c.synced(hosts)
+		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
 		}
-		if !synced {
-			return errors.New("cluster was unable to sync in time")
+		if !cs.Synced {
+			return fmt.Errorf("bus is not synced, last block %v at %v", cs.BlockHeight, cs.LastBlockTime) // can't be synced if bus itself isn't synced
+		}
+		for _, h := range hosts {
+			if hh := h.cs.Height(); uint64(hh) < cs.BlockHeight {
+				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
+			}
 		}
 		return nil
 	})
-}
-
-// synced returns true if bus and hosts are at the same blockheight.
-func (c *TestCluster) synced(hosts []*Host) (bool, error) {
-	c.tt.Helper()
-	cs, err := c.Bus.ConsensusState(context.Background())
-	if err != nil {
-		return false, err
-	}
-	if !cs.Synced {
-		return false, nil // can't be synced if bus itself isn't synced
-	}
-	for _, h := range hosts {
-		bh := h.cs.Height()
-		if cs.BlockHeight != uint64(bh) {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 // MineBlocks uses the bus' miner to mine n blocks.
