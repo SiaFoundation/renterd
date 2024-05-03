@@ -1259,7 +1259,7 @@ WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id
 UNION ALL
 SELECT '' as ETag, MAX(o.created_at) as ModTime, %s as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
 FROM objects o
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = %s AND %s
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(%s)) = %s AND %s
 WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
 AND o.object_id LIKE ?
 AND SUBSTR(o.object_id, 1, ?) = ?
@@ -1268,7 +1268,8 @@ GROUP BY d.id
 `, prefixExpr,
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
 		lengthFn,
-		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/%'"),
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
+		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
 		prefixExpr)
 
 	// build query params
@@ -1278,6 +1279,9 @@ GROUP BY d.id
 			path,          // o.object_id != ?
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
 			utf8.RuneCountInString(path + prefix), path + prefix,
+			path,
+			path,
+			path,
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			bucket,                             // b.name = ?
 			path + "%",                         // o.object_id LIKE ?
@@ -1288,7 +1292,7 @@ GROUP BY d.id
 		objectsQueryParams = []interface{}{
 			path,          // o.object_id != ?
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
-			path, path,
+			path, path, path,
 			bucket,                             // b.name = ?
 			path + "%",                         // o.object_id LIKE ?
 			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
@@ -3018,11 +3022,21 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileC
 }
 
 // nolint:unparam
-func sqlConcat(db *gorm.DB, a, b string) string {
-	if isSQLite(db) {
-		return fmt.Sprintf("%s || %s", a, b)
+func sqlConcat(db *gorm.DB, s ...string) string {
+	if len(s) < 2 {
+		panic("sqlConcat: need at least two arguments")
 	}
-	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+	query := s[0]
+	if isSQLite(db) {
+		for i := 1; i < len(s); i++ {
+			query = fmt.Sprintf("%s || %s", query, s[i])
+		}
+		return query
+	}
+	for i := 1; i < len(s); i++ {
+		query = fmt.Sprintf("%s, %s", query, s[i])
+	}
+	return fmt.Sprintf("CONCAT(%s)", query)
 }
 
 func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) clause.Expr {
