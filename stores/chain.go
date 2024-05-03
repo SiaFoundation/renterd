@@ -60,6 +60,7 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 
 	// remove spent outputs
 	for _, e := range spent {
+		u.debug(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
 		if res := u.tx.
 			Where("output_id", hash256(e.ID)).
 			Delete(&dbWalletOutput{}); res.Error != nil {
@@ -67,11 +68,11 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 		} else if res.RowsAffected != 1 {
 			return fmt.Errorf("spent output with id %v not found ", e.ID)
 		}
-		u.debug(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 
 	// create outputs
 	for _, e := range created {
+		u.debug(fmt.Sprintf("create output %v", e.ID), "height", index.Height, "block_id", index.ID)
 		if err := u.tx.
 			Clauses(clause.OnConflict{
 				DoNothing: true,
@@ -87,11 +88,11 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 			}).Error; err != nil {
 			return nil
 		}
-		u.debug(fmt.Sprintf("create output %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 
 	// create events
 	for _, e := range events {
+		u.debug(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 		if err := u.tx.
 			Clauses(clause.OnConflict{
 				DoNothing: true,
@@ -110,7 +111,6 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 			}).Error; err != nil {
 			return err
 		}
-		u.debug(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 	}
 	return nil
 }
@@ -118,6 +118,8 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 // ContractState returns the state of a file contract.
 func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
 	var state contractState
+
+	// try regular contracts
 	err := u.tx.
 		Select("state").
 		Model(&dbContract{}).
@@ -125,7 +127,8 @@ func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractSt
 		Scan(&state).
 		Error
 
-	if err == gorm.ErrRecordNotFound {
+	// try archived contracts
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		err = u.tx.
 			Select("state").
 			Model(&dbArchivedContract{}).
@@ -215,106 +218,119 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 		return revisionNumber > currRev
 	}
 
-	// try updating contract
+	// try regular contract
 	var c dbContract
 	err := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Take(&c).Error
-	if err == nil {
-		bkp := c
+		Take(&c).
+		Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	} else if err == nil {
+		// save old valules
+		oldRevH := c.RevisionHeight
+		oldRevN := c.RevisionNumber
+		oldSize := c.Size
+
 		c.RevisionHeight = revisionHeight
 		if isUpdatedRevision(c.RevisionNumber) {
 			c.RevisionNumber = fmt.Sprint(revisionNumber)
 			c.Size = size
 		}
-		u.debug(fmt.Sprintf("update contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, c.RevisionNumber, bkp.RevisionHeight, c.RevisionHeight, bkp.Size, c.Size), "fcid", fcid)
+
+		u.debug(fmt.Sprintf("update contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", oldRevN, c.RevisionNumber, oldRevH, c.RevisionHeight, oldSize, c.Size), "fcid", fcid)
 		return u.tx.Save(&c).Error
-	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
 	}
 
-	// try updating archived contracts
+	// try archived contract
 	var ac dbArchivedContract
 	err = u.tx.
 		Model(&dbArchivedContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Take(&ac).Error
-	if err == nil {
-		bkp := ac
+		Take(&ac).
+		Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	} else if err == nil {
+		// save old valules
+		oldRevH := ac.RevisionHeight
+		oldRevN := ac.RevisionNumber
+		oldSize := ac.Size
+
 		ac.RevisionHeight = revisionHeight
 		if isUpdatedRevision(ac.RevisionNumber) {
 			ac.RevisionNumber = fmt.Sprint(revisionNumber)
 			ac.Size = size
 		}
-		u.debug(fmt.Sprintf("update archived contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, ac.RevisionNumber, bkp.RevisionHeight, ac.RevisionHeight, bkp.Size, ac.Size), "fcid", fcid)
+
+		u.debug(fmt.Sprintf("update archived contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", oldRevN, ac.RevisionNumber, oldRevH, ac.RevisionHeight, oldSize, ac.Size), "fcid", fcid)
 		return u.tx.Save(&ac).Error
 	}
 
-	return err
+	return api.ErrContractNotFound
 }
 
 // UpdateContractState updates the state of the contract with given fcid.
 func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {
+	u.debug("update contract state", "fcid", fcid, "state", state)
+
 	var cs contractState
 	if err := cs.LoadString(string(state)); err != nil {
 		return err
 	}
 
-	// try update contract
+	// try regular contract
 	res := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
 		Update("state", cs)
-	if res.Error != nil {
-		return res.Error
-	} else if res.RowsAffected == 1 {
-		u.debug(fmt.Sprintf("updated contract state to '%s'", state), "fcid", fcid)
-		return nil
+
+	// try archived contract
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+		res = u.tx.
+			Model(&dbArchivedContract{}).
+			Where("fcid", fileContractID(fcid)).
+			Update("state", cs)
 	}
 
-	// try update archived contract
-	res = u.tx.
-		Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid)).
-		Update("state", cs)
-	if res.Error != nil {
+	// handle errors
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
+	} else if res.Error == nil && res.RowsAffected == 0 {
+		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
+	} else {
 		return res.Error
-	} else if res.RowsAffected == 1 {
-		u.debug(fmt.Sprintf("updated archived contract state to '%s'", state), "fcid", fcid)
-		return nil
 	}
-
-	return nil
 }
 
 // UpdateContractProofHeight updates the proof height of the contract with given
 // fcid.
 func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
-	// try update contract
+	u.debug("update contract proof height", "fcid", fcid, "proof_height", proofHeight)
+
+	// try regular contract
 	res := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
 		Update("proof_height", proofHeight)
-	if res.Error != nil {
-		return res.Error
-	} else if res.RowsAffected == 1 {
-		u.debug(fmt.Sprintf("updated contract proof height to '%d'", proofHeight), "fcid", fcid)
-		return nil
+
+	// try archived contract
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+		res = u.tx.
+			Model(&dbArchivedContract{}).
+			Where("fcid", fileContractID(fcid)).
+			Update("proof_height", proofHeight)
 	}
 
-	// try update archived contract
-	res = u.tx.
-		Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid)).
-		Update("proof_height", proofHeight)
-	if res.Error != nil {
+	// handle errors
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
+	} else if res.Error == nil && res.RowsAffected == 0 {
+		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
+	} else {
 		return res.Error
-	} else if res.RowsAffected == 1 {
-		u.debug(fmt.Sprintf("updated archived contract proof height to '%d'", proofHeight), "fcid", fcid)
-		return nil
 	}
-	return nil
 }
 
 // UpdateFailedContracts marks active contract as failed if the current
