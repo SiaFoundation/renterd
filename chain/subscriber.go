@@ -62,7 +62,7 @@ type (
 		walletAddress      types.Address
 
 		shutdownCtx       context.Context
-		shutdownCtxCancel context.CancelFunc
+		shutdownCtxCancel context.CancelCauseFunc
 		syncSig           chan struct{}
 		wg                sync.WaitGroup
 
@@ -94,7 +94,7 @@ func NewSubscriber(cm ChainManager, cs ChainStore, css ContractStore, walletAddr
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Subscriber{
 		cm:     cm,
 		cs:     cs,
@@ -114,7 +114,7 @@ func NewSubscriber(cm ChainManager, cs ChainStore, css ContractStore, walletAddr
 
 func (s *Subscriber) Close() error {
 	// cancel shutdown context
-	s.shutdownCtxCancel()
+	s.shutdownCtxCancel(errClosed)
 
 	// wait for sync loop to finish
 	s.wg.Wait()
@@ -151,13 +151,11 @@ func (s *Subscriber) Run() (func(), error) {
 
 	// trigger a sync on reorgs
 	return s.cm.OnReorg(func(ci types.ChainIndex) {
-		var triggered bool
 		select {
 		case s.syncSig <- struct{}{}:
-			triggered = true
+			s.logger.Debugw("reorg triggered", "height", ci.Height, "block_id", ci.ID)
 		default:
 		}
-		s.logger.Debugw("reorg detected", "triggered", triggered, "height", ci.Height, "block_id", ci.ID)
 	}), nil
 }
 
@@ -241,18 +239,20 @@ func (s *Subscriber) sync() error {
 	// fetch updates until we're caught up
 	for index != s.cm.Tip() && !s.isClosed() {
 		// fetch updates
+		start := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
-		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID)
+		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "dur", time.Since(start))
 
 		// process updates
+		start = time.Now()
 		index, err = s.processUpdates(s.shutdownCtx, crus, caus)
 		if err != nil {
 			return fmt.Errorf("failed to process updates: %w", err)
 		}
-		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID)
+		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "dur", time.Since(start))
 	}
 
 	return nil
