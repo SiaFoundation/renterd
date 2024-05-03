@@ -81,6 +81,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 		Network:             network,
 		Genesis:             genesis,
 		SlabPruningInterval: time.Minute,
+		Logger:              zap.NewNop(),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err

@@ -17,6 +17,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"gorm.io/gorm"
@@ -4490,8 +4491,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 // same transaction, deadlocks become more likely due to the gap locks MySQL
 // uses.
 func TestUpdateObjectParallel(t *testing.T) {
-	dbURI, _, _, _ := DBConfigFromEnv()
-	if dbURI == "" {
+	if config.MySQLConfigFromEnv().URI == "" {
 		// it's pretty much impossile to optimise for both sqlite and mysql at
 		// the same time so we skip this test for SQLite for now
 		// TODO: once we moved away from gorm and implement separate interfaces
