@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -192,18 +193,15 @@ func (u *chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []t
 
 // UpdateChainIndex updates the chain index in the database.
 func (u *chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
-	if err := u.tx.
+	u.debug("updating index", "height", index.Height, "block_id", index.ID)
+	return u.tx.
 		Model(&dbConsensusInfo{}).
 		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		Updates(map[string]interface{}{
 			"height":   index.Height,
 			"block_id": hash256(index.ID),
 		}).
-		Error; err != nil {
-		return err
-	}
-	u.debug("updating index", "height", index.Height, "block_id", index.ID)
-	return nil
+		Error
 }
 
 // UpdateContract updates the revision height, revision number, and size the
@@ -217,48 +215,43 @@ func (u *chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight
 		return revisionNumber > currRev
 	}
 
-	// update either active or archived contract
-	var msg string
-	var update interface{}
+	// try updating contract
 	var c dbContract
-	if err := u.tx.
+	err := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Take(&c).Error; err == nil {
+		Take(&c).Error
+	if err == nil {
 		bkp := c
 		c.RevisionHeight = revisionHeight
 		if isUpdatedRevision(c.RevisionNumber) {
 			c.RevisionNumber = fmt.Sprint(revisionNumber)
 			c.Size = size
 		}
-		msg = fmt.Sprintf("update contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, c.RevisionNumber, bkp.RevisionHeight, c.RevisionHeight, bkp.Size, c.Size)
-		update = &c
-	} else if err == gorm.ErrRecordNotFound {
-		// try archived contracts
-		var ac dbArchivedContract
-		if err := u.tx.
-			Model(&dbArchivedContract{}).
-			Where("fcid", fileContractID(fcid)).
-			Take(&ac).Error; err == nil {
-			bkp := ac
-			ac.RevisionHeight = revisionHeight
-			if isUpdatedRevision(ac.RevisionNumber) {
-				ac.RevisionNumber = fmt.Sprint(revisionNumber)
-				ac.Size = size
-			}
-			msg = fmt.Sprintf("update archived contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, ac.RevisionNumber, bkp.RevisionHeight, ac.RevisionHeight, bkp.Size, ac.Size)
-			update = &ac
-		}
-	}
-	if update == nil {
-		return nil
-	}
-
-	if err := u.tx.Save(update).Error; err != nil {
+		u.debug(fmt.Sprintf("update contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, c.RevisionNumber, bkp.RevisionHeight, c.RevisionHeight, bkp.Size, c.Size), "fcid", fcid)
+		return u.tx.Save(&c).Error
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	u.debug(msg, "fcid", fcid)
-	return nil
+
+	// try updating archived contracts
+	var ac dbArchivedContract
+	err = u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid", fileContractID(fcid)).
+		Take(&ac).Error
+	if err == nil {
+		bkp := ac
+		ac.RevisionHeight = revisionHeight
+		if isUpdatedRevision(ac.RevisionNumber) {
+			ac.RevisionNumber = fmt.Sprint(revisionNumber)
+			ac.Size = size
+		}
+		u.debug(fmt.Sprintf("update archived contract, revision number %s -> %s, revision height %d -> %d, size %d -> %d", bkp.RevisionNumber, ac.RevisionNumber, bkp.RevisionHeight, ac.RevisionHeight, bkp.Size, ac.Size), "fcid", fcid)
+		return u.tx.Save(&ac).Error
+	}
+
+	return err
 }
 
 // UpdateContractState updates the state of the contract with given fcid.
@@ -341,6 +334,8 @@ func (u *chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 
 // UpdateHost creates the announcement and upserts the host in the database.
 func (u *chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error {
+	u.debug("updated host", "hk", hk, "netaddress", ha.NetAddress)
+
 	// create the announcement
 	if err := u.tx.Create(&dbAnnouncement{
 		HostKey:     publicKey(hk),

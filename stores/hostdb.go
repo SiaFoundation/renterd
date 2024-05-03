@@ -429,7 +429,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 	if err != nil {
 		return api.Host{}, err
 	} else if len(hosts) == 0 {
-		return api.Host{}, api.ErrHostNotFound
+		return api.Host{}, fmt.Errorf("%w %v", api.ErrHostNotFound, hostKey)
 	} else {
 		return hosts[0], nil
 	}
@@ -458,7 +458,7 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 			Select("id").
 			Take(&hID).
 			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrHostNotFound
+			return fmt.Errorf("%w %v", api.ErrHostNotFound, hk)
 		} else if err != nil {
 			return err
 		}
