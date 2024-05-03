@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -195,8 +194,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 
 	// create cluster
 	opts := testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: zap.NewNop(),
+		hosts: test.RedundancySettings.TotalShards,
 	}
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
