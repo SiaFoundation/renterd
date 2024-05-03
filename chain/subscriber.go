@@ -17,7 +17,7 @@ import (
 const (
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
-	updatesBatchSize = 1000
+	updatesBatchSize = 50
 )
 
 var (
@@ -141,7 +141,7 @@ func (s *Subscriber) Run() (func(), error) {
 			case <-s.syncSig:
 			}
 
-			if err := s.sync(); errors.Is(err, errClosed) {
+			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
 				return
 			} else if err != nil {
 				s.logger.Errorf("failed to sync: %v", err)
@@ -229,32 +229,37 @@ func (s *Subscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUpdate)
 }
 
 func (s *Subscriber) sync() error {
+	start := time.Now()
+
 	// fetch current chain index
 	index, err := s.cs.ChainIndex(s.shutdownCtx)
 	if err != nil {
 		return fmt.Errorf("failed to get chain index: %w", err)
 	}
-	s.logger.Debugw("syncing", "height", index.Height, "block_id", index.ID)
+	s.logger.Debugw("sync started", "height", index.Height, "block_id", index.ID)
 
 	// fetch updates until we're caught up
+	var cnt uint64
 	for index != s.cm.Tip() && !s.isClosed() {
 		// fetch updates
-		start := time.Now()
+		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
-		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(start).Milliseconds())
+		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
 
 		// process updates
-		start = time.Now()
+		istart = time.Now()
 		index, err = s.processUpdates(s.shutdownCtx, crus, caus)
 		if err != nil {
 			return fmt.Errorf("failed to process updates: %w", err)
 		}
-		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "ms", time.Since(start).Milliseconds())
+		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
+		cnt++
 	}
 
+	s.logger.Debugw("sync completed", "start_height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
 	return nil
 }
 

@@ -924,12 +924,12 @@ func testBusCfg() node.BusConfig {
 		SyncerSyncInterval:          100 * time.Millisecond,
 		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
 		RetryTxIntervals: []time.Duration{
+			50 * time.Millisecond,
 			100 * time.Millisecond,
 			200 * time.Millisecond,
-			300 * time.Millisecond,
-			400 * time.Millisecond,
 			500 * time.Millisecond,
 			time.Second,
+			5 * time.Second,
 		},
 	}
 }
