@@ -117,8 +117,8 @@ type (
 	dbDirectory struct {
 		Model
 
-		Name     string
-		ParentID uint
+		Name       string
+		DBParentID uint
 	}
 
 	dbObject struct {
@@ -1263,7 +1263,7 @@ INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(%s)) = %s AND %s
 WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
 AND o.object_id LIKE ?
 AND SUBSTR(o.object_id, 1, ?) = ?
-AND d.parent_id = ?
+AND d.db_parent_id = ?
 GROUP BY d.id
 `, prefixExpr,
 		sqlConcat(s.db, sqlConcat(s.db, "?", "d.name"), "'/'"),
@@ -1286,7 +1286,7 @@ GROUP BY d.id
 			bucket,                             // b.name = ?
 			path + "%",                         // o.object_id LIKE ?
 			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
-			dirID, // d.parent_id = ?
+			dirID, // d.db_parent_id = ?
 		}
 	} else {
 		objectsQueryParams = []interface{}{
@@ -1296,7 +1296,7 @@ GROUP BY d.id
 			bucket,                             // b.name = ?
 			path + "%",                         // o.object_id LIKE ?
 			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
-			dirID, // d.parent_id = ?
+			dirID, // d.db_parent_id = ?
 		}
 	}
 
@@ -1783,7 +1783,7 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 
 	splitPath := strings.Split(dirPath[1:len(dirPath)-1], "/")
 	for _, dir := range splitPath {
-		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND parent_id = ?", dir, dirID).
+		if err := tx.Raw("SELECT id FROM directories WHERE name = ? AND db_parent_id = ?", dir, dirID).
 			Scan(&dirID).Error; err != nil {
 			return 0, fmt.Errorf("failed to fetch root directory: %w", err)
 		}
@@ -1811,8 +1811,8 @@ func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 			DoNothing: true,
 		}).
 			Create(&dbDirectory{
-				Name:     dir,
-				ParentID: dirID,
+				Name:       dir,
+				DBParentID: dirID,
 			}).Error; err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		}
@@ -2887,7 +2887,7 @@ DELETE
 FROM directories
 WHERE directories.id != 1
 AND NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
-AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.parent_id = directories.id) i)
+AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.db_parent_id = directories.id) i)
 `)
 		if res.Error != nil {
 			return res.Error
