@@ -102,7 +102,6 @@ func TestNewTestCluster(t *testing.T) {
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
 	cluster.MineBlocks(contract.WindowStart - cs.BlockHeight - 4)
-	cluster.Sync()
 	if cs.LastBlockTime.IsZero() {
 		t.Fatal("last block time not set")
 	}
@@ -1374,7 +1373,9 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
+	apCfg := testApCfg()
+	apCfg.ContractConfirmationDeadline = 20
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1, autopilotCfg: &apCfg})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
@@ -1419,9 +1420,8 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 		t.Fatalf("expected 2 contracts, got %v", len(contracts))
 	}
 
-	// mine for 20 blocks to make sure we are beyond the 18 block deadline for
-	// contract confirmation
-	cluster.MineBlocks(20)
+	// mine enough blocks to ensure we're passed the confirmation deadline
+	cluster.MineBlocks(apCfg.ContractConfirmationDeadline + 1)
 
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
@@ -1451,6 +1451,7 @@ func TestWalletTransactions(t *testing.T) {
 	cluster.MineBlocks(1)
 	time.Sleep(time.Second)
 	cluster.MineBlocks(1)
+	time.Sleep(time.Second)
 
 	// Get all transactions of the wallet.
 	allTxns, err := b.WalletTransactions(context.Background())

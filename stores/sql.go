@@ -132,14 +132,6 @@ func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
 }
 
-func DBConfigFromEnv() (uri, user, password, dbName string) {
-	uri = os.Getenv("RENTERD_DB_URI")
-	user = os.Getenv("RENTERD_DB_USER")
-	password = os.Getenv("RENTERD_DB_PASSWORD")
-	dbName = os.Getenv("RENTERD_DB_NAME")
-	return
-}
-
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.

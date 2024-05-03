@@ -14,6 +14,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/crypto"
 	"lukechampine.com/frand"
@@ -85,9 +86,12 @@ func (hes HostErrorSet) Error() string {
 	return "\n" + strings.Join(strs, "\n")
 }
 
-func wrapErr(err *error, fnName string) {
+func wrapErr(ctx context.Context, fnName string, err *error) {
 	if *err != nil {
 		*err = fmt.Errorf("%s: %w", fnName, *err)
+		if cause := context.Cause(ctx); cause != nil && !utils.IsErr(*err, cause) {
+			*err = fmt.Errorf("%w; %w", cause, *err)
+		}
 	}
 }
 
@@ -133,7 +137,7 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
 func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
-	defer wrapErr(&err, "Settings")
+	defer wrapErr(ctx, "Settings", &err)
 
 	var resp rhpv2.RPCSettingsResponse
 	if err := t.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
@@ -147,7 +151,7 @@ func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSe
 
 // RPCFormContract forms a contract with a host.
 func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
-	defer wrapErr(&err, "FormContract")
+	defer wrapErr(ctx, "FormContract", &err)
 
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]

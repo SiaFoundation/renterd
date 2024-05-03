@@ -39,8 +39,6 @@ import (
 
 	"go.sia.tech/renterd/worker"
 	stypes "go.sia.tech/siad/types"
-	gormlogger "gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 const (
@@ -207,7 +205,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	defer cancel()
 
 	// Apply options.
-	dbName := opts.dbName
 	dir := t.TempDir()
 	if opts.dir != "" {
 		dir = opts.dir
@@ -246,35 +243,31 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
 	}
-
-	// default database logger
-	if busCfg.DBLogger == nil {
-		busCfg.DBLogger = zapgorm2.Logger{
-			ZapLogger:                 logger.Named("SQL"),
-			LogLevel:                  gormlogger.Warn,
-			SlowThreshold:             100 * time.Millisecond,
-			SkipCallerLookup:          false,
-			IgnoreRecordNotFoundError: true,
-			Context:                   nil,
-		}
+	if busCfg.Logger == nil {
+		busCfg.Logger = logger
+	}
+	if opts.dbName != "" {
+		busCfg.Database.MySQL.Database = opts.dbName
 	}
 
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
-	uri, user, password, _ := stores.DBConfigFromEnv()
-	if uri != "" {
-		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
-		tt.OK(err)
-
-		if dbName == "" {
-			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
+	if mysql := config.MySQLConfigFromEnv(); mysql.URI != "" {
+		// generate a random database name if none are set
+		if busCfg.Database.MySQL.Database == "" {
+			busCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
-		dbMetricsName := "db" + hex.EncodeToString(frand.Bytes(16))
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbMetricsName)).Error)
+		if busCfg.Database.MySQL.MetricsDatabase == "" {
+			busCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
+		}
 
-		busCfg.DBDialector = stores.NewMySQLConnection(user, password, uri, dbName)
-		busCfg.DBMetricsDialector = stores.NewMySQLConnection(user, password, uri, dbMetricsName)
+		tmpDB, err := gorm.Open(stores.NewMySQLConnection(mysql.User, mysql.Password, mysql.URI, ""))
+		tt.OK(err)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)).Error)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)).Error)
+		tmpDBB, err := tmpDB.DB()
+		tt.OK(err)
+		tt.OK(tmpDBB.Close())
 	}
 
 	// Prepare individual dirs.
@@ -375,7 +368,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	cluster := &TestCluster{
 		apID:    apCfg.ID,
 		dir:     dir,
-		dbName:  dbName,
+		dbName:  busCfg.Database.MySQL.Database,
 		logger:  logger,
 		network: busCfg.Network,
 		cm:      cm,
@@ -532,7 +525,6 @@ func (c *TestCluster) MineToRenewWindow() {
 		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
 	c.MineBlocks(renewWindowStart - cs.BlockHeight)
-	c.Sync()
 }
 
 // sync blocks until the cluster is synced.
@@ -542,10 +534,10 @@ func (c *TestCluster) sync(hosts []*Host) {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
-		}
-		if !cs.Synced {
+		} else if !cs.Synced {
 			return fmt.Errorf("bus is not synced, last block %v at %v", cs.BlockHeight, cs.LastBlockTime) // can't be synced if bus itself isn't synced
 		}
+
 		for _, h := range hosts {
 			if hh := h.cs.Height(); uint64(hh) < cs.BlockHeight {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
@@ -723,15 +715,11 @@ func (c *TestCluster) AddHost(h *Host) {
 	// Mine transaction.
 	c.MineBlocks(1)
 
-	// Wait for hosts to sync up with consensus.
-	hosts := []*Host{h}
-	c.sync(hosts)
-
 	// Announce hosts.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	c.tt.OK(addStorageFolderToHost(ctx, hosts))
-	c.tt.OK(announceHosts(hosts))
+	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
+	c.tt.OK(announceHosts([]*Host{h}))
 
 	// Mine a few blocks. The host should show up eventually.
 	c.tt.Retry(10, time.Second, func() error {
@@ -744,9 +732,6 @@ func (c *TestCluster) AddHost(h *Host) {
 		}
 		return nil
 	})
-
-	// Wait for host to be synced.
-	c.Sync()
 }
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
@@ -924,6 +909,14 @@ func testBusCfg() node.BusConfig {
 			GatewayAddr:                   "127.0.0.1:0",
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
+		},
+		Database: config.Database{
+			MySQL: config.MySQLConfigFromEnv(),
+		},
+		DatabaseLog: config.DatabaseLog{
+			Enabled:                   true,
+			IgnoreRecordNotFoundError: true,
+			SlowThreshold:             100 * time.Millisecond,
 		},
 		Network:                     network,
 		Genesis:                     genesis,
