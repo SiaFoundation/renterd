@@ -26,7 +26,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -1375,10 +1374,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: zap.NewNop(),
-		hosts:  1,
-	})
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
