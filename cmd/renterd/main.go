@@ -129,10 +129,11 @@ var (
 		},
 		Autopilot: config.Autopilot{
 			Enabled:                        true,
-			RevisionSubmissionBuffer:       144,
 			AccountsRefillInterval:         defaultAccountRefillInterval,
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
+			ContractConfirmationDeadline:   18,
+			RevisionSubmissionBuffer:       144,
 			RevisionBroadcastInterval:      7 * 24 * time.Hour,
 			ScannerBatchSize:               1000,
 			ScannerInterval:                24 * time.Hour,
@@ -296,6 +297,8 @@ func main() {
 	flag.DurationVar(&cfg.Autopilot.Heartbeat, "autopilot.heartbeat", cfg.Autopilot.Heartbeat, "Interval for autopilot loop execution")
 	flag.Float64Var(&cfg.Autopilot.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", cfg.Autopilot.MigrationHealthCutoff, "Threshold for migrating slabs based on health")
 	flag.DurationVar(&cfg.Autopilot.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", cfg.Autopilot.RevisionBroadcastInterval, "Interval for broadcasting contract revisions (overrides with RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL)")
+	flag.Uint64Var(&cfg.Autopilot.RevisionSubmissionBuffer, "autopilot.revisionSubmissionBuffer", cfg.Autopilot.RevisionSubmissionBuffer, "Amount of blocks buffer applied on the contract's end height before archiving it (overrides with RENTERD_AUTOPILOT_REVISION_SUBMISSION_BUFFER)")
+	flag.Uint64Var(&cfg.Autopilot.ContractConfirmationDeadline, "autopilot.contractConfirmationDeadline", cfg.Autopilot.ContractConfirmationDeadline, "Maximum number of blocks we wait for the contract to appear on chain (overrides with RENTERD_AUTOPILOT_CONTRACT_CONFIRMATION_DEADLINE)")
 	flag.Uint64Var(&cfg.Autopilot.ScannerBatchSize, "autopilot.scannerBatchSize", cfg.Autopilot.ScannerBatchSize, "Batch size for host scanning")
 	flag.DurationVar(&cfg.Autopilot.ScannerInterval, "autopilot.scannerInterval", cfg.Autopilot.ScannerInterval, "Interval for scanning hosts")
 	flag.Uint64Var(&cfg.Autopilot.ScannerNumThreads, "autopilot.scannerNumThreads", cfg.Autopilot.ScannerNumThreads, "Number of threads for scanning hosts")

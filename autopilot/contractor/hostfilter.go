@@ -23,10 +23,6 @@ const (
 	// acquirable storage below which the contract is considered to be
 	// out-of-collateral.
 	minContractCollateralDenominator = 20 // 5%
-
-	// contractConfirmationDeadline is the number of blocks since its start
-	// height we wait for a contract to appear on chain.
-	contractConfirmationDeadline = 18
 )
 
 var (

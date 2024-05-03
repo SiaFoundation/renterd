@@ -119,6 +119,8 @@ type (
 		revisionLastBroadcast     map[types.FileContractID]time.Time
 		revisionSubmissionBuffer  uint64
 
+		contractConfirmationDeadline uint64
+
 		firstRefreshFailure map[types.FileContractID]time.Time
 
 		mu sync.Mutex
@@ -168,7 +170,7 @@ type (
 	}
 )
 
-func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
+func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, contractConfirmationDeadline, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
 	logger = logger.Named("contractor")
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Contractor{
@@ -180,6 +182,8 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
+
+		contractConfirmationDeadline: contractConfirmationDeadline,
 
 		firstRefreshFailure: make(map[types.FileContractID]time.Time),
 
@@ -239,6 +243,12 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 		}
 	}
 	c.logger.Info("performing contract maintenance")
+
+	// fetch consensus state
+	cs, err := c.bus.ConsensusState(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch consensus state, err: %v", err)
+	}
 
 	// fetch current contract set
 	currentSet, err := c.bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
@@ -325,12 +335,6 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	checks, err := c.runHostChecks(mCtx, hosts, minScore)
 	if err != nil {
 		return false, fmt.Errorf("failed to run host checks, err: %v", err)
-	}
-
-	// fetch consensus state
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		return false, fmt.Errorf("failed to fetch consensus state, err: %v", err)
 	}
 
 	// run contract checks
@@ -651,7 +655,7 @@ LOOP:
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
-		} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > contractConfirmationDeadline {
+		} else if c.contractConfirmationDeadline > 0 && contract.State == api.ContractStatePending && bh-contract.StartHeight > c.contractConfirmationDeadline {
 			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {

@@ -964,6 +964,7 @@ func testApCfg() node.AutopilotConfig {
 			Heartbeat:                      500 * time.Millisecond,
 			MigrationHealthCutoff:          0.99,
 			MigratorParallelSlabsPerWorker: 1,
+			ContractConfirmationDeadline:   144,
 			RevisionSubmissionBuffer:       0,
 			ScannerInterval:                time.Second,
 			ScannerBatchSize:               10,
