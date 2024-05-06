@@ -876,20 +876,14 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 				return nil, err
 			}
 			ap.logger.Infof("initialised current period to %d", autopilot.CurrentPeriod)
-		} else {
+		} else if nextPeriod := computeNextPeriod(cs.BlockHeight, autopilot.CurrentPeriod, autopilot.Config.Contracts.Period); nextPeriod != autopilot.CurrentPeriod {
 			prevPeriod := autopilot.CurrentPeriod
-			nextPeriod := prevPeriod
-			for cs.BlockHeight >= nextPeriod+autopilot.Config.Contracts.Period {
-				nextPeriod += autopilot.Config.Contracts.Period
+			autopilot.CurrentPeriod = nextPeriod
+			err := ap.bus.UpdateAutopilot(ctx, autopilot)
+			if err != nil {
+				return nil, err
 			}
-			if nextPeriod > prevPeriod {
-				autopilot.CurrentPeriod = nextPeriod
-				err := ap.bus.UpdateAutopilot(ctx, autopilot)
-				if err != nil {
-					return nil, err
-				}
-				ap.logger.Infof("updated current period from %d to %d", prevPeriod, nextPeriod)
-			}
+			ap.logger.Infof("updated current period from %d to %d", prevPeriod, nextPeriod)
 		}
 	}
 
@@ -955,4 +949,13 @@ func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
 		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
 	}
 	return nil
+}
+
+func computeNextPeriod(bh, currentPeriod, period uint64) uint64 {
+	prevPeriod := currentPeriod
+	nextPeriod := prevPeriod
+	for bh >= nextPeriod+period {
+		nextPeriod += period
+	}
+	return nextPeriod
 }
