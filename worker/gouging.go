@@ -111,11 +111,11 @@ func NewGougingChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee typ
 func (gc gougingChecker) BlocksUntilBlockHeightGouging(hostHeight uint64) int64 {
 	blockHeight := gc.consensusState.BlockHeight
 	leeway := gc.settings.HostBlockHeightLeeway
-	var min uint64
+	var minHeight uint64
 	if blockHeight >= uint64(leeway) {
-		min = blockHeight - uint64(leeway)
+		minHeight = blockHeight - uint64(leeway)
 	}
-	return int64(hostHeight) - int64(min)
+	return int64(hostHeight) - int64(minHeight)
 }
 
 func (gc gougingChecker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.HostGougingBreakdown {
@@ -298,13 +298,13 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
 		}
 	} else {
-		var min uint64
+		var minHeight uint64
 		if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
-			min = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
+			minHeight = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
 		}
-		max := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
-		if !(min <= pt.HostBlockHeight && pt.HostBlockHeight <= max) {
-			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", min, max, pt.HostBlockHeight)
+		maxHeight := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
+		if !(minHeight <= pt.HostBlockHeight && pt.HostBlockHeight <= maxHeight) {
+			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", minHeight, maxHeight, pt.HostBlockHeight)
 		}
 	}
 
