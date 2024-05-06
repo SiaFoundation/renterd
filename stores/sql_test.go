@@ -28,10 +28,9 @@ import (
 )
 
 const (
-	testPersistInterval = time.Second
-	testContractSet     = "test"
-	testMimeType        = "application/octet-stream"
-	testETag            = "d34db33f"
+	testContractSet = "test"
+	testMimeType    = "application/octet-stream"
+	testETag        = "d34db33f"
 )
 
 var (

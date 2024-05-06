@@ -7,10 +7,10 @@ import (
 type (
 	// ConsensusState holds the current blockheight and whether we are synced or not.
 	ConsensusState struct {
-		BlockHeight   uint64      `json:"blockHeight"`
-		LastBlockTime TimeRFC3339 `json:"lastBlockTime"`
-		Synced        bool        `json:"synced"`
-		SyncHeight    uint64      `json:"syncHeight"`
+		BlockHeight      uint64      `json:"blockHeight"`
+		LastBlockTime    TimeRFC3339 `json:"lastBlockTime"`
+		SubscriberHeight uint64      `json:"subscriberHeight"`
+		Synced           bool        `json:"synced"`
 	}
 
 	// ConsensusNetwork holds the name of the network.

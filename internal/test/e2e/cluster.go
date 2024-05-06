@@ -42,8 +42,7 @@ import (
 )
 
 const (
-	testBusFlushInterval   = 100 * time.Millisecond
-	testBusPersistInterval = 100 * time.Millisecond
+	testBusFlushInterval = 100 * time.Millisecond
 )
 
 var (
@@ -443,7 +442,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		cluster.MineBlocksBlocking(busCfg.Network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
 		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
@@ -524,20 +523,25 @@ func (c *TestCluster) MineToRenewWindow() {
 	if cs.BlockHeight >= renewWindowStart {
 		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
-	c.MineBlocks(renewWindowStart - cs.BlockHeight)
+	c.MineBlocksBlocking(renewWindowStart - cs.BlockHeight)
 }
 
 // sync blocks until the cluster is synced.
 func (c *TestCluster) sync(hosts []*Host) {
 	c.tt.Helper()
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
+
+	// fetch current block height to ensure sync height catches up
+	start, err := c.Bus.ConsensusState(context.Background())
+	c.tt.OK(err)
+
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
 		} else if !cs.Synced {
 			return fmt.Errorf("bus is not synced, last block %v at %v", cs.BlockHeight, cs.LastBlockTime) // can't be synced if bus itself isn't synced
-		} else if cs.SyncHeight < cs.BlockHeight {
-			return fmt.Errorf("bus is not synced, sync height %v < block height %v", cs.SyncHeight, cs.BlockHeight)
+		} else if cs.SubscriberHeight < start.BlockHeight {
+			return fmt.Errorf("bus is not synced, sync height %v < block height %v", cs.SubscriberHeight, cs.BlockHeight)
 		}
 
 		for _, h := range hosts {
@@ -549,7 +553,14 @@ func (c *TestCluster) sync(hosts []*Host) {
 	})
 }
 
-// MineBlocks uses the bus' miner to mine n blocks.
+// MineBlocksBlocking mines n blocks and blocks until the cluster is synced.
+func (c *TestCluster) MineBlocksBlocking(n uint64) {
+	c.tt.Helper()
+	c.MineBlocks(n)
+	c.sync(c.hosts)
+}
+
+// MineBlocks mines n blocks
 func (c *TestCluster) MineBlocks(n uint64) {
 	c.tt.Helper()
 	wallet, err := c.Bus.Wallet(context.Background())
@@ -558,7 +569,6 @@ func (c *TestCluster) MineBlocks(n uint64) {
 	// If we don't have any hosts in the cluster mine all blocks right away.
 	if len(c.hosts) == 0 {
 		c.tt.OK(c.mineBlocks(wallet.Address, n))
-		c.Sync()
 		return
 	}
 
@@ -571,12 +581,6 @@ func (c *TestCluster) MineBlocks(n uint64) {
 		}
 		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
 		mined += toMine
-
-		// we briefly sleep here to allow the subscriber to catch up processing
-		// new updates and avoid lagging behind the tip too much when mining a
-		// bunch of blocks at once
-		time.Sleep(100 * time.Millisecond)
-		c.Sync()
 	}
 }
 
@@ -715,7 +719,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
 
 	// Mine transaction.
-	c.MineBlocks(1)
+	c.MineBlocksBlocking(1)
 
 	// Announce hosts.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -778,12 +782,6 @@ func (c *TestCluster) Shutdown() {
 		c.tt.OK(h.Close())
 	}
 	c.wg.Wait()
-}
-
-// Sync blocks until the whole cluster has reached the same block height.
-func (c *TestCluster) Sync() {
-	c.tt.Helper()
-	c.sync(c.hosts)
 }
 
 // waitForHostAccounts will fetch the accounts from the worker and wait until

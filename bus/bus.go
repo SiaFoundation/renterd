@@ -1792,10 +1792,10 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 	}
 
 	return api.ConsensusState{
-		BlockHeight:   tip.Index.Height,
-		LastBlockTime: api.TimeRFC3339(tip.PrevTimestamps[0]),
-		Synced:        synced,
-		SyncHeight:    index.Height,
+		BlockHeight:      tip.Index.Height,
+		LastBlockTime:    api.TimeRFC3339(tip.PrevTimestamps[0]),
+		Synced:           synced,
+		SubscriberHeight: index.Height,
 	}, nil
 }
 
