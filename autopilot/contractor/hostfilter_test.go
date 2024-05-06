@@ -80,9 +80,9 @@ func TestMinRemainingCollateral(t *testing.T) {
 	for i, test := range tests {
 		cfg.Contracts.Storage = test.expectedStorage
 		s.RemainingStorage = test.remainingStorage
-		min := minRemainingCollateral(cfg, rs, test.renterFunds, s, pt)
-		if min.Cmp(test.expected) != 0 {
-			t.Fatalf("%v: expected %v, got %v", i+1, test.expected, min)
+		minCollateral := minRemainingCollateral(cfg, rs, test.renterFunds, s, pt)
+		if minCollateral.Cmp(test.expected) != 0 {
+			t.Fatalf("%v: expected %v, got %v", i+1, test.expected, minCollateral)
 		}
 	}
 }
