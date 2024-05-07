@@ -790,14 +790,14 @@ func TestUploadDownloadSpending(t *testing.T) {
 	large := make([]byte, rhpv2.SectorSize*3)
 	files := [][]byte{small, large}
 
-	uploadDownload := func() {
+	uploadDownload := func(ttt string) {
 		t.Helper()
 		for _, data := range files {
 			// prepare some data - make sure it's more than one sector
 			tt.OKAll(frand.Read(data))
 
 			// upload the data
-			path := fmt.Sprintf("data_%v", len(data))
+			path := fmt.Sprintf("data_%v_%s", len(data), ttt)
 			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 			// Should be registered in bus.
@@ -827,7 +827,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	}
 
 	// run uploads once
-	uploadDownload()
+	uploadDownload("1")
 
 	// Fuzzy search for uploaded data in various ways.
 	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{})
@@ -880,9 +880,9 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 		return nil
 	})
-
+	time.Sleep(10 * time.Second)
 	// run uploads again
-	uploadDownload()
+	uploadDownload("2")
 
 	// check that the spending was recorded
 	tt.Retry(100, testBusFlushInterval, func() error {
