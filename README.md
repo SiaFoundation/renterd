@@ -81,7 +81,7 @@ renter and shut it down again.
 
 Use the `mysqldump` command to create a backup of the MySQL databases. It's a
 utility provided by MySQL to backup or transfer a MySQL database and it's
-usually installed alongside the MySQL cient tools. Replace placeholders with
+usually installed alongside the MySQL client tools. Replace placeholders with
 actual user and password.
 
 ```bash
