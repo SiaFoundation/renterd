@@ -22,9 +22,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-var (
-	pruneSlabsAlertID = frand.Entropy256()
-)
+const rootDirID = 1
 
 const (
 	// batchDurationThreshold is the upper bound for the duration of a batch
@@ -45,19 +43,23 @@ const (
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
-var (
-	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
-	errShardRootChanged      = errors.New("shard root changed")
-
-	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
-)
-
 const (
 	contractStateInvalid contractState = iota
 	contractStatePending
 	contractStateActive
 	contractStateComplete
 	contractStateFailed
+)
+
+var (
+	pruneSlabsAlertID = frand.Entropy256()
+)
+
+var (
+	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	errShardRootChanged      = errors.New("shard root changed")
+
+	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
 type (
@@ -1793,7 +1795,7 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 
 func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	// Create root dir.
-	dirID := uint(1)
+	dirID := uint(rootDirID)
 	if err := tx.Model(&dbDirectory{}).
 		Clauses(clause.OnConflict{
 			DoNothing: true,
