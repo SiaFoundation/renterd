@@ -1054,17 +1054,17 @@ func (c *Contractor) runContractRefreshes(ctx *mCtx, w Worker, toRefresh []contr
 	return refreshed, nil
 }
 
-func (c *Contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
-	if !max.IsZero() && min.Cmp(max) > 0 {
+func (c *Contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {
+	if !maxFunding.IsZero() && minFunding.Cmp(maxFunding) > 0 {
 		panic("given min is larger than max") // developer error
 	}
 
 	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
-	if !min.IsZero() && funding.Cmp(min) < 0 {
-		return min
+	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
+		return minFunding
 	}
-	if !max.IsZero() && funding.Cmp(max) > 0 {
-		return max
+	if !maxFunding.IsZero() && funding.Cmp(maxFunding) > 0 {
+		return maxFunding
 	}
 	return funding
 }
@@ -1529,25 +1529,25 @@ func addLeeway(n uint64, pct float64) uint64 {
 	return uint64(math.Ceil(float64(n) * pct))
 }
 
-func initialContractFunding(settings rhpv2.HostSettings, txnFee, min, max types.Currency) types.Currency {
-	if !max.IsZero() && min.Cmp(max) > 0 {
+func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {
+	if !maxFunding.IsZero() && minFunding.Cmp(maxFunding) > 0 {
 		panic("given min is larger than max") // developer error
 	}
 
 	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
-	if !min.IsZero() && funding.Cmp(min) < 0 {
-		return min
+	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
+		return minFunding
 	}
-	if !max.IsZero() && funding.Cmp(max) > 0 {
-		return max
+	if !maxFunding.IsZero() && funding.Cmp(maxFunding) > 0 {
+		return maxFunding
 	}
 	return funding
 }
 
-func initialContractFundingMinMax(cfg api.AutopilotConfig) (min types.Currency, max types.Currency) {
+func initialContractFundingMinMax(cfg api.AutopilotConfig) (minFunding types.Currency, maxFunding types.Currency) {
 	allowance := cfg.Contracts.Allowance.Div64(cfg.Contracts.Amount)
-	min = allowance.Div64(minInitialContractFundingDivisor)
-	max = allowance.Div64(maxInitialContractFundingDivisor)
+	minFunding = allowance.Div64(minInitialContractFundingDivisor)
+	maxFunding = allowance.Div64(maxInitialContractFundingDivisor)
 	return
 }
 

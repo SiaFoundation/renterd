@@ -3905,11 +3905,11 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		}
 
 		// assert it's validity is within expected bounds
-		min := now.Add(refreshHealthMinHealthValidity).Add(-time.Second) // avoid NDF
-		max := now.Add(refreshHealthMaxHealthValidity).Add(time.Second)  // avoid NDF
+		minValidity := now.Add(refreshHealthMinHealthValidity).Add(-time.Second) // avoid NDF
+		maxValidity := now.Add(refreshHealthMaxHealthValidity).Add(time.Second)  // avoid NDF
 		validUntil := time.Unix(slab.HealthValidUntil, 0)
-		if !(min.Before(validUntil) && max.After(validUntil)) {
-			t.Fatal("valid until not in boundaries", min, max, validUntil, now)
+		if !(minValidity.Before(validUntil) && maxValidity.After(validUntil)) {
+			t.Fatal("valid until not in boundaries", minValidity, maxValidity, validUntil, now)
 		}
 	}
 }

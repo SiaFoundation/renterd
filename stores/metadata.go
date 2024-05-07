@@ -2876,11 +2876,11 @@ func sqlConcat(db *gorm.DB, a, b string) string {
 	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
 }
 
-func sqlRandomTimestamp(db *gorm.DB, now time.Time, min, max time.Duration) clause.Expr {
+func sqlRandomTimestamp(db *gorm.DB, now time.Time, minDuration, maxDuration time.Duration) clause.Expr {
 	if isSQLite(db) {
-		return gorm.Expr("ABS(RANDOM()) % (? - ?) + ?", int(max.Seconds()), int(min.Seconds()), now.Add(min).Unix())
+		return gorm.Expr("ABS(RANDOM()) % (? - ?) + ?", int(maxDuration.Seconds()), int(minDuration.Seconds()), now.Add(minDuration).Unix())
 	}
-	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(min).Unix(), int(max.Seconds()), int(min.Seconds()))
+	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(minDuration).Unix(), int(maxDuration.Seconds()), int(minDuration.Seconds()))
 }
 
 // nolint:unparam
