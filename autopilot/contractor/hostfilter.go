@@ -169,8 +169,8 @@ func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contra
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
 func isOutOfCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) bool {
-	min := minRemainingCollateral(cfg, rs, c.RenterFunds(), s, pt)
-	return c.RemainingCollateral().Cmp(min) < 0
+	minCollateral := minRemainingCollateral(cfg, rs, c.RenterFunds(), s, pt)
+	return c.RemainingCollateral().Cmp(minCollateral) < 0
 }
 
 // minNewCollateral returns the minimum amount of unallocated collateral that a

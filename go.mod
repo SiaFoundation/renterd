@@ -20,7 +20,7 @@ require (
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.51.2
+	go.sia.tech/web/renterd v0.52.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.22.0
 	golang.org/x/sys v0.20.0
