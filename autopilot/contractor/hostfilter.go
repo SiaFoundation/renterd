@@ -14,6 +14,10 @@ import (
 )
 
 const (
+	// ContractConfirmationDeadline is the number of blocks since its start
+	// height we wait for a contract to appear on chain.
+	ContractConfirmationDeadline = 18
+
 	// minContractFundUploadThreshold is the percentage of contract funds
 	// remaining at which the contract gets marked as not good for upload
 	minContractFundUploadThreshold = float64(0.05) // 5%

@@ -132,7 +132,6 @@ type (
 		AccountsRefillInterval         time.Duration `yaml:"accountsRefillInterval,omitempty"`
 		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
 		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`
-		ContractConfirmationDeadline   uint64        `yaml:"contractConfirmationDeadline,omitempty"`
 		RevisionBroadcastInterval      time.Duration `yaml:"revisionBroadcastInterval,omitempty"`
 		RevisionSubmissionBuffer       uint64        `yaml:"revisionSubmissionBuffer,omitempty"`
 		ScannerInterval                time.Duration `yaml:"scannerInterval,omitempty"`

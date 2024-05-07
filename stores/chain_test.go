@@ -34,7 +34,7 @@ func TestProcessChainUpdate(t *testing.T) {
 		if state, err := tx.ContractState(fcid); err != nil {
 			return err
 		} else if state != api.ContractStatePending {
-			return fmt.Errorf("unexpected state %v", state)
+			return fmt.Errorf("unexpected state '%v'", state)
 		} else {
 			return nil
 		}

@@ -33,6 +33,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// blockInterval is the expected wall clock time between consecutive blocks.
+const blockInterval = 10 * time.Minute
+
 // Client re-exports the client from the client package.
 type Client struct {
 	*client.Client
@@ -1778,8 +1781,6 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 }
 
 func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
-	tip := b.cm.TipState()
-
 	index, err := b.cs.ChainIndex(ctx)
 	if err != nil {
 		return api.ConsensusState{}, err
@@ -1787,15 +1788,14 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 
 	var synced bool
 	block, found := b.cm.Block(index.ID)
-	if found && time.Since(block.Timestamp) < 2*tip.BlockInterval() {
+	if found && time.Since(block.Timestamp) < 2*blockInterval {
 		synced = true
 	}
 
 	return api.ConsensusState{
-		BlockHeight:      tip.Index.Height,
-		LastBlockTime:    api.TimeRFC3339(tip.PrevTimestamps[0]),
-		Synced:           synced,
-		SubscriberHeight: index.Height,
+		BlockHeight:   index.Height,
+		LastBlockTime: api.TimeRFC3339(block.Timestamp),
+		Synced:        synced,
 	}, nil
 }
 

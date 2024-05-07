@@ -727,24 +727,6 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 	return added.convert(), nil
 }
 
-func (s *SQLStore) ContractExists(ctx context.Context, fcid types.FileContractID) (bool, error) {
-	var exists bool
-	if err := s.db.WithContext(ctx).
-		Raw(`SELECT EXISTS(SELECT 1 FROM contracts WHERE fcid = ?)`, fileContractID(fcid)).
-		Scan(&exists).
-		Error; err != nil {
-		return false, err
-	} else if !exists {
-		if err := s.db.WithContext(ctx).
-			Raw(`SELECT EXISTS(SELECT 1 FROM archived_contracts WHERE fcid = ?)`, fileContractID(fcid)).
-			Scan(&exists).
-			Error; err != nil {
-			return false, err
-		}
-	}
-	return exists, nil
-}
-
 func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	db := s.db.WithContext(ctx)
 
@@ -1458,8 +1440,10 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			return err
 		}
 	}
-	if err := s.RecordContractMetric(ctx, metrics...); err != nil {
-		s.logger.Errorw("failed to record contract metrics", zap.Error(err))
+	if len(metrics) > 0 {
+		if err := s.RecordContractMetric(ctx, metrics...); err != nil {
+			s.logger.Errorw("failed to record contract metrics", zap.Error(err))
+		}
 	}
 	return nil
 }

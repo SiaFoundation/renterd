@@ -810,57 +810,6 @@ func TestRenewedContract(t *testing.T) {
 	}
 }
 
-func TestContractExists(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// add test host
-	hk1 := types.PublicKey{1}
-	err := ss.addTestHost(hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// define a helper to assert if a contract exists
-	assertExists := func(fcid types.FileContractID, expected bool) {
-		t.Helper()
-		exists, err := ss.ContractExists(context.Background(), fcid)
-		if err != nil {
-			t.Fatal(err)
-		} else if exists != expected {
-			t.Fatalf("expected %v but got %v", expected, exists)
-		}
-	}
-
-	// define two fcids
-	fcid1 := types.FileContractID{1}
-	fcid2 := types.FileContractID{2}
-
-	// both contracts don't exist
-	assertExists(fcid1, false)
-	assertExists(fcid2, false)
-
-	// add contract
-	_, err = ss.addTestContract(fcid1, hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert contract exists
-	assertExists(fcid1, true)
-	assertExists(fcid2, false)
-
-	// renew contract
-	_, err = ss.addTestRenewedContract(fcid2, fcid1, hk1, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert both exist
-	assertExists(fcid1, true)
-	assertExists(fcid2, true)
-}
-
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {

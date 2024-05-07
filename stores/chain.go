@@ -117,30 +117,31 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 
 // ContractState returns the state of a file contract.
 func (u *chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
-	var state contractState
-
 	// try regular contracts
-	err := u.tx.
-		Select("state").
+	var c dbContract
+	if err := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Scan(&state).
-		Error
+		Take(&c).
+		Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	} else if err == nil {
+		return api.ContractState(c.State.String()), nil
+	}
 
 	// try archived contracts
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = u.tx.
-			Select("state").
-			Model(&dbArchivedContract{}).
-			Where("fcid", fileContractID(fcid)).
-			Scan(&state).
-			Error
+	var ac dbArchivedContract
+	if err := u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid", fileContractID(fcid)).
+		Take(&ac).
+		Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	} else if err == nil {
+		return api.ContractState(ac.State.String()), nil
 	}
 
-	if err != nil {
-		return "", err
-	}
-	return api.ContractState(state.String()), nil
+	return "", api.ErrContractNotFound
 }
 
 // RevertIndex is called with the chain index that is being reverted. Any
@@ -281,24 +282,27 @@ func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api
 	}
 
 	// try regular contract
-	res := u.tx.
+	if res := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Update("state", cs)
+		Update("state", cs); res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected > 0 {
+		return nil
+	}
 
 	// try archived contract
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
-		res = u.tx.
-			Model(&dbArchivedContract{}).
-			Where("fcid", fileContractID(fcid)).
-			Update("state", cs)
+	if res := u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid", fileContractID(fcid)).
+		Update("state", cs); res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected > 0 {
+		return nil
 	}
 
 	// wrap ErrContractNotFound
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
-		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
-	}
-	return res.Error
+	return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
 }
 
 // UpdateContractProofHeight updates the proof height of the contract with given
@@ -307,24 +311,27 @@ func (u *chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, pro
 	u.debug("update contract proof height", "fcid", fcid, "proof_height", proofHeight)
 
 	// try regular contract
-	res := u.tx.
+	if res := u.tx.
 		Model(&dbContract{}).
 		Where("fcid", fileContractID(fcid)).
-		Update("proof_height", proofHeight)
+		Update("proof_height", proofHeight); res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected > 0 {
+		return nil
+	}
 
 	// try archived contract
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
-		res = u.tx.
-			Model(&dbArchivedContract{}).
-			Where("fcid", fileContractID(fcid)).
-			Update("proof_height", proofHeight)
+	if res := u.tx.
+		Model(&dbArchivedContract{}).
+		Where("fcid", fileContractID(fcid)).
+		Update("proof_height", proofHeight); res.Error != nil {
+		return res.Error
+	} else if res.RowsAffected > 0 {
+		return nil
 	}
 
 	// wrap api.ErrContractNotFound
-	if errors.Is(res.Error, gorm.ErrRecordNotFound) || (res.Error == nil && res.RowsAffected == 0) {
-		return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
-	}
-	return res.Error
+	return fmt.Errorf("%v %w", fcid, api.ErrContractNotFound)
 }
 
 // UpdateFailedContracts marks active contract as failed if the current

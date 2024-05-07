@@ -526,38 +526,34 @@ func (c *TestCluster) MineToRenewWindow() {
 	c.MineBlocksBlocking(renewWindowStart - cs.BlockHeight)
 }
 
-// sync blocks until the cluster is synced.
-func (c *TestCluster) sync(hosts []*Host) {
+// MineBlocksBlocking mines n blocks and blocks until the cluster is synced.
+func (c *TestCluster) MineBlocksBlocking(n uint64) {
 	c.tt.Helper()
 
-	// fetch current block height to ensure sync height catches up
-	start, err := c.Bus.ConsensusState(context.Background())
-	c.tt.OK(err)
+	// mine 'n' blocks
+	c.MineBlocks(n)
 
+	// fetch tip
+	tip := c.cm.Tip()
+
+	// wait until we've caught up with the chain manager's tip
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
 		} else if !cs.Synced {
-			return fmt.Errorf("bus is not synced, last block %v at %v", cs.BlockHeight, cs.LastBlockTime) // can't be synced if bus itself isn't synced
-		} else if cs.SubscriberHeight < start.BlockHeight {
-			return fmt.Errorf("bus is not synced, sync height %v < block height %v", cs.SubscriberHeight, cs.BlockHeight)
+			return errors.New("bus is not synced")
+		} else if cs.BlockHeight < tip.Height {
+			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
 		}
 
-		for _, h := range hosts {
+		for _, h := range c.hosts {
 			if hh := h.cs.Height(); uint64(hh) < cs.BlockHeight {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
 			}
 		}
 		return nil
 	})
-}
-
-// MineBlocksBlocking mines n blocks and blocks until the cluster is synced.
-func (c *TestCluster) MineBlocksBlocking(n uint64) {
-	c.tt.Helper()
-	c.MineBlocks(n)
-	c.sync(c.hosts)
 }
 
 // MineBlocks mines n blocks
@@ -956,7 +952,6 @@ func testApCfg() node.AutopilotConfig {
 			Heartbeat:                      time.Second,
 			MigrationHealthCutoff:          0.99,
 			MigratorParallelSlabsPerWorker: 1,
-			ContractConfirmationDeadline:   144,
 			RevisionSubmissionBuffer:       0,
 			ScannerInterval:                time.Second,
 			ScannerBatchSize:               10,

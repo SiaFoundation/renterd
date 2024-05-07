@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -48,14 +49,9 @@ type (
 		wallet.UpdateTx
 	}
 
-	ContractStore interface {
-		ContractExists(ctx context.Context, fcid types.FileContractID) (bool, error)
-	}
-
 	Subscriber struct {
 		cm     ChainManager
 		cs     ChainStore
-		css    ContractStore
 		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
@@ -89,7 +85,7 @@ type (
 	}
 )
 
-func NewSubscriber(cm ChainManager, cs ChainStore, css ContractStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *Subscriber, err error) {
+func NewSubscriber(cm ChainManager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *Subscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
@@ -98,7 +94,6 @@ func NewSubscriber(cm ChainManager, cs ChainStore, css ContractStore, walletAddr
 	return &Subscriber{
 		cm:     cm,
 		cs:     cs,
-		css:    css,
 		logger: logger.Sugar(),
 
 		announcementMaxAge: announcementMaxAge,
@@ -144,7 +139,7 @@ func (s *Subscriber) Run() (func(), error) {
 			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
 				return
 			} else if err != nil {
-				s.logger.Errorf("failed to sync: %v", err)
+				s.logger.Panicf("failed to sync: %v", err)
 			}
 		}
 	}()
@@ -298,7 +293,7 @@ func (s *Subscriber) processUpdates(ctx context.Context, crus []chain.RevertUpda
 
 		return nil
 	}); err != nil {
-		return types.ChainIndex{}, fmt.Errorf("failed to process chain update: %w", err)
+		return types.ChainIndex{}, err
 	}
 	return index, nil
 }
@@ -310,16 +305,19 @@ func (s *Subscriber) updateContract(tx ChainUpdateTx, index types.ChainIndex, fc
 	}
 
 	// ignore unknown contracts
-	if known, err := s.isKnownContract(fcid); err != nil {
-		return fmt.Errorf("failed to check if contract exists: %w", err)
-	} else if !known {
+	if !s.isKnownContract(fcid) {
 		return nil
 	}
 
 	// fetch contract state
 	state, err := tx.ContractState(fcid)
-	if err != nil {
+	if err != nil && utils.IsErr(err, api.ErrContractNotFound) {
+		s.updateKnownContracts(fcid, false) // ignore unknown contracts
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("failed to get contract state: %w", err)
+	} else {
+		s.updateKnownContracts(fcid, true) // update known contracts
 	}
 
 	// handle reverts
@@ -423,24 +421,20 @@ func (s *Subscriber) isClosed() bool {
 	return false
 }
 
-func (s *Subscriber) isKnownContract(fcid types.FileContractID) (bool, error) {
+func (s *Subscriber) isKnownContract(fcid types.FileContractID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// return result from cache
 	known, ok := s.knownContracts[fcid]
-	if ok {
-		return known, nil
+	if !ok {
+		return true // assume known
 	}
+	return known
+}
 
-	// check if contract exists in the store
-	known, err := s.css.ContractExists(s.shutdownCtx, fcid)
-	if err != nil {
-		return false, err
-	}
-
+func (s *Subscriber) updateKnownContracts(fcid types.FileContractID, known bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.knownContracts[fcid] = known
-	return known, nil
 }
 
 func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) contractUpdate {

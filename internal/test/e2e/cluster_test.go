@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
@@ -790,14 +791,14 @@ func TestUploadDownloadSpending(t *testing.T) {
 	large := make([]byte, rhpv2.SectorSize*3)
 	files := [][]byte{small, large}
 
-	uploadDownload := func(ttt string) {
+	uploadDownload := func() {
 		t.Helper()
 		for _, data := range files {
 			// prepare some data - make sure it's more than one sector
 			tt.OKAll(frand.Read(data))
 
 			// upload the data
-			path := fmt.Sprintf("data_%v_%s", len(data), ttt)
+			path := fmt.Sprintf("data_%v", len(data))
 			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 			// Should be registered in bus.
@@ -827,7 +828,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	}
 
 	// run uploads once
-	uploadDownload("1")
+	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
 	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{})
@@ -880,9 +881,9 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 		return nil
 	})
-	time.Sleep(10 * time.Second)
+
 	// run uploads again
-	uploadDownload("2")
+	uploadDownload()
 
 	// check that the spending was recorded
 	tt.Retry(100, testBusFlushInterval, func() error {
@@ -1373,9 +1374,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 
 	// create a test cluster
-	apCfg := testApCfg()
-	apCfg.ContractConfirmationDeadline = 20
-	cluster := newTestCluster(t, testClusterOptions{hosts: 1, autopilotCfg: &apCfg})
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
@@ -1421,7 +1420,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 
 	// mine enough blocks to ensure we're passed the confirmation deadline
-	cluster.MineBlocksBlocking(apCfg.ContractConfirmationDeadline + 1)
+	cluster.MineBlocksBlocking(contractor.ContractConfirmationDeadline + 1)
 
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})

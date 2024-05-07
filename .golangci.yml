@@ -58,7 +58,6 @@ linters-settings:
       # diagnostic
       - commentedOutCode
       - uncheckedInlineErr
-      - builtinShadow
 
       # style
       - exitAfterDefer
