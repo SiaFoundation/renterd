@@ -1,5 +1,3 @@
-PRAGMA defer_foreign_keys=ON;
-
 -- dbDirectory
 DROP TABLE IF EXISTS `directories`;
 CREATE TABLE `directories` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_parent_id` integer,`name` text, CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories`(`id`));
