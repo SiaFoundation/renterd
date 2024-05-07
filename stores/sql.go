@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
@@ -57,6 +58,8 @@ type (
 		Logger                        *zap.SugaredLogger
 		GormLogger                    glogger.Interface
 		RetryTransactionIntervals     []time.Duration
+		LongQueryDuration             time.Duration
+		LongTxDuration                time.Duration
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -64,6 +67,8 @@ type (
 		alerts    alerts.Alerter
 		db        *gorm.DB
 		dbMetrics *gorm.DB
+		bMain     sql.Backend
+		bMetrics  sql.MetricsBackend
 		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
@@ -141,7 +146,7 @@ func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
 //	  should be made configurable and set to TRUNCATE or any of the other options.
 //	  For reference see https://github.com/mattn/go-sqlite3#connection-string.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL", path))
+	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_cache_size=65536", path))
 }
 
 // NewMetricsSQLiteConnection opens a sqlite db at the given path similarly to
@@ -184,16 +189,26 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 	l := cfg.Logger.Named("sql")
 
-	// Print SQLite version
-	var dbName string
-	var dbVersion string
-	if isSQLite(db) {
-		err = db.Raw("select sqlite_version()").Scan(&dbVersion).Error
-		dbName = "SQLite"
-	} else {
-		err = db.Raw("select version()").Scan(&dbVersion).Error
-		dbName = "MySQL"
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db: %v", err)
 	}
+	sqlDBMetrics, err := dbMetrics.DB()
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch metrics db: %v", err)
+	}
+
+	// Print DB version
+	var bMain sql.Backend
+	var bMetrics sql.MetricsBackend
+	if cfg.Conn.Name() == "sqlite" {
+		bMain = sql.NewSQLiteBackend(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sql.NewSQLiteBackend(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+	} else {
+		bMain = sql.NewMySQLBackend(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sql.NewMySQLBackend(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+	}
+	dbName, dbVersion, err := bMain.Version(context.Background())
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db version: %v", err)
 	}
@@ -248,6 +263,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		ccid:                   ccid,
 		db:                     db,
 		dbMetrics:              dbMetrics,
+		bMain:                  bMain,
+		bMetrics:               bMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
@@ -363,20 +380,11 @@ func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
 	s.wg.Wait()
 
-	db, err := s.db.DB()
+	err := s.bMain.Close()
 	if err != nil {
 		return err
 	}
-	dbMetrics, err := s.dbMetrics.DB()
-	if err != nil {
-		return err
-	}
-
-	err = db.Close()
-	if err != nil {
-		return err
-	}
-	err = dbMetrics.Close()
+	err = s.bMetrics.Close()
 	if err != nil {
 		return err
 	}
