@@ -67,8 +67,8 @@ type (
 		alerts    alerts.Alerter
 		db        *gorm.DB
 		dbMetrics *gorm.DB
-		bMain     sql.Backend
-		bMetrics  sql.MetricsBackend
+		bMain     sql.Database
+		bMetrics  sql.MetricsDatabase
 		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
@@ -199,16 +199,18 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	// Print DB version
-	var bMain sql.Backend
-	var bMetrics sql.MetricsBackend
+	var dbMain sql.Database
+	var bMetrics sql.MetricsDatabase
 	if cfg.Conn.Name() == "sqlite" {
-		bMain = sql.NewSQLiteBackend(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sql.NewSQLiteBackend(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = sql.NewSQLiteDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sql.NewSQLiteDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
-		bMain = sql.NewMySQLBackend(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sql.NewMySQLBackend(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = sql.NewMySQLDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sql.NewMySQLDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
-	dbName, dbVersion, err := bMain.Version(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dbName, dbVersion, err := dbMain.Version(ctx)
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db version: %v", err)
 	}
@@ -263,7 +265,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		ccid:                   ccid,
 		db:                     db,
 		dbMetrics:              dbMetrics,
-		bMain:                  bMain,
+		bMain:                  dbMain,
 		bMetrics:               bMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,

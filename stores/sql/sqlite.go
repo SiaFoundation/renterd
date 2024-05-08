@@ -10,23 +10,23 @@ import (
 	"go.uber.org/zap"
 )
 
-type SQLiteBackend struct {
+type SQLiteDatabase struct {
 	db *isql.DB
 }
 
-// NewSQLiteBackend creates a new SQLite backend.
-func NewSQLiteBackend(db *sql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) Backend {
-	store := isql.NewDB(db, log.Desugar(), "database is locked", lqd, ltd)
-	return &SQLiteBackend{
+// NewSQLiteDatabase creates a new SQLite backend.
+func NewSQLiteDatabase(db *sql.DB, log *zap.Logger, lqd, ltd time.Duration) Database {
+	store := isql.NewDB(db, log, "database is locked", lqd, ltd)
+	return &SQLiteDatabase{
 		db: store,
 	}
 }
 
-func (b *SQLiteBackend) Close() error {
+func (b *SQLiteDatabase) Close() error {
 	return b.db.Close()
 }
 
-func (b *SQLiteBackend) Version(_ context.Context) (string, string, error) {
+func (b *SQLiteDatabase) Version(_ context.Context) (string, string, error) {
 	var version string
 	if err := b.db.QueryRow("select sqlite_version()").Scan(&version); err != nil {
 		return "", "", err

@@ -3,6 +3,7 @@ package sql
 import (
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -119,7 +120,7 @@ func (s *DB) QueryRow(query string, args ...any) *loggedRow {
 // transaction executes a function within a database transaction. If the
 // function returns an error, the transaction is rolled back. Otherwise, the
 // transaction is committed. If the transaction fails due to a busy error, it is
-// retried up to 15 times before returning.
+// retried up to 'maxRetryAttempts' times before returning.
 func (s *DB) Transaction(fn func(Tx) error) error {
 	var err error
 	txnID := hex.EncodeToString(frand.Bytes(4))
@@ -155,16 +156,20 @@ func (s *DB) Close() error {
 	return s.db.Close()
 }
 
-// doTransaction is a helper function to execute a function within a transaction. If fn returns
-// an error, the transaction is rolled back. Otherwise, the transaction is
-// committed.
+// transaction is a helper function to execute a function within a transaction.
+// If fn returns an error, the transaction is rolled back. Otherwise, the
+// transaction is committed.
 func (s *DB) transaction(db *sql.DB, log *zap.Logger, fn func(tx Tx) error) error {
 	start := time.Now()
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			s.log.Error("failed to roll back transaction", zap.Error(err))
+		}
+	}()
 	defer func() {
 		// log the transaction if it took longer than txn duration
 		if time.Since(start) > s.longTxDuration {
