@@ -172,16 +172,15 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 	if err := <-errCh; err != nil {
 		return nil, fmt.Errorf("failed to create consensus set: %w", err)
 	}
-	cm, err := node.NewChainManager(cs, network)
-	if err != nil {
-		return nil, err
-	}
-
 	tpool, err := transactionpool.New(cs, g, filepath.Join(dir, "transactionpool"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transaction pool: %w", err)
 	}
 	tp := node.NewTransactionPool(tpool)
+	cm, err := node.NewChainManager(cs, tp, network)
+	if err != nil {
+		return nil, err
+	}
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
@@ -189,7 +188,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 		return nil, fmt.Errorf("failed to create sql store: %w", err)
 	}
 
-	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, tp, db, log.Named("wallet"))
+	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, db, log.Named("wallet"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}

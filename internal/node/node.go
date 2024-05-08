@@ -195,7 +195,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		tp.TransactionPoolSubscribe(m)
 	}
 
-	cm, err := NewChainManager(cs, cfg.Network)
+	cm, err := NewChainManager(cs, NewTransactionPool(tp), cfg.Network)
 	if err != nil {
 		return nil, nil, err
 	}
