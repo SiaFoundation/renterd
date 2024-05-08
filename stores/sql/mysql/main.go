@@ -1,4 +1,4 @@
-package sql
+package mysql
 
 import (
 	"context"
@@ -10,23 +10,23 @@ import (
 	"go.uber.org/zap"
 )
 
-type MySQLDatabase struct {
+type MainDatabase struct {
 	db *isql.DB
 }
 
 // NewMySQLDatabase creates a new MySQL backend.
-func NewMySQLDatabase(db *sql.DB, log *zap.Logger, lqd, ltd time.Duration) Database {
+func NewMySQLDatabase(db *sql.DB, log *zap.Logger, lqd, ltd time.Duration) *MainDatabase {
 	store := isql.NewDB(db, log, "Deadlock found when trying to get lock", lqd, ltd)
-	return &MySQLDatabase{
+	return &MainDatabase{
 		db: store,
 	}
 }
 
-func (b *MySQLDatabase) Close() error {
+func (b *MainDatabase) Close() error {
 	return b.db.Close()
 }
 
-func (b *MySQLDatabase) Version(_ context.Context) (string, string, error) {
+func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
 	var version string
 	if err := b.db.QueryRow("select version()").Scan(&version); err != nil {
 		return "", "", err

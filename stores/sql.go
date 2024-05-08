@@ -14,10 +14,12 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/sqlite"
+	gmysql "gorm.io/driver/mysql"
+	gsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	glogger "gorm.io/gorm/logger"
 )
@@ -133,7 +135,7 @@ type (
 //	cache: set to shared which is required for in-memory databases
 //	_foreign_keys: enforce foreign_key relations
 func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=1", name))
+	return gsqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=1", name))
 }
 
 // NewSQLiteConnection opens a sqlite db at the given path.
@@ -146,19 +148,19 @@ func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
 //	  should be made configurable and set to TRUNCATE or any of the other options.
 //	  For reference see https://github.com/mattn/go-sqlite3#connection-string.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_cache_size=65536", path))
+	return gsqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_cache_size=65536", path))
 }
 
 // NewMetricsSQLiteConnection opens a sqlite db at the given path similarly to
 // NewSQLiteConnection but with weaker consistency guarantees since it's
 // optimised for recording metrics.
 func NewMetricsSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
+	return gsqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
 }
 
 // NewMySQLConnection creates a connection to a MySQL database.
 func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
-	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
+	return gmysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
 }
 
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
@@ -202,11 +204,11 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	var dbMain sql.Database
 	var bMetrics sql.MetricsDatabase
 	if cfg.Conn.Name() == "sqlite" {
-		dbMain = sql.NewSQLiteDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sql.NewSQLiteDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = sqlite.NewMainDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
-		dbMain = sql.NewMySQLDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sql.NewMySQLDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = mysql.NewMySQLDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = mysql.NewMySQLDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -307,9 +309,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 func isSQLite(db *gorm.DB) bool {
 	switch db.Dialector.(type) {
-	case *sqlite.Dialector:
+	case *gsqlite.Dialector:
 		return true
-	case *mysql.Dialector:
+	case *gmysql.Dialector:
 		return false
 	default:
 		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
