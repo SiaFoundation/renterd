@@ -2,7 +2,7 @@
 DROP TABLE IF EXISTS `directories`;
 CREATE TABLE `directories` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_parent_id` integer,`name` text, CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories`(`id`));
 CREATE INDEX `idx_directories_parent_id` ON `directories`(`db_parent_id`);
-CREATE UNIQUE INDEX `idx_directories_parent_id_name` ON `directories`(`db_parent_id`, `name`);
+CREATE UNIQUE INDEX `idx_directories_name` ON `directories`(`name`);
 
 -- dbObject: add column and constraint
 DROP TABLE IF EXISTS `objects_temp`;

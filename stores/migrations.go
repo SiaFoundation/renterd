@@ -129,27 +129,22 @@ func performMigrations(db *gorm.DB, logger *zap.SugaredLogger) error {
 		},
 	}
 
-	// Create migrator.
-	var m *gormigrate.Gormigrate
-	err := db.Transaction(func(tx *gorm.DB) error {
+	// Run migration
+	return db.Transaction(func(tx *gorm.DB) error {
 		if isSQLite(tx) {
 			if err := tx.Exec("PRAGMA defer_foreign_keys = ON").Error; err != nil {
 				return fmt.Errorf("failed to defer foreign keys: %v", err)
 			}
 		}
-		m = gormigrate.New(tx, gormigrate.DefaultOptions, migrations)
+		m := gormigrate.New(tx, gormigrate.DefaultOptions, migrations)
+
+		// Set init function.
+		m.InitSchema(initSchema(dbIdentifier, logger))
+
+		// Perform migrations.
+		if err := m.Migrate(); err != nil {
+			return fmt.Errorf("failed to migrate: %v", err)
+		}
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("failed to create migrator: %v", err)
-	}
-
-	// Set init function.
-	m.InitSchema(initSchema(dbIdentifier, logger))
-
-	// Perform migrations.
-	if err := m.Migrate(); err != nil {
-		return fmt.Errorf("failed to migrate: %v", err)
-	}
-	return nil
 }

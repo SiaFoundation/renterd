@@ -1278,9 +1278,6 @@ GROUP BY d.id
 			path,          // o.object_id != ?
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
 			utf8.RuneCountInString(path + prefix), path + prefix,
-			path,
-			path,
-			path,
 			utf8.RuneCountInString(path + prefix), path + prefix,
 			bucket,                             // b.name = ?
 			path + "%",                         // o.object_id LIKE ?
@@ -1291,7 +1288,7 @@ GROUP BY d.id
 		objectsQueryParams = []interface{}{
 			path,          // o.object_id != ?
 			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
-			bucket,                             // b.name = ?
+			bucket,
 			path + "%",                         // o.object_id LIKE ?
 			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
 			dirID, // d.db_parent_id = ?
