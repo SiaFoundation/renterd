@@ -320,8 +320,14 @@ CREATE TABLE `directories` (
   `db_parent_id` bigint unsigned,
   `name` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   PRIMARY KEY (`id`),
+<<<<<<< HEAD
   UNIQUE KEY `idx_directories_parent_id_name` (`db_parent_id`, `name`),
   CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
+=======
+  KEY `idx_directories_parent_id` (`parent_id`),
+  UNIQUE KEY `idx_directories_name` (`name`),
+  CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
+>>>>>>> parent of 7ba50647 (stores: only store dir name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbObject
