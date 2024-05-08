@@ -33,11 +33,6 @@ func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
 	return version(b.db)
 }
 
-type migration struct {
-	ID      string
-	Migrate func(tx sql.Tx) error
-}
-
 func (b *MainDatabase) Migrate() error {
 	dbIdentifier := "main"
 	return performMigrations(b.db, dbIdentifier, []migration{

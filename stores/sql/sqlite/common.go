@@ -13,6 +13,11 @@ import (
 //go:embed all:migrations/*
 var migrations embed.FS
 
+type migration struct {
+	ID      string
+	Migrate func(tx sql.Tx) error
+}
+
 func performMigrations(db *sql.DB, identifier string, migrations []migration, l *zap.SugaredLogger) error {
 	// check if the migrations table exists
 	var hasTable bool
