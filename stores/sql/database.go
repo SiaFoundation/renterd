@@ -19,11 +19,13 @@ var _ MetricsDatabase = (*sqlite.MetricsDatabase)(nil)
 type (
 	Database interface {
 		io.Closer
+		Migrate() error
 		Version(ctx context.Context) (string, string, error)
 	}
 
 	MetricsDatabase interface {
 		io.Closer
+		Migrate() error
 		Version(ctx context.Context) (string, string, error)
 	}
 )

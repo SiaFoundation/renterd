@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"os"
@@ -30,9 +29,6 @@ const (
 	// 1000. This is also lower than the mysql default of 65535.
 	maxSQLVars = 32000
 )
-
-//go:embed all:migrations/*
-var migrations embed.FS
 
 var (
 	exprTRUE = gorm.Expr("TRUE")
@@ -204,11 +200,11 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	var dbMain sql.Database
 	var bMetrics sql.MetricsDatabase
 	if cfg.Conn.Name() == "sqlite" {
-		dbMain = sqlite.NewMainDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
-		dbMain = mysql.NewMySQLDatabase(sqlDB, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = mysql.NewMySQLDatabase(sqlDBMetrics, l.Desugar(), cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = mysql.NewMySQLDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = mysql.NewMySQLDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -220,10 +216,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 	// Perform migrations.
 	if cfg.Migrate {
-		if err := performMigrations(db, l); err != nil {
+		if err := dbMain.Migrate(); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
-		}
-		if err := performMetricsMigrations(dbMetrics, l); err != nil {
+		} else if err := bMetrics.Migrate(); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}

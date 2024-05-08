@@ -15,8 +15,8 @@ type MainDatabase struct {
 }
 
 // NewMySQLDatabase creates a new MySQL backend.
-func NewMySQLDatabase(db *sql.DB, log *zap.Logger, lqd, ltd time.Duration) *MainDatabase {
-	store := isql.NewDB(db, log, "Deadlock found when trying to get lock", lqd, ltd)
+func NewMySQLDatabase(db *sql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
+	store := isql.NewDB(db, log.Desugar(), "Deadlock found when trying to get lock", lqd, ltd)
 	return &MainDatabase{
 		db: store,
 	}
@@ -24,6 +24,10 @@ func NewMySQLDatabase(db *sql.DB, log *zap.Logger, lqd, ltd time.Duration) *Main
 
 func (b *MainDatabase) Close() error {
 	return b.db.Close()
+}
+
+func (b *MainDatabase) Migrate() error {
+	panic("implement me")
 }
 
 func (b *MainDatabase) Version(_ context.Context) (string, string, error) {

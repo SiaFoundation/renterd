@@ -2,23 +2,25 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
+	dsql "database/sql"
 	"time"
 
-	isql "go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/internal/sql"
 
 	"go.uber.org/zap"
 )
 
 type MetricsDatabase struct {
-	db *isql.DB
+	log *zap.SugaredLogger
+	db  *sql.DB
 }
 
 // NewSQLiteDatabase creates a new SQLite backend.
-func NewMetricsDatabase(db *sql.DB, log *zap.Logger, lqd, ltd time.Duration) *MetricsDatabase {
-	store := isql.NewDB(db, log, "database is locked", lqd, ltd)
+func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MetricsDatabase {
+	store := sql.NewDB(db, log.Desugar(), "database is locked", lqd, ltd)
 	return &MetricsDatabase{
-		db: store,
+		db:  store,
+		log: log,
 	}
 }
 
@@ -27,9 +29,21 @@ func (b *MetricsDatabase) Close() error {
 }
 
 func (b *MetricsDatabase) Version(_ context.Context) (string, string, error) {
-	var version string
-	if err := b.db.QueryRow("select sqlite_version()").Scan(&version); err != nil {
-		return "", "", err
-	}
-	return "SQLite", version, nil
+	return version(b.db)
+}
+
+func (b *MetricsDatabase) Migrate() error {
+	dbIdentifier := "metrics"
+	return performMigrations(b.db, dbIdentifier, []migration{
+		{
+			ID:      "00001_init",
+			Migrate: func(tx sql.Tx) error { return sql.ErrRunV072 },
+		},
+		{
+			ID: "00001_idx_contracts_fcid_timestamp",
+			Migrate: func(tx sql.Tx) error {
+				return performMigration(tx, dbIdentifier, "00001_idx_contracts_fcid_timestamp", b.log)
+			},
+		},
+	}, b.log)
 }
