@@ -1,4 +1,4 @@
-package sqlite
+package mysql
 
 import (
 	dsql "database/sql"
@@ -20,11 +20,11 @@ type migration struct {
 
 func performMigrations(db *sql.DB, identifier string, migrations []migration, l *zap.SugaredLogger) error {
 	// check if the migrations table exists
-	var hasTable bool
-	if err := db.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name='migrations'").Scan(&hasTable); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+	var dummy string
+	if err := db.QueryRow("SHOW TABLES LIKE 'migrations'").Scan(&dummy); err != nil && !errors.Is(err, dsql.ErrNoRows) {
 		return fmt.Errorf("failed to check for migrations table: %w", err)
 	}
-	if !hasTable {
+	if dummy == "" {
 		// init schema if it doesn't
 		return initSchema(db, identifier, migrations, l)
 	}
@@ -55,12 +55,6 @@ func performMigrations(db *sql.DB, identifier string, migrations []migration, l 
 				return fmt.Errorf("failed to check if migration '%s' was already applied: %w", migration.ID, err)
 			} else if applied {
 				return nil
-			}
-
-			// defer foreign_keys to avoid triggering unwanted CASCADEs or
-			// constraint failures
-			if _, err := tx.Exec("PRAGMA defer_foreign_keys = ON"); err != nil {
-				return fmt.Errorf("failed to defer foreign keys: %w", err)
 			}
 
 			// run migration
@@ -95,7 +89,11 @@ func initSchema(db *sql.DB, identifier string, migrations []migration, logger *z
 		logger.Infof("initializing '%s' schema", identifier)
 
 		// create migrations table if necessary
-		if _, err := tx.Exec("CREATE TABLE IF NOT EXISTS `migrations` (`id` text,PRIMARY KEY (`id`))"); err != nil {
+		if _, err := tx.Exec(`
+			CREATE TABLE migrations (
+				id varchar(255) NOT NULL,
+				PRIMARY KEY (id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;`); err != nil {
 			return fmt.Errorf("failed to create migrations table: %w", err)
 		}
 		// insert SCHEMA_INIT
@@ -119,7 +117,7 @@ func initSchema(db *sql.DB, identifier string, migrations []migration, logger *z
 }
 
 func performMigration(tx sql.Tx, kind, migration string, logger *zap.SugaredLogger) error {
-	logger.Infof("performing %s migration '%s'", kind, migration)
+	logger.Infof("performing %s igration '%s'", kind, migration)
 	if err := execSQLFile(tx, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
 		return err
 	}
@@ -129,8 +127,8 @@ func performMigration(tx sql.Tx, kind, migration string, logger *zap.SugaredLogg
 
 func version(db *sql.DB) (string, string, error) {
 	var version string
-	if err := db.QueryRow("select sqlite_version()").Scan(&version); err != nil {
+	if err := db.QueryRow("select version()").Scan(&version); err != nil {
 		return "", "", err
 	}
-	return "SQLite", version, nil
+	return "MySQL", version, nil
 }

@@ -16,8 +16,8 @@ type MainDatabase struct {
 	log *zap.SugaredLogger
 }
 
-// NewMySQLDatabase creates a new MySQL backend.
-func NewMySQLDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
+// NewMainDatabase creates a new MySQL backend.
+func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
 	store := sql.NewDB(db, log.Desugar(), "Deadlock found when trying to get lock", lqd, ltd)
 	return &MainDatabase{
 		db:  store,

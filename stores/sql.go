@@ -203,8 +203,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		dbMain = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
-		dbMain = mysql.NewMySQLDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = mysql.NewMySQLDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
