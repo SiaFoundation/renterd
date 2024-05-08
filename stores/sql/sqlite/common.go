@@ -31,7 +31,7 @@ func performMigrations(db *sql.DB, identifier string, migrations []migration, l 
 
 	// check if the migrations table is empty
 	var isEmpty bool
-	if err := db.QueryRow("COUNT(*) == 0 FROM migrations").Scan(&isEmpty); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) = 0 FROM migrations").Scan(&isEmpty); err != nil {
 		return fmt.Errorf("failed to count rows in migrations table: %w", err)
 	} else if isEmpty {
 		// table is empty, init schema
