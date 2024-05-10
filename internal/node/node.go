@@ -72,7 +72,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(dir, "chain.db"))
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "chain.db"))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}

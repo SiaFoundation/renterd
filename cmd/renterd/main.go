@@ -446,13 +446,14 @@ func main() {
 		cfg.Log.Database.Level = cfg.Log.Level
 	}
 
-	network, _ := build.Network()
+	network, genesis := build.Network()
 	busCfg := node.BusConfig{
 		Bus:                 cfg.Bus,
 		Database:            cfg.Database,
 		DatabaseLog:         cfg.Log.Database,
 		Logger:              logger,
 		Network:             network,
+		Genesis:             genesis,
 		SlabPruningInterval: time.Hour,
 		RetryTxIntervals: []time.Duration{
 			200 * time.Millisecond,
