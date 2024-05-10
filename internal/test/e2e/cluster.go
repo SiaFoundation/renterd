@@ -442,7 +442,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocksBlocking(busCfg.Network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
 		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
@@ -523,20 +523,38 @@ func (c *TestCluster) MineToRenewWindow() {
 	if cs.BlockHeight >= renewWindowStart {
 		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
-	c.MineBlocksBlocking(renewWindowStart - cs.BlockHeight)
+	c.MineBlocks(renewWindowStart - cs.BlockHeight)
 }
 
-// MineBlocksBlocking mines n blocks and blocks until the cluster is synced.
-func (c *TestCluster) MineBlocksBlocking(n uint64) {
+// MineBlocks mines n blocks
+func (c *TestCluster) MineBlocks(n uint64) {
 	c.tt.Helper()
+	wallet, err := c.Bus.Wallet(context.Background())
+	c.tt.OK(err)
 
-	// mine 'n' blocks
-	c.MineBlocks(n)
+	// If we don't have any hosts in the cluster mine all blocks right away.
+	if len(c.hosts) == 0 {
+		c.tt.OK(c.mineBlocks(wallet.Address, n))
+		c.sync()
+		return
+	}
 
-	// fetch tip
+	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
+	// with hosts by too many blocks.
+	for mined := uint64(0); mined < n; {
+		toMine := n - mined
+		if toMine > 10 {
+			toMine = 10
+		}
+		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
+		mined += toMine
+		c.sync()
+	}
+	c.sync()
+}
+
+func (c *TestCluster) sync() {
 	tip := c.cm.Tip()
-
-	// wait until we've caught up with the chain manager's tip
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
@@ -554,30 +572,6 @@ func (c *TestCluster) MineBlocksBlocking(n uint64) {
 		}
 		return nil
 	})
-}
-
-// MineBlocks mines n blocks
-func (c *TestCluster) MineBlocks(n uint64) {
-	c.tt.Helper()
-	wallet, err := c.Bus.Wallet(context.Background())
-	c.tt.OK(err)
-
-	// If we don't have any hosts in the cluster mine all blocks right away.
-	if len(c.hosts) == 0 {
-		c.tt.OK(c.mineBlocks(wallet.Address, n))
-		return
-	}
-
-	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
-	// with hosts by too many blocks.
-	for mined := uint64(0); mined < n; {
-		toMine := n - mined
-		if toMine > 10 {
-			toMine = 10
-		}
-		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
-		mined += toMine
-	}
 }
 
 func (c *TestCluster) WaitForAccounts() []api.Account {
@@ -715,7 +709,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
 
 	// Mine transaction.
-	c.MineBlocksBlocking(1)
+	c.MineBlocks(1)
 
 	// Announce hosts.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
