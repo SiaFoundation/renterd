@@ -8,7 +8,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	"go.uber.org/zap"
 )
 
 func TestUploaderStopped(t *testing.T) {
@@ -87,7 +86,7 @@ func TestHandleSectorUpload(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(c.uploadErr, c.uploadDur, c.totalDur, c.overdrive, zap.NewNop().Sugar())
+		success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(c.uploadErr, c.uploadDur, c.totalDur, c.overdrive)
 		if success != c.success {
 			t.Fatalf("case %d failed: expected success %v, got %v", i+1, c.success, success)
 		} else if failure != c.failure {

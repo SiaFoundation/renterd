@@ -118,6 +118,7 @@ outer:
 			// execute it
 			start := time.Now()
 			duration, err := u.execute(req)
+			elapsed := time.Since(start)
 			if errors.Is(err, errMaxRevisionReached) {
 				if u.tryRefresh(req.sector.ctx) {
 					u.enqueue(req)
@@ -126,9 +127,16 @@ outer:
 			}
 
 			// track stats
-			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, time.Since(start), req.overdrive, u.logger)
+			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, elapsed, req.overdrive)
 			u.trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS)
 			u.trackConsecutiveFailures(success, failure)
+
+			// debug log
+			if uploadEstimateMS > 0 && !success {
+				u.logger.Debugw("sector upload failure was penalised", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.overdrive, "penalty", uploadEstimateMS, "hk", u.hk)
+			} else if uploadEstimateMS == 0 && err != nil {
+				u.logger.Debugw("sector upload failure was ignored", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.overdrive, "hk", u.hk)
+			}
 
 			// send the response
 			select {
@@ -142,7 +150,7 @@ outer:
 	}
 }
 
-func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool, logger *zap.SugaredLogger) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
+func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
 	// no-op cases
 	if utils.IsErr(uploadErr, errMaxRevisionReached) {
 		return false, false, 0, 0
@@ -169,15 +177,11 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 		if !overdrive || slowDial {
 			failure = overdrive
 			uploadEstimateMS = float64(totalDuration.Milliseconds() * 10)
-			logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", totalDuration.Milliseconds()*10)
-		} else {
-			logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
 		}
 		return false, failure, uploadEstimateMS, 0
 	}
 
 	// in all other cases we want to punish the host for failing the upload
-	logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", time.Hour)
 	return false, true, float64(time.Hour.Milliseconds()), 0
 }
 
