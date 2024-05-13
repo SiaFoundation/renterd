@@ -143,9 +143,12 @@ outer:
 }
 
 func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool, logger *zap.SugaredLogger) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
-	// special case, uploader will refresh and the request will be requeued
-	if errors.Is(uploadErr, errMaxRevisionReached) {
-		logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
+	// no-op cases
+	if utils.IsErr(uploadErr, errMaxRevisionReached) {
+		return false, false, 0, 0
+	} else if utils.IsErr(uploadErr, errFailedToCreatePayment) {
+		return false, false, 0, 0
+	} else if utils.IsErr(uploadErr, context.Canceled) {
 		return false, false, 0, 0
 	}
 
@@ -161,8 +164,8 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	// upload failed because the sector was already uploaded by another host, in
 	// this case we want to punish the host for being too slow but only when we
 	// weren't overdriving or when it took too long to dial
-	if errors.Is(uploadErr, errSectorUploadFinished) {
-		slowDial := errors.Is(uploadErr, errDialTransport) && totalDuration > time.Second
+	if utils.IsErr(uploadErr, errSectorUploadFinished) {
+		slowDial := utils.IsErr(uploadErr, errDialTransport) && totalDuration > 500*time.Millisecond
 		if !overdrive || slowDial {
 			failure = overdrive
 			uploadEstimateMS = float64(totalDuration.Milliseconds() * 10)

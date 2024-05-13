@@ -67,6 +67,14 @@ func TestHandleSectorUpload(t *testing.T) {
 		{errMaxRevisionReached, 0, ms, regular, false, false, 0, 0},
 		{errMaxRevisionReached, 0, ms, overdrive, false, false, 0, 0},
 
+		// payment failure case
+		{errFailedToCreatePayment, 0, ms, regular, false, false, 0, 0},
+		{errFailedToCreatePayment, 0, ms, overdrive, false, false, 0, 0},
+
+		// context canceled case
+		{context.Canceled, 0, ms, regular, false, false, 0, 0},
+		{context.Canceled, 0, ms, overdrive, false, false, 0, 0},
+
 		// sector already uploaded case
 		{errSectorUploadFinished, ms, ms, regular, false, false, 10, 0},
 		{errSectorUploadFinished, ms, ms, overdrive, false, false, 0, 0},
