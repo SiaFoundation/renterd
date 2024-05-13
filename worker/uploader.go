@@ -258,7 +258,11 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	// wrap cause
 	defer func() {
 		if cause := context.Cause(req.sector.ctx); cause != nil && !utils.IsErr(err, cause) {
-			err = fmt.Errorf("%w; %w", cause, err)
+			if err != nil {
+				err = fmt.Errorf("%w; %w", cause, err)
+			} else {
+				err = cause
+			}
 		}
 	}()
 
