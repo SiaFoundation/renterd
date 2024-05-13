@@ -25,6 +25,7 @@ require (
 	golang.org/x/crypto v0.23.0
 	golang.org/x/sys v0.20.0
 	golang.org/x/term v0.20.0
+	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.6
 	gorm.io/driver/sqlite v1.5.5
