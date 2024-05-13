@@ -154,8 +154,6 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	// no-op cases
 	if utils.IsErr(uploadErr, errMaxRevisionReached) {
 		return false, false, 0, 0
-	} else if utils.IsErr(uploadErr, errFailedToCreatePayment) {
-		return false, false, 0, 0
 	} else if utils.IsErr(uploadErr, context.Canceled) {
 		return false, false, 0, 0
 	}
@@ -167,6 +165,13 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 			ms = 1 // avoid division by zero
 		}
 		return true, false, float64(ms), float64(rhpv2.SectorSize / ms)
+	}
+
+	// upload failed because we weren't able to create a payment, in this case
+	// we want to punish the host but only to ensure we stop using it, meaning
+	// we don't increment consecutive failures
+	if utils.IsErr(uploadErr, errFailedToCreatePayment) {
+		return false, false, float64(time.Hour.Milliseconds()), 0
 	}
 
 	// upload failed because the sector was already uploaded by another host, in

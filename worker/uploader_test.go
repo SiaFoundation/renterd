@@ -66,10 +66,6 @@ func TestHandleSectorUpload(t *testing.T) {
 		{errMaxRevisionReached, 0, ms, regular, false, false, 0, 0},
 		{errMaxRevisionReached, 0, ms, overdrive, false, false, 0, 0},
 
-		// payment failure case
-		{errFailedToCreatePayment, 0, ms, regular, false, false, 0, 0},
-		{errFailedToCreatePayment, 0, ms, overdrive, false, false, 0, 0},
-
 		// context canceled case
 		{context.Canceled, 0, ms, regular, false, false, 0, 0},
 		{context.Canceled, 0, ms, overdrive, false, false, 0, 0},
@@ -79,6 +75,10 @@ func TestHandleSectorUpload(t *testing.T) {
 		{errSectorUploadFinished, ms, ms, overdrive, false, false, 0, 0},
 		{errSectorUploadFinishedAndDial, ms, ms, overdrive, false, false, 0, 0},
 		{errSectorUploadFinishedAndDial, ms, 1001 * ms, overdrive, false, true, 10010, 0},
+
+		// payment failure case
+		{errFailedToCreatePayment, 0, ms, regular, false, false, 3600000, 0},
+		{errFailedToCreatePayment, 0, ms, overdrive, false, false, 3600000, 0},
 
 		// host failure
 		{errHostError, ms, ms, regular, false, true, 3600000, 0},
