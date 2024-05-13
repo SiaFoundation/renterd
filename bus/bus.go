@@ -33,8 +33,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// blockInterval is the expected wall clock time between consecutive blocks.
-const blockInterval = 10 * time.Minute
+// maxSyncTime is the maximum time since the last block before we consider
+// ourselves unsynced.
+const maxSyncTime = time.Hour
 
 // Client re-exports the client from the client package.
 type Client struct {
@@ -1788,7 +1789,7 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 
 	var synced bool
 	block, found := b.cm.Block(index.ID)
-	if found && time.Since(block.Timestamp) < 2*blockInterval {
+	if found && time.Since(block.Timestamp) <= maxSyncTime {
 		synced = true
 	}
 
