@@ -18,6 +18,13 @@ const (
 	maxRetryAttempts = 30  // 30 attempts
 	factor           = 1.8 // factor ^ retryAttempts = backoff time in milliseconds
 	maxBackoff       = 15 * time.Second
+
+	SCHEMA_INIT = "SCHEMA_INIT"
+)
+
+var (
+	ErrRunV072               = errors.New("can't upgrade to >=v1.0.0 from your current version - please upgrade to v0.7.2 first (https://github.com/SiaFoundation/renterd/releases/tag/v0.7.2)")
+	ErrMySQLNoSuperPrivilege = errors.New("You do not have the SUPER privilege and binary logging is enabled")
 )
 
 type (
