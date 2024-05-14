@@ -641,7 +641,7 @@ func (s *SQLStore) findPeriods(ctx context.Context, table string, dst interface{
 		Error
 }
 
-func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
+func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, _ api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
 	err = s.findPeriods(ctx, dbWalletMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)

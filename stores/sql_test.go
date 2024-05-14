@@ -28,10 +28,9 @@ import (
 )
 
 const (
-	testPersistInterval = time.Second
-	testContractSet     = "test"
-	testMimeType        = "application/octet-stream"
-	testETag            = "d34db33f"
+	testContractSet = "test"
+	testMimeType    = "application/octet-stream"
+	testETag        = "d34db33f"
 )
 
 var (
@@ -128,7 +127,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		t.Fatal("failed to create db connections", err)
 	}
 
-	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
 	sqlStore, err := NewSQLStore(Config{
 		Conn:                          conn,
@@ -136,9 +134,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		Alerts:                        alerts,
 		PartialSlabDir:                cfg.dir,
 		Migrate:                       !cfg.skipMigrate,
-		AnnouncementMaxAge:            time.Hour,
-		PersistInterval:               time.Second,
-		WalletAddress:                 walletAddrs,
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop().Sugar(),
 		GormLogger:                    newTestLogger(),

@@ -89,6 +89,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
+	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -615,6 +616,7 @@ func (c *Contractor) runContractChecks(ctx *mCtx, hostChecks map[types.PublicKey
 			"toArchive", len(toArchive),
 			"toRefresh", len(toRefresh),
 			"toRenew", len(toRenew),
+			"bh", bh,
 		)
 	}()
 
@@ -650,7 +652,7 @@ LOOP:
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
-		} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > contractConfirmationDeadline {
+		} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > ContractConfirmationDeadline {
 			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {

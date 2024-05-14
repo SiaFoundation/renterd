@@ -12,8 +12,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/chain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -429,7 +429,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 	if err != nil {
 		return api.Host{}, err
 	} else if len(hosts) == 0 {
-		return api.Host{}, api.ErrHostNotFound
+		return api.Host{}, fmt.Errorf("%w %v", api.ErrHostNotFound, hostKey)
 	} else {
 		return hosts[0], nil
 	}
@@ -458,7 +458,7 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 			Select("id").
 			Take(&hID).
 			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrHostNotFound
+			return fmt.Errorf("%w %v", api.ErrHostNotFound, hk)
 		} else if err != nil {
 			return err
 		}
@@ -1085,15 +1085,13 @@ func (ss *SQLStore) isBlocked(h dbHost) (blocked bool) {
 	return
 }
 
-func updateChainIndex(tx *gorm.DB, newTip types.ChainIndex) error {
-	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-		Model: Model{
-			ID: consensusInfoID,
-		},
-	}).Updates(map[string]interface{}{
-		"height":   newTip.Height,
-		"block_id": hash256(newTip.ID),
-	}).Error
+func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Model(&dbHost{}).
+			Where("public_key", publicKey(hk)).
+			Update("lost_sectors", 0).
+			Error
+	})
 }
 
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
@@ -1116,83 +1114,6 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 		return err
 	}
 	return tx.Create(&hosts).Error
-}
-
-func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpdate) error {
-	// isUpdatedRevision indicates whether the given revision number is greater
-	// than the one currently set on the contract
-	isUpdatedRevision := func(currRevStr string) bool {
-		var currRev uint64
-		_, _ = fmt.Sscan(currRevStr, &currRev)
-		return rev.number > currRev
-	}
-
-	// update either active or archived contract
-	var update interface{}
-	var c dbContract
-	if err := db.
-		Model(&dbContract{}).
-		Where("fcid", fileContractID(fcid)).
-		Take(&c).Error; err == nil {
-		c.RevisionHeight = rev.height
-		if isUpdatedRevision(c.RevisionNumber) {
-			c.RevisionNumber = fmt.Sprint(rev.number)
-			c.Size = rev.size
-		}
-		update = c
-	} else if err == gorm.ErrRecordNotFound {
-		// try archived contracts
-		var ac dbArchivedContract
-		if err := db.
-			Model(&dbArchivedContract{}).
-			Where("fcid", fileContractID(fcid)).
-			Take(&ac).Error; err == nil {
-			ac.RevisionHeight = rev.height
-			if isUpdatedRevision(ac.RevisionNumber) {
-				ac.RevisionNumber = fmt.Sprint(rev.number)
-				ac.Size = rev.size
-			}
-			update = ac
-		}
-	}
-	if update == nil {
-		return nil
-	}
-	return db.Save(update).Error
-}
-
-func updateContractState(db *gorm.DB, fcid types.FileContractID, cs contractState) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"state": cs,
-	})
-}
-
-func markFailedContracts(db *gorm.DB, height uint64) error {
-	if err := db.Model(&dbContract{}).
-		Where("state = ? AND ? > window_end", contractStateActive, height).
-		Update("state", contractStateFailed).Error; err != nil {
-		return fmt.Errorf("failed to mark failed contracts: %w", err)
-	}
-	return nil
-}
-
-func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"proof_height": blockHeight,
-	})
-}
-
-func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
-	err1 := tx.Model(&dbContract{}).
-		Where("fcid", fileContractID(fcid)).
-		Updates(updates).Error
-	err2 := tx.Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid)).
-		Updates(updates).Error
-	if err1 != nil || err2 != nil {
-		return fmt.Errorf("%s; %s", err1, err2)
-	}
-	return nil
 }
 
 func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) {
@@ -1245,13 +1166,4 @@ func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEnt
 		}
 	}
 	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
-}
-
-func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Model(&dbHost{}).
-			Where("public_key", publicKey(hk)).
-			Update("lost_sectors", 0).
-			Error
-	})
 }

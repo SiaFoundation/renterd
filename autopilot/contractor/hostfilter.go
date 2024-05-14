@@ -14,6 +14,10 @@ import (
 )
 
 const (
+	// ContractConfirmationDeadline is the number of blocks since its start
+	// height we wait for a contract to appear on chain.
+	ContractConfirmationDeadline = 18
+
 	// minContractFundUploadThreshold is the percentage of contract funds
 	// remaining at which the contract gets marked as not good for upload
 	minContractFundUploadThreshold = float64(0.05) // 5%
@@ -23,10 +27,6 @@ const (
 	// acquirable storage below which the contract is considered to be
 	// out-of-collateral.
 	minContractCollateralDenominator = 20 // 5%
-
-	// contractConfirmationDeadline is the number of blocks since its start
-	// height we wait for a contract to appear on chain.
-	contractConfirmationDeadline = 18
 )
 
 var (

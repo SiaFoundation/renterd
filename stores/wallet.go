@@ -1,13 +1,17 @@
 package stores
 
 import (
+	"errors"
 	"math"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+)
+
+var (
+	_ wallet.SingleAddressStore = (*SQLStore)(nil)
 )
 
 type (
@@ -38,20 +42,6 @@ type (
 		Value          currency
 		Address        hash256 `gorm:"size:32"`
 		MaturityHeight uint64  `gorm:"index:idx_wallet_outputs_maturity_height"`
-
-		// chain index
-		Height  uint64  `gorm:"index:idx_wallet_outputs_height"`
-		BlockID hash256 `gorm:"size:32"`
-	}
-
-	outputChange struct {
-		addition bool
-		se       dbWalletOutput
-	}
-
-	eventChange struct {
-		addition bool
-		event    dbWalletEvent
 	}
 )
 
@@ -72,46 +62,43 @@ func (e dbWalletEvent) Index() types.ChainIndex {
 	}
 }
 
-func (se dbWalletOutput) Index() types.ChainIndex {
-	return types.ChainIndex{
-		Height: se.Height,
-		ID:     types.BlockID(se.BlockID),
-	}
-}
-
 // Tip returns the consensus change ID and block height of the last wallet
 // change.
 func (s *SQLStore) Tip() (types.ChainIndex, error) {
-	return s.cs.Tip(), nil
+	var cs dbConsensusInfo
+	if err := s.db.
+		Model(&dbConsensusInfo{}).
+		First(&cs).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return types.ChainIndex{}, nil
+	} else if err != nil {
+		return types.ChainIndex{}, err
+	}
+	return types.ChainIndex{
+		Height: cs.Height,
+		ID:     types.BlockID(cs.BlockID),
+	}, nil
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
-func (s *SQLStore) UnspentSiacoinElements() ([]wallet.SiacoinElement, error) {
+func (s *SQLStore) UnspentSiacoinElements() ([]types.SiacoinElement, error) {
 	var dbElems []dbWalletOutput
 	if err := s.db.Find(&dbElems).Error; err != nil {
 		return nil, err
 	}
 
-	elements := make([]wallet.SiacoinElement, len(dbElems))
+	elements := make([]types.SiacoinElement, len(dbElems))
 	for i, el := range dbElems {
-		elements[i] = wallet.SiacoinElement{
-			SiacoinElement: types.SiacoinElement{
-				StateElement: types.StateElement{
-					ID:          types.Hash256(el.OutputID),
-					LeafIndex:   el.LeafIndex,
-					MerkleProof: el.MerkleProof.proof,
-				},
-				MaturityHeight: el.MaturityHeight,
-				SiacoinOutput: types.SiacoinOutput{
-					Address: types.Address(el.Address),
-					Value:   types.Currency(el.Value),
-				},
+		elements[i] = types.SiacoinElement{
+			StateElement: types.StateElement{
+				ID:          types.Hash256(el.OutputID),
+				LeafIndex:   el.LeafIndex,
+				MerkleProof: el.MerkleProof.proof,
 			},
-			Index: types.ChainIndex{
-				Height: el.Height,
-				ID:     types.BlockID(el.BlockID),
+			MaturityHeight: el.MaturityHeight,
+			SiacoinOutput: types.SiacoinOutput{
+				Address: types.Address(el.Address),
+				Value:   types.Currency(el.Value),
 			},
-			// TODO: Index missing
 		}
 	}
 	return elements, nil
@@ -158,32 +145,4 @@ func (s *SQLStore) WalletEventCount() (uint64, error) {
 		return 0, err
 	}
 	return uint64(count), nil
-}
-
-func applyUnappliedOutputAdditions(tx *gorm.DB, sco dbWalletOutput) error {
-	return tx.
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-			Columns:   []clause.Column{{Name: "output_id"}},
-		}).Create(&sco).Error
-}
-
-func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
-	return tx.Where("output_id", oid).
-		Delete(&dbWalletOutput{}).
-		Error
-}
-
-func applyUnappliedEventAdditions(tx *gorm.DB, event dbWalletEvent) error {
-	return tx.
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-			Columns:   []clause.Column{{Name: "event_id"}},
-		}).Create(&event).Error
-}
-
-func applyUnappliedEventRemovals(tx *gorm.DB, eventID hash256) error {
-	return tx.Where("event_id", eventID).
-		Delete(&dbWalletEvent{}).
-		Error
 }

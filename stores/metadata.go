@@ -45,19 +45,19 @@ const (
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
-var (
-	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
-	errShardRootChanged      = errors.New("shard root changed")
-
-	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
-)
-
 const (
 	contractStateInvalid contractState = iota
 	contractStatePending
 	contractStateActive
 	contractStateComplete
 	contractStateFailed
+)
+
+var (
+	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	errShardRootChanged      = errors.New("shard root changed")
+
+	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
 type (
@@ -724,7 +724,6 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 		return
 	}
 
-	s.cs.addKnownContract(types.FileContractID(added.FCID))
 	return added.convert(), nil
 }
 
@@ -846,7 +845,6 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
-		s.cs.addKnownContract(c.ID())
 		renewed = newContract
 		return nil
 	}); err != nil {
@@ -1435,14 +1433,17 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			}
 			updates["revision_number"] = latestValues[fcid].revision
 			updates["size"] = latestValues[fcid].size
-			return tx.Model(&contract).Updates(updates).Error
+			err = tx.Model(&contract).Updates(updates).Error
+			return err
 		})
 		if err != nil {
 			return err
 		}
 	}
-	if err := s.RecordContractMetric(ctx, metrics...); err != nil {
-		s.logger.Errorw("failed to record contract metrics", zap.Error(err))
+	if len(metrics) > 0 {
+		if err := s.RecordContractMetric(ctx, metrics...); err != nil {
+			s.logger.Errorw("failed to record contract metrics", zap.Error(err))
+		}
 	}
 	return nil
 }

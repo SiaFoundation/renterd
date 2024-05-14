@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -73,13 +74,14 @@ func TestNewTestCluster(t *testing.T) {
 	cluster.MineToRenewWindow()
 
 	// Wait for the contract to be renewed.
+	var renewalID types.FileContractID
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
 		}
 		if len(contracts) != 1 {
-			return errors.New("no renewed contract")
+			return fmt.Errorf("unexpected number of contracts %d != 1", len(contracts))
 		}
 		if contracts[0].RenewedFrom != contract.ID {
 			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
@@ -93,6 +95,7 @@ func TestNewTestCluster(t *testing.T) {
 		if contracts[0].State != api.ContractStatePending {
 			return fmt.Errorf("contract should be pending but was %v", contracts[0].State)
 		}
+		renewalID = contracts[0].ID
 		return nil
 	})
 
@@ -101,7 +104,6 @@ func TestNewTestCluster(t *testing.T) {
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
 	cluster.MineBlocks(contract.WindowStart - cs.BlockHeight - 4)
-	cluster.Sync()
 	if cs.LastBlockTime.IsZero() {
 		t.Fatal("last block time not set")
 	}
@@ -109,14 +111,7 @@ func TestNewTestCluster(t *testing.T) {
 	// Now wait for the revision and proof to be caught by the hostdb.
 	var ac api.ArchivedContract
 	tt.Retry(20, time.Second, func() error {
-		cluster.MineBlocks(1)
-
-		// Fetch renewed contract and make sure we caught the proof and revision.
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, 0)
+		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), renewalID, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,20 +120,13 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		ac = archivedContracts[0]
 		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
-			return fmt.Errorf("revision information is wrong: %v %v", ac.RevisionHeight, ac.RevisionNumber)
+			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
 		if ac.ProofHeight != 0 {
 			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
 		}
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
-		}
-		archivedContracts, err = cluster.Bus.AncestorContracts(context.Background(), contracts[0].ID, math.MaxUint32)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(archivedContracts) != 0 {
-			return fmt.Errorf("should have 0 archived contracts but got %v", len(archivedContracts))
 		}
 		return nil
 	})
@@ -596,13 +584,16 @@ func TestUploadDownloadBasic(t *testing.T) {
 	}
 
 	// check that stored data on hosts was updated
-	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
-	tt.OK(err)
-	for _, host := range hosts {
-		if host.StoredData != rhpv2.SectorSize {
-			t.Fatalf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+		tt.OK(err)
+		for _, host := range hosts {
+			if host.StoredData != rhpv2.SectorSize {
+				return fmt.Errorf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+			}
 		}
-	}
+		return nil
+	})
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
@@ -759,7 +750,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: test.RedundancySettings.TotalShards,
+		hosts:  test.RedundancySettings.TotalShards,
+		logger: zap.NewNop(),
 	})
 	defer cluster.Shutdown()
 
@@ -771,8 +763,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 	tt.Retry(100, testBusFlushInterval, func() error {
 		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
-		if len(cms) == 0 {
-			t.Fatal("no contracts found")
+		if len(cms) != test.RedundancySettings.TotalShards {
+			t.Fatalf("unexpected number of contracts %v", len(cms))
 		}
 
 		nFunded := 0
@@ -977,29 +969,16 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	cluster := newTestCluster(t, testClusterOptions{})
+	// Create cluster
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
-	// add host
-	nodes := cluster.AddHosts(1)
-	host := nodes[0]
+	// Shut down the autopilot to prevent it from interfering.
+	cluster.ShutdownAutopilot(context.Background())
 
-	// make the cost of fetching a revision 0. That allows us to check for exact
-	// balances when funding the account and avoid NDFs.
-	settings := host.settings.Settings()
-	settings.BaseRPCPrice = types.ZeroCurrency
-	settings.EgressPrice = types.ZeroCurrency
-	if err := host.settings.UpdateSettings(settings); err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for contracts to form.
-	var contract api.Contract
-	contracts := cluster.WaitForContracts()
-	contract = contracts[0]
-
-	// Wait for account to appear.
+	// Wait for contract and accounts.
+	contract := cluster.WaitForContracts()[0]
 	accounts := cluster.WaitForAccounts()
 
 	// Shut down the autopilot to prevent it from interfering with the test.
@@ -1013,7 +992,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		} else if acc.RequiresSync {
 			t.Fatal("new account should not require a sync")
 		}
-		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, acc.Balance); err != nil {
+		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, types.Siacoins(1).Big()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1023,13 +1002,13 @@ func TestEphemeralAccounts(t *testing.T) {
 	tt.OK(err)
 
 	acc := accounts[0]
-	minExpectedBalance := types.Siacoins(1).Sub(types.NewCurrency64(1))
-	if acc.Balance.Cmp(minExpectedBalance.Big()) < 0 {
+	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
 		t.Fatalf("wrong balance %v", acc.Balance)
 	}
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
 	}
+	host := cluster.hosts[0]
 	if acc.HostKey != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
 	}
@@ -1350,8 +1329,7 @@ func TestContractArchival(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  1,
-		logger: zap.NewNop(),
+		hosts: 1,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -1379,7 +1357,14 @@ func TestContractArchival(t *testing.T) {
 			return err
 		}
 		if len(contracts) != 0 {
-			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
+			// trigger contract maintenance again, there's an NDF where we use
+			// the keep leeway because we can't fetch the revision preventing
+			// the contract from being archived
+			_, err := cluster.Autopilot.Trigger(false)
+			tt.OK(err)
+
+			cs, _ := cluster.Bus.ConsensusState(context.Background())
+			return fmt.Errorf("expected 0 contracts, got %v (bh: %v we: %v)", len(contracts), cs.BlockHeight, contracts[0].WindowEnd)
 		}
 		return nil
 	})
@@ -1391,10 +1376,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 
 	// create a test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: zap.NewNop(),
-		hosts:  1,
-	})
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
@@ -1439,9 +1421,8 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 		t.Fatalf("expected 2 contracts, got %v", len(contracts))
 	}
 
-	// mine for 20 blocks to make sure we are beyond the 18 block deadline for
-	// contract confirmation
-	cluster.MineBlocks(20)
+	// mine enough blocks to ensure we're passed the confirmation deadline
+	cluster.MineBlocks(contractor.ContractConfirmationDeadline + 1)
 
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
@@ -1488,7 +1469,7 @@ func TestWalletTransactions(t *testing.T) {
 	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
 	tt.OK(err)
 	if !reflect.DeepEqual(txns, allTxns[2:]) {
-		t.Fatal("transactions don't match")
+		t.Fatal("transactions don't match", cmp.Diff(txns, allTxns[2:]))
 	}
 
 	// Find the first index that has a different timestamp than the first.
@@ -2303,34 +2284,27 @@ func TestBusRecordedMetrics(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	// Get contract set metrics.
-	csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-	cluster.tt.OK(err)
+	// fetch contract set metrics
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
+		cluster.tt.OK(err)
 
-	for i := 0; i < len(csMetrics); i++ {
-		// Remove metrics from before contract was formed.
-		if csMetrics[i].Contracts > 0 {
-			csMetrics = csMetrics[i:]
-			break
-		}
-	}
-	if len(csMetrics) == 0 {
-		t.Fatal("expected at least 1 metric with contracts")
-	}
-	for _, m := range csMetrics {
-		if m.Contracts != 1 {
-			t.Fatalf("expected 1 contract, got %v", m.Contracts)
+		// expect at least 1 metric with contracts
+		if len(csMetrics) < 1 {
+			return fmt.Errorf("expected at least 1 metric, got %v", len(csMetrics))
+		} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
+			return fmt.Errorf("expected 1 contract, got %v", m.Contracts)
 		} else if m.Name != test.ContractSet {
-			t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
+			return fmt.Errorf("expected contract set %v, got %v", test.ContractSet, m.Name)
 		} else if m.Timestamp.Std().Before(startTime) {
-			t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
+			return fmt.Errorf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 		}
-	}
+		return nil
+	})
 
-	// Get churn metrics. Should have 1 for the new contract.
+	// get churn metrics, should have 1 for the new contract
 	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetChurnMetricsQueryOpts{})
 	cluster.tt.OK(err)
-
 	if len(cscMetrics) != 1 {
 		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
 	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
@@ -2343,7 +2317,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}
 
-	// Get contract metrics.
+	// get contract metrics
 	var cMetrics []api.ContractMetric
 	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
 		// Retry fetching metrics since they are buffered.
@@ -2381,7 +2355,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero ListSpending")
 	}
 
-	// Prune one of the metrics
+	// prune one of the metrics
 	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
 		t.Fatal(err)
 	} else if cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {

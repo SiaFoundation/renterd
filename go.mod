@@ -13,10 +13,10 @@ require (
 	github.com/minio/minio-go/v7 v7.0.70
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.2
-	go.sia.tech/coreutils v0.0.4-0.20240313143809-01b5d444a630
+	go.sia.tech/core v0.2.3
+	go.sia.tech/coreutils v0.0.4-0.20240502154058-5df7ad9c0b7c
 	go.sia.tech/gofakes3 v0.0.3
-	go.sia.tech/hostd v1.0.4
+	go.sia.tech/hostd v1.1.0-beta.1.0.20240507093050-bc2a34c93355
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
@@ -35,8 +35,8 @@ require (
 
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.51.21 // indirect
-	github.com/cloudflare/cloudflare-go v0.91.0 // indirect
+	github.com/aws/aws-sdk-go v1.52.3 // indirect
+	github.com/cloudflare/cloudflare-go v0.94.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-sql-driver/mysql v1.7.1 // indirect
@@ -59,7 +59,7 @@ require (
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
-	github.com/shopspring/decimal v1.3.1 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	gitlab.com/NebulousLabs/bolt v1.4.4 // indirect
 	gitlab.com/NebulousLabs/demotemutex v0.0.0-20151003192217-235395f71c40 // indirect
 	gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500 // indirect
@@ -81,5 +81,5 @@ require (
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.20.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	nhooyr.io/websocket v1.8.10 // indirect
+	nhooyr.io/websocket v1.8.11 // indirect
 )

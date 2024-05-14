@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
 )
@@ -24,6 +25,7 @@ var (
 
 type chainManager struct {
 	cs      modules.ConsensusSet
+	tp      bus.TransactionPool
 	network *consensus.Network
 
 	close  chan struct{}
@@ -114,6 +116,11 @@ func (m *chainManager) AcceptBlock(b types.Block) error {
 	return m.cs.AcceptBlock(sb)
 }
 
+// PoolTransactions returns all transactions in the transaction pool
+func (m *chainManager) PoolTransactions() []types.Transaction {
+	return m.tp.Transactions()
+}
+
 // Subscribe subscribes to the consensus set.
 func (m *chainManager) Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error {
 	if err := m.cs.ConsensusSetSubscribe(s, ccID, cancel); err != nil {
@@ -130,7 +137,7 @@ func synced(timestamp stypes.Timestamp) bool {
 }
 
 // NewManager creates a new chain manager.
-func NewChainManager(cs modules.ConsensusSet, network *consensus.Network) (*chainManager, error) {
+func NewChainManager(cs modules.ConsensusSet, tp bus.TransactionPool, network *consensus.Network) (*chainManager, error) {
 	height := cs.Height()
 	block, ok := cs.BlockAtHeight(height)
 	if !ok {
@@ -139,6 +146,7 @@ func NewChainManager(cs modules.ConsensusSet, network *consensus.Network) (*chai
 
 	m := &chainManager{
 		cs:      cs,
+		tp:      tp,
 		network: network,
 		tip: consensus.State{
 			Network: network,

@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -22,9 +21,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.ErrorLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 
 	cfg := test.AutopilotConfig.Contracts

@@ -259,7 +259,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(newTestAnnouncement(hk, "address"))
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestSQLContractStore(t *testing.T) {
 		Size:          c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
-		t.Fatal("contract mismatch")
+		t.Fatal("contract mismatch", cmp.Diff(returned, expected))
 	}
 
 	// Look it up again.
@@ -550,11 +550,11 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	err = ss.insertTestAnnouncement(newTestAnnouncement(hk, "address"))
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.insertTestAnnouncement(newTestAnnouncement(hk2, "address2"))
+	_, err = ss.announceHost(hk2, "address2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,6 +856,14 @@ func TestAncestorsContracts(t *testing.T) {
 		}) {
 			t.Fatal("wrong contract", i, contracts[i])
 		}
+	}
+
+	// Fetch the ancestors with startHeight >= 3. That should return 0 contracts.
+	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 3)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatalf("should have 0 contracts but got %v", len(contracts))
 	}
 }
 
@@ -2303,7 +2311,7 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(newTestAnnouncement(hk, "address"))
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}

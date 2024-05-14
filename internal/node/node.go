@@ -16,12 +16,12 @@ import (
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/webhooks"
@@ -45,12 +45,15 @@ type Bus interface {
 
 type BusConfig struct {
 	config.Bus
-	Database            config.Database
-	DatabaseLog         config.DatabaseLog
-	Genesis             types.Block
-	Logger              *zap.Logger
-	Network             *consensus.Network
-	SlabPruningInterval time.Duration
+	Database                    config.Database
+	DatabaseLog                 config.DatabaseLog
+	Genesis                     types.Block
+	Logger                      *zap.Logger
+	Network                     *consensus.Network
+	RetryTxIntervals            []time.Duration
+	SlabPruningInterval         time.Duration
+	SyncerSyncInterval          time.Duration
+	SyncerPeerDiscoveryInterval time.Duration
 }
 
 type AutopilotConfig struct {
@@ -63,15 +66,15 @@ type (
 	ShutdownFn = func(context.Context) error
 )
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, *chain.Subscriber, error) {
 	// create consensus directory
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(dir, "chain.db"))
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "chain.db"))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}
 
 	// create database connections
@@ -94,7 +97,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		// create database directory
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 
 		// create SQLite connections
@@ -113,29 +116,25 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 
 	alertsMgr := alerts.NewManager()
-	walletAddr := types.StandardUnlockHash(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
 	sqlStore, err := stores.NewSQLStore(stores.Config{
 		Conn:                          dbConn,
 		ConnMetrics:                   dbMetricsConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
 		PartialSlabDir:                sqlStoreDir,
 		Migrate:                       true,
-		AnnouncementMaxAge:            announcementMaxAge,
-		PersistInterval:               cfg.PersistInterval,
-		WalletAddress:                 walletAddr,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        logger.Sugar(),
 		GormLogger:                    dbLogger,
-		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
+		RetryTransactionIntervals:     cfg.RetryTxIntervals,
+		WalletAddress:                 types.StandardUnlockHash(seed.PublicKey()),
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	wh, err := webhooks.NewManager(logger.Named("webhooks").Sugar(), sqlStore)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// Hook up webhooks to alerts.
@@ -144,20 +143,20 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	// create chain manager
 	store, state, err := chain.NewDBStore(bdb, cfg.Network, cfg.Genesis)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	cm := chain.NewManager(store, state)
 
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create syncer
 	l, err := net.Listen("tcp", cfg.GatewayAddr)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	syncerAddr := l.Addr().String()
 
@@ -172,17 +171,30 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}
-	s := syncer.New(l, cm, sqlStore, header, syncer.WithSyncInterval(100*time.Millisecond), syncer.WithLogger(logger.Named("syncer")))
 
-	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	opts := []syncer.Option{syncer.WithLogger(logger.Named("syncer"))}
+	if cfg.SyncerSyncInterval > 0 {
+		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
+	}
+	if cfg.SyncerPeerDiscoveryInterval > 0 {
+		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
+	}
+	s := syncer.New(l, cm, sqlStore, header, opts...)
+
+	b, err := bus.New(alertsMgr, wh, cm, sqlStore, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+
+	cs, err := chain.NewSubscriber(cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
 	// bootstrap the syncer
 	if cfg.Bootstrap {
 		if cfg.Network == nil {
-			return nil, nil, nil, errors.New("cannot bootstrap without a network")
+			return nil, nil, nil, nil, errors.New("cannot bootstrap without a network")
 		}
 
 		var bootstrapPeers []string
@@ -194,12 +206,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		case "anagami":
 			bootstrapPeers = syncer.AnagamiBootstrapPeers
 		default:
-			return nil, nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", cfg.Network.Name)
+			return nil, nil, nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", cfg.Network.Name)
 		}
 
 		for _, addr := range bootstrapPeers {
 			if err := sqlStore.AddPeer(addr); err != nil {
-				return nil, nil, nil, fmt.Errorf("%w: failed to add bootstrap peer '%s'", err, addr)
+				return nil, nil, nil, nil, fmt.Errorf("%w: failed to add bootstrap peer '%s'", err, addr)
 			}
 		}
 	}
@@ -207,29 +219,24 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	// start the syncer
 	go s.Run()
 
-	// fetch chain index
-	ci, err := sqlStore.ChainIndex()
+	// start the subscriber
+	unsubscribeFn, err := cs.Run()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: failed to fetch chain index", err)
-	}
-
-	// subscribe the store to the chain manager
-	err = cm.AddSubscriber(sqlStore, ci)
-	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
+		unsubscribeFn()
 		return errors.Join(
 			l.Close(),
+			cs.Close(),
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-			store.Close(),
 			bdb.Close(),
 		)
 	}
-	return b.Handler(), shutdownFn, cm, nil
+	return b.Handler(), shutdownFn, cm, cs, nil
 }
 
 func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, ShutdownFn, error) {

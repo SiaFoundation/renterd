@@ -19,12 +19,12 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
@@ -42,8 +42,7 @@ import (
 )
 
 const (
-	testBusFlushInterval   = 100 * time.Millisecond
-	testBusPersistInterval = 2 * time.Second
+	testBusFlushInterval = 100 * time.Millisecond
 )
 
 var (
@@ -69,6 +68,7 @@ type TestCluster struct {
 
 	network *consensus.Network
 	cm      *chain.Manager
+	cs      *chain.Subscriber
 	apID    string
 	dbName  string
 	dir     string
@@ -311,7 +311,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, cs, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -371,6 +371,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		logger:  logger,
 		network: busCfg.Network,
 		cm:      cm,
+		cs:      cs,
 		tt:      tt,
 		wk:      wk,
 
@@ -523,44 +524,9 @@ func (c *TestCluster) MineToRenewWindow() {
 		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
 	c.MineBlocks(renewWindowStart - cs.BlockHeight)
-	c.Sync()
 }
 
-// sync blocks until the cluster is synced.
-func (c *TestCluster) sync(hosts []*Host) {
-	c.tt.Helper()
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
-		synced, err := c.synced(hosts)
-		if err != nil {
-			return err
-		}
-		if !synced {
-			return errors.New("cluster was unable to sync in time")
-		}
-		return nil
-	})
-}
-
-// synced returns true if bus and hosts are at the same blockheight.
-func (c *TestCluster) synced(hosts []*Host) (bool, error) {
-	c.tt.Helper()
-	cs, err := c.Bus.ConsensusState(context.Background())
-	if err != nil {
-		return false, err
-	}
-	if !cs.Synced {
-		return false, nil // can't be synced if bus itself isn't synced
-	}
-	for _, h := range hosts {
-		bh := h.cs.Height()
-		if cs.BlockHeight != uint64(bh) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// MineBlocks uses the bus' miner to mine n blocks.
+// MineBlocks mines n blocks
 func (c *TestCluster) MineBlocks(n uint64) {
 	c.tt.Helper()
 	wallet, err := c.Bus.Wallet(context.Background())
@@ -569,21 +535,43 @@ func (c *TestCluster) MineBlocks(n uint64) {
 	// If we don't have any hosts in the cluster mine all blocks right away.
 	if len(c.hosts) == 0 {
 		c.tt.OK(c.mineBlocks(wallet.Address, n))
-		c.Sync()
+		c.sync()
 		return
 	}
 
-	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
-	// hosts by too many blocks.
+	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
+	// with hosts by too many blocks.
 	for mined := uint64(0); mined < n; {
 		toMine := n - mined
 		if toMine > 10 {
 			toMine = 10
 		}
 		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
-		c.Sync()
 		mined += toMine
+		c.sync()
 	}
+	c.sync()
+}
+
+func (c *TestCluster) sync() {
+	tip := c.cm.Tip()
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
+		cs, err := c.Bus.ConsensusState(context.Background())
+		if err != nil {
+			return err
+		} else if !cs.Synced {
+			return errors.New("bus is not synced")
+		} else if cs.BlockHeight < tip.Height {
+			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
+		}
+
+		for _, h := range c.hosts {
+			if hh := h.cs.Height(); uint64(hh) < cs.BlockHeight {
+				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
+			}
+		}
+		return nil
+	})
 }
 
 func (c *TestCluster) WaitForAccounts() []api.Account {
@@ -723,30 +711,23 @@ func (c *TestCluster) AddHost(h *Host) {
 	// Mine transaction.
 	c.MineBlocks(1)
 
-	// Wait for hosts to sync up with consensus.
-	hosts := []*Host{h}
-	c.sync(hosts)
-
 	// Announce hosts.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	c.tt.OK(addStorageFolderToHost(ctx, hosts))
-	c.tt.OK(announceHosts(hosts))
+	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
+	c.tt.OK(announceHosts([]*Host{h}))
 
 	// Mine a few blocks. The host should show up eventually.
 	c.tt.Retry(10, time.Second, func() error {
 		c.tt.Helper()
 
-		c.MineBlocks(1)
 		_, err := c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
+			c.MineBlocks(1)
 			return err
 		}
 		return nil
 	})
-
-	// Wait for host to be synced.
-	c.Sync()
 }
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
@@ -791,12 +772,6 @@ func (c *TestCluster) Shutdown() {
 		c.tt.OK(h.Close())
 	}
 	c.wg.Wait()
-}
-
-// Sync blocks until the whole cluster has reached the same block height.
-func (c *TestCluster) Sync() {
-	c.tt.Helper()
-	c.sync(c.hosts)
 }
 
 // waitForHostAccounts will fetch the accounts from the worker and wait until
@@ -868,8 +843,8 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 
 func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
 	for i := uint64(0); i < n; i++ {
-		if block, found := coreutils.MineBlock(c.cm, addr, time.Second); !found {
-			return errors.New("failed to find block")
+		if block, found := coreutils.MineBlock(c.cm, addr, 5*time.Second); !found {
+			c.tt.Fatal("failed to mine block")
 		} else if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
 			return err
 		}
@@ -922,12 +897,9 @@ func testBusCfg() node.BusConfig {
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
 			GatewayAddr:                   "127.0.0.1:0",
-			PersistInterval:               testBusPersistInterval,
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
-		Network: network,
-		Genesis: genesis,
 		Database: config.Database{
 			MySQL: config.MySQLConfigFromEnv(),
 		},
@@ -936,7 +908,19 @@ func testBusCfg() node.BusConfig {
 			IgnoreRecordNotFoundError: true,
 			SlowThreshold:             100 * time.Millisecond,
 		},
-		SlabPruningInterval: time.Second,
+		Network:                     network,
+		Genesis:                     genesis,
+		SlabPruningInterval:         time.Second,
+		SyncerSyncInterval:          100 * time.Millisecond,
+		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
+		RetryTxIntervals: []time.Duration{
+			50 * time.Millisecond,
+			100 * time.Millisecond,
+			200 * time.Millisecond,
+			500 * time.Millisecond,
+			time.Second,
+			5 * time.Second,
+		},
 	}
 }
 

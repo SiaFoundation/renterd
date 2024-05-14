@@ -26,11 +26,16 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 )
+
+// maxSyncTime is the maximum time since the last block before we consider
+// ourselves unsynced.
+const maxSyncTime = time.Hour
 
 // Client re-exports the client from the client package.
 type Client struct {
@@ -205,7 +210,7 @@ type (
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
 		ReleaseInputs(txns ...types.Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
-		SpendableOutputs() ([]wallet.SiacoinElement, error)
+		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
 		UnconfirmedTransactions() ([]wallet.Event, error)
 		Events(offset, limit int) ([]wallet.Event, error)
@@ -232,6 +237,7 @@ type bus struct {
 	w  Wallet
 
 	as    AutopilotStore
+	cs    chain.ChainStore
 	eas   EphemeralAccountStore
 	hdb   HostDB
 	ms    MetadataStore
@@ -450,7 +456,11 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
-	jc.Encode(b.consensusState())
+	cs, err := b.consensusState(jc.Request.Context())
+	if jc.Check("couldn't fetch consensus state", err) != nil {
+		return
+	}
+	jc.Encode(cs)
 }
 
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
@@ -1771,19 +1781,23 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
-func (b *bus) consensusState() api.ConsensusState {
-	cs := b.cm.TipState()
+func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
+	index, err := b.cs.ChainIndex(ctx)
+	if err != nil {
+		return api.ConsensusState{}, err
+	}
 
 	var synced bool
-	if block, ok := b.cm.Block(cs.Index.ID); ok && time.Since(block.Timestamp) < 2*cs.BlockInterval() {
+	block, found := b.cm.Block(index.ID)
+	if found && time.Since(block.Timestamp) <= maxSyncTime {
 		synced = true
 	}
 
 	return api.ConsensusState{
-		BlockHeight:   cs.Index.Height,
-		LastBlockTime: api.TimeRFC3339(cs.PrevTimestamps[0]),
+		BlockHeight:   index.Height,
+		LastBlockTime: api.TimeRFC3339(block.Timestamp),
 		Synced:        synced,
-	}
+	}, nil
 }
 
 func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
@@ -1809,7 +1823,10 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
-	cs := b.consensusState()
+	cs, err := b.consensusState(ctx)
+	if err != nil {
+		return api.GougingParams{}, err
+	}
 
 	return api.GougingParams{
 		ConsensusState:     cs,
@@ -2422,12 +2439,13 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, cs chain.ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		webhooks:         hm,
 		cm:               cm,
+		cs:               cs,
 		s:                s,
 		w:                w,
 		hdb:              hdb,

@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
@@ -38,10 +36,6 @@ var (
 )
 
 var (
-	_ wallet.SingleAddressStore = (*SQLStore)(nil)
-)
-
-var (
 	errNoSuchTable    = errors.New("no such table")
 	errDuplicateEntry = errors.New("Duplicate entry")
 )
@@ -62,7 +56,6 @@ type (
 		PartialSlabDir                string
 		Migrate                       bool
 		AnnouncementMaxAge            time.Duration
-		PersistInterval               time.Duration
 		WalletAddress                 types.Address
 		SlabBufferCompletionThreshold int64
 		Logger                        *zap.SugaredLogger
@@ -73,10 +66,11 @@ type (
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		alerts    alerts.Alerter
-		cs        *chainSubscriber
 		db        *gorm.DB
 		dbMetrics *gorm.DB
 		logger    *zap.SugaredLogger
+
+		walletAddress types.Address
 
 		// ObjectDB related fields
 		slabBufferMgr *SlabBufferManager
@@ -98,12 +92,6 @@ type (
 		hasBlocklist bool
 		lastPrunedAt time.Time
 		closed       bool
-	}
-
-	revisionUpdate struct {
-		height uint64
-		number uint64
-		size   uint64
 	}
 )
 
@@ -148,11 +136,6 @@ func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
 func NewSQLStore(cfg Config) (*SQLStore, error) {
-	// Sanity check announcement max age.
-	if cfg.AnnouncementMaxAge == 0 {
-		return nil, errors.New("announcementMaxAge must be non-zero")
-	}
-
 	if err := os.MkdirAll(cfg.PartialSlabDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create partial slab dir '%s': %v", cfg.PartialSlabDir, err)
 	}
@@ -209,25 +192,21 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		alerts:           cfg.Alerts,
-		db:               db,
-		dbMetrics:        dbMetrics,
-		logger:           l,
-		hasAllowlist:     allowlistCnt > 0,
-		hasBlocklist:     blocklistCnt > 0,
-		settings:         make(map[string]string),
-		slabPruneSigChan: make(chan struct{}, 1),
+		alerts:        cfg.Alerts,
+		db:            db,
+		dbMetrics:     dbMetrics,
+		logger:        l,
+		settings:      make(map[string]string),
+		hasAllowlist:  allowlistCnt > 0,
+		hasBlocklist:  blocklistCnt > 0,
+		walletAddress: cfg.WalletAddress,
 
+		slabPruneSigChan:          make(chan struct{}, 1),
 		lastPrunedAt:              time.Now(),
 		retryTransactionIntervals: cfg.RetryTransactionIntervals,
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
-	}
-
-	ss.cs, err = newChainSubscriber(ss, cfg.Logger, cfg.RetryTransactionIntervals, cfg.PersistInterval, cfg.WalletAddress, cfg.AnnouncementMaxAge)
-	if err != nil {
-		return nil, err
 	}
 
 	ss.slabBufferMgr, err = newSlabBufferManager(ss, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
@@ -304,12 +283,7 @@ func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
 func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
 
-	err := s.cs.Close()
-	if err != nil {
-		return err
-	}
-
-	err = s.slabBufferMgr.Close()
+	err := s.slabBufferMgr.Close()
 	if err != nil {
 		return err
 	}
@@ -339,9 +313,10 @@ func (s *SQLStore) Close() error {
 }
 
 // ChainIndex returns the last stored chain index.
-func (ss *SQLStore) ChainIndex() (types.ChainIndex, error) {
+func (ss *SQLStore) ChainIndex(ctx context.Context) (types.ChainIndex, error) {
 	var ci dbConsensusInfo
 	if err := ss.db.
+		WithContext(ctx).
 		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
 		FirstOrCreate(&ci).
 		Error; err != nil {
@@ -353,39 +328,30 @@ func (ss *SQLStore) ChainIndex() (types.ChainIndex, error) {
 	}, nil
 }
 
-// ProcessChainApplyUpdate implements chain.Subscriber.
-func (s *SQLStore) ProcessChainApplyUpdate(cau *chain.ApplyUpdate, mayCommit bool) error {
-	return s.cs.ProcessChainApplyUpdate(cau, mayCommit)
-}
-
-// ProcessChainRevertUpdate implements chain.Subscriber.
-func (s *SQLStore) ProcessChainRevertUpdate(cru *chain.RevertUpdate) error {
-	return s.cs.ProcessChainRevertUpdate(cru)
-}
-
 func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
-	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, func(err error) bool {
-		return err == nil ||
-			utils.IsErr(err, context.Canceled) ||
-			utils.IsErr(err, context.DeadlineExceeded) ||
-			utils.IsErr(err, gorm.ErrRecordNotFound) ||
-			utils.IsErr(err, errInvalidNumberOfShards) ||
-			utils.IsErr(err, errShardRootChanged) ||
-			utils.IsErr(err, api.ErrContractNotFound) ||
-			utils.IsErr(err, api.ErrObjectNotFound) ||
-			utils.IsErr(err, api.ErrObjectCorrupted) ||
-			utils.IsErr(err, api.ErrBucketExists) ||
-			utils.IsErr(err, api.ErrBucketNotFound) ||
-			utils.IsErr(err, api.ErrBucketNotEmpty) ||
-			utils.IsErr(err, api.ErrContractNotFound) ||
-			utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
-			utils.IsErr(err, api.ErrObjectExists) ||
-			utils.IsErr(err, errNoSuchTable) ||
-			utils.IsErr(err, errDuplicateEntry) ||
-			utils.IsErr(err, api.ErrPartNotFound) ||
-			utils.IsErr(err, api.ErrSlabNotFound) ||
-			utils.IsErr(err, syncer.ErrPeerNotFound)
-	})
+	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, s.retryAbortFn)
+}
+
+func (s *SQLStore) retryAbortFn(err error) bool {
+	return err == nil ||
+		utils.IsErr(err, context.Canceled) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
+		utils.IsErr(err, gorm.ErrRecordNotFound) ||
+		utils.IsErr(err, errInvalidNumberOfShards) ||
+		utils.IsErr(err, errShardRootChanged) ||
+		utils.IsErr(err, api.ErrContractNotFound) ||
+		utils.IsErr(err, api.ErrObjectNotFound) ||
+		utils.IsErr(err, api.ErrObjectCorrupted) ||
+		utils.IsErr(err, api.ErrBucketExists) ||
+		utils.IsErr(err, api.ErrBucketNotFound) ||
+		utils.IsErr(err, api.ErrBucketNotEmpty) ||
+		utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
+		utils.IsErr(err, api.ErrObjectExists) ||
+		utils.IsErr(err, errNoSuchTable) ||
+		utils.IsErr(err, api.ErrPartNotFound) ||
+		utils.IsErr(err, api.ErrSlabNotFound) ||
+		utils.IsErr(err, syncer.ErrPeerNotFound) ||
+		utils.IsErr(err, errDuplicateEntry)
 }
 
 func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {

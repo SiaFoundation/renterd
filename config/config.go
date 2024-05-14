@@ -51,9 +51,9 @@ type (
 		GatewayAddr                   string        `yaml:"gatewayAddr,omitempty"`
 		RemoteAddr                    string        `yaml:"remoteAddr,omitempty"`
 		RemotePassword                string        `yaml:"remotePassword,omitempty"`
-		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"`
 		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry,omitempty"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
+		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"` // deprecated
 	}
 
 	// LogFile configures the file output of the logger.
