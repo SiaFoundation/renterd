@@ -1,5 +1,5 @@
 -- dbDirectory
-CREATE TABLE `directories` (
+CREATE TABLE IF NOT EXISTS `directories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `db_parent_id` bigint unsigned,
