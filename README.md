@@ -3,25 +3,61 @@
 
 # Renterd: The Next-Gen Sia Renter
 
-## Overview
-
 `renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
 to cater to both casual users seeking straightforward data storage and
 developers requiring a robust API for building apps on Sia.
 
-`renterd` is now in beta, achieving feature parity with siad. It introduces an
-enhanced web UI and the autopilot functionality. While it mirrors most siad
-capabilities, renterd does not support backwards compatibility with siad
+## Links
+
+- [API documentation](https://api.sia.tech/renterd)
+- [Project Roadmap](https://github.com/orgs/SiaFoundation/projects/5)
+- [Setup Guide](https://docs.sia.tech/renting/setting-up-renterd)
+
+## Overview
+
+`renterd` is the successor to `siad`, offering feature parity while extending
+its capabilities with new features like an enhanced web UI and an autopilot.
+That said, `renterd` does not support backwards compatibility with siad
 metadata. Consequently, files uploaded via siad cannot currently be migrated to
-renterd. Our immediate focus is on refining renterd to enhance its stability,
+renterd. Our immediate focus is on refining `renterd` to enhance its stability,
 scalability, and performance, ensuring it serves as a robust foundation for new
 Sia applications.
 
-## Useful Links
+## Architecture
 
-API documentation can be found [here](https://api.sia.tech/renterd).<br>
-Setup guides are available on our [website](https://docs.sia.tech/renting/setting-up-renterd).<br>
-A project roadmap is available on [GitHub](https://github.com/orgs/SiaFoundation/projects/5).
+`renterd` distinguishes itself from `siad` through a unique architecture
+comprised of three main components: the autopilot, the bus, and one or more
+workers.
+
+Instead of adopting another Electron app bundle, `renterd` incorporates an
+embedded web UI. This approach caters to developers and power users who prefer a
+streamlined experience. For those who do not require the UI, `renterd` can be
+compiled without it, which reduces software bloat and simplifies the build
+process.
+
+### Autopilot
+
+The autopilot in `renterd` automates high-level functions like host scanning,
+ranking, and the management of contracts and data. This ensures efficient host
+selection for data storage. While it offers convenience for most users, those
+desiring full control can disable the autopilot via a CLI flag. Remarkably, the
+autopilot is designed over the public `renterd` HTTP API, allowing for
+straightforward customization and language porting.
+
+### Bus
+
+Serving as the central nervous system of `renterd`, the bus handles data
+persistence and connections with Sia's peer-to-peer network. While `renterd`
+defaults to an SQLite database, users have the option to configure it for MySQL
+use. SQLite is the default choice due to its seamless initial experience, but
+switching to MySQL is recommended for enhanced performance.
+
+### Worker(s)
+
+Workers are the direct interface for users, managing tasks such as file
+uploads/downloads and contract handling. They depend on the bus for consistent
+data persistence.
+
 
 ## Backups
 
@@ -225,41 +261,6 @@ docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEE
 ```bash
 docker run -d --name renterd-testnet -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9880:9880/tcp -p :9881:9881/tcp ghcr.io/siafoundation/renterd:master-zen
 ```
-
-## Architecture
-
-`renterd` distinguishes itself from its predecessor, `siad`, through a unique
-architecture comprised of three main components: the autopilot, the bus, and one
-or more workers.
-
-Instead of adopting another Electron app bundle, `renterd` incorporates an
-embedded web UI. This approach caters to developers and power users who prefer a
-streamlined experience. For those who do not require the UI, `renterd` can be
-compiled without it, which reduces software bloat and simplifies the build
-process.
-
-### Autopilot
-
-The autopilot in `renterd` automates high-level functions like host scanning,
-ranking, and the management of contracts and data. This ensures efficient host
-selection for data storage. While it offers convenience for most users, those
-desiring full control can disable the autopilot via a CLI flag. Remarkably, the
-autopilot is designed over the public `renterd` HTTP API, allowing for
-straightforward customization and language porting.
-
-### Bus
-
-Serving as the central nervous system of `renterd`, the bus handles data
-persistence and connections with Sia's peer-to-peer network. While `renterd`
-defaults to an SQLite database, users have the option to configure it for MySQL
-use. SQLite is the default choice due to its seamless initial experience, but
-switching to MySQL is recommended for enhanced performance.
-
-### Worker(s)
-
-Workers are the direct interface for users, managing tasks such as file
-uploads/downloads and contract handling. They depend on the bus for consistent
-data persistence.
 
 ## Usage
 
