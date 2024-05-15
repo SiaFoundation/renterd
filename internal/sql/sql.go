@@ -19,8 +19,6 @@ const (
 	factor           = 1.8 // factor ^ retryAttempts = backoff time in milliseconds
 	maxBackoff       = 15 * time.Second
 
-	SCHEMA_INIT = "SCHEMA_INIT"
-
 	DirectoriesRootID = 1
 )
 

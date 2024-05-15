@@ -30,7 +30,7 @@ func (b *MetricsDatabase) Close() error {
 }
 
 func (b *MetricsDatabase) Migrate() error {
-	return performMigrations(b.db, "metrics", sql.MetricsMigrations(migrationsFs, b.log), b.log)
+	return performMigrations(b.db, "metrics", sql.MetricsMigrations(migrationsFs, b.log))
 }
 
 func (b *MetricsDatabase) Version(_ context.Context) (string, string, error) {

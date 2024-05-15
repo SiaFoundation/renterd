@@ -162,16 +162,23 @@ var (
 	}
 )
 
-func performMigration(tx Tx, fs embed.FS, kind, migration string, logger *zap.SugaredLogger) error {
-	logger.Infof("performing %s migration '%s'", kind, migration)
-	if err := ExecSQLFile(tx, fs, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
-		return err
-	}
-	logger.Info("migration '%s' complete", migration)
-	return nil
+func InitSchema(db *DB, fs embed.FS, identifier string, migrations []Migration) error {
+	return db.Transaction(func(tx Tx) error {
+		// init schema
+		if err := execSQLFile(tx, fs, identifier, "schema"); err != nil {
+			return fmt.Errorf("failed to execute schema: %w", err)
+		}
+		// insert migration ids
+		for _, migration := range migrations {
+			if _, err := tx.Exec("INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
+				return fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
+			}
+		}
+		return nil
+	})
 }
 
-func ExecSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
+func execSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
 	path := fmt.Sprintf("migrations/%s/%s.sql", folder, filename)
 
 	// read file
@@ -184,5 +191,14 @@ func ExecSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
 	if _, err := tx.Exec(string(file)); err != nil {
 		return fmt.Errorf("failed to execute %s: %w", path, err)
 	}
+	return nil
+}
+
+func performMigration(tx Tx, fs embed.FS, kind, migration string, logger *zap.SugaredLogger) error {
+	logger.Infof("performing %s migration '%s'", kind, migration)
+	if err := execSQLFile(tx, fs, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
+		return err
+	}
+	logger.Info("migration '%s' complete", migration)
 	return nil
 }

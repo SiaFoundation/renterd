@@ -29,7 +29,7 @@ func (b *MainDatabase) Close() error {
 }
 
 func (b *MainDatabase) Migrate() error {
-	return performMigrations(b.db, "main", sql.MainMigrations(migrationsFs, b.log), b.log)
+	return performMigrations(b.db, "main", sql.MainMigrations(migrationsFs, b.log))
 }
 
 func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
