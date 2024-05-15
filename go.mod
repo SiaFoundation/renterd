@@ -6,7 +6,6 @@ toolchain go1.22.0
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3
-	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
@@ -16,13 +15,13 @@ require (
 	go.sia.tech/core v0.2.3
 	go.sia.tech/coreutils v0.0.4-0.20240502154058-5df7ad9c0b7c
 	go.sia.tech/gofakes3 v0.0.3
-	go.sia.tech/hostd v1.1.0-beta.1.0.20240507093050-bc2a34c93355
+	go.sia.tech/hostd v1.1.0-beta.2.0.20240507175533-83884e68bd38
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.52.0
+	go.sia.tech/web/renterd v0.52.1
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.22.0
+	golang.org/x/crypto v0.23.0
 	golang.org/x/sys v0.20.0
 	golang.org/x/term v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -39,7 +38,7 @@ require (
 	github.com/cloudflare/cloudflare-go v0.94.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-sql-driver/mysql v1.7.1 // indirect
+	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -73,11 +72,11 @@ require (
 	gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e // indirect
 	gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259 // indirect
 	gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 // indirect
-	go.etcd.io/bbolt v1.3.9 // indirect
+	go.etcd.io/bbolt v1.3.10 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.24.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/text v0.15.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.20.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

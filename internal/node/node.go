@@ -128,6 +128,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		GormLogger:                    dbLogger,
 		RetryTransactionIntervals:     cfg.RetryTxIntervals,
 		WalletAddress:                 types.StandardUnlockHash(seed.PublicKey()),
+		LongQueryDuration:             cfg.DatabaseLog.SlowThreshold,
+		LongTxDuration:                cfg.DatabaseLog.SlowThreshold,
 	})
 	if err != nil {
 		return nil, nil, nil, nil, err
