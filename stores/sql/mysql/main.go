@@ -27,7 +27,7 @@ func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration
 	}
 }
 
-func (b *MainDatabase) ApplyMigration(fn func(tx sql.Tx) error) error {
+func (b *MainDatabase) ApplyMigration(fn func(tx sql.Tx) (bool, error)) error {
 	return applyMigration(b.db, fn)
 }
 

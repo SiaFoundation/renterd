@@ -10,8 +10,11 @@ import (
 //go:embed all:migrations/*
 var migrationsFs embed.FS
 
-func applyMigration(db *sql.DB, fn func(tx sql.Tx) error) error {
-	return db.Transaction(fn)
+func applyMigration(db *sql.DB, fn func(tx sql.Tx) (bool, error)) error {
+	return db.Transaction(func(tx sql.Tx) error {
+		_, err := fn(tx)
+		return err
+	})
 }
 
 func createMigrationTable(db *sql.DB) error {

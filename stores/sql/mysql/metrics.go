@@ -25,7 +25,7 @@ func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Durat
 	}
 }
 
-func (b *MetricsDatabase) ApplyMigration(fn func(tx sql.Tx) error) error {
+func (b *MetricsDatabase) ApplyMigration(fn func(tx sql.Tx) (bool, error)) error {
 	return applyMigration(b.db, fn)
 }
 

@@ -19,7 +19,7 @@ type (
 	// Migrator is an interface for defining db - specific helper methods
 	// required during migrations
 	Migrator interface {
-		ApplyMigration(func(tx Tx) error) error
+		ApplyMigration(func(tx Tx) (bool, error)) error
 		CreateMigrationTable() error
 		DB() *DB
 	}
@@ -195,23 +195,23 @@ func PerformMigrations(m Migrator, fs embed.FS, identifier string, migrations []
 
 	// apply missing migrations
 	for _, migration := range migrations {
-		if err := m.ApplyMigration(func(tx Tx) error {
+		if err := m.ApplyMigration(func(tx Tx) (bool, error) {
 			// check if migration was already applied
 			var applied bool
 			if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM migrations WHERE id = ?)", migration.ID).Scan(&applied); err != nil {
-				return fmt.Errorf("failed to check if migration '%s' was already applied: %w", migration.ID, err)
+				return false, fmt.Errorf("failed to check if migration '%s' was already applied: %w", migration.ID, err)
 			} else if applied {
-				return nil
+				return false, nil
 			}
 			// run migration
 			if err := migration.Migrate(tx); err != nil {
-				return fmt.Errorf("migration '%s' failed: %w", migration.ID, err)
+				return false, fmt.Errorf("migration '%s' failed: %w", migration.ID, err)
 			}
 			// insert migration
 			if _, err := tx.Exec("INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
-				return fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
+				return false, fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
 			}
-			return nil
+			return true, nil
 		}); err != nil {
 			return fmt.Errorf("migration '%s' failed: %w", migration.ID, err)
 		}
