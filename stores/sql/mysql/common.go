@@ -11,14 +11,9 @@ import (
 )
 
 //go:embed all:migrations/*
-var migrations embed.FS
+var migrationsFs embed.FS
 
-type migration struct {
-	ID      string
-	Migrate func(tx sql.Tx) error
-}
-
-func performMigrations(db *sql.DB, identifier string, migrations []migration, l *zap.SugaredLogger) error {
+func performMigrations(db *sql.DB, identifier string, migrations []sql.Migration, l *zap.SugaredLogger) error {
 	// check if the migrations table exists
 	var dummy string
 	if err := db.QueryRow("SHOW TABLES LIKE 'migrations'").Scan(&dummy); err != nil && !errors.Is(err, dsql.ErrNoRows) {
@@ -66,25 +61,9 @@ func performMigrations(db *sql.DB, identifier string, migrations []migration, l 
 	return nil
 }
 
-func execSQLFile(tx sql.Tx, folder, filename string) error {
-	path := fmt.Sprintf("migrations/%s/%s.sql", folder, filename)
-
-	// read file
-	file, err := migrations.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", path, err)
-	}
-
-	// execute it
-	if _, err := tx.Exec(string(file)); err != nil {
-		return fmt.Errorf("failed to execute %s: %w", path, err)
-	}
-	return nil
-}
-
 // initSchema is executed only on a clean database. Otherwise the individual
 // migrations are executed.
-func initSchema(db *sql.DB, identifier string, migrations []migration, logger *zap.SugaredLogger) error {
+func initSchema(db *sql.DB, identifier string, migrations []sql.Migration, logger *zap.SugaredLogger) error {
 	return db.Transaction(func(tx sql.Tx) error {
 		logger.Infof("initializing '%s' schema", identifier)
 
@@ -107,22 +86,13 @@ func initSchema(db *sql.DB, identifier string, migrations []migration, logger *z
 			}
 		}
 		// create remaining schema
-		if err := execSQLFile(tx, identifier, "schema"); err != nil {
+		if err := sql.ExecSQLFile(tx, migrationsFs, identifier, "schema"); err != nil {
 			return fmt.Errorf("failed to execute schema: %w", err)
 		}
 
 		logger.Infof("initialization complete")
 		return nil
 	})
-}
-
-func performMigration(tx sql.Tx, kind, migration string, logger *zap.SugaredLogger) error {
-	logger.Infof("performing %s migration '%s'", kind, migration)
-	if err := execSQLFile(tx, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
-		return err
-	}
-	logger.Info("migration '%s' complete", migration)
-	return nil
 }
 
 func version(db *sql.DB) (string, string, error) {

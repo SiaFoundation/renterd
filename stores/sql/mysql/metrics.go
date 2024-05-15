@@ -30,19 +30,7 @@ func (b *MetricsDatabase) Close() error {
 }
 
 func (b *MetricsDatabase) Migrate() error {
-	dbIdentifier := "metrics"
-	return performMigrations(b.db, dbIdentifier, []migration{
-		{
-			ID:      "00001_init",
-			Migrate: func(tx sql.Tx) error { return sql.ErrRunV072 },
-		},
-		{
-			ID: "00001_idx_contracts_fcid_timestamp",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00001_idx_contracts_fcid_timestamp", b.log)
-			},
-		},
-	}, b.log)
+	return performMigrations(b.db, "metrics", sql.MetricsMigrations(migrationsFs, b.log), b.log)
 }
 
 func (b *MetricsDatabase) Version(_ context.Context) (string, string, error) {
