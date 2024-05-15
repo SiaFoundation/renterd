@@ -10,13 +10,28 @@ import (
 	"go.uber.org/zap"
 )
 
-type Migration struct {
-	ID      string
-	Migrate func(tx Tx) error
-}
+type (
+	Migration struct {
+		ID      string
+		Migrate func(tx Tx) error
+	}
+
+	// Migrator is an interface for defining db - specific helper methods
+	// required during migrations
+	Migrator interface {
+		ApplyMigration(func(tx Tx) error) error
+		CreateMigrationTable() error
+		DB() *DB
+	}
+
+	MainMigrator interface {
+		Migrator
+		MakeDirsForPath(tx Tx, path string) (uint, error)
+	}
+)
 
 var (
-	MainMigrations = func(migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
+	MainMigrations = func(m MainMigrator, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
 		dbIdentifier := "main"
 		return []Migration{
 			{
@@ -116,7 +131,7 @@ var (
 							processedDirs[dir] = struct{}{}
 
 							// process
-							dirID, err := MakeDirsForPath(tx, obj.ObjectID)
+							dirID, err := m.MakeDirsForPath(tx, obj.ObjectID)
 							if err != nil {
 								return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
 							}
@@ -162,20 +177,46 @@ var (
 	}
 )
 
-func InitSchema(db *DB, fs embed.FS, identifier string, migrations []Migration) error {
-	return db.Transaction(func(tx Tx) error {
-		// init schema
-		if err := execSQLFile(tx, fs, identifier, "schema"); err != nil {
-			return fmt.Errorf("failed to execute schema: %w", err)
-		}
-		// insert migration ids
-		for _, migration := range migrations {
+func PerformMigrations(m Migrator, fs embed.FS, identifier string, migrations []Migration) error {
+	// try to create migrations table
+	err := m.CreateMigrationTable()
+	if err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
+
+	// check if the migrations table is empty
+	var isEmpty bool
+	if err := m.DB().QueryRow("SELECT COUNT(*) = 0 FROM migrations").Scan(&isEmpty); err != nil {
+		return fmt.Errorf("failed to count rows in migrations table: %w", err)
+	} else if isEmpty {
+		// table is empty, init schema
+		return initSchema(m.DB(), fs, identifier, migrations)
+	}
+
+	// apply missing migrations
+	for _, migration := range migrations {
+		if err := m.ApplyMigration(func(tx Tx) error {
+			// check if migration was already applied
+			var applied bool
+			if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM migrations WHERE id = ?)", migration.ID).Scan(&applied); err != nil {
+				return fmt.Errorf("failed to check if migration '%s' was already applied: %w", migration.ID, err)
+			} else if applied {
+				return nil
+			}
+			// run migration
+			if err := migration.Migrate(tx); err != nil {
+				return fmt.Errorf("migration '%s' failed: %w", migration.ID, err)
+			}
+			// insert migration
 			if _, err := tx.Exec("INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
 				return fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
 			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("migration '%s' failed: %w", migration.ID, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func execSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
@@ -194,11 +235,27 @@ func execSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
 	return nil
 }
 
+func initSchema(db *DB, fs embed.FS, identifier string, migrations []Migration) error {
+	return db.Transaction(func(tx Tx) error {
+		// init schema
+		if err := execSQLFile(tx, fs, identifier, "schema"); err != nil {
+			return fmt.Errorf("failed to execute schema: %w", err)
+		}
+		// insert migration ids
+		for _, migration := range migrations {
+			if _, err := tx.Exec("INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
+				return fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
+			}
+		}
+		return nil
+	})
+}
+
 func performMigration(tx Tx, fs embed.FS, kind, migration string, logger *zap.SugaredLogger) error {
 	logger.Infof("performing %s migration '%s'", kind, migration)
 	if err := execSQLFile(tx, fs, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
 		return err
 	}
-	logger.Info("migration '%s' complete", migration)
+	logger.Infof("migration '%s' complete", migration)
 	return nil
 }
