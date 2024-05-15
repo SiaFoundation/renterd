@@ -1,17 +1,10 @@
 # [![Sia](https://sia.tech/assets/banners/sia-banner-expanded-renterd.png)](http://sia.tech)
 [![GoDoc](https://godoc.org/go.sia.tech/renterd?status.svg)](https://godoc.org/go.sia.tech/renterd)
 
-# Renterd: The Next-Gen Sia Renter
 
 `renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
 to cater to both casual users seeking straightforward data storage and
 developers requiring a robust API for building apps on Sia.
-
-## Links
-
-- [API documentation](https://api.sia.tech/renterd)
-- [Project Roadmap](https://github.com/orgs/SiaFoundation/projects/5)
-- [Setup Guide](https://docs.sia.tech/renting/setting-up-renterd)
 
 ## Overview
 
@@ -21,42 +14,83 @@ That said, `renterd` does not support backwards compatibility with siad
 metadata. Consequently, files uploaded via siad cannot currently be migrated to
 renterd. Our immediate focus is on refining `renterd` to enhance its stability,
 scalability, and performance, ensuring it serves as a robust foundation for new
-Sia applications.
+Sia applications. Useful links:
 
-## Architecture
+- [API documentation](https://api.sia.tech/renterd)
+- [Project Roadmap](https://github.com/orgs/SiaFoundation/projects/5)
+- [Setup Guide](https://docs.sia.tech/renting/setting-up-renterd)
 
-`renterd` distinguishes itself from `siad` through a unique architecture
-comprised of three main components: the autopilot, the bus, and one or more
-workers.
 
-Instead of adopting another Electron app bundle, `renterd` incorporates an
-embedded web UI. This approach caters to developers and power users who prefer a
-streamlined experience. For those who do not require the UI, `renterd` can be
-compiled without it, which reduces software bloat and simplifies the build
-process.
+## Configuration
 
-### Autopilot
+`renterd` can be configured in various ways, through the use of a yaml file, CLI
+flags or environment variables. Settings that are configured multiple times will
+be evaluated in this order. In the CLI, use the `help` command to see an
+overview of all settings configurable through the CLI.
 
-The autopilot in `renterd` automates high-level functions like host scanning,
-ranking, and the management of contracts and data. This ensures efficient host
-selection for data storage. While it offers convenience for most users, those
-desiring full control can disable the autopilot via a CLI flag. Remarkably, the
-autopilot is designed over the public `renterd` HTTP API, allowing for
-straightforward customization and language porting.
-
-### Bus
-
-Serving as the central nervous system of `renterd`, the bus handles data
-persistence and connections with Sia's peer-to-peer network. While `renterd`
-defaults to an SQLite database, users have the option to configure it for MySQL
-use. SQLite is the default choice due to its seamless initial experience, but
-switching to MySQL is recommended for enhanced performance.
-
-### Worker(s)
-
-Workers are the direct interface for users, managing tasks such as file
-uploads/downloads and contract handling. They depend on the bus for consistent
-data persistence.
+| **Name**                             | **Description**                                      | **Default Value**                 | **CLI Flag**                     | **Environment Variable**                       | **YAML Path**                           |
+|--------------------------------------|------------------------------------------------------|-----------------------------------|----------------------------------|------------------------------------------------|----------------------------------------|
+| `HTTP.Address`                       | Address for serving the API                          | `:9980`                          | `--http`                         | -                                              | `http.address`                     |
+| `HTTP.Password`                      | Password for the HTTP server                         | -                                 | -                                | `RENTERD_API_PASSWORD`                         | `http.password`                     |
+| `Directory`                          | Directory for storing node state                     | `.`                               | `--dir`                          | -                                              | `directory`                        |
+| `Seed`                               | Seed for the node                                    | -                                 | -                                | `RENTERD_SEED`                                 | `seed`                              |
+| `AutoOpenWebUI`                      | Automatically open the web UI on startup             | `true`                            | `--openui`                       | -                                              | `autoOpenWebUI`                    |
+| `ShutdownTimeout`                    | Timeout for node shutdown                            | `5m`                              | `--node.shutdownTimeout`         | -                                              | `shutdownTimeout`                  |
+| `Log.Level`                          | Global logger level (debug\|info\|warn\|error). Defaults to 'info' | `info`                            | `--log.level`               | `RENTERD_LOG_LEVEL`                          | `log.level`                         |
+| `Log.File.Enabled`                   | Enables logging to disk. Defaults to 'true'          | `true`                            | `--log.file.enabled`              | `RENTERD_LOG_FILE_ENABLED`                   | `log.file.enabled`                  |
+| `Log.File.Format`                    | Format of log file (json\|human). Defaults to 'json'  | `json`                            | `--log.file.format`               | `RENTERD_LOG_FILE_FORMAT`                    | `log.file.format`                   |
+| `Log.File.Path`                      | Path of log file. Defaults to 'renterd.log' within the renterd directory | `renterd.log`                     | `--log.file.path`       | `RENTERD_LOG_FILE_PATH`                      | `log.file.path`                     |
+| `Log.StdOut.Enabled`                 | Enables logging to stdout. Defaults to 'true'        | `true`                            | `--log.stdout.enabled`            | `RENTERD_LOG_STDOUT_ENABLED`                 | `log.stdout.enabled`                |
+| `Log.StdOut.Format`                  | Format of log output (json\|human). Defaults to 'human' | `human`                            | `--log.stdout.format`           | `RENTERD_LOG_STDOUT_FORMAT`                  | `log.stdout.format`                 |
+| `Log.StdOut.EnableANSI`              | Enables ANSI color codes in log output. Defaults to 'true' on non-Windows systems | `true` (`false` on Windows)       | `--log.stdout.enableANSI` | `RENTERD_LOG_STDOUT_ENABLE_ANSI`             | `log.stdout.enableANSI`             |
+| `Log.Database.Enabled`               | Enable logging database queries. Defaults to 'true'  | `true`                            | `--log.database.enabled`          | `RENTERD_LOG_DATABASE_ENABLED`               | `log.database.enabled`              |
+| `Log.Database.Level`                 | Logger level for database queries (info\|warn\|error). Defaults to 'warn' | `warn`                            | `--log.database.level`          | `RENTERD_LOG_DATABASE_LEVEL`, `RENTERD_LOG_LEVEL` | `log.database.level`           |
+| `Log.Database.IgnoreRecordNotFoundError` | Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' | `true`                            | `--log.database.ignoreRecordNotFoundError` | `RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR` | `log.database.ignoreRecordNotFoundError` |
+| `Log.Database.SlowThreshold`         | Threshold for slow queries in logger. Defaults to 100ms | `100ms`                          | `--log.database.slowThreshold`  | `RENTERD_LOG_DATABASE_SLOW_THRESHOLD`         | `log.database.slowThreshold`        |
+| `Log.Database.Level (DEPRECATED)`    | Logger level                                        | `warn`                            | `--db.logger.logLevel`           | `RENTERD_DB_LOGGER_LOG_LEVEL`                  | `log.database.level`               |
+| `Log.Database.IgnoreRecordNotFoundError (DEPRECATED)` | Ignores 'not found' errors in logger    | `true`                            | `--db.logger.ignoreNotFoundError`| `RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR`     | `log.ignoreRecordNotFoundError` |
+| `Log.Database.SlowThreshold (DEPRECATED)`    | Threshold for slow queries in logger    | `100ms`                          | `--db.logger.slowThreshold`      | `RENTERD_DB_LOGGER_SLOW_THRESHOLD`             | `log.slowThreshold`       |
+| `Log.Path (DEPRECATED)`              | Path to directory for logs                          | -                                 | `--log-path`                     | `RENTERD_LOG_PATH`                             | `log.path`                         |
+| `Database.MySQL.URI`                 | Database URI for the bus                             | -                                 | `--db.uri`                      | `RENTERD_DB_URI`                              | `database.mysql.uri`                |
+| `Database.MySQL.User`                | Database username for the bus                        | `renterd`                         | `--db.user`                     | `RENTERD_DB_USER`                             | `database.mysql.user`               |
+| `Database.MySQL.Password`            | Database password for the bus                        | -                                 | -                               | `RENTERD_DB_PASSWORD`                         | `database.mysql.password`           |
+| `Database.MySQL.Database`            | Database name for the bus                            | `renterd`                         | `--db.name`                     | `RENTERD_DB_NAME`                             | `database.mysql.database`           |
+| `Database.MySQL.MetricsDatabase`     | Database for metrics                                 | `renterd_metrics`                 | `--db.metricsName`              | `RENTERD_DB_METRICS_NAME`                     | `database.mysql.metricsDatabase`    |
+| `Database.SQLite.Database`           | SQLite database name                                 | -                                 | -                               | -                                              | `database.sqlite.database`          |
+| `Database.SQLite.MetricsDatabase`    | SQLite metrics database name                         | -                                 | -                               | -                                              | `database.sqlite.metricsDatabase`   |
+| `Bus.AnnouncementMaxAgeHours`        | Max age for announcements                            | `8760h` (1 year)                  | `--bus.announcementMaxAgeHours` | -                                              | `bus.announcementMaxAgeHours`       |
+| `Bus.Bootstrap`                      | Bootstraps gateway and consensus modules             | `true`                            | `--bus.bootstrap`               | -                                              | `bus.bootstrap`                     |
+| `Bus.GatewayAddr`                    | Address for Sia peer connections                     | `:9981`                          | `--bus.gatewayAddr`             | `RENTERD_BUS_GATEWAY_ADDR`                     | `bus.gatewayAddr`                   |
+| `Bus.RemoteAddr`                     | Remote address for the bus                           | -                                 | -                               | `RENTERD_BUS_REMOTE_ADDR`                      | `bus.remoteAddr`                    |
+| `Bus.RemotePassword`                 | Remote password for the bus                          | -                                 | -                               | `RENTERD_BUS_API_PASSWORD`                     | `bus.remotePassword`                |
+| `Bus.PersistInterval`                | Interval for persisting consensus updates            | `1m`                              | `--bus.persistInterval`         | -                                              | `bus.persistInterval`               |
+| `Bus.UsedUTXOExpiry`                 | Expiry for used UTXOs in transactions                | `24h`                             | `--bus.usedUTXOExpiry`          | -                                              | `bus.usedUtxoExpiry`                |
+| `Bus.SlabBufferCompletionThreshold`  | Threshold for slab buffer upload                     | `4096`                            | `--bus.slabBufferCompletionThreshold` | `RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD` | `bus.slabBufferCompletionThreshold` |
+| `Worker.AllowPrivateIPs`             | Allows hosts with private IPs                        | -                                 | `--worker.allowPrivateIPs`       | -                                              | `worker.allowPrivateIPs`            |
+| `Worker.BusFlushInterval`            | Interval for flushing data to bus                    | `5s`                              | `--worker.busFlushInterval`      | -                                              | `worker.busFlushInterval`           |
+| `Worker.ContractLockTimeout`         | Timeout for locking contracts                        | `30s`                             | -                               | -                                              | `worker.contractLockTimeout`        |
+| `Worker.DownloadMaxOverdrive`        | Max overdrive workers for downloads                  | `5`                               | `--worker.downloadMaxOverdrive`  | -                                              | `worker.downloadMaxOverdrive`       |
+| `Worker.DownloadMaxMemory`           | Max memory for downloads                             | `1GiB`                            | -                               | -                                              | `worker.downloadMaxMemory`          |
+| `Worker.ID`                          | Unique ID for worker                                 | `worker`                          | `--worker.id`                    | `RENTERD_WORKER_ID`                            | `worker.id`                         |
+| `Worker.DownloadOverdriveTimeout`    | Timeout for overdriving slab downloads               | `3s`                              | `--worker.downloadOverdriveTimeout` | -                                            | `worker.downloadOverdriveTimeout`   |
+| `Worker.UploadMaxMemory`             | Max amount of RAM the worker allocates for slabs when uploading | `1GiB`                            | `--worker.uploadMaxMemory`      | `RENTERD_WORKER_UPLOAD_MAX_MEMORY`             | `worker.uploadMaxMemory`            |
+| `Worker.UploadMaxOverdrive`          | Max overdrive workers for uploads                    | `5`                               | `--worker.uploadMaxOverdrive`    | -                                              | `worker.uploadMaxOverdrive`         |
+| `Worker.UploadOverdriveTimeout`      | Timeout for overdriving slab uploads                 | `3s`                              | `--worker.uploadOverdriveTimeout` | -                                              | `worker.uploadOverdriveTimeout`     |
+| `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
+| `Worker.AllowUnauthenticatedDownloads` | Allows unauthenticated downloads                    | -                                 | `--worker.unauthenticatedDownloads` | `RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS` | `worker.allowUnauthenticatedDownloads` |
+| `Autopilot.AccountsRefillInterval`   | Interval for refilling workers' account balances     | `24h`                             | `--autopilot.accountRefillInterval` | -                                              | `autopilot.accountsRefillInterval`  |
+| `Autopilot.Heartbeat`                | Interval for autopilot loop execution                | `30m`                             | `--autopilot.heartbeat`            | -                                              | `autopilot.heartbeat`               |
+| `Autopilot.MigrationHealthCutoff`    | Threshold for migrating slabs based on health        | `0.75`                            | `--autopilot.migrationHealthCutoff` | -                                              | `autopilot.migrationHealthCutoff`   |
+| `Autopilot.RevisionBroadcastInterval`| Interval for broadcasting contract revisions         | `168h` (7 days)                   | `--autopilot.revisionBroadcastInterval` | `RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL` | `autopilot.revisionBroadcastInterval` |
+| `Autopilot.ScannerBatchSize`         | Batch size for host scanning                         | `1000`                            | `--autopilot.scannerBatchSize`      | -                                              | `autopilot.scannerBatchSize`        |
+| `Autopilot.ScannerInterval`          | Interval for scanning hosts                          | `24h`                             | `--autopilot.scannerInterval`       | -                                              | `autopilot.scannerInterval`         |
+| `Autopilot.ScannerNumThreads`        | Number of threads for scanning hosts                 | `100`                             | -                                | -                                              | `autopilot.scannerNumThreads`       |
+| `Autopilot.MigratorParallelSlabsPerWorker` | Parallel slab migrations per worker                    | `1`                               | `--autopilot.migratorParallelSlabsPerWorker` | `RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER` | `autopilot.migratorParallelSlabsPerWorker` |
+| `S3.Address`                         | Address for serving S3 API                           | `:9982`                          | `--s3.address`                     | `RENTERD_S3_ADDRESS`                           | `s3.address`                        |
+| `S3.DisableAuth`                     | Disables authentication for S3 API                   | `false`                           | `--s3.disableAuth`                 | `RENTERD_S3_DISABLE_AUTH`                      | `s3.disableAuth`                    |
+| `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
+| `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
+| `S3.KeypairsV4`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
 
 
 ## Backups
@@ -262,16 +296,42 @@ docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEE
 docker run -d --name renterd-testnet -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9880:9880/tcp -p :9881:9881/tcp ghcr.io/siafoundation/renterd:master-zen
 ```
 
+## Architecture
+
+`renterd` distinguishes itself from `siad` through a unique architecture
+comprised of three main components: the autopilot, the bus, and one or more
+workers.
+
+Instead of adopting another Electron app bundle, `renterd` incorporates an
+embedded web UI. This approach caters to developers and power users who prefer a
+streamlined experience. For those who do not require the UI, `renterd` can be
+compiled without it, which reduces software bloat and simplifies the build
+process.
+
+### Autopilot
+
+The autopilot in `renterd` automates high-level functions like host scanning,
+ranking, and the management of contracts and data. This ensures efficient host
+selection for data storage. While it offers convenience for most users, those
+desiring full control can disable the autopilot via a CLI flag. Remarkably, the
+autopilot is designed over the public `renterd` HTTP API, allowing for
+straightforward customization and language porting.
+
+### Bus
+
+Serving as the central nervous system of `renterd`, the bus handles data
+persistence and connections with Sia's peer-to-peer network. While `renterd`
+defaults to an SQLite database, users have the option to configure it for MySQL
+use. SQLite is the default choice due to its seamless initial experience, but
+switching to MySQL is recommended for enhanced performance.
+
+### Worker(s)
+
+Workers are the direct interface for users, managing tasks such as file
+uploads/downloads and contract handling. They depend on the bus for consistent
+data persistence.
+
 ## Usage
-
-`renterd` can be configured in various ways, through the use of a yaml file, CLI
-flags or environment variables. Settings that are configured multiple times will
-be evaluated in this order. Use the `help` command to see an overview of all
-settings.
-
-```sh
-renterd --help
-```
 
 The Web UI streamlines the initial setup and configuration for newcomers.
 However, if manual configuration is necessary, the subsequent sections outline a
@@ -414,48 +474,3 @@ following entries exclude a decent amount of bad/old/malicious hosts:
 - 51.158.108.244
 - siacentral.ddnsfree.com
 - siacentral.mooo.com
-
-## Debugging
-
-### Logging
-
-`renterd` has both console and file logging, the logs are stored in
-`renterd.log` and contain logs from all of the components that are enabled, e.g.
-if only the `bus` and `worker` are enabled it will only contain the logs from
-those two components.
-
-### Ephemeral Account Drift
-
-The Autopilot manages a collection of ephemeral accounts, each corresponding to
-a specific contract. These accounts facilitate quicker payments to hosts for
-various actions, offering advantages over contract payments in terms of speed
-and parallel execution. Account balances are periodically synchronized with
-hosts, and discrepancies, if any, are detected during this process. renterd
-incorporates built-in safeguards to deter host manipulation, discontinuing
-interactions with hosts that exhibit excessive account balance drift. In rare
-scenarios, issues may arise due to this drift; these can be rectified by
-resetting the drift via a specific endpoint:
-
-- `POST   /account/:id/resetdrift`
-
-### Contract Set Contracts
-
-The autopilot forms and manages contracts in the contract set with name
-configured in the autopilot's configuration object, by default this is called
-the `autopilot` contract set. This contract set should contain the amount of
-contracts configured in the contracts section of the configuration.
-
-That means that, if everything is running smoothly, the following curl call
-should return that number
-
-```bash
-curl -u ":[YOUR_PASSWORD]"  [BASE_URL]/api/bus/contracts/set/autopilot | jq '.|length'
-```
-
-### Autopilot Loop Trigger
-
-The autopilot allows triggering its loop using the following endpoint. The UI
-triggers this endpoint after the user updates the configuration, but it can be
-useful for debugging purposes too.
-
-- `POST /api/autopilot/trigger`
