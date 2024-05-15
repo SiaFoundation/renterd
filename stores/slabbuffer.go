@@ -307,10 +307,9 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 
 func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
 	mgr.mu.Lock()
-	buffers := mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]
-	mgr.mu.Unlock()
+	defer mgr.mu.Unlock()
 
-	for _, buffer := range buffers {
+	for _, buffer := range mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))] {
 		if !buffer.acquireForUpload(lockingDuration) {
 			continue
 		}
