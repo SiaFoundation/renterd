@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
@@ -21,8 +22,6 @@ import (
 	"gorm.io/gorm/clause"
 	"lukechampine.com/frand"
 )
-
-const rootDirID = 1
 
 const (
 	// batchDurationThreshold is the upper bound for the duration of a batch
@@ -1788,7 +1787,7 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 
 func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	// Create root dir.
-	dirID := uint(rootDirID)
+	dirID := uint(sql.DirectoriesRootID)
 	if err := tx.Model(&dbDirectory{}).
 		Clauses(clause.OnConflict{
 			DoNothing: true,
@@ -1867,7 +1866,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// create the dir
 		dirID, err := makeDirsForPath(tx, path)
 		if err != nil {
-			return fmt.Errorf("failed to create directories: %w", err)
+			return fmt.Errorf("failed to create directories for path '%s': %w", path, err)
 		}
 
 		// Insert a new object.

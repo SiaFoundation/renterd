@@ -16,7 +16,7 @@ type (
 		Migrate func(tx Tx) error
 	}
 
-	// Migrator is an interface for defining db - specific helper methods
+	// Migrator is an interface for defining database-specific helper methods
 	// required during migrations
 	Migrator interface {
 		ApplyMigration(func(tx Tx) (bool, error)) error
