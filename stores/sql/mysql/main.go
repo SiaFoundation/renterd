@@ -94,7 +94,7 @@ func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) 
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
-	insertDirStmt, err := tx.Prepare("INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id")
+	insertDirStmt, err := tx.Prepare("INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
 	}
