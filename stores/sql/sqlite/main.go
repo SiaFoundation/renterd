@@ -28,7 +28,7 @@ type (
 
 // NewMainDatabase creates a new SQLite backend.
 func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
-	store := sql.NewDB(db, log.Desugar(), "database is locked", lqd, ltd)
+	store := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
 		db:  store,
 		log: log,
@@ -71,7 +71,7 @@ func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
 }
 
 func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) {
-	resp, err := tx.Exec("DELETE FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) LIMIT 1", key, bucket)
+	resp, err := tx.Exec("DELETE FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", key, bucket)
 	if err != nil {
 		return false, err
 	} else if n, err := resp.RowsAffected(); err != nil {

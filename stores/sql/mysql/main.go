@@ -30,7 +30,7 @@ type (
 
 // NewMainDatabase creates a new MySQL backend.
 func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
-	store := sql.NewDB(db, log.Desugar(), "Deadlock found when trying to get lock", lqd, ltd)
+	store := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
 		db:  store,
 		log: log,
@@ -76,14 +76,14 @@ func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) 
 	// check if the object exists first to avoid unnecessary locking for the
 	// common case
 	var objID uint
-	err := tx.QueryRow("SELECT id FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) LIMIT 1", key, bucket).Scan(&objID)
+	err := tx.QueryRow("SELECT id FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", key, bucket).Scan(&objID)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return false, nil
 	} else if err != nil {
 		return false, err
 	}
 
-	resp, err := tx.Exec("DELETE FROM objects WHERE object_id = ?", objID)
+	resp, err := tx.Exec("DELETE FROM objects WHERE id = ?", objID)
 	if err != nil {
 		return false, err
 	} else if n, err := resp.RowsAffected(); err != nil {
