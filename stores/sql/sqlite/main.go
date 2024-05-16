@@ -96,7 +96,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 
 	// Create root dir.
 	dirID := uint(sql.DirectoriesRootID)
-	if _, err := insertDirStmt.Exec('/', dirID); err != nil {
+	if _, err := tx.Exec("INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
