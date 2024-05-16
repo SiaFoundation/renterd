@@ -416,7 +416,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// defer a function that finishes the upload
 	defer func() {
 		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
+		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil && !errors.Is(err, context.Canceled) {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
 		}
 		cancel()
