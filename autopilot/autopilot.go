@@ -117,6 +117,7 @@ type Autopilot struct {
 	mu               sync.Mutex
 	pruning          bool
 	pruningLastStart time.Time
+	pruningAlertIDs  map[types.FileContractID]types.Hash256
 
 	maintenanceTxnIDs []types.TransactionID
 }
@@ -136,6 +137,8 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 		shutdownCtxCancel: shutdownCtxCancel,
 
 		tickerDuration: heartbeat,
+
+		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 	scanner, err := newScanner(
 		ap,
