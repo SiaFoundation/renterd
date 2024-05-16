@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	sqldblogger "github.com/simukti/sqldb-logger"
+	"github.com/simukti/sqldb-logger/logadapter/zapadapter"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -46,23 +48,23 @@ type (
 		// Multiple queries or executions may be run concurrently from the
 		// returned statement. The caller must call the statement's Close method
 		// when the statement is no longer needed.
-		Prepare(query string) (*loggedStmt, error)
+		Prepare(query string) (*sql.Stmt, error)
 		// Query executes a query that returns rows, typically a SELECT. The
 		// args are for any placeholder parameters in the query.
-		Query(query string, args ...any) (*loggedRows, error)
+		Query(query string, args ...any) (*sql.Rows, error)
 		// QueryRow executes a query that is expected to return at most one row.
 		// QueryRow always returns a non-nil value. Errors are deferred until
 		// Row's Scan method is called. If the query selects no rows, the *Row's
 		// Scan will return ErrNoRows. Otherwise, the *Row's Scan scans the
 		// first selected row and discards the rest.
-		QueryRow(query string, args ...any) *loggedRow
+		QueryRow(query string, args ...any) *sql.Row
 	}
 )
 
 func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) *DB {
 	return &DB{
 		dbLockedMsgs:      dbLockedMsgs,
-		db:                db,
+		db:                sqldblogger.OpenDriver("", db.Driver(), zapadapter.New(log)),
 		log:               log,
 		longQueryDuration: longQueryDuration,
 		longTxDuration:    longTxDuration,
@@ -72,43 +74,21 @@ func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration
 // exec executes a query without returning any rows. The args are for
 // any placeholder parameters in the query.
 func (s *DB) Exec(query string, args ...any) (sql.Result, error) {
-	start := time.Now()
-	result, err := s.db.Exec(query, args...)
-	if dur := time.Since(start); dur > s.longQueryDuration {
-		s.log.Debug("slow exec", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	}
-	return result, err
+	return s.db.Exec(query, args...)
 }
 
 // prepare creates a prepared statement for later queries or executions.
 // Multiple queries or executions may be run concurrently from the
 // returned statement. The caller must call the statement's Close method
 // when the statement is no longer needed.
-func (s *DB) Prepare(query string) (*loggedStmt, error) {
-	start := time.Now()
-	stmt, err := s.db.Prepare(query)
-	if dur := time.Since(start); dur > s.longQueryDuration {
-		s.log.Debug("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	} else if err != nil {
-		return nil, err
-	}
-	return &loggedStmt{
-		Stmt:              stmt,
-		query:             query,
-		log:               s.log.Named("statement"),
-		longQueryDuration: s.longQueryDuration,
-	}, nil
+func (s *DB) Prepare(query string) (*sql.Stmt, error) {
+	return s.db.Prepare(query)
 }
 
 // query executes a query that returns rows, typically a SELECT. The
 // args are for any placeholder parameters in the query.
-func (s *DB) Query(query string, args ...any) (*loggedRows, error) {
-	start := time.Now()
-	rows, err := s.db.Query(query, args...)
-	if dur := time.Since(start); dur > s.longQueryDuration {
-		s.log.Debug("slow query", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	}
-	return &loggedRows{rows, s.log.Named("rows"), s.longQueryDuration}, err
+func (s *DB) Query(query string, args ...any) (*sql.Rows, error) {
+	return s.db.Query(query, args...)
 }
 
 // queryRow executes a query that is expected to return at most one row.
@@ -116,13 +96,8 @@ func (s *DB) Query(query string, args ...any) (*loggedRows, error) {
 // Row's Scan method is called. If the query selects no rows, the *Row's
 // Scan will return ErrNoRows. Otherwise, the *Row's Scan scans the
 // first selected row and discards the rest.
-func (s *DB) QueryRow(query string, args ...any) *loggedRow {
-	start := time.Now()
-	row := s.db.QueryRow(query, args...)
-	if dur := time.Since(start); dur > s.longQueryDuration {
-		s.log.Debug("slow query row", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	}
-	return &loggedRow{row, s.log.Named("row"), s.longQueryDuration}
+func (s *DB) QueryRow(query string, args ...any) *sql.Row {
+	return s.db.QueryRow(query, args...)
 }
 
 // transaction executes a function within a database transaction. If the
@@ -192,12 +167,7 @@ func (s *DB) transaction(db *sql.DB, log *zap.Logger, fn func(tx Tx) error) erro
 		}
 	}()
 
-	ltx := &loggedTxn{
-		Tx:                tx,
-		log:               log,
-		longQueryDuration: s.longQueryDuration,
-	}
-	if err := fn(ltx); err != nil {
+	if err := fn(tx); err != nil {
 		return err
 	} else if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)

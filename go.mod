@@ -6,12 +6,13 @@ toolchain go1.21.8
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3
-	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
 	github.com/minio/minio-go/v7 v7.0.70
 	github.com/montanaflynn/stats v0.7.1
+	github.com/simukti/sqldb-logger v0.0.0-20230108155151-646c1a075551
+	github.com/simukti/sqldb-logger/logadapter/zapadapter v0.0.0-20230108155151-646c1a075551
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.3
 	go.sia.tech/coreutils v0.0.4-0.20240502154058-5df7ad9c0b7c
