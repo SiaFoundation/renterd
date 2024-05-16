@@ -8,7 +8,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	"go.uber.org/zap"
 )
 
 func TestUploaderStopped(t *testing.T) {
@@ -67,11 +66,19 @@ func TestHandleSectorUpload(t *testing.T) {
 		{errMaxRevisionReached, 0, ms, regular, false, false, 0, 0},
 		{errMaxRevisionReached, 0, ms, overdrive, false, false, 0, 0},
 
+		// context canceled case
+		{context.Canceled, 0, ms, regular, false, false, 0, 0},
+		{context.Canceled, 0, ms, overdrive, false, false, 0, 0},
+
 		// sector already uploaded case
 		{errSectorUploadFinished, ms, ms, regular, false, false, 10, 0},
 		{errSectorUploadFinished, ms, ms, overdrive, false, false, 0, 0},
 		{errSectorUploadFinishedAndDial, ms, ms, overdrive, false, false, 0, 0},
 		{errSectorUploadFinishedAndDial, ms, 1001 * ms, overdrive, false, true, 10010, 0},
+
+		// payment failure case
+		{errFailedToCreatePayment, 0, ms, regular, false, false, 3600000, 0},
+		{errFailedToCreatePayment, 0, ms, overdrive, false, false, 3600000, 0},
 
 		// host failure
 		{errHostError, ms, ms, regular, false, true, 3600000, 0},
@@ -79,7 +86,7 @@ func TestHandleSectorUpload(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(c.uploadErr, c.uploadDur, c.totalDur, c.overdrive, zap.NewNop().Sugar())
+		success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(c.uploadErr, c.uploadDur, c.totalDur, c.overdrive)
 		if success != c.success {
 			t.Fatalf("case %d failed: expected success %v, got %v", i+1, c.success, success)
 		} else if failure != c.failure {

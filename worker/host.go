@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	errFailedToCreatePayment = errors.New("failed to create payment")
+)
+
 type (
 	Host interface {
 		PublicKey() types.PublicKey
@@ -136,7 +140,7 @@ func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 	}
 	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
 	if !ok {
-		return errors.New("failed to create payment")
+		return errFailedToCreatePayment
 	}
 
 	var cost types.Currency
