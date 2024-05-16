@@ -1525,14 +1525,14 @@ func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
-	return s.bMain.Transaction(func(tx sql.DatabaseTx) error {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
-		dirID, err := tx.MakeDirsForPath(keyNew)
+		dirID, err := tx.MakeDirsForPath(ctx, keyNew)
 		if err != nil {
 			return err
 		}
 		// update object
-		err = tx.RenameObject(bucket, keyOld, keyNew, dirID, force)
+		err = tx.RenameObject(ctx, bucket, keyOld, keyNew, dirID, force)
 		if err != nil {
 			return err
 		}
@@ -2937,8 +2937,8 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 		start := time.Now()
 		var duration time.Duration
 		var prune bool
-		if err := s.bMain.Transaction(func(tx sql.DatabaseTx) error {
-			d, err := tx.DeleteObjects(bucket, path, objectDeleteBatchSizes[batchSizeIdx])
+		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			d, err := tx.DeleteObjects(ctx, bucket, path, objectDeleteBatchSizes[batchSizeIdx])
 			if err != nil {
 				return err
 			}

@@ -12,10 +12,10 @@ type (
 		io.Closer
 
 		// Transaction starts a new transaction.
-		Transaction(fn func(DatabaseTx) error) error
+		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
 
 		// Migrate runs all missing migrations on the database.
-		Migrate() error
+		Migrate(ctx context.Context) error
 
 		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
@@ -24,15 +24,15 @@ type (
 	DatabaseTx interface {
 		// DeleteObject deletes an object from the database and returns true if
 		// the requested object was actually deleted.
-		DeleteObject(bucket, key string) (bool, error)
+		DeleteObject(ctx context.Context, bucket, key string) (bool, error)
 
 		// DeleteObjects deletes a batch of objects starting with the given
 		// prefix and returns 'true' if any object was deleted. The deletion
 		// should prioritize larger objects for a more predictable performance.
-		DeleteObjects(bucket, prefix string, limit int64) (bool, error)
+		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
-		MakeDirsForPath(path string) (uint, error)
+		MakeDirsForPath(ctx context.Context, path string) (uint, error)
 
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an
@@ -40,12 +40,12 @@ type (
 		// if the object at keyOld doesn't exist. If force is true, the instead
 		// of returning api.ErrObjectExists, the existing object will be
 		// deleted.
-		RenameObject(bucket, keyOld, keyNew string, dirID uint, force bool) error
+		RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID uint, force bool) error
 	}
 
 	MetricsDatabase interface {
 		io.Closer
-		Migrate() error
+		Migrate(ctx context.Context) error
 		Version(ctx context.Context) (string, string, error)
 	}
 )
