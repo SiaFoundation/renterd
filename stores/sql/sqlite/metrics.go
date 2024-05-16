@@ -24,8 +24,20 @@ func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Durat
 	}
 }
 
+func (b *MetricsDatabase) ApplyMigration(fn func(tx sql.Tx) (bool, error)) error {
+	return applyMigration(b.db, fn)
+}
+
 func (b *MetricsDatabase) Close() error {
 	return b.db.Close()
+}
+
+func (b *MetricsDatabase) DB() *sql.DB {
+	return b.db
+}
+
+func (b *MetricsDatabase) CreateMigrationTable() error {
+	return createMigrationTable(b.db)
 }
 
 func (b *MetricsDatabase) Version(_ context.Context) (string, string, error) {
@@ -33,17 +45,5 @@ func (b *MetricsDatabase) Version(_ context.Context) (string, string, error) {
 }
 
 func (b *MetricsDatabase) Migrate() error {
-	dbIdentifier := "metrics"
-	return performMigrations(b.db, dbIdentifier, []migration{
-		{
-			ID:      "00001_init",
-			Migrate: func(tx sql.Tx) error { return sql.ErrRunV072 },
-		},
-		{
-			ID: "00001_idx_contracts_fcid_timestamp",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00001_idx_contracts_fcid_timestamp", b.log)
-			},
-		},
-	}, b.log)
+	return sql.PerformMigrations(b, migrationsFs, "metrics", sql.MetricsMigrations(migrationsFs, b.log))
 }

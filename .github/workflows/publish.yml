@@ -29,9 +29,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v2
-      - uses: docker/setup-buildx-action@v2
-      - uses: docker/login-action@v2
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -70,6 +70,7 @@ jobs:
     strategy:
       matrix:
         network: ["mainnet" , "zen"]
+        arch: [ amd64, arm64 ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -77,9 +78,12 @@ jobs:
           go-version: 'stable'
       - name: Setup
         run: |
-          sudo apt update
-          sudo apt install -y gcc-aarch64-linux-gnu
           go generate ./...
+          if [ ${{ matrix.arch }} == "arm64" ]; then
+            sudo apt update
+            sudo apt install -y gcc-aarch64-linux-gnu
+            echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          fi
       - name: Set build tag environment variable
         run: |
           if [[ "${{ matrix.network }}" == "zen" ]]; then
@@ -89,38 +93,41 @@ jobs:
             echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
             echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
           fi
-      - name: Build amd64
+      - name: Build ${{ matrix.arch }}
         env:
           CGO_ENABLED: 1
           GOOS: linux
-          GOARCH: amd64
+          GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p release
           ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
-      - name: Build arm64
-        env:
-          CGO_ENABLED: 1
-          GOOS: linux
-          GOARCH: arm64
-          CC: aarch64-linux-gnu-gcc
-        run: |
-          mkdir -p release
-          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
-          go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
-          cp README.md LICENSE bin/
-          zip -qj $ZIP_OUTPUT bin/*
-      - uses: actions/upload-artifact@v3
+      - name: Get Release Asset
+        uses: actions/github-script@v7
+        id: get_release_asset
         with:
-          name: renterd
+          script: |
+            const arch = context.matrix.arch,
+              network = context.matrix.network,
+              release = ['renterd', 'linux'];
+
+            if (network === 'zen')
+              release.push('zen');
+
+            release.push(arch);
+            return release.join('-');
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get_payload.outputs.result }}
           path: release/
   build-mac:
     runs-on: macos-latest
     strategy:
       matrix:
         network: ["mainnet" , "zen"]
+        arch: [ amd64, arm64 ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -168,7 +175,7 @@ jobs:
               echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
               echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
           fi
-      - name: Build amd64
+      - name: Build ${{ matrix.arch }}
         env:
           APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -179,7 +186,7 @@ jobs:
           APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
           CGO_ENABLED: 1
           GOOS: darwin
-          GOARCH: amd64
+          GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p release
           ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
@@ -188,35 +195,30 @@ jobs:
           /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
           ditto -ck bin $ZIP_OUTPUT
           xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
-      - name: Build arm64
-        env:
-          APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_KEY_B64: ${{ secrets.APPLE_KEY_B64 }}
-          APPLE_CERT_B64: ${{ secrets.APPLE_CERT_B64 }}
-          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-          CGO_ENABLED: 1
-          GOOS: darwin
-          GOARCH: arm64
-        run: |
-          mkdir -p release
-          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
-          go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w' ./cmd/renterd
-          cp README.md LICENSE bin/
-          /usr/bin/codesign --deep -f -v --timestamp -o runtime,library -s $APPLE_CERT_ID bin/renterd
-          ditto -ck bin $ZIP_OUTPUT
-          xcrun notarytool submit -k ~/private_keys/AuthKey_$APPLE_API_KEY.p8 -d $APPLE_API_KEY -i $APPLE_API_ISSUER --wait --timeout 10m $ZIP_OUTPUT
-      - uses: actions/upload-artifact@v3
+      - name: Get Release Asset
+        uses: actions/github-script@v7
+        id: get_release_asset
         with:
-          name: renterd
+          script: |
+            const arch = context.matrix.arch,
+              network = context.matrix.network,
+              release = ['renterd', 'darwin'];
+
+            if (network === 'zen')
+              release.push('zen');
+
+            release.push(arch);
+            return release.join('-');
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get_payload.outputs.result }}
           path: release/
   build-windows:
     runs-on: windows-latest
     strategy:
       matrix:
         network: ["mainnet" , "zen"]
+        arch: [ amd64 ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -236,11 +238,11 @@ jobs:
         run: |
           dotnet tool install --global AzureSignTool
           go generate ./...
-      - name: Build amd64
+      - name: Build ${{ matrix.arch }}
         env:
           CGO_ENABLED: 1
           GOOS: windows
-          GOARCH: amd64
+          GOARCH: ${{ matrix.arch }}
         shell: bash
         run: |
           mkdir -p release
@@ -249,14 +251,37 @@ jobs:
           azuresigntool sign -kvu "${{ secrets.AZURE_KEY_VAULT_URI }}" -kvi "${{ secrets.AZURE_CLIENT_ID }}" -kvt "${{ secrets.AZURE_TENANT_ID }}" -kvs "${{ secrets.AZURE_CLIENT_SECRET }}" -kvc ${{ secrets.AZURE_CERT_NAME }} -tr http://timestamp.digicert.com -v bin/renterd.exe
           cp README.md LICENSE bin/
           7z a $ZIP_OUTPUT bin/*
-      - uses: actions/upload-artifact@v3
+      - name: Get Release Asset
+        uses: actions/github-script@v7
+        id: get_release_asset
         with:
-          name: renterd
+          script: |
+            const arch = context.matrix.arch,
+              network = context.matrix.network,
+              release = ['renterd', 'windows'];
+
+            if (network === 'zen')
+              release.push('zen');
+
+            release.push(arch);
+            return release.join('-');
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get_payload.outputs.result }}
           path: release/
+
+  combine-release-assets:
+    runs-on: ubuntu-latest
+    needs: [ build-linux, build-mac, build-windows ]
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: renterd-release-assets-combined
 
   dispatch-homebrew: # only runs on full releases
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
-    needs: [docker, build-linux, build-mac, build-windows]
+    needs: [ build-mac ]
     runs-on: ubuntu-latest
     steps:
       - name: Extract Tag Name
@@ -278,7 +303,7 @@ jobs:
             }
   dispatch-linux: # run on full releases, release candidates, and master branch
     if: startsWith(github.ref, 'refs/tags/v') || endsWith(github.ref, 'master')
-    needs: [docker, build-linux, build-mac, build-windows]
+    needs: [ build-linux ]
     runs-on: ubuntu-latest
     steps:
       - name: Build Dispatch Payload

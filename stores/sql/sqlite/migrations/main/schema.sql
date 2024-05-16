@@ -44,8 +44,13 @@ CREATE INDEX `idx_contract_set_contracts_db_contract_id` ON `contract_set_contra
 CREATE TABLE `buckets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`policy` text,`name` text NOT NULL UNIQUE);
 CREATE INDEX `idx_buckets_name` ON `buckets`(`name`);
 
+-- dbDirectory
+CREATE TABLE `directories` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_parent_id` integer,`name` text, CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories`(`id`));
+CREATE INDEX `idx_directories_parent_id` ON `directories`(`db_parent_id`);
+CREATE UNIQUE INDEX `idx_directories_name` ON `directories`(`name`);
+
 -- dbObject
-CREATE TABLE `objects` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_bucket_id` integer NOT NULL,`object_id` text,`key` blob,`health` real NOT NULL DEFAULT 1,`size` integer,`mime_type` text,`etag` text,CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`));
+CREATE TABLE `objects` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_bucket_id` integer NOT NULL, `db_directory_id` integer NOT NULL, `object_id` text,`key` blob,`health` real NOT NULL DEFAULT 1,`size` integer,`mime_type` text,`etag` text,CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`),CONSTRAINT `fk_objects_db_directories` FOREIGN KEY (`db_directory_id`) REFERENCES `directories`(`id`));
 CREATE INDEX `idx_objects_db_bucket_id` ON `objects`(`db_bucket_id`);
 CREATE INDEX `idx_objects_etag` ON `objects`(`etag`);
 CREATE INDEX `idx_objects_health` ON `objects`(`health`);

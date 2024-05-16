@@ -127,9 +127,10 @@ func (lt *loggedTxn) Prepare(query string) (*loggedStmt, error) {
 		return nil, err
 	}
 	return &loggedStmt{
-		Stmt:  stmt,
-		query: query,
-		log:   lt.log.Named("statement"),
+		Stmt:              stmt,
+		query:             query,
+		log:               lt.log.Named("statement"),
+		longQueryDuration: lt.longQueryDuration,
 	}, nil
 }
 

@@ -3,10 +3,12 @@ package mysql
 import (
 	"context"
 	dsql "database/sql"
+	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.sia.tech/renterd/internal/sql"
-	"go.sia.tech/renterd/internal/utils"
 
 	"go.uber.org/zap"
 )
@@ -25,64 +27,70 @@ func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration
 	}
 }
 
+func (b *MainDatabase) ApplyMigration(fn func(tx sql.Tx) (bool, error)) error {
+	return applyMigration(b.db, fn)
+}
+
 func (b *MainDatabase) Close() error {
 	return b.db.Close()
 }
 
+func (b *MainDatabase) DB() *sql.DB {
+	return b.db
+}
+
+func (b *MainDatabase) CreateMigrationTable() error {
+	return createMigrationTable(b.db)
+}
+
+func (b *MainDatabase) MakeDirsForPath(tx sql.Tx, path string) (uint, error) {
+	insertDirStmt, err := tx.Prepare("INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	queryDirStmt, err := tx.Prepare("SELECT id FROM directories WHERE name = ?")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer queryDirStmt.Close()
+
+	// Create root dir.
+	dirID := uint(sql.DirectoriesRootID)
+	if _, err := insertDirStmt.Exec('/', dirID); err != nil {
+		return 0, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	// Create remaining directories.
+	path = strings.TrimSuffix(path, "/")
+	if path == "/" {
+		return dirID, nil
+	}
+	for i := 0; i < utf8.RuneCountInString(path); i++ {
+		if path[i] != '/' {
+			continue
+		}
+		dir := path[:i+1]
+		if dir == "/" {
+			continue
+		}
+		if _, err := insertDirStmt.Exec(dir, dirID); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		}
+		var childID uint
+		if err := queryDirStmt.QueryRow(dir).Scan(&childID); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if childID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		}
+		dirID = childID
+	}
+	return dirID, nil
+}
+
 func (b *MainDatabase) Migrate() error {
-	dbIdentifier := "main"
-	return performMigrations(b.db, dbIdentifier, []migration{
-		{
-			ID:      "00001_init",
-			Migrate: func(tx sql.Tx) error { return sql.ErrRunV072 },
-		},
-		{
-			ID: "00001_object_metadata",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00001_object_metadata", b.log)
-			},
-		},
-		{
-			ID: "00002_prune_slabs_trigger",
-			Migrate: func(tx sql.Tx) error {
-				err := performMigration(tx, dbIdentifier, "00002_prune_slabs_trigger", b.log)
-				if utils.IsErr(err, sql.ErrMySQLNoSuperPrivilege) {
-					b.log.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
-				}
-				return err
-			},
-		},
-		{
-			ID: "00003_idx_objects_size",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00003_idx_objects_size", b.log)
-			},
-		},
-		{
-			ID: "00004_prune_slabs_cascade",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00004_prune_slabs_cascade", b.log)
-			},
-		},
-		{
-			ID: "00005_zero_size_object_health",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00005_zero_size_object_health", b.log)
-			},
-		},
-		{
-			ID: "00006_idx_objects_created_at",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00006_idx_objects_created_at", b.log)
-			},
-		},
-		{
-			ID: "00007_host_checks",
-			Migrate: func(tx sql.Tx) error {
-				return performMigration(tx, dbIdentifier, "00007_host_checks", b.log)
-			},
-		},
-	}, b.log)
+	return sql.PerformMigrations(b, migrationsFs, "main", sql.MainMigrations(b, migrationsFs, b.log))
 }
 
 func (b *MainDatabase) Version(_ context.Context) (string, string, error) {

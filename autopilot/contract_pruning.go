@@ -14,6 +14,7 @@ import (
 )
 
 var (
+	errInvalidHandshake          = errors.New("couldn't read host's handshake")
 	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
 	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
 )
@@ -239,6 +240,7 @@ func shouldSendPruneAlert(err error, version string) bool {
 		utils.IsErr(err, utils.ErrConnectionTimedOut) ||
 		utils.IsErr(err, utils.ErrConnectionResetByPeer) ||
 		utils.IsErr(err, errInvalidHandshakeSignature) ||
+		utils.IsErr(err, errInvalidHandshake) ||
 		utils.IsErr(err, utils.ErrNoRouteToHost) ||
 		utils.IsErr(err, utils.ErrNoSuchHost))
 }
