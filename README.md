@@ -90,7 +90,7 @@ overview of all settings configurable through the CLI.
 | `S3.DisableAuth`                     | Disables authentication for S3 API                   | `false`                           | `--s3.disableAuth`                 | `RENTERD_S3_DISABLE_AUTH`                      | `s3.disableAuth`                    |
 | `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
 | `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
-| `S3.KeypairsV4`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
+| `S3.KeypairsV4 (DEPRECATED)`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
 
 
 ## Backups
