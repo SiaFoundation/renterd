@@ -19,7 +19,7 @@ const (
 	factor           = 1.8 // factor ^ retryAttempts = backoff time in milliseconds
 	maxBackoff       = 15 * time.Second
 
-	SCHEMA_INIT = "SCHEMA_INIT"
+	DirectoriesRootID = 1
 )
 
 var (
@@ -93,9 +93,10 @@ func (s *DB) Prepare(query string) (*loggedStmt, error) {
 		return nil, err
 	}
 	return &loggedStmt{
-		Stmt:  stmt,
-		query: query,
-		log:   s.log.Named("statement"),
+		Stmt:              stmt,
+		query:             query,
+		log:               s.log.Named("statement"),
+		longQueryDuration: s.longQueryDuration,
 	}, nil
 }
 
@@ -185,8 +186,9 @@ func (s *DB) transaction(db *sql.DB, log *zap.Logger, fn func(tx Tx) error) erro
 	}()
 
 	ltx := &loggedTxn{
-		Tx:  tx,
-		log: log,
+		Tx:                tx,
+		log:               log,
+		longQueryDuration: s.longQueryDuration,
 	}
 	if err := fn(ltx); err != nil {
 		return err

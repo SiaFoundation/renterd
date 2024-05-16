@@ -403,14 +403,21 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 		sum := h.Sum()
 		eTag = hex.EncodeToString(sum[:])
 
+		// Create the directory.
+		dirID, err := makeDirsForPath(tx, path)
+		if err != nil {
+			return fmt.Errorf("failed to create directory for path %s: %w", path, err)
+		}
+
 		// Create the object.
 		obj := dbObject{
-			DBBucketID: mu.DBBucketID,
-			ObjectID:   path,
-			Key:        mu.Key,
-			Size:       int64(size),
-			MimeType:   mu.MimeType,
-			Etag:       eTag,
+			DBDirectoryID: dirID,
+			DBBucketID:    mu.DBBucketID,
+			ObjectID:      path,
+			Key:           mu.Key,
+			Size:          int64(size),
+			MimeType:      mu.MimeType,
+			Etag:          eTag,
 		}
 		if err := tx.Create(&obj).Error; err != nil {
 			return fmt.Errorf("failed to create object: %w", err)

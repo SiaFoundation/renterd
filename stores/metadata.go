@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,16 +14,13 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lukechampine.com/frand"
-)
-
-var (
-	pruneSlabsAlertID = frand.Entropy256()
 )
 
 const (
@@ -46,19 +42,23 @@ const (
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
-var (
-	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
-	errShardRootChanged      = errors.New("shard root changed")
-
-	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
-)
-
 const (
 	contractStateInvalid contractState = iota
 	contractStatePending
 	contractStateActive
 	contractStateComplete
 	contractStateFailed
+)
+
+var (
+	pruneSlabsAlertID = frand.Entropy256()
+)
+
+var (
+	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	errShardRootChanged      = errors.New("shard root changed")
+
+	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
 type (
@@ -115,8 +115,17 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
+	dbDirectory struct {
+		Model
+
+		Name       string
+		DBParentID uint
+	}
+
 	dbObject struct {
 		Model
+
+		DBDirectoryID uint
 
 		DBBucketID uint `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
 		DBBucket   dbBucket
@@ -241,12 +250,12 @@ type (
 
 	// rawObjectMetadata is used for hydrating object metadata.
 	rawObjectMetadata struct {
-		ETag     string
-		Health   float64
-		MimeType string
-		ModTime  datetime
-		Name     string
-		Size     int64
+		ETag       string
+		Health     float64
+		MimeType   string
+		ModTime    datetime
+		ObjectName string
+		Size       int64
 	}
 )
 
@@ -303,6 +312,9 @@ func (dbContractSector) TableName() string { return "contract_sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
+
+// TableName implements the gorm.Tabler interface.
+func (dbDirectory) TableName() string { return "directories" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
@@ -418,7 +430,7 @@ func (s dbSlab) convert() (slab object.Slab, err error) {
 
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 	return newObjectMetadata(
-		raw.Name,
+		raw.ObjectName,
 		raw.ETag,
 		raw.MimeType,
 		raw.Health,
@@ -1161,11 +1173,6 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return objects, nil
 }
 
-func replaceAnyValue(query string) string {
-	re := regexp.MustCompile(`ANY_VALUE\((.*?)\)`)
-	return re.ReplaceAllString(query, "$1")
-}
-
 func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -1216,64 +1223,75 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 		offset = 0
 	}
 
-	indexHint := ""
-	if !isSQLite(s.db) {
-		indexHint = "USE INDEX (idx_object_bucket, idx_objects_created_at)"
+	// fetch id of directory to query
+	dirID, err := s.dirID(s.db, path)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return []api.ObjectMetadata{}, false, nil
+	} else if err != nil {
+		return nil, false, err
 	}
 
-	onameExpr := fmt.Sprintf("CASE INSTR(SUBSTR(object_id, ?), '/') WHEN 0 THEN %s ELSE %s END",
-		sqlConcat(s.db, "?", "SUBSTR(object_id, ?)"),
-		sqlConcat(s.db, "?", "substr(SUBSTR(object_id, ?), 1, INSTR(SUBSTR(object_id, ?), '/'))"),
-	)
+	// fetch bucket id
+	var dBucket dbBucket
+	if err := s.db.Select("id").
+		Where("name", bucket).
+		Take(&dBucket).Error; err != nil {
+		return nil, false, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
 
-	// build objects query & parameters
-	objectsQuery := fmt.Sprintf(`
-SELECT ETag, ModTime, oname as Name, Size, Health, MimeType
-FROM (
-	SELECT
-	ANY_VALUE(etag) AS ETag,
-	MAX(objects.created_at) AS ModTime,
-	%s AS oname,
-	SUM(size) AS Size,
-	MIN(health) as Health,
-	ANY_VALUE(mime_type) as MimeType
-	FROM objects %s
-	INNER JOIN buckets b ON objects.db_bucket_id = b.id
-	WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND b.name = ? AND SUBSTR(%s, 1, ?) = ? AND %s != ?
-	GROUP BY oname
-) baseQuery
-`,
-		onameExpr,
-		indexHint,
-		onameExpr,
-		onameExpr,
-	)
+	// build prefix expression
+	prefixExpr := "TRUE"
+	if prefix != "" {
+		prefixExpr = "SUBSTR(o.object_id, 1, ?) = ?"
+	}
 
+	lengthFn := "CHAR_LENGTH"
 	if isSQLite(s.db) {
-		objectsQuery = replaceAnyValue(objectsQuery)
+		lengthFn = "LENGTH"
 	}
 
-	objectsQueryParams := []interface{}{
-		utf8.RuneCountInString(path) + 1,       // onameExpr
-		path, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
+	// objectsQuery consists of 2 parts
+	// 1. fetch all objects in requested directory
+	// 2. fetch all sub-directories
+	objectsQuery := fmt.Sprintf(`
+SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
+FROM objects o
+WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) AND %s
+UNION ALL
+SELECT '' as ETag, MAX(o.created_at) as ModTime, d.name as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
+FROM objects o
+INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name AND %s
+WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
+AND o.object_id LIKE ?
+AND SUBSTR(o.object_id, 1, ?) = ?
+AND d.db_parent_id = ?
+GROUP BY d.id
+`, prefixExpr,
+		lengthFn,
+		prefixExpr)
 
-		path + "%",
-
-		utf8.RuneCountInString(path), // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		path,                         // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		bucket,                       // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-
-		utf8.RuneCountInString(path) + 1,       // onameExpr
-		path, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
-
-		utf8.RuneCountInString(path + prefix),  // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		path + prefix,                          // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
-		utf8.RuneCountInString(path) + 1,       // onameExpr
-		path, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, utf8.RuneCountInString(path) + 1, utf8.RuneCountInString(path) + 1, // onameExpr
-		path, // WHERE SUBSTR(%s, 1, ?) = ? AND %s != ? AND b.name = ?
+	// build query params
+	var objectsQueryParams []interface{}
+	if prefix != "" {
+		objectsQueryParams = []interface{}{
+			path,          // o.object_id != ?
+			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
+			utf8.RuneCountInString(path + prefix), path + prefix,
+			utf8.RuneCountInString(path + prefix), path + prefix,
+			bucket,                             // b.name = ?
+			path + "%",                         // o.object_id LIKE ?
+			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
+			dirID, // d.db_parent_id = ?
+		}
+	} else {
+		objectsQueryParams = []interface{}{
+			path,          // o.object_id != ?
+			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
+			bucket,
+			path + "%",                         // o.object_id LIKE ?
+			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
+			dirID, // d.db_parent_id = ?
+		}
 	}
 
 	// build marker expr
@@ -1285,41 +1303,41 @@ FROM (
 			var markerHealth float64
 			if err = s.db.
 				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Health FROM (%s WHERE oname >= ? ORDER BY oname LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Health FROM (SELECT * FROM (%s) h WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerHealth).
 				Error; err != nil {
 				return
 			}
 
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(Health > ? OR (Health = ? AND Name > ?))"
+				markerExpr = "(Health > ? OR (Health = ? AND ObjectName > ?))"
 				markerParams = []interface{}{markerHealth, markerHealth, marker}
 			} else {
-				markerExpr = "(Health = ? AND Name > ?) OR Health < ?"
+				markerExpr = "(Health = ? AND ObjectName > ?) OR Health < ?"
 				markerParams = []interface{}{markerHealth, marker, markerHealth}
 			}
 		case api.ObjectSortBySize:
 			var markerSize float64
 			if err = s.db.
 				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Size FROM (%s WHERE oname >= ? ORDER BY oname LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
+				Raw(fmt.Sprintf(`SELECT Size FROM (SELECT * FROM (%s) s WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
 				Scan(&markerSize).
 				Error; err != nil {
 				return
 			}
 
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(Size > ? OR (Size = ? AND Name > ?))"
+				markerExpr = "(Size > ? OR (Size = ? AND ObjectName > ?))"
 				markerParams = []interface{}{markerSize, markerSize, marker}
 			} else {
-				markerExpr = "(Size = ? AND Name > ?) OR Size < ?"
+				markerExpr = "(Size = ? AND ObjectName > ?) OR Size < ?"
 				markerParams = []interface{}{markerSize, marker, markerSize}
 			}
 		case api.ObjectSortByName:
 			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "Name > ?"
+				markerExpr = "ObjectName > ?"
 			} else {
-				markerExpr = "Name < ?"
+				markerExpr = "ObjectName < ?"
 			}
 			markerParams = []interface{}{marker}
 		default:
@@ -1328,9 +1346,12 @@ FROM (
 	}
 
 	// build order clause
+	if sortBy == api.ObjectSortByName {
+		sortBy = "ObjectName"
+	}
 	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
-	if sortBy != api.ObjectSortByName {
-		orderByClause += ", Name"
+	if sortBy != "ObjectName" {
+		orderByClause += ", ObjectName"
 	}
 
 	var rows []rawObjectMetadata
@@ -1510,7 +1531,13 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 				return fmt.Errorf("RenameObject: failed to delete object: %w", err)
 			}
 		}
-		tx = tx.Exec(`UPDATE objects SET object_id = ? WHERE object_id = ? AND ?`, keyNew, keyOld, sqlWhereBucket("objects", bucket))
+		// create new dir
+		dirID, err := makeDirsForPath(tx, keyNew)
+		if err != nil {
+			return err
+		}
+		// update object
+		tx = tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND ?`, keyNew, dirID, keyOld, sqlWhereBucket("objects", bucket))
 		if tx.Error != nil &&
 			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
 			return api.ErrObjectExists
@@ -1520,6 +1547,8 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 		if tx.RowsAffected == 0 {
 			return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
 		}
+		// delete old dir if empty
+		s.triggerSlabPruning()
 		return nil
 	})
 }
@@ -1543,8 +1572,13 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 				return err
 			}
 		}
-		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+" WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
-			prefixNew, utf8.RuneCountInString(prefixOld)+1, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
+		// create new dir
+		dirID, err := makeDirsForPath(tx, prefixNew)
+		if err != nil {
+			return err
+		}
+		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+", db_directory_id = ? WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
+			prefixNew, utf8.RuneCountInString(prefixOld)+1, dirID, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
 		if tx.Error != nil &&
 			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
 			return api.ErrObjectExists
@@ -1554,6 +1588,8 @@ func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixN
 		if tx.RowsAffected == 0 {
 			return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 		}
+		// delete old dir if empty
+		s.triggerSlabPruning()
 		return nil
 	})
 }
@@ -1728,6 +1764,74 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	return deletedSectors, err
 }
 
+func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
+	if !strings.HasPrefix(dirPath, "/") {
+		return 0, fmt.Errorf("path must start with /")
+	} else if !strings.HasSuffix(dirPath, "/") {
+		return 0, fmt.Errorf("path must end with /")
+	}
+
+	if dirPath == "/" {
+		return 1, nil // root dir returned
+	}
+
+	var dir dbDirectory
+	if err := tx.Where("name", dirPath).
+		Select("id").
+		Take(&dir).
+		Error; err != nil {
+		return 0, fmt.Errorf("failed to fetch directory: %w", err)
+	}
+	return dir.ID, nil
+}
+
+func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
+	// Create root dir.
+	dirID := uint(sql.DirectoriesRootID)
+	if err := tx.Model(&dbDirectory{}).
+		Clauses(clause.OnConflict{
+			DoNothing: true,
+		}).Create(map[string]any{
+		"id":   dirID,
+		"name": "/",
+	}).Error; err != nil {
+		return 0, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	// Create remaining directories.
+	path = strings.TrimSuffix(path, "/")
+	if path == "/" {
+		return dirID, nil
+	}
+	for i := 0; i < utf8.RuneCountInString(path); i++ {
+		if path[i] != '/' {
+			continue
+		}
+		dir := path[:i+1]
+		if dir == "/" {
+			continue
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			DoNothing: true,
+		}).
+			Create(&dbDirectory{
+				Name:       dir,
+				DBParentID: dirID,
+			}).Error; err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		}
+		var childID uint
+		if err := tx.Raw("SELECT id FROM directories WHERE name = ?", dir).
+			Scan(&childID).Error; err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if childID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		}
+		dirID = childID
+	}
+	return dirID, nil
+}
+
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	// Sanity check input.
 	for _, s := range o.Slabs {
@@ -1759,6 +1863,12 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
+		// create the dir
+		dirID, err := makeDirsForPath(tx, path)
+		if err != nil {
+			return fmt.Errorf("failed to create directories for path '%s': %w", path, err)
+		}
+
 		// Insert a new object.
 		objKey, err := o.Key.MarshalBinary()
 		if err != nil {
@@ -1775,12 +1885,13 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 
 		obj := dbObject{
-			DBBucketID: bucketID,
-			ObjectID:   path,
-			Key:        objKey,
-			Size:       o.TotalSize(),
-			MimeType:   mimeType,
-			Etag:       eTag,
+			DBDirectoryID: dirID,
+			DBBucketID:    bucketID,
+			ObjectID:      path,
+			Key:           objKey,
+			Size:          o.TotalSize(),
+			MimeType:      mimeType,
+			Etag:          eTag,
 		}
 		err = tx.Create(&obj).Error
 		if err != nil {
@@ -2476,7 +2587,7 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey 
 
 	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Raw(`
-SELECT DISTINCT obj.object_id as Name, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
+SELECT DISTINCT obj.object_id as ObjectName, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
 FROM slabs sla
 INNER JOIN slices sli ON sli.db_slab_id = sla.id
 INNER JOIN objects obj ON sli.db_object_id = obj.id
@@ -2733,13 +2844,20 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
-		err := s.retryTransaction(ctx, pruneSlabs)
+		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
+			if err := pruneSlabs(tx); err != nil {
+				return fmt.Errorf("failed to prune slabs: %w", err)
+			} else if err := pruneDirs(tx); err != nil {
+				return fmt.Errorf("failed to prune directories: %w", err)
+			}
+			return nil
+		})
 		if err != nil {
-			s.logger.Errorw("failed to prune slabs", zap.Error(err))
+			s.logger.Errorw("pruning failed", zap.Error(err))
 			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
 				ID:        pruneSlabsAlertID,
 				Severity:  alerts.SeverityWarning,
-				Message:   "Failed to prune slabs from database",
+				Message:   "Failed to prune database",
 				Timestamp: time.Now(),
 				Data: map[string]interface{}{
 					"error": err.Error(),
@@ -2764,6 +2882,23 @@ FROM slabs
 WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
 AND slabs.db_buffered_slab_id IS NULL
 `).Error
+}
+
+func pruneDirs(tx *gorm.DB) error {
+	for {
+		res := tx.Exec(`
+DELETE
+FROM directories
+WHERE directories.id != 1
+AND NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
+AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.db_parent_id = directories.id) i)
+`)
+		if res.Error != nil {
+			return res.Error
+		} else if res.RowsAffected == 0 {
+			return nil
+		}
+	}
 }
 
 func (s *SQLStore) triggerSlabPruning() {
@@ -2891,11 +3026,21 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileC
 }
 
 // nolint:unparam
-func sqlConcat(db *gorm.DB, a, b string) string {
-	if isSQLite(db) {
-		return fmt.Sprintf("%s || %s", a, b)
+func sqlConcat(db *gorm.DB, s ...string) string {
+	if len(s) < 2 {
+		panic("sqlConcat: need at least two arguments")
 	}
-	return fmt.Sprintf("CONCAT(%s, %s)", a, b)
+	query := s[0]
+	if isSQLite(db) {
+		for i := 1; i < len(s); i++ {
+			query = fmt.Sprintf("%s || %s", query, s[i])
+		}
+		return query
+	}
+	for i := 1; i < len(s); i++ {
+		query = fmt.Sprintf("%s, %s", query, s[i])
+	}
+	return fmt.Sprintf("CONCAT(%s)", query)
 }
 
 func sqlRandomTimestamp(db *gorm.DB, now time.Time, minDuration, maxDuration time.Duration) clause.Expr {
@@ -2937,14 +3082,15 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	}
 	var rows []rawObjectMetadata
 	if err := s.db.
-		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
+		Select("o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
 		Model(&dbObject{}).
 		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Where("b.name = ? AND ? AND ?", bucket, prefixExpr, markerExpr).
+		Where("o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)", bucket).
+		Where("?", prefixExpr).
+		Where("?", markerExpr).
 		Order(orderBy).
 		Order(markerOrderBy).
-		Order("Name ASC").
+		Order("ObjectName ASC").
 		Limit(int(limit)).
 		Scan(&rows).Error; err != nil {
 		return api.ObjectsListResponse{}, err
@@ -2955,7 +3101,7 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 	if len(rows) == limit {
 		hasMore = true
 		rows = rows[:len(rows)-1]
-		nextMarker = rows[len(rows)-1].Name
+		nextMarker = rows[len(rows)-1].ObjectName
 	}
 
 	var objects []api.ObjectMetadata

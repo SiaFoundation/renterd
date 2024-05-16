@@ -42,6 +42,22 @@ func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix str
 	return s.waitForPruneLoop(ts)
 }
 
+func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
+	ts := time.Now()
+	if err := s.RenameObject(ctx, bucket, keyOld, keyNew, force); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
+	ts := time.Now()
+	if err := s.RenameObjects(ctx, bucket, prefixOld, prefixNew, force); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
 func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	var ts time.Time
 	_, err := s.Object(ctx, bucket, path)
@@ -1048,11 +1064,12 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	one := uint(1)
 	expectedObj := dbObject{
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
-		ObjectID:   objID,
-		Key:        obj1Key,
-		Size:       obj1.TotalSize(),
+		DBDirectoryID: 1,
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
+		ObjectID:      objID,
+		Key:           obj1Key,
+		Size:          obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID:  &one,
@@ -1447,6 +1464,7 @@ func TestObjectEntries(t *testing.T) {
 	// assertMetadata asserts both ModTime, MimeType and ETag and clears them so the
 	// entries are ready for comparison
 	assertMetadata := func(entries []api.ObjectMetadata) {
+		t.Helper()
 		for i := range entries {
 			// assert mod time
 			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
@@ -1455,14 +1473,15 @@ func TestObjectEntries(t *testing.T) {
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			if entries[i].MimeType != testMimeType {
+			isDir := strings.HasSuffix(entries[i].Name, "/")
+			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType != testMimeType) {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
 			entries[i].MimeType = ""
 
 			// assert etag
-			if entries[i].ETag == "" {
-				t.Fatal("etag should be set")
+			if isDir != (entries[i].ETag == "") {
+				t.Fatal("etag should be set for files and empty for dirs")
 			}
 			entries[i].ETag = ""
 		}
@@ -2468,6 +2487,43 @@ func TestRenameObjects(t *testing.T) {
 			t.Fatal("unexpected path", obj.Name)
 		}
 	}
+
+	// Assert directories are correct
+	expectedDirs := []struct {
+		id       uint
+		parentID uint
+		name     string
+	}{
+		{
+			id:       1,
+			parentID: 0,
+			name:     "/",
+		},
+		{
+			id:       2,
+			parentID: 1,
+			name:     "/fileś/",
+		},
+	}
+	var directories []dbDirectory
+	test.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Find(&directories).Error; err != nil {
+			return err
+		} else if len(directories) != len(expectedDirs) {
+			return fmt.Errorf("unexpected number of directories, %v != %v", len(directories), len(expectedDirs))
+		}
+		return nil
+	})
+
+	for i, dir := range directories {
+		if dir.ID != expectedDirs[i].id {
+			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
+		} else if dir.DBParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected directory parent id, %v != %v", dir.DBParentID, expectedDirs[i].parentID)
+		} else if dir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
+		}
+	}
 }
 
 // TestObjectsStats is a unit test for ObjectsStats.
@@ -3243,7 +3299,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
+	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3260,7 +3316,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
+	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -4080,19 +4136,26 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	dirID, err := makeDirsForPath(ss.db, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// create objects
 	obj1 := dbObject{
-		ObjectID:   "1",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: dirID,
+		ObjectID:      "1",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj1).Error; err != nil {
 		t.Fatal(err)
 	}
 	obj2 := dbObject{
-		ObjectID:   "2",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: dirID,
+		ObjectID:      "2",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj2).Error; err != nil {
 		t.Fatal(err)
@@ -4127,7 +4190,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4163,9 +4226,10 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj3 := dbObject{
-		ObjectID:   "3",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: dirID,
+		ObjectID:      "3",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj3).Error; err != nil {
 		t.Fatal(err)
@@ -4760,5 +4824,88 @@ func TestFetchUsedContracts(t *testing.T) {
 		t.Fatal("contracts should match")
 	} else if contracts[types.FileContractID{1}].convert().ID != fcid2 {
 		t.Fatal("contracts should point to the renewed contract")
+	}
+}
+
+func TestDirectories(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	objects := []string{
+		"/foo",
+		"/bar/baz",
+		"///somefile",
+		"/dir/fakedir/",
+		"/",
+		"/bar/fileinsamedirasbefore",
+	}
+
+	for _, o := range objects {
+		dirID, err := makeDirsForPath(ss.db, o)
+		if err != nil {
+			t.Fatal(err)
+		} else if dirID == 0 {
+			t.Fatalf("unexpected dir id %v", dirID)
+		}
+	}
+
+	expectedDirs := []struct {
+		name     string
+		id       uint
+		parentID uint
+	}{
+		{
+			name:     "/",
+			id:       1,
+			parentID: 0,
+		},
+		{
+			name:     "/bar/",
+			id:       2,
+			parentID: 1,
+		},
+		{
+			name:     "//",
+			id:       3,
+			parentID: 1,
+		},
+		{
+			name:     "///",
+			id:       4,
+			parentID: 3,
+		},
+		{
+			name:     "/dir/",
+			id:       2,
+			parentID: 1,
+		},
+	}
+
+	var dbDirs []dbDirectory
+	if err := ss.db.Find(&dbDirs).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbDirs) != len(expectedDirs) {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), len(dbDirs))
+	}
+
+	for i, dbDir := range dbDirs {
+		if dbDir.ID != uint(i+1) {
+			t.Fatalf("unexpected id %v", dbDir.ID)
+		} else if dbDir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected name '%v' != '%v'", dbDir.Name, expectedDirs[i].name)
+		}
+	}
+
+	now := time.Now()
+	ss.triggerSlabPruning()
+	if err := ss.waitForPruneLoop(now); err != nil {
+		t.Fatal(err)
+	}
+
+	var n int64
+	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal("expected 1 dir, got", n)
 	}
 }
