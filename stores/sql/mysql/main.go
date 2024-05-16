@@ -3,20 +3,30 @@ package mysql
 import (
 	"context"
 	dsql "database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"go.sia.tech/renterd/api"
+	ssql "go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/sql"
 
 	"go.uber.org/zap"
 )
 
-type MainDatabase struct {
-	db  *sql.DB
-	log *zap.SugaredLogger
-}
+type (
+	MainDatabase struct {
+		db  *sql.DB
+		log *zap.SugaredLogger
+	}
+
+	MainDatabaseTx struct {
+		sql.Tx
+	}
+)
 
 // NewMainDatabase creates a new MySQL backend.
 func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
@@ -44,6 +54,46 @@ func (b *MainDatabase) CreateMigrationTable() error {
 }
 
 func (b *MainDatabase) MakeDirsForPath(tx sql.Tx, path string) (uint, error) {
+	mtx := &MainDatabaseTx{tx}
+	return mtx.MakeDirsForPath(path)
+}
+
+func (b *MainDatabase) Migrate() error {
+	return sql.PerformMigrations(b, migrationsFs, "main", sql.MainMigrations(b, migrationsFs, b.log))
+}
+
+func (b *MainDatabase) Transaction(fn func(tx ssql.DatabaseTx) error) error {
+	return b.db.Transaction(func(tx sql.Tx) error {
+		return fn(&MainDatabaseTx{tx})
+	})
+}
+
+func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
+	return version(b.db)
+}
+
+func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) {
+	// check if the object exists first to avoid unnecessary locking for the
+	// common case
+	var objID uint
+	err := tx.QueryRow("SELECT id FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) LIMIT 1", key, bucket).Scan(&objID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	resp, err := tx.Exec("DELETE FROM objects WHERE object_id = ?", objID)
+	if err != nil {
+		return false, err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return false, err
+	} else {
+		return n != 0, nil
+	}
+}
+
+func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 	insertDirStmt, err := tx.Prepare("INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
@@ -89,10 +139,16 @@ func (b *MainDatabase) MakeDirsForPath(tx sql.Tx, path string) (uint, error) {
 	return dirID, nil
 }
 
-func (b *MainDatabase) Migrate() error {
-	return sql.PerformMigrations(b, migrationsFs, "main", sql.MainMigrations(b, migrationsFs, b.log))
-}
-
-func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
-	return version(b.db)
+func (tx *MainDatabaseTx) RenameObject(bucket, keyOld, keyNew string, dirID uint) error {
+	resp, err := tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
+	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
+		return api.ErrObjectExists
+	} else if err != nil {
+		return err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+	}
+	return nil
 }
