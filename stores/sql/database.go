@@ -26,6 +26,11 @@ type (
 		// the requested object was actually deleted.
 		DeleteObject(bucket, key string) (bool, error)
 
+		// DeleteObjects deletes a batch of objects starting with the given
+		// prefix and returns 'true' if any object was deleted. The deletion
+		// should prioritize larger objects for a more predictable performance.
+		DeleteObjects(bucket, prefix string, limit int64) (bool, error)
+
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(path string) (uint, error)
 

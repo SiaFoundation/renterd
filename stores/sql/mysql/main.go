@@ -93,6 +93,30 @@ func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) 
 	}
 }
 
+func (tx *MainDatabaseTx) DeleteObjects(bucket string, key string, limit int64) (bool, error) {
+	resp, err := tx.Exec(`
+	DELETE o
+	FROM objects o
+	JOIN (
+		SELECT id
+		FROM objects
+		WHERE object_id LIKE ? AND db_bucket_id = (
+		    SELECT id FROM buckets WHERE buckets.name = ?
+		)
+		ORDER BY size DESC
+		LIMIT ?
+	) AS limited ON o.id = limited.id;
+
+	`, key+"%", key, bucket, limit)
+	if err != nil {
+		return false, err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return false, err
+	} else {
+		return n != 0, nil
+	}
+}
+
 func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 	insertDirStmt, err := tx.Prepare("INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {

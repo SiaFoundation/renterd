@@ -1933,13 +1933,12 @@ func (s *SQLStore) RemoveObject(ctx context.Context, bucket, path string) error 
 }
 
 func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) error {
-	var rowsAffected int64
 	var err error
-	rowsAffected, err = s.deleteObjects(ctx, bucket, prefix)
+	deleted, err := s.deleteObjects(ctx, bucket, prefix)
 	if err != nil {
 		return err
 	}
-	if rowsAffected == 0 {
+	if !deleted {
 		return fmt.Errorf("%w: prefix: %s", api.ErrObjectNotFound, prefix)
 	}
 	return nil
@@ -2932,51 +2931,36 @@ func (s *SQLStore) deleteObject(tx *gorm.DB, bucket string, path string) (int64,
 // deletion goes from largest to smallest. That's because the batch size is
 // dynamically increased and the smaller objects get the faster we can delete
 // them meaning it makes sense to increase the batch size over time.
-func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string) (numDeleted int64, _ error) {
+func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string) (deleted bool, _ error) {
 	batchSizeIdx := 0
 	for {
+		start := time.Now()
 		var duration time.Duration
-		var rowsAffected int64
-		if err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			start := time.Now()
-			res := tx.Exec(`
-			DELETE FROM objects
-			WHERE id IN (
-				SELECT id FROM (
-					SELECT id FROM objects
-					WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?
-					ORDER BY size DESC
-					LIMIT ?
-					) tmp
-				)`,
-				path+"%", utf8.RuneCountInString(path), path, sqlWhereBucket("objects", bucket),
-				objectDeleteBatchSizes[batchSizeIdx])
-			if err := res.Error; err != nil {
-				return res.Error
+		var prune bool
+		if err := s.bMain.Transaction(func(tx sql.DatabaseTx) error {
+			d, err := tx.DeleteObjects(bucket, path, objectDeleteBatchSizes[batchSizeIdx])
+			if err != nil {
+				return err
 			}
-			// prune slabs if we deleted an object
-			rowsAffected = res.RowsAffected
-			if rowsAffected > 0 {
-				s.triggerSlabPruning()
-			}
-			duration = time.Since(start)
+			deleted = deleted || d
+			prune = d
 			return nil
 		}); err != nil {
-			return 0, fmt.Errorf("failed to delete objects: %w", err)
+			return false, fmt.Errorf("failed to delete objects: %w", err)
 		}
-
-		// if nothing got deleted we are done
-		if rowsAffected == 0 {
-			break
+		if prune {
+			s.triggerSlabPruning() // prune if we deleted an object
+		} else {
+			break // otherwise we are done
 		}
-		numDeleted += rowsAffected
+		duration = time.Since(start)
 
 		// increase the batch size if deletion was faster than the threshold
 		if duration < batchDurationThreshold && batchSizeIdx < len(objectDeleteBatchSizes)-1 {
 			batchSizeIdx++
 		}
 	}
-	return numDeleted, nil
+	return deleted, nil
 }
 
 func invalidateSlabHealthByFCID(tx *gorm.DB, fcids []fileContractID) error {
