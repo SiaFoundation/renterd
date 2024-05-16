@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -12,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -22,9 +22,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		logger: newTestLoggerCustom(zapcore.ErrorLevel),
-	})
+	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 
 	cfg := test.AutopilotConfig.Contracts
@@ -33,11 +31,19 @@ func TestGouging(t *testing.T) {
 	tt := cluster.tt
 
 	// mine enough blocks for the current period to become > period
-	cluster.MineBlocks(int(cfg.Period) * 2)
+	cluster.MineBlocks(int(cfg.Period) + 1)
 
 	// add hosts
 	tt.OKAll(cluster.AddHostsBlocking(int(test.AutopilotConfig.Contracts.Amount)))
 	cluster.WaitForAccounts()
+
+	// assert that the current period is greater than the period
+	tt.Retry(10, time.Second, func() error {
+		if ap, _ := b.Autopilot(context.Background(), api.DefaultAutopilotID); ap.CurrentPeriod <= cfg.Period {
+			return errors.New("current period is not greater than period")
+		}
+		return nil
+	})
 
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
