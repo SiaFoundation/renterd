@@ -149,6 +149,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		Logger:                        l.Sugar(),
 		GormLogger:                    dbLogger,
 		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
+		LongQueryDuration:             cfg.DatabaseLog.SlowThreshold,
+		LongTxDuration:                cfg.DatabaseLog.SlowThreshold,
 	})
 	if err != nil {
 		return nil, nil, err

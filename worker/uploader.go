@@ -21,7 +21,9 @@ const (
 )
 
 var (
-	errUploaderStopped = errors.New("uploader was stopped")
+	errAcquireContractFailed = errors.New("failed to acquire contract lock")
+	errFetchRevisionFailed   = errors.New("failed to fetch revision")
+	errUploaderStopped       = errors.New("uploader was stopped")
 )
 
 type (
@@ -118,6 +120,7 @@ outer:
 			// execute it
 			start := time.Now()
 			duration, err := u.execute(req)
+			elapsed := time.Since(start)
 			if errors.Is(err, errMaxRevisionReached) {
 				if u.tryRefresh(req.sector.ctx) {
 					u.enqueue(req)
@@ -126,9 +129,16 @@ outer:
 			}
 
 			// track stats
-			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, time.Since(start), req.overdrive, u.logger)
+			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, elapsed, req.overdrive)
 			u.trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS)
 			u.trackConsecutiveFailures(success, failure)
+
+			// debug log
+			if uploadEstimateMS > 0 && !success {
+				u.logger.Debugw("sector upload failure was penalised", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.overdrive, "penalty", uploadEstimateMS, "hk", u.hk)
+			} else if uploadEstimateMS == 0 && err != nil && !utils.IsErr(err, errSectorUploadFinished) {
+				u.logger.Debugw("sector upload failure was ignored", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.overdrive, "hk", u.hk)
+			}
 
 			// send the response
 			select {
@@ -142,10 +152,11 @@ outer:
 	}
 }
 
-func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool, logger *zap.SugaredLogger) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
-	// special case, uploader will refresh and the request will be requeued
-	if errors.Is(uploadErr, errMaxRevisionReached) {
-		logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
+func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
+	// no-op cases
+	if utils.IsErr(uploadErr, errMaxRevisionReached) {
+		return false, false, 0, 0
+	} else if utils.IsErr(uploadErr, context.Canceled) {
 		return false, false, 0, 0
 	}
 
@@ -158,23 +169,28 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 		return true, false, float64(ms), float64(rhpv2.SectorSize / ms)
 	}
 
+	// upload failed because we weren't able to create a payment, in this case
+	// we want to punish the host but only to ensure we stop using it, meaning
+	// we don't increment consecutive failures
+	if utils.IsErr(uploadErr, errFailedToCreatePayment) {
+		return false, false, float64(time.Hour.Milliseconds()), 0
+	}
+
 	// upload failed because the sector was already uploaded by another host, in
 	// this case we want to punish the host for being too slow but only when we
 	// weren't overdriving or when it took too long to dial
-	if errors.Is(uploadErr, errSectorUploadFinished) {
-		slowDial := errors.Is(uploadErr, errDialTransport) && totalDuration > time.Second
-		if !overdrive || slowDial {
+	if utils.IsErr(uploadErr, errSectorUploadFinished) {
+		slowDial := utils.IsErr(uploadErr, errDialTransport) && totalDuration > time.Second
+		slowLock := utils.IsErr(uploadErr, errAcquireContractFailed) && totalDuration > time.Second
+		slowFetchRev := utils.IsErr(uploadErr, errFetchRevisionFailed) && totalDuration > time.Second
+		if !overdrive || slowDial || slowLock || slowFetchRev {
 			failure = overdrive
 			uploadEstimateMS = float64(totalDuration.Milliseconds() * 10)
-			logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", totalDuration.Milliseconds()*10)
-		} else {
-			logger.Debugw("sector upload failure was ignored", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive)
 		}
 		return false, failure, uploadEstimateMS, 0
 	}
 
 	// in all other cases we want to punish the host for failing the upload
-	logger.Debugw("sector upload failure was penalised", "uploadError", uploadErr, "uploadDuration", uploadDuration, "totalDuration", totalDuration, "overdrive", overdrive, "penalty", time.Hour)
 	return false, true, float64(time.Hour.Milliseconds()), 0
 }
 
@@ -232,17 +248,28 @@ func (u *uploader) estimate() float64 {
 
 // execute executes the sector upload request, if the upload was successful it
 // returns the time it took to upload the sector to the host
-func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
+func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	// grab fields
 	u.mu.Lock()
 	host := u.host
 	fcid := u.fcid
 	u.mu.Unlock()
 
+	// wrap cause
+	defer func() {
+		if cause := context.Cause(req.sector.ctx); cause != nil && !utils.IsErr(err, cause) {
+			if err != nil {
+				err = fmt.Errorf("%w; %w", cause, err)
+			} else {
+				err = cause
+			}
+		}
+	}()
+
 	// acquire contract lock
 	lockID, err := u.cl.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w; %w", errAcquireContractFailed, err)
 	}
 
 	// defer the release
@@ -260,7 +287,7 @@ func (u *uploader) execute(req *sectorUploadReq) (time.Duration, error) {
 	// fetch the revision
 	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w; %w", errFetchRevisionFailed, err)
 	} else if rev.RevisionNumber == math.MaxUint64 {
 		return 0, errMaxRevisionReached
 	}
