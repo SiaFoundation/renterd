@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +12,13 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/sqlite"
+	gmysql "gorm.io/driver/mysql"
+	gsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	glogger "gorm.io/gorm/logger"
 )
@@ -27,9 +29,6 @@ const (
 	// 1000. This is also lower than the mysql default of 65535.
 	maxSQLVars = 32000
 )
-
-//go:embed all:migrations/*
-var migrations embed.FS
 
 var (
 	exprTRUE = gorm.Expr("TRUE")
@@ -57,6 +56,8 @@ type (
 		Logger                        *zap.SugaredLogger
 		GormLogger                    glogger.Interface
 		RetryTransactionIntervals     []time.Duration
+		LongQueryDuration             time.Duration
+		LongTxDuration                time.Duration
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -64,6 +65,8 @@ type (
 		alerts    alerts.Alerter
 		db        *gorm.DB
 		dbMetrics *gorm.DB
+		bMain     sql.Database
+		bMetrics  sql.MetricsDatabase
 		logger    *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
@@ -128,7 +131,7 @@ type (
 //	cache: set to shared which is required for in-memory databases
 //	_foreign_keys: enforce foreign_key relations
 func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=1", name))
+	return gsqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=1", name))
 }
 
 // NewSQLiteConnection opens a sqlite db at the given path.
@@ -141,19 +144,19 @@ func NewEphemeralSQLiteConnection(name string) gorm.Dialector {
 //	  should be made configurable and set to TRUNCATE or any of the other options.
 //	  For reference see https://github.com/mattn/go-sqlite3#connection-string.
 func NewSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL", path))
+	return gsqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_cache_size=65536", path))
 }
 
 // NewMetricsSQLiteConnection opens a sqlite db at the given path similarly to
 // NewSQLiteConnection but with weaker consistency guarantees since it's
 // optimised for recording metrics.
 func NewMetricsSQLiteConnection(path string) gorm.Dialector {
-	return sqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
+	return gsqlite.Open(fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_synchronous=NORMAL", path))
 }
 
 // NewMySQLConnection creates a connection to a MySQL database.
 func NewMySQLConnection(user, password, addr, dbName string) gorm.Dialector {
-	return mysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
+	return gmysql.Open(fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
 }
 
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
@@ -184,16 +187,28 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 	l := cfg.Logger.Named("sql")
 
-	// Print SQLite version
-	var dbName string
-	var dbVersion string
-	if isSQLite(db) {
-		err = db.Raw("select sqlite_version()").Scan(&dbVersion).Error
-		dbName = "SQLite"
-	} else {
-		err = db.Raw("select version()").Scan(&dbVersion).Error
-		dbName = "MySQL"
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db: %v", err)
 	}
+	sqlDBMetrics, err := dbMetrics.DB()
+	if err != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch metrics db: %v", err)
+	}
+
+	// Print DB version
+	var dbMain sql.Database
+	var bMetrics sql.MetricsDatabase
+	if cfg.Conn.Name() == "sqlite" {
+		dbMain = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+	} else {
+		dbMain = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dbName, dbVersion, err := dbMain.Version(ctx)
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db version: %v", err)
 	}
@@ -201,10 +216,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 	// Perform migrations.
 	if cfg.Migrate {
-		if err := performMigrations(db, l); err != nil {
+		if err := dbMain.Migrate(); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
-		}
-		if err := performMetricsMigrations(dbMetrics, l); err != nil {
+		} else if err := bMetrics.Migrate(); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
@@ -248,6 +262,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		ccid:                   ccid,
 		db:                     db,
 		dbMetrics:              dbMetrics,
+		bMain:                  dbMain,
+		bMetrics:               bMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
@@ -288,9 +304,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 func isSQLite(db *gorm.DB) bool {
 	switch db.Dialector.(type) {
-	case *sqlite.Dialector:
+	case *gsqlite.Dialector:
 		return true
-	case *mysql.Dialector:
+	case *gmysql.Dialector:
 		return false
 	default:
 		panic(fmt.Sprintf("unknown dialector: %t", db.Dialector))
@@ -363,20 +379,11 @@ func (s *SQLStore) Close() error {
 	s.shutdownCtxCancel()
 	s.wg.Wait()
 
-	db, err := s.db.DB()
+	err := s.bMain.Close()
 	if err != nil {
 		return err
 	}
-	dbMetrics, err := s.dbMetrics.DB()
-	if err != nil {
-		return err
-	}
-
-	err = db.Close()
-	if err != nil {
-		return err
-	}
-	err = dbMetrics.Close()
+	err = s.bMetrics.Close()
 	if err != nil {
 		return err
 	}
