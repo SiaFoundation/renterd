@@ -1526,19 +1526,13 @@ func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
 	return s.bMain.Transaction(func(tx sql.DatabaseTx) error {
-		if force {
-			// delete potentially existing object at destination
-			if _, err := tx.DeleteObject(bucket, keyNew); err != nil {
-				return fmt.Errorf("RenameObject: failed to delete object: %w", err)
-			}
-		}
 		// create new dir
 		dirID, err := tx.MakeDirsForPath(keyNew)
 		if err != nil {
 			return err
 		}
 		// update object
-		err = tx.RenameObject(bucket, keyOld, keyNew, dirID)
+		err = tx.RenameObject(bucket, keyOld, keyNew, dirID, force)
 		if err != nil {
 			return err
 		}

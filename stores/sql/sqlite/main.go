@@ -127,12 +127,19 @@ func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 	return dirID, nil
 }
 
-func (tx *MainDatabaseTx) RenameObject(bucket, keyOld, keyNew string, dirID uint) error {
-	var exists bool
-	if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?))", keyNew, bucket).Scan(&exists); err != nil {
-		return err
-	} else if exists {
-		return api.ErrObjectExists
+func (tx *MainDatabaseTx) RenameObject(bucket, keyOld, keyNew string, dirID uint, force bool) error {
+	if force {
+		// delete potentially existing object at destination
+		if _, err := tx.DeleteObject(bucket, keyNew); err != nil {
+			return fmt.Errorf("RenameObject: failed to delete object: %w", err)
+		}
+	} else {
+		var exists bool
+		if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?))", keyNew, bucket).Scan(&exists); err != nil {
+			return err
+		} else if exists {
+			return api.ErrObjectExists
+		}
 	}
 	resp, err := tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
 	if err != nil {

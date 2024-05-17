@@ -32,8 +32,10 @@ type (
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an
 		// object already exists at the target location or api.ErrObjectNotFound
-		// if the object at keyOld doesn't exist.
-		RenameObject(bucket, keyOld, keyNew string, dirID uint) error
+		// if the object at keyOld doesn't exist. If force is true, the instead
+		// of returning api.ErrObjectExists, the existing object will be
+		// deleted.
+		RenameObject(bucket, keyOld, keyNew string, dirID uint, force bool) error
 	}
 
 	MetricsDatabase interface {
