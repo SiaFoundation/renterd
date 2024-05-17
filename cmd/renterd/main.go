@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -58,10 +57,17 @@ There are 3 ways to configure renterd (sorted from lowest to highest precedence)
   - CLI flags
   - Environment variables
 
+Usage:
+`
+	// usageFooter is the footer for the CLI usage text.
+	usageFooter = `
+There are 3 commands:
+  - version: prints the network as well as build information
+  - config: builds a YAML config file through a series of prompts
+  - seed: generates a new seed and prints the recovery phrase
+
 See the documentation (https://docs.sia.tech/) for more information and examples
 on how to configure and use renterd.
-
-Usage:
 `
 )
 
@@ -309,26 +315,17 @@ func main() {
 	flag.Usage = func() {
 		log.Print(usageHeader)
 		flag.PrintDefaults()
+		log.Print(usageFooter)
 	}
 
 	flag.Parse()
 
+	// NOTE: update the usage header when adding new commands
 	if flag.Arg(0) == "version" {
-		fmt.Println("renterd", build.Version())
-		fmt.Println("Network", build.NetworkName())
-		log.Println("Commit:", build.Commit())
-		log.Println("Build Date:", build.BuildTime())
+		cmdVersion()
 		return
 	} else if flag.Arg(0) == "seed" {
-		var seed [32]byte
-		phrase := wallet.NewSeedPhrase()
-		if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
-			println(err.Error())
-			os.Exit(1)
-		}
-		key := wallet.KeyFromSeed(&seed, 0)
-		fmt.Println("Recovery Phrase:", phrase)
-		fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
+		cmdSeed()
 		return
 	} else if flag.Arg(0) == "config" {
 		cmdBuildConfig()

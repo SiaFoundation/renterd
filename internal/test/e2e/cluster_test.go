@@ -239,14 +239,15 @@ func TestObjectEntries(t *testing.T) {
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			if entries[i].MimeType == "" {
-				t.Fatal("mime type should be set", entries[i].MimeType, entries[i].Name)
+			isDir := strings.HasSuffix(entries[i].Name, "/") && entries[i].Name != "//double/" // double is a file
+			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
+				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
 			entries[i].MimeType = ""
 
 			// assert etag
-			if entries[i].ETag == "" {
-				t.Fatal("ETag should be set")
+			if isDir != (entries[i].ETag == "") {
+				t.Fatal("etag should be set for files and empty for dirs")
 			}
 			entries[i].ETag = ""
 		}
@@ -627,14 +628,16 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "", api.GetObjectOptions{})
+	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{})
 	tt.OK(err)
 
-	if len(entries) != 1 {
-		t.Fatal("expected one entry to be returned", len(entries))
+	if len(entries) != 2 {
+		t.Fatal("expected two entries to be returned", len(entries))
 	}
-	if entries[0].MimeType != "application/octet-stream" {
-		t.Fatal("wrong mime type", entries[0].MimeType)
+	for _, entry := range entries {
+		if entry.MimeType != "application/octet-stream" {
+			t.Fatal("wrong mime type", entry.MimeType)
+		}
 	}
 
 	// fetch entries with "file" prefix

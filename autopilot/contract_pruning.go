@@ -14,6 +14,7 @@ import (
 )
 
 var (
+	errInvalidHandshake          = errors.New("couldn't read host's handshake")
 	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
 	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
 )
@@ -73,6 +74,7 @@ func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
 		utils.IsErr(pr.err, utils.ErrConnectionTimedOut) ||
 		utils.IsErr(pr.err, utils.ErrConnectionResetByPeer) ||
 		utils.IsErr(pr.err, errInvalidHandshakeSignature) ||
+		utils.IsErr(pr.err, errInvalidHandshake) ||
 		utils.IsErr(pr.err, utils.ErrNoRouteToHost) ||
 		utils.IsErr(pr.err, utils.ErrNoSuchHost)); shouldTrigger {
 		alert = newContractPruningFailedAlert(pr.hk, pr.version, pr.fcid, pr.err)
