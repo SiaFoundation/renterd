@@ -140,10 +140,14 @@ func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 }
 
 func (tx *MainDatabaseTx) RenameObject(bucket, keyOld, keyNew string, dirID uint) error {
-	resp, err := tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
-	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
+	var exists bool
+	if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?))", keyNew, bucket).Scan(&exists); err != nil {
+		return err
+	} else if exists {
 		return api.ErrObjectExists
-	} else if err != nil {
+	}
+	resp, err := tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
+	if err != nil {
 		return err
 	} else if n, err := resp.RowsAffected(); err != nil {
 		return err
