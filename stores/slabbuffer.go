@@ -306,8 +306,10 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 }
 
 func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
+	// Deep copy complete buffers. We don't want to block the manager while we
+	// perform disk I/O.
 	mgr.mu.Lock()
-	buffers := mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]
+	buffers := append([]*SlabBuffer{}, mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]...)
 	mgr.mu.Unlock()
 
 	for _, buffer := range buffers {
