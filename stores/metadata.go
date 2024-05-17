@@ -1549,41 +1549,15 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 }
 
 func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if force {
-			// delete potentially existing objects at destination
-			inner := tx.Raw("SELECT ? FROM objects WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
-				gorm.Expr(sqlConcat(tx, "?", "SUBSTR(object_id, ?)")), prefixNew,
-				utf8.RuneCountInString(prefixOld)+1, prefixOld+"%",
-				utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
-
-			if !isSQLite(tx) {
-				inner = tx.Raw("SELECT * FROM (?) as i", inner)
-			}
-			resp := tx.Model(&dbObject{}).
-				Where("object_id IN (?)", inner).
-				Delete(&dbObject{})
-			if err := resp.Error; err != nil {
-				return err
-			}
-		}
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
-		dirID, err := makeDirsForPath(tx, prefixNew)
+		dirID, err := tx.MakeDirsForPath(ctx, prefixNew)
 		if err != nil {
+			return fmt.Errorf("RenameObjects: failed to create new directory: %w", err)
+		} else if err := tx.RenameObjects(ctx, bucket, prefixOld, prefixNew, dirID, force); err != nil {
 			return err
 		}
-		tx = tx.Exec("UPDATE objects SET object_id = "+sqlConcat(tx, "?", "SUBSTR(object_id, ?)")+", db_directory_id = ? WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND ?",
-			prefixNew, utf8.RuneCountInString(prefixOld)+1, dirID, prefixOld+"%", utf8.RuneCountInString(prefixOld), prefixOld, sqlWhereBucket("objects", bucket))
-		if tx.Error != nil &&
-			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
-			return api.ErrObjectExists
-		} else if tx.Error != nil {
-			return tx.Error
-		}
-		if tx.RowsAffected == 0 {
-			return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
-		}
-		// delete old dir if empty
+		// prune old dirs
 		s.triggerSlabPruning()
 		return nil
 	})
@@ -3010,24 +2984,6 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileC
 	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return invalidateSlabHealthByFCID(tx, fcids)
 	})
-}
-
-// nolint:unparam
-func sqlConcat(db *gorm.DB, s ...string) string {
-	if len(s) < 2 {
-		panic("sqlConcat: need at least two arguments")
-	}
-	query := s[0]
-	if isSQLite(db) {
-		for i := 1; i < len(s); i++ {
-			query = fmt.Sprintf("%s || %s", query, s[i])
-		}
-		return query
-	}
-	for i := 1; i < len(s); i++ {
-		query = fmt.Sprintf("%s, %s", query, s[i])
-	}
-	return fmt.Sprintf("CONCAT(%s)", query)
 }
 
 func sqlRandomTimestamp(db *gorm.DB, now time.Time, minDuration, maxDuration time.Duration) clause.Expr {

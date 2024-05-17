@@ -213,3 +213,48 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	}
 	return nil
 }
+
+func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID uint, force bool) error {
+	if force {
+		_, err := tx.Exec(ctx, `
+		DELETE
+		FROM objects
+		WHERE object_id IN (
+			SELECT CONCAT(?, SUBSTR(object_id, ?))
+			FROM objects
+			WHERE object_id LIKE ?
+			AND SUBSTR(object_id, 1, ?) = ?
+			AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
+		)`,
+			prefixNew,
+			utf8.RuneCountInString(prefixOld)+1,
+			prefixOld+"%",
+			utf8.RuneCountInString(prefixOld), prefixOld,
+			bucket)
+		if err != nil {
+			return err
+		}
+	}
+	resp, err := tx.Exec(ctx, `
+		UPDATE objects
+		SET object_id = ? || SUBSTR(object_id, ?),
+		db_directory_id = ?
+		WHERE object_id LIKE ? 
+		AND SUBSTR(object_id, 1, ?) = ? 
+		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
+		prefixNew, utf8.RuneCountInString(prefixOld)+1,
+		dirID,
+		prefixOld+"%",
+		utf8.RuneCountInString(prefixOld), prefixOld,
+		bucket)
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return api.ErrObjectExists
+	} else if err != nil {
+		return err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
+	}
+	return nil
+}
