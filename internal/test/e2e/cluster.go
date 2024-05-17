@@ -468,7 +468,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
-		_ = cluster.WaitForAccounts()
+		cluster.WaitForAccounts()
 	}
 
 	// Ping the UI
@@ -574,7 +574,9 @@ func (c *TestCluster) MineBlocks(n int) {
 	if len(c.hosts) == 0 {
 		c.tt.OK(c.miner.Mine(wallet.Address, n))
 		c.Sync()
+		return
 	}
+
 	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
 	// hosts by too many blocks.
 	for mined := 0; mined < n; {
