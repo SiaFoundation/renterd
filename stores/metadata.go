@@ -1526,7 +1526,6 @@ func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map
 			usedContracts[types.FileContractID(c.RenewedFrom)] = c
 		}
 	}
-
 	return usedContracts, nil
 }
 
@@ -1812,11 +1811,9 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		}
 	}
 
-	// collect all used contracts
-	usedContracts := o.Contracts()
-
 	// UpdateObject is ACID.
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
+	var prune bool
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// Try to delete. We want to get rid of the object and its slices if it
 		// exists.
 		//
@@ -1827,70 +1824,32 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// NOTE: the metadata is not deleted because this delete will cascade,
 		// if we stop recreating the object we have to make sure to delete the
 		// object's metadata before trying to recreate it
-		_, err := s.deleteObject(tx, bucket, path)
+		deleted, err := tx.DeleteObject(ctx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
+		prune = deleted
 
 		// create the dir
-		dirID, err := makeDirsForPath(tx, path)
+		dirID, err := tx.MakeDirsForPath(ctx, path)
 		if err != nil {
 			return fmt.Errorf("failed to create directories for path '%s': %w", path, err)
 		}
 
 		// Insert a new object.
-		objKey, err := o.Key.MarshalBinary()
+		err = tx.InsertObject(ctx, bucket, path, contractSet, dirID, o, mimeType, eTag, metadata)
 		if err != nil {
-			return fmt.Errorf("failed to marshal object key: %w", err)
+			return fmt.Errorf("failed to insert object: %w", err)
 		}
-		// fetch bucket id
-		var bucketID uint
-		err = s.db.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
-			Take(&bucketID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch bucket id: %w", err)
-		}
-
-		obj := dbObject{
-			DBDirectoryID: dirID,
-			DBBucketID:    bucketID,
-			ObjectID:      path,
-			Key:           objKey,
-			Size:          o.TotalSize(),
-			MimeType:      mimeType,
-			Etag:          eTag,
-		}
-		err = tx.Create(&obj).Error
-		if err != nil {
-			return fmt.Errorf("failed to create object: %w", err)
-		}
-
-		// Fetch contract set.
-		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
-		}
-
-		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, usedContracts)
-		if err != nil {
-			return fmt.Errorf("failed to fetch used contracts: %w", err)
-		}
-
-		// Create all slices. This also creates any missing slabs or sectors.
-		if err := s.createSlices(tx, &obj.ID, nil, cs.ID, contracts, o.Slabs); err != nil {
-			return fmt.Errorf("failed to create slices: %w", err)
-		}
-
-		// Create all user metadata.
-		if err := s.createUserMetadata(tx, obj.ID, metadata); err != nil {
-			return fmt.Errorf("failed to create user metadata: %w", err)
-		}
-
 		return nil
 	})
+	if err != nil {
+		return err
+	} else if prune {
+		// trigger pruning if we deleted an object
+		s.triggerSlabPruning()
+	}
+	return nil
 }
 
 func (s *SQLStore) RemoveObject(ctx context.Context, bucket, path string) error {

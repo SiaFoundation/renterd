@@ -3,6 +3,9 @@ package sql
 import (
 	"context"
 	"io"
+
+	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -29,6 +32,9 @@ type (
 		// DeleteObjects deletes a batch of objects starting with the given
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
+
+		// InsertObject inserts a new object into the database.
+		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID uint, obj object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (uint, error)
@@ -61,5 +67,11 @@ type (
 		io.Closer
 		Migrate(ctx context.Context) error
 		Version(ctx context.Context) (string, string, error)
+	}
+
+	UsedContract struct {
+		ID          int64
+		FCID        FileContractID
+		RenewedFrom FileContractID
 	}
 )

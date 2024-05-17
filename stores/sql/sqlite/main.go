@@ -8,8 +8,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 
 	"go.uber.org/zap"
@@ -96,6 +98,10 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	} else {
 		return n != 0, nil
 	}
+}
+
+func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID uint, obj object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
+	panic("not implemented")
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uint, error) {
@@ -257,4 +263,8 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) UsedContracts(ctx context.Context, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
+	panic("not implemented")
 }

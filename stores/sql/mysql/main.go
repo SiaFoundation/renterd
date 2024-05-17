@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/sql"
@@ -51,6 +52,20 @@ func (b *MainDatabase) DB() *sql.DB {
 
 func (b *MainDatabase) CreateMigrationTable(ctx context.Context) error {
 	return createMigrationTable(ctx, b.db)
+}
+
+func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID uint, obj object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
+	// res, err := tx.Exec(ctx, `INSERT INTO objects (object_id, db_directory_id, db_bucket_id, key, size, mime_type, etag)
+	//
+	//	VALUES (?, ?, (SELECT id FROM buckets WHERE buckets.name = ?), ?, ?, ?, ?)`,
+	//	key, dirID, bucket, sk, size, mimeType, eTag)
+	//
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//
+	// return res.LastInsertId()
+	panic("not implemented")
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (uint, error) {
@@ -274,3 +289,32 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	}
 	return nil
 }
+
+// func usedContracts(ctx context.Context, tx *MainDatabaseTx, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
+//	panic("not implemented")
+// }
+//
+// func (tx *MainDatabaseTx) fetchUsedContracts(ctx context.Context, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
+//	// fetch all contracts, take into account renewals
+//	contracts, err := usedContracts(ctx, tx, fcids)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	fcidMap := make(map[types.FileContractID]struct{}, len(fcids))
+//	for _, fcid := range fcids {
+//		fcidMap[fcid] = struct{}{}
+//	}
+//
+//	// build map of used contracts
+//	usedContracts := make(map[types.FileContractID]ssql.UsedContract, len(contracts))
+//	for _, c := range contracts {
+//		if _, used := fcidMap[types.FileContractID(c.FCID)]; used {
+//			usedContracts[types.FileContractID(c.FCID)] = c
+//		}
+//		if _, used := fcidMap[types.FileContractID(c.RenewedFrom)]; used {
+//			usedContracts[types.FileContractID(c.RenewedFrom)] = c
+//		}
+//	}
+//	return usedContracts, nil
+// }
