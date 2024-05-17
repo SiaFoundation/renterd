@@ -105,7 +105,7 @@ type (
 		Address           string            `yaml:"address,omitempty"`
 		DisableAuth       bool              `yaml:"disableAuth,omitempty"`
 		Enabled           bool              `yaml:"enabled,omitempty"`
-		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"`
+		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"` // deprecated. included for compatibility.
 		HostBucketEnabled bool              `yaml:"hostBucketEnabled,omitempty"`
 	}
 
