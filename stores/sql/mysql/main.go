@@ -103,7 +103,6 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 		WHERE object_id LIKE ? AND db_bucket_id = (
 		    SELECT id FROM buckets WHERE buckets.name = ?
 		)
-		ORDER BY size DESC
 		LIMIT ?
 	) AS limited ON o.id = limited.id`,
 		key+"%", bucket, limit)
@@ -160,6 +159,51 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uin
 		dirID = childID
 	}
 	return dirID, nil
+}
+
+func (tx *MainDatabaseTx) PruneDirs(ctx context.Context) error {
+	stmt, err := tx.Prepare(ctx, `
+	DELETE
+	FROM directories
+	WHERE directories.id != 1
+	AND NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
+	AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.db_parent_id = directories.id) i)
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for {
+		res, err := stmt.Exec(ctx)
+		if err != nil {
+			return err
+		} else if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return nil
+		}
+	}
+}
+
+func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, error) {
+	res, err := tx.Exec(ctx, `
+	DELETE FROM slabs
+	WHERE id IN (
+    SELECT id
+    FROM (
+        SELECT slabs.id
+        FROM slabs
+        WHERE NOT EXISTS (
+            SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id
+        )
+        AND slabs.db_buffered_slab_id IS NULL
+        LIMIT ?
+    ) AS limited
+	)`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID uint, force bool) error {

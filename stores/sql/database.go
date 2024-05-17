@@ -27,12 +27,18 @@ type (
 		DeleteObject(ctx context.Context, bucket, key string) (bool, error)
 
 		// DeleteObjects deletes a batch of objects starting with the given
-		// prefix and returns 'true' if any object was deleted. The deletion
-		// should prioritize larger objects for a more predictable performance.
+		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (uint, error)
+
+		// PruneDirs prunes any directories that are empty.
+		PruneDirs(ctx context.Context) error
+
+		// PruneSlabs deletes slabs that are no longer referenced by any slice
+		// or slab buffer.
+		PruneSlabs(ctx context.Context, limit int64) (int64, error)
 
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an

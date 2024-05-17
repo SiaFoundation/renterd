@@ -39,6 +39,11 @@ const (
 	// upsert sectors.
 	sectorInsertionBatchSize = 500
 
+	// slabPruningBatchSize is the number of slabs per batch when we prune
+	// slabs. We limit this to 100 slabs which is 3000 sectors at default
+	// redundancy.
+	slabPruningBatchSize = 100
+
 	refreshHealthMinHealthValidity = 12 * time.Hour
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
@@ -53,6 +58,7 @@ const (
 
 var (
 	pruneSlabsAlertID = frand.Entropy256()
+	pruneDirsAlertID  = frand.Entropy256()
 )
 
 var (
@@ -2831,60 +2837,67 @@ func (s *SQLStore) pruneSlabsLoop() {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
-		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			if err := pruneSlabs(tx); err != nil {
-				return fmt.Errorf("failed to prune slabs: %w", err)
-			} else if err := pruneDirs(tx); err != nil {
-				return fmt.Errorf("failed to prune directories: %w", err)
+		// prune slabs
+		pruneSuccess := true
+		for {
+			var deleted int64
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
+			err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
+				var err error
+				deleted, err = dt.PruneSlabs(ctx, slabPruningBatchSize)
+				return err
+			})
+			cancel()
+			if err != nil {
+				s.logger.Errorw("slab pruning failed", zap.Error(err))
+				s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
+					ID:        pruneSlabsAlertID,
+					Severity:  alerts.SeverityWarning,
+					Message:   "Failed to prune slabs",
+					Timestamp: time.Now(),
+					Data: map[string]interface{}{
+						"error": err.Error(),
+						"hint":  "This might happen when your database is under a lot of load due to deleting objects rapidly. This alert will disappear the next time slabs are pruned successfully.",
+					},
+				})
+				pruneSuccess = false
+			} else {
+				s.alerts.DismissAlerts(s.shutdownCtx, pruneSlabsAlertID)
 			}
-			return nil
+
+			if deleted < slabPruningBatchSize {
+				break // done
+			}
+		}
+
+		// prune dirs
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
+		err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
+			return dt.PruneDirs(ctx)
 		})
+		cancel()
 		if err != nil {
-			s.logger.Errorw("pruning failed", zap.Error(err))
+			s.logger.Errorw("dir pruning failed", zap.Error(err))
 			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
-				ID:        pruneSlabsAlertID,
+				ID:        pruneDirsAlertID,
 				Severity:  alerts.SeverityWarning,
-				Message:   "Failed to prune database",
+				Message:   "Failed to prune dirs",
 				Timestamp: time.Now(),
 				Data: map[string]interface{}{
 					"error": err.Error(),
 					"hint":  "This might happen when your database is under a lot of load due to deleting objects rapidly. This alert will disappear the next time slabs are pruned successfully.",
 				},
 			})
+			pruneSuccess = false
 		} else {
-			s.alerts.DismissAlerts(s.shutdownCtx, pruneSlabsAlertID)
+			s.alerts.DismissAlerts(s.shutdownCtx, pruneDirsAlertID)
+		}
 
+		// mark the last prune time where both slabs and dirs were pruned
+		if pruneSuccess {
 			s.mu.Lock()
 			s.lastPrunedAt = time.Now()
 			s.mu.Unlock()
-		}
-		cancel()
-	}
-}
-
-func pruneSlabs(tx *gorm.DB) error {
-	return tx.Exec(`
-DELETE
-FROM slabs
-WHERE NOT EXISTS (SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id)
-AND slabs.db_buffered_slab_id IS NULL
-`).Error
-}
-
-func pruneDirs(tx *gorm.DB) error {
-	for {
-		res := tx.Exec(`
-DELETE
-FROM directories
-WHERE directories.id != 1
-AND NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
-AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.db_parent_id = directories.id) i)
-`)
-		if res.Error != nil {
-			return res.Error
-		} else if res.RowsAffected == 0 {
-			return nil
 		}
 	}
 }
