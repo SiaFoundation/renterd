@@ -281,6 +281,14 @@ func (u *chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api
 		return err
 	}
 
+	// return early if the contract is already in the desired state
+	curr, err := u.ContractState(fcid)
+	if err != nil {
+		return err
+	} else if curr == state {
+		return nil
+	}
+
 	// try regular contract
 	if res := u.tx.
 		Model(&dbContract{}).
