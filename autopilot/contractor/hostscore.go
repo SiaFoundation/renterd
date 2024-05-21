@@ -60,6 +60,12 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) 
 //     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
 //     it to drop to 0.05.
 func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.ContractsConfig) float64 {
+	// return early if the allowance or amount of hosts is zero, avoiding a
+	// division by zero panic below.
+	if cfg.Allowance.IsZero() || cfg.Amount == 0 {
+		return 0.5
+	}
+
 	hostPeriodBudget := cfg.Allowance.Div64(cfg.Amount)
 
 	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())

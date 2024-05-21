@@ -21,6 +21,11 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
 func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse) {
+	// we need an allowance and a target amount of contracts to evaluate
+	if cfg.Contracts.Allowance.IsZero() || cfg.Contracts.Amount == 0 {
+		return
+	}
+
 	period := cfg.Contracts.Period
 	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
 
