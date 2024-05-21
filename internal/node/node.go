@@ -144,9 +144,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	if err != nil && !os.IsNotExist(err) {
 		return nil, nil, nil, nil, err
 	} else if err == nil {
-		logger.Warn("Found 'consensus.db' indicating this node still needs to migrate its consensus database. The first step is to reset the chain state in the SQL database.")
+		logger.Warn("Found (old) 'consensus.db', indicating a migration to the new chain database is necessary.")
 
 		// reset chain state first, avoiding ACID checks if removing the consensus database fails
+		logger.Warn("Resetting chain state...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := sqlStore.ResetChainState(ctx); err != nil {
@@ -155,12 +156,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		logger.Warn("Chain state was successfully reset.")
 
 		// remove old consensus.db and consensus.log file
+		logger.Warn("Removing consensus database...")
 		_ = os.RemoveAll(filepath.Join(consensusDir, "consensus.log")) // ignore error
 		if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
 			return nil, nil, nil, nil, err
 		}
-		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space. Consensus will now be re-synced from scratch.", utils.HumanReadableSize(int(oldConsensus.Size()))))
-		logger.Warn("Note that this process may take several hours to complete...")
+		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
+		logger.Warn("Consensus will now be re-synced from scratch, this process may take several hours to complete...")
 	}
 
 	// create chain database
