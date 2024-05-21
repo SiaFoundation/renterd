@@ -14,8 +14,9 @@ const (
 )
 
 type (
-	SecretKey      []byte
 	FileContractID types.FileContractID
+	PublicKey      types.PublicKey
+	SecretKey      []byte
 )
 
 var (
@@ -39,6 +40,24 @@ func (fcid *FileContractID) Scan(value interface{}) error {
 // Value returns a fileContractID value, implements driver.Valuer interface.
 func (fcid FileContractID) Value() (driver.Value, error) {
 	return fcid[:], nil
+}
+
+// Scan scan value into publicKey, implements sql.Scanner interface.
+func (pk *PublicKey) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal publicKey value:", value))
+	}
+	if len(bytes) != len(types.PublicKey{}) {
+		return fmt.Errorf("failed to unmarshal publicKey value due invalid number of bytes %v != %v: %v", len(bytes), len(PublicKey{}), value)
+	}
+	*pk = *(*PublicKey)(bytes)
+	return nil
+}
+
+// Value returns a publicKey value, implements driver.Valuer interface.
+func (pk PublicKey) Value() (driver.Value, error) {
+	return pk[:], nil
 }
 
 // String implements fmt.Stringer to prevent the key from getting leaked in

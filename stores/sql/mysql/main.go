@@ -54,7 +54,7 @@ func (b *MainDatabase) CreateMigrationTable(ctx context.Context) error {
 	return createMigrationTable(ctx, b.db)
 }
 
-func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID uint, obj object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
+func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// res, err := tx.Exec(ctx, `INSERT INTO objects (object_id, db_directory_id, db_bucket_id, key, size, mime_type, etag)
 	//
 	//	VALUES (?, ?, (SELECT id FROM buckets WHERE buckets.name = ?), ?, ?, ?, ?)`,
@@ -68,7 +68,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	panic("not implemented")
 }
 
-func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (uint, error) {
+func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := &MainDatabaseTx{tx}
 	return mtx.MakeDirsForPath(ctx, path)
 }
@@ -130,7 +130,7 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uint, error) {
+func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
@@ -144,7 +144,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uin
 	defer queryDirStmt.Close()
 
 	// Create root dir.
-	dirID := uint(sql.DirectoriesRootID)
+	dirID := int64(sql.DirectoriesRootID)
 	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON DUPLICATE KEY UPDATE id = id", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
@@ -165,7 +165,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uin
 		if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		}
-		var childID uint
+		var childID int64
 		if err := queryDirStmt.QueryRow(ctx, dir).Scan(&childID); err != nil {
 			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
 		} else if childID == 0 {
@@ -221,7 +221,7 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID uint, force bool) error {
+func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error {
 	if force {
 		// delete potentially existing object at destination
 		if _, err := tx.DeleteObject(ctx, bucket, keyNew); err != nil {
@@ -246,7 +246,7 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	return nil
 }
 
-func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID uint, force bool) error {
+func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
 	if force {
 		_, err := tx.Exec(ctx, `
 		DELETE
