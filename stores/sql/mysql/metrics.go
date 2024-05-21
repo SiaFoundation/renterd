@@ -18,7 +18,7 @@ type MetricsDatabase struct {
 
 // NewMetricsDatabase creates a new MySQL backend.
 func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MetricsDatabase {
-	store := sql.NewDB(db, log.Desugar(), "Deadlock found when trying to get lock", lqd, ltd)
+	store := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
 	return &MetricsDatabase{
 		db:  store,
 		log: log,

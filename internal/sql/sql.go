@@ -30,7 +30,7 @@ var (
 type (
 	// A DB is a wrapper around a *sql.DB that provides additional utility
 	DB struct {
-		dbLockedMsg       string
+		dbLockedMsgs      []string
 		db                *sql.DB
 		log               *zap.Logger
 		longQueryDuration time.Duration
@@ -59,9 +59,9 @@ type (
 	}
 )
 
-func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsg string, longQueryDuration, longTxDuration time.Duration) *DB {
+func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) *DB {
 	return &DB{
-		dbLockedMsg:       dbLockedMsg,
+		dbLockedMsgs:      dbLockedMsgs,
 		db:                db,
 		log:               log,
 		longQueryDuration: longQueryDuration,
@@ -145,7 +145,14 @@ func (s *DB) Transaction(fn func(Tx) error) error {
 		}
 
 		// return immediately if the error is not a busy error
-		if !strings.Contains(err.Error(), s.dbLockedMsg) {
+		var locked bool
+		for _, msg := range s.dbLockedMsgs {
+			if strings.Contains(err.Error(), msg) {
+				locked = true
+				break
+			}
+		}
+		if !locked {
 			break
 		}
 		// exponential backoff

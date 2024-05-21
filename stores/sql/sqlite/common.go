@@ -9,6 +9,11 @@ import (
 	"go.sia.tech/renterd/internal/sql"
 )
 
+var deadlockMsgs = []string{
+	"database is locked",
+	"database table is locked",
+}
+
 //go:embed all:migrations/*
 var migrationsFs embed.FS
 

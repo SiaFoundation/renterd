@@ -111,9 +111,13 @@ var (
 						for rows.Next() {
 							var o obj
 							if err := rows.Scan(&o.ID, &o.ObjectID); err != nil {
+								_ = rows.Close()
 								return fmt.Errorf("failed to scan object: %v", err)
 							}
 							objBatch = append(objBatch, o)
+						}
+						if err := rows.Close(); err != nil {
+							return fmt.Errorf("failed to close rows: %v", err)
 						}
 						if len(objBatch) == 0 {
 							break // done

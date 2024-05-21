@@ -7,6 +7,10 @@ import (
 	"go.sia.tech/renterd/internal/sql"
 )
 
+var deadlockMsgs = []string{
+	"Deadlock found when trying to get lock",
+}
+
 //go:embed all:migrations/*
 var migrationsFs embed.FS
 

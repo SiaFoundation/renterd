@@ -14,8 +14,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/sql"
+	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
+	sql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -1524,28 +1525,16 @@ func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if force {
-			// delete potentially existing object at destination
-			if _, err := s.deleteObject(tx, bucket, keyNew); err != nil {
-				return fmt.Errorf("RenameObject: failed to delete object: %w", err)
-			}
-		}
+	return s.bMain.Transaction(func(tx sql.DatabaseTx) error {
 		// create new dir
-		dirID, err := makeDirsForPath(tx, keyNew)
+		dirID, err := tx.MakeDirsForPath(keyNew)
 		if err != nil {
 			return err
 		}
 		// update object
-		tx = tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND ?`, keyNew, dirID, keyOld, sqlWhereBucket("objects", bucket))
-		if tx.Error != nil &&
-			(strings.Contains(tx.Error.Error(), "UNIQUE constraint failed") || strings.Contains(tx.Error.Error(), "Duplicate entry")) {
-			return api.ErrObjectExists
-		} else if tx.Error != nil {
-			return tx.Error
-		}
-		if tx.RowsAffected == 0 {
-			return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+		err = tx.RenameObject(bucket, keyOld, keyNew, dirID, force)
+		if err != nil {
+			return err
 		}
 		// delete old dir if empty
 		s.triggerSlabPruning()
@@ -1787,7 +1776,7 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 
 func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
 	// Create root dir.
-	dirID := uint(sql.DirectoriesRootID)
+	dirID := uint(isql.DirectoriesRootID)
 	if err := tx.Model(&dbDirectory{}).
 		Clauses(clause.OnConflict{
 			DoNothing: true,

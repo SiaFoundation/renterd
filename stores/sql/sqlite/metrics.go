@@ -17,7 +17,7 @@ type MetricsDatabase struct {
 
 // NewSQLiteDatabase creates a new SQLite backend.
 func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MetricsDatabase {
-	store := sql.NewDB(db, log.Desugar(), "database is locked", lqd, ltd)
+	store := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
 	return &MetricsDatabase{
 		db:  store,
 		log: log,

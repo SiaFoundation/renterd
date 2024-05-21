@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
+	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
@@ -4136,7 +4137,12 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dirID, err := makeDirsForPath(ss.db, "1")
+	var dirID uint
+	err := ss.bMain.Transaction(func(tx sql.DatabaseTx) error {
+		var err error
+		dirID, err = tx.MakeDirsForPath("1")
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4841,7 +4847,12 @@ func TestDirectories(t *testing.T) {
 	}
 
 	for _, o := range objects {
-		dirID, err := makeDirsForPath(ss.db, o)
+		var dirID uint
+		err := ss.bMain.Transaction(func(tx sql.DatabaseTx) error {
+			var err error
+			dirID, err = tx.MakeDirsForPath(o)
+			return err
+		})
 		if err != nil {
 			t.Fatal(err)
 		} else if dirID == 0 {
