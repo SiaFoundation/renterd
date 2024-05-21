@@ -147,15 +147,21 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert slabs
+	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, key, min_shards, total_shards)
+						VALUES (?, ?, ?, ?, ?)
+						ON CONFLICT(key) DO NOTHING RETURNING id`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert slab: %w", err)
+	}
+	defer insertSlabStmt.Close()
+
 	slabIDs := make([]int64, len(slices))
 	for i := range slices {
 		slabKey, err := slices[i].Key.MarshalBinary()
 		if err != nil {
 			return fmt.Errorf("failed to marshal slab key: %w", err)
 		}
-		err = tx.QueryRow(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, key, min_shards, total_shards)
-						VALUES (?, ?, ?, ?, ?)
-						ON CONFLICT(key) DO NOTHING RETURNING id`,
+		err = insertSlabStmt.QueryRow(ctx,
 			time.Now(),
 			contractSetID,
 			ssql.SecretKey(slabKey),
@@ -168,10 +174,16 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert slices
+	insertSliceStmt, err := tx.Prepare(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_multipart_part_id, db_slab_id, offset, length)
+								VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert slice: %w", err)
+	}
+	defer insertSliceStmt.Close()
+
 	for i := range slices {
 		var dummy int64
-		err := tx.QueryRow(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_multipart_part_id, db_slab_id, offset, length)
-								VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+		err := insertSliceStmt.QueryRow(ctx,
 			time.Now(),
 			objID,
 			uint(i+1),
@@ -186,12 +198,18 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert sectors
+	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
+								VALUES (?, ?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET latest_host = EXCLUDED.latest_host RETURNING id`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert sector: %w", err)
+	}
+	defer insertSectorStmt.Close()
+
 	var sectorIDs []int64
 	for i, ss := range slices {
 		for j := range ss.Shards {
 			var sectorID int64
-			err := tx.QueryRow(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root) 
-								VALUES (?, ?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET latest_host = EXCLUDED.latest_host RETURNING id`,
+			err := insertSectorStmt.QueryRow(ctx,
 				time.Now(),
 				slabIDs[i],
 				j+1,
@@ -206,14 +224,20 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert contract <-> sector links
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
+											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
+	}
+	defer insertContractSectorStmt.Close()
+
 	sectorIdx := 0
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := usedContracts[fcid]; ok {
-						_, err := tx.Exec(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`,
+						_, err := insertContractSectorStmt.Exec(ctx,
 							sectorIDs[sectorIdx],
 							usedContracts[fcid].ID,
 						)
@@ -237,8 +261,14 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	if _, err := tx.Exec(ctx, "DELETE FROM object_user_metadata WHERE db_object_id = ?", objID); err != nil {
 		return fmt.Errorf("failed to delete object metadata: %w", err)
 	}
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, key, value) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
+	}
+	defer insertMetadataStmt.Close()
+
 	for k, v := range md {
-		if _, err := tx.Exec(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, key, value) VALUES (?, ?, ?, ?)",
+		if _, err := insertMetadataStmt.Exec(ctx,
 			time.Now(), objID, k, v); err != nil {
 			return fmt.Errorf("failed to insert object metadata: %w", err)
 		}
