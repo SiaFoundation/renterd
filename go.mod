@@ -6,7 +6,6 @@ toolchain go1.21.8
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.3
-	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
@@ -20,7 +19,7 @@ require (
 	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.52.1
+	go.sia.tech/web/renterd v0.53.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.23.0
 	golang.org/x/sys v0.20.0
