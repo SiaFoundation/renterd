@@ -139,7 +139,12 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
 	}
 
-	// TODO: contract set id
+	// get contract set id
+	var contractSetID int64
+	if err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", contractSet).
+		Scan(&contractSetID); err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
 
 	// insert slabs
 	slabIDs := make([]int64, len(slices))
@@ -149,10 +154,10 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 			return fmt.Errorf("failed to marshal slab key: %w", err)
 		}
 		err = tx.QueryRow(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, key, min_shards, total_shards)
-						VALUES (?, (SELECT id FROM contract_sets WHERE contract_sets.name = ?), ?, ?, ?)
+						VALUES (?, ?, ?, ?, ?)
 						ON CONFLICT(key) DO NOTHING RETURNING id`,
 			time.Now(),
-			contractSet,
+			contractSetID,
 			ssql.SecretKey(slabKey),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
@@ -225,6 +230,17 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 				}
 			}
 			sectorIdx++
+		}
+	}
+
+	// update metadata
+	if _, err := tx.Exec(ctx, "DELETE FROM object_user_metadata WHERE db_object_id = ?", objID); err != nil {
+		return fmt.Errorf("failed to delete object metadata: %w", err)
+	}
+	for k, v := range md {
+		if _, err := tx.Exec(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, key, value) VALUES (?, ?, ?, ?)",
+			time.Now(), objID, k, v); err != nil {
+			return fmt.Errorf("failed to insert object metadata: %w", err)
 		}
 	}
 	return nil
