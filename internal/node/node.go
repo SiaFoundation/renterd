@@ -159,9 +159,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
 			return nil, nil, nil, nil, err
 		}
-		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
-
-		logger.Warn("Consensus will now be re-synced from scratch. Note that this process may take several hours to complete.")
+		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space. Consensus will now be re-synced from scratch.", utils.HumanReadableSize(int(oldConsensus.Size()))))
+		logger.Warn("Note that this process may take several hours to complete...")
 	}
 
 	// create chain database
