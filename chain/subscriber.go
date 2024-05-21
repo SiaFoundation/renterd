@@ -18,7 +18,7 @@ import (
 const (
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
-	updatesBatchSize = 1000
+	updatesBatchSize = 250
 )
 
 var (
@@ -232,7 +232,7 @@ func (s *Subscriber) sync() error {
 		return fmt.Errorf("failed to get chain index: %w", err)
 	}
 	s.logger.Debugw("sync started", "height", index.Height, "block_id", index.ID)
-	sheight := index.Height / 10000
+	sheight := index.Height / (100 * updatesBatchSize)
 
 	// fetch updates until we're caught up
 	var cnt uint64
@@ -257,8 +257,8 @@ func (s *Subscriber) sync() error {
 
 	s.logger.Debugw("sync completed", "height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
 
-	// every ~10k blocks log progress
-	if index.Height/10000 != sheight {
+	// roughly every 100 batches log progress
+	if index.Height/(100*updatesBatchSize) != sheight {
 		s.logger.Infow("sync progress", "height", index.Height, "block_id", index.ID)
 	}
 	return nil
