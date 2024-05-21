@@ -353,7 +353,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 		With("fcid", rev.ID()).
 		With("revisionNumber", rev.Revision.RevisionNumber).
 		Named("deleteContractRoots")
-	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
+	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), utils.HumanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
 	if len(indices) == 0 {
@@ -715,18 +715,4 @@ func (w *worker) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, h
 	}
 
 	return fn(t, rev, settings)
-}
-
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }

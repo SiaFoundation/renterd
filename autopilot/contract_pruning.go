@@ -62,7 +62,7 @@ func (pm pruneMetrics) String() string {
 	for _, m := range pm {
 		total += m.Pruned
 	}
-	return fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(pm))
+	return fmt.Sprintf("pruned %d (%s) from %v contracts", total, utils.HumanReadableSize(int(total)), len(pm))
 }
 
 func (pr pruneResult) toAlert() (id types.Hash256, alert *alerts.Alert) {
@@ -235,20 +235,6 @@ func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID) pruneRes
 
 		err: err,
 	}
-}
-
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func (ap *Autopilot) tryPerformPruning(wp *workerPool) {
