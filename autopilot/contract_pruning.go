@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/build"
+	"go.uber.org/zap"
 )
 
 var (
@@ -136,7 +137,7 @@ func (ap *Autopilot) performContractPruning(wp *workerPool) {
 
 		// prune contract using a random worker
 		wp.withWorker(func(w Worker) {
-			total += ap.pruneContract(w, contract.ID, h.PublicKey, h.Settings.Version)
+			total += ap.pruneContract(w, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release)
 		})
 	}
 
@@ -144,7 +145,7 @@ func (ap *Autopilot) performContractPruning(wp *workerPool) {
 	ap.logger.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
 }
 
-func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types.PublicKey, hostVersion string) uint64 {
+func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string) uint64 {
 	// use a sane timeout
 	ctx, cancel := context.WithTimeout(ap.shutdownCtx, timeoutPruneContract+5*time.Minute)
 	defer cancel()
@@ -177,12 +178,13 @@ func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types
 	}
 
 	// handle logs
+	log := ap.logger.With("contract", fcid, "host", hk, "version", hostVersion, "release", hostRelease, "pruned", pruned, "remaining", remaining, "elapsed", duration)
 	if err != nil && pruned > 0 {
-		ap.logger.Errorf("contract %v, host %v version %s, pruned %d bytes, remaining %d bytes, elapsed %v, err %v", fcid, hk, hostVersion, pruned, remaining, duration, err)
+		log.With(zap.Error(err)).Error("unexpected error interrupted pruning")
 	} else if err != nil {
-		ap.logger.Errorf("contract %v, host %v version %s, err %v", fcid, hk, hostVersion, err)
+		log.With(zap.Error(err)).Error("failed to prune contract")
 	} else {
-		ap.logger.Infof("contract %v, host %v version %s, pruned %d bytes, remaining %d bytes, elapsed %v", fcid, hk, hostVersion, pruned, remaining, duration)
+		log.Info("successfully pruned contract")
 	}
 
 	// handle alerts
@@ -190,7 +192,7 @@ func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types
 	defer ap.mu.Unlock()
 	alertID := alerts.IDForContract(alertPruningID, fcid)
 	if shouldSendPruneAlert(err, hostVersion) {
-		ap.RegisterAlert(ctx, newContractPruningFailedAlert(hk, hostVersion, fcid, err))
+		ap.RegisterAlert(ctx, newContractPruningFailedAlert(hk, hostVersion, hostRelease, fcid, err))
 		ap.pruningAlertIDs[fcid] = alertID // store id to dismiss stale alerts
 	} else {
 		ap.DismissAlert(ctx, alertID)

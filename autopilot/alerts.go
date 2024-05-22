@@ -73,7 +73,7 @@ func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err 
 	}
 }
 
-func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid types.FileContractID, err error) alerts.Alert {
+func newContractPruningFailedAlert(hk types.PublicKey, version, release string, fcid types.FileContractID, err error) alerts.Alert {
 	return alerts.Alert{
 		ID:       alerts.IDForContract(alertPruningID, fcid),
 		Severity: alerts.SeverityWarning,
@@ -83,6 +83,7 @@ func newContractPruningFailedAlert(hk types.PublicKey, version string, fcid type
 			"error":       err.Error(),
 			"hostKey":     hk.String(),
 			"hostVersion": version,
+			"hostRelease": release,
 		},
 		Timestamp: time.Now(),
 	}
