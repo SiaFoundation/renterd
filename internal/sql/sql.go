@@ -60,14 +60,17 @@ type (
 	}
 )
 
-func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) *DB {
+func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) (*DB, error) {
+	if longQueryDuration == 0 || longTxDuration == 0 {
+		return nil, fmt.Errorf("longQueryDuration and longTxDuration must be non-zero: %d %d", longQueryDuration, longTxDuration)
+	}
 	return &DB{
 		dbLockedMsgs:      dbLockedMsgs,
 		db:                db,
 		log:               log,
 		longQueryDuration: longQueryDuration,
 		longTxDuration:    longTxDuration,
-	}
+	}, nil
 }
 
 // exec executes a query without returning any rows. The args are for

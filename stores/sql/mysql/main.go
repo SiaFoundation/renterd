@@ -30,12 +30,12 @@ type (
 )
 
 // NewMainDatabase creates a new MySQL backend.
-func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MainDatabase {
-	store := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
+func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) (*MainDatabase, error) {
+	store, err := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
 		db:  store,
 		log: log,
-	}
+	}, err
 }
 
 func (b *MainDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx) (bool, error)) error {
