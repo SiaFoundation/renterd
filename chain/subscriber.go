@@ -146,13 +146,6 @@ func (s *Subscriber) Run() (func(), error) {
 		}
 	}()
 
-	// perform an initial sync
-	start := time.Now()
-	if err := s.sync(); err != nil {
-		return nil, fmt.Errorf("initial sync failed: %w", err)
-	}
-	s.logger.Debugw("initial sync completed", "duration", time.Since(start))
-
 	// start sync loop in separate goroutine
 	s.wg.Add(1)
 	go func() {
