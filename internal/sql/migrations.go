@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"strings"
@@ -19,19 +20,19 @@ type (
 	// Migrator is an interface for defining database-specific helper methods
 	// required during migrations
 	Migrator interface {
-		ApplyMigration(func(tx Tx) (bool, error)) error
-		CreateMigrationTable() error
+		ApplyMigration(ctx context.Context, fn func(tx Tx) (bool, error)) error
+		CreateMigrationTable(ctx context.Context) error
 		DB() *DB
 	}
 
 	MainMigrator interface {
 		Migrator
-		MakeDirsForPath(tx Tx, path string) (uint, error)
+		MakeDirsForPath(ctx context.Context, tx Tx, path string) (uint, error)
 	}
 )
 
 var (
-	MainMigrations = func(m MainMigrator, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
+	MainMigrations = func(ctx context.Context, m MainMigrator, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
 		dbIdentifier := "main"
 		return []Migration{
 			{
@@ -41,13 +42,13 @@ var (
 			{
 				ID: "00001_object_metadata",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00001_object_metadata", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00001_object_metadata", log)
 				},
 			},
 			{
 				ID: "00002_prune_slabs_trigger",
 				Migrate: func(tx Tx) error {
-					err := performMigration(tx, migrationsFs, dbIdentifier, "00002_prune_slabs_trigger", log)
+					err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00002_prune_slabs_trigger", log)
 					if utils.IsErr(err, ErrMySQLNoSuperPrivilege) {
 						log.Warn("migration 00002_prune_slabs_trigger requires the user to have the SUPER privilege to register triggers")
 					}
@@ -57,37 +58,37 @@ var (
 			{
 				ID: "00003_idx_objects_size",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00003_idx_objects_size", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_idx_objects_size", log)
 				},
 			},
 			{
 				ID: "00004_prune_slabs_cascade",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00004_prune_slabs_cascade", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_prune_slabs_cascade", log)
 				},
 			},
 			{
 				ID: "00005_zero_size_object_health",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00005_zero_size_object_health", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00005_zero_size_object_health", log)
 				},
 			},
 			{
 				ID: "00006_idx_objects_created_at",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00006_idx_objects_created_at", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00006_idx_objects_created_at", log)
 				},
 			},
 			{
 				ID: "00007_host_checks",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00007_host_checks", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00007_host_checks", log)
 				},
 			},
 			{
 				ID: "00008_directories",
 				Migrate: func(tx Tx) error {
-					if err := performMigration(tx, migrationsFs, dbIdentifier, "00008_directories_1", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00008_directories_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 					// helper type
@@ -104,7 +105,7 @@ var (
 							log.Infof("processed %v objects", offset)
 						}
 						var objBatch []obj
-						rows, err := tx.Query("SELECT id, object_id FROM objects ORDER BY id LIMIT ? OFFSET ?", batchSize, offset)
+						rows, err := tx.Query(ctx, "SELECT id, object_id FROM objects ORDER BY id LIMIT ? OFFSET ?", batchSize, offset)
 						if err != nil {
 							return fmt.Errorf("failed to fetch objects: %v", err)
 						}
@@ -135,12 +136,12 @@ var (
 							processedDirs[dir] = struct{}{}
 
 							// process
-							dirID, err := m.MakeDirsForPath(tx, obj.ObjectID)
+							dirID, err := m.MakeDirsForPath(ctx, tx, obj.ObjectID)
 							if err != nil {
 								return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
 							}
 
-							if _, err := tx.Exec(`
+							if _, err := tx.Exec(ctx, `
 							UPDATE objects
 							SET db_directory_id = ?
 							WHERE object_id LIKE ? AND
@@ -156,7 +157,7 @@ var (
 						}
 					}
 					log.Info("post-migration directory creation complete")
-					if err := performMigration(tx, migrationsFs, dbIdentifier, "00008_directories_2", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00008_directories_2", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 					return nil
@@ -164,7 +165,7 @@ var (
 			},
 		}
 	}
-	MetricsMigrations = func(migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
+	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
 		dbIdentifier := "metrics"
 		return []Migration{
 			{
@@ -174,35 +175,35 @@ var (
 			{
 				ID: "00001_idx_contracts_fcid_timestamp",
 				Migrate: func(tx Tx) error {
-					return performMigration(tx, migrationsFs, dbIdentifier, "00001_idx_contracts_fcid_timestamp", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00001_idx_contracts_fcid_timestamp", log)
 				},
 			},
 		}
 	}
 )
 
-func PerformMigrations(m Migrator, fs embed.FS, identifier string, migrations []Migration) error {
+func PerformMigrations(ctx context.Context, m Migrator, fs embed.FS, identifier string, migrations []Migration) error {
 	// try to create migrations table
-	err := m.CreateMigrationTable()
+	err := m.CreateMigrationTable(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
 	// check if the migrations table is empty
 	var isEmpty bool
-	if err := m.DB().QueryRow("SELECT COUNT(*) = 0 FROM migrations").Scan(&isEmpty); err != nil {
+	if err := m.DB().QueryRow(ctx, "SELECT COUNT(*) = 0 FROM migrations").Scan(&isEmpty); err != nil {
 		return fmt.Errorf("failed to count rows in migrations table: %w", err)
 	} else if isEmpty {
 		// table is empty, init schema
-		return initSchema(m.DB(), fs, identifier, migrations)
+		return initSchema(ctx, m.DB(), fs, identifier, migrations)
 	}
 
 	// apply missing migrations
 	for _, migration := range migrations {
-		if err := m.ApplyMigration(func(tx Tx) (bool, error) {
+		if err := m.ApplyMigration(ctx, func(tx Tx) (bool, error) {
 			// check if migration was already applied
 			var applied bool
-			if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM migrations WHERE id = ?)", migration.ID).Scan(&applied); err != nil {
+			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM migrations WHERE id = ?)", migration.ID).Scan(&applied); err != nil {
 				return false, fmt.Errorf("failed to check if migration '%s' was already applied: %w", migration.ID, err)
 			} else if applied {
 				return false, nil
@@ -212,7 +213,7 @@ func PerformMigrations(m Migrator, fs embed.FS, identifier string, migrations []
 				return false, fmt.Errorf("migration '%s' failed: %w", migration.ID, err)
 			}
 			// insert migration
-			if _, err := tx.Exec("INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
+			if _, err := tx.Exec(ctx, "INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
 				return false, fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
 			}
 			return true, nil
@@ -223,7 +224,7 @@ func PerformMigrations(m Migrator, fs embed.FS, identifier string, migrations []
 	return nil
 }
 
-func execSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
+func execSQLFile(ctx context.Context, tx Tx, fs embed.FS, folder, filename string) error {
 	path := fmt.Sprintf("migrations/%s/%s.sql", folder, filename)
 
 	// read file
@@ -233,21 +234,21 @@ func execSQLFile(tx Tx, fs embed.FS, folder, filename string) error {
 	}
 
 	// execute it
-	if _, err := tx.Exec(string(file)); err != nil {
+	if _, err := tx.Exec(ctx, string(file)); err != nil {
 		return fmt.Errorf("failed to execute %s: %w", path, err)
 	}
 	return nil
 }
 
-func initSchema(db *DB, fs embed.FS, identifier string, migrations []Migration) error {
-	return db.Transaction(func(tx Tx) error {
+func initSchema(ctx context.Context, db *DB, fs embed.FS, identifier string, migrations []Migration) error {
+	return db.Transaction(ctx, func(tx Tx) error {
 		// init schema
-		if err := execSQLFile(tx, fs, identifier, "schema"); err != nil {
+		if err := execSQLFile(ctx, tx, fs, identifier, "schema"); err != nil {
 			return fmt.Errorf("failed to execute schema: %w", err)
 		}
 		// insert migration ids
 		for _, migration := range migrations {
-			if _, err := tx.Exec("INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
+			if _, err := tx.Exec(ctx, "INSERT INTO migrations (id) VALUES (?)", migration.ID); err != nil {
 				return fmt.Errorf("failed to insert migration '%s': %w", migration.ID, err)
 			}
 		}
@@ -255,9 +256,9 @@ func initSchema(db *DB, fs embed.FS, identifier string, migrations []Migration) 
 	})
 }
 
-func performMigration(tx Tx, fs embed.FS, kind, migration string, logger *zap.SugaredLogger) error {
+func performMigration(ctx context.Context, tx Tx, fs embed.FS, kind, migration string, logger *zap.SugaredLogger) error {
 	logger.Infof("performing %s migration '%s'", kind, migration)
-	if err := execSQLFile(tx, fs, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
+	if err := execSQLFile(ctx, tx, fs, kind, fmt.Sprintf("migration_%s", migration)); err != nil {
 		return err
 	}
 	logger.Infof("migration '%s' complete", migration)

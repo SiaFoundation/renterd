@@ -24,8 +24,8 @@ func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Durat
 	}
 }
 
-func (b *MetricsDatabase) ApplyMigration(fn func(tx sql.Tx) (bool, error)) error {
-	return applyMigration(b.db, fn)
+func (b *MetricsDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx) (bool, error)) error {
+	return applyMigration(ctx, b.db, fn)
 }
 
 func (b *MetricsDatabase) Close() error {
@@ -36,14 +36,14 @@ func (b *MetricsDatabase) DB() *sql.DB {
 	return b.db
 }
 
-func (b *MetricsDatabase) CreateMigrationTable() error {
-	return createMigrationTable(b.db)
+func (b *MetricsDatabase) CreateMigrationTable(ctx context.Context) error {
+	return createMigrationTable(ctx, b.db)
 }
 
-func (b *MetricsDatabase) Version(_ context.Context) (string, string, error) {
-	return version(b.db)
+func (b *MetricsDatabase) Version(ctx context.Context) (string, string, error) {
+	return version(ctx, b.db)
 }
 
-func (b *MetricsDatabase) Migrate() error {
-	return sql.PerformMigrations(b, migrationsFs, "metrics", sql.MetricsMigrations(migrationsFs, b.log))
+func (b *MetricsDatabase) Migrate(ctx context.Context) error {
+	return sql.PerformMigrations(ctx, b, migrationsFs, "metrics", sql.MetricsMigrations(ctx, migrationsFs, b.log))
 }

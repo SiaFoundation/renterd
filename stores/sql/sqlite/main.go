@@ -35,8 +35,8 @@ func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration
 	}
 }
 
-func (b *MainDatabase) ApplyMigration(fn func(tx sql.Tx) (bool, error)) error {
-	return applyMigration(b.db, fn)
+func (b *MainDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx) (bool, error)) error {
+	return applyMigration(ctx, b.db, fn)
 }
 
 func (b *MainDatabase) Close() error {
@@ -47,31 +47,31 @@ func (b *MainDatabase) DB() *sql.DB {
 	return b.db
 }
 
-func (b *MainDatabase) CreateMigrationTable() error {
-	return createMigrationTable(b.db)
+func (b *MainDatabase) CreateMigrationTable(ctx context.Context) error {
+	return createMigrationTable(ctx, b.db)
 }
 
-func (b *MainDatabase) MakeDirsForPath(tx sql.Tx, path string) (uint, error) {
+func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (uint, error) {
 	mtx := &MainDatabaseTx{tx}
-	return mtx.MakeDirsForPath(path)
+	return mtx.MakeDirsForPath(ctx, path)
 }
 
-func (b *MainDatabase) Migrate() error {
-	return sql.PerformMigrations(b, migrationsFs, "main", sql.MainMigrations(b, migrationsFs, b.log))
+func (b *MainDatabase) Migrate(ctx context.Context) error {
+	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
 }
 
-func (b *MainDatabase) Transaction(fn func(tx ssql.DatabaseTx) error) error {
-	return b.db.Transaction(func(tx sql.Tx) error {
+func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.DatabaseTx) error) error {
+	return b.db.Transaction(ctx, func(tx sql.Tx) error {
 		return fn(&MainDatabaseTx{tx})
 	})
 }
 
-func (b *MainDatabase) Version(_ context.Context) (string, string, error) {
-	return version(b.db)
+func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
+	return version(ctx, b.db)
 }
 
-func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) {
-	resp, err := tx.Exec("DELETE FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", key, bucket)
+func (tx *MainDatabaseTx) DeleteObject(ctx context.Context, bucket string, key string) (bool, error) {
+	resp, err := tx.Exec(ctx, "DELETE FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", key, bucket)
 	if err != nil {
 		return false, err
 	} else if n, err := resp.RowsAffected(); err != nil {
@@ -81,14 +81,32 @@ func (tx *MainDatabaseTx) DeleteObject(bucket string, key string) (bool, error) 
 	}
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
-	insertDirStmt, err := tx.Prepare("INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
+func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key string, limit int64) (bool, error) {
+	resp, err := tx.Exec(ctx, `
+	DELETE FROM objects
+	WHERE id IN (
+		SELECT id FROM objects
+		WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
+		ORDER BY size DESC
+		LIMIT ?
+	)`, key+"%", utf8.RuneCountInString(key), key, bucket, limit)
+	if err != nil {
+		return false, err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return false, err
+	} else {
+		return n != 0, nil
+	}
+}
+
+func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uint, error) {
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer insertDirStmt.Close()
 
-	queryDirStmt, err := tx.Prepare("SELECT id FROM directories WHERE name = ?")
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ?")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -96,7 +114,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 
 	// Create root dir.
 	dirID := uint(sql.DirectoriesRootID)
-	if _, err := tx.Exec("INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
@@ -113,11 +131,11 @@ func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 		if dir == "/" {
 			continue
 		}
-		if _, err := insertDirStmt.Exec(dir, dirID); err != nil {
+		if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		}
 		var childID uint
-		if err := queryDirStmt.QueryRow(dir).Scan(&childID); err != nil {
+		if err := queryDirStmt.QueryRow(ctx, dir).Scan(&childID); err != nil {
 			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
 		} else if childID == 0 {
 			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
@@ -127,21 +145,21 @@ func (tx *MainDatabaseTx) MakeDirsForPath(path string) (uint, error) {
 	return dirID, nil
 }
 
-func (tx *MainDatabaseTx) RenameObject(bucket, keyOld, keyNew string, dirID uint, force bool) error {
+func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID uint, force bool) error {
 	if force {
 		// delete potentially existing object at destination
-		if _, err := tx.DeleteObject(bucket, keyNew); err != nil {
+		if _, err := tx.DeleteObject(ctx, bucket, keyNew); err != nil {
 			return fmt.Errorf("RenameObject: failed to delete object: %w", err)
 		}
 	} else {
 		var exists bool
-		if err := tx.QueryRow("SELECT EXISTS (SELECT 1 FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?))", keyNew, bucket).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?))", keyNew, bucket).Scan(&exists); err != nil {
 			return err
 		} else if exists {
 			return api.ErrObjectExists
 		}
 	}
-	resp, err := tx.Exec(`UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
+	resp, err := tx.Exec(ctx, `UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
 	if err != nil {
 		return err
 	} else if n, err := resp.RowsAffected(); err != nil {

@@ -4138,9 +4138,9 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	var dirID uint
-	err := ss.bMain.Transaction(func(tx sql.DatabaseTx) error {
+	err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.MakeDirsForPath("1")
+		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
 		return err
 	})
 	if err != nil {
@@ -4848,9 +4848,9 @@ func TestDirectories(t *testing.T) {
 
 	for _, o := range objects {
 		var dirID uint
-		err := ss.bMain.Transaction(func(tx sql.DatabaseTx) error {
+		err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.MakeDirsForPath(o)
+			dirID, err = tx.MakeDirsForPath(context.Background(), o)
 			return err
 		})
 		if err != nil {
