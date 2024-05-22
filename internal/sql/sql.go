@@ -139,8 +139,10 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 	for ; attempt < maxRetryAttempts; attempt++ {
 		attemptStart := time.Now()
 		log := log.With(zap.Int("attempt", attempt))
-		err = s.transaction(s.db, log, fn)
-		if err == nil {
+		err = s.transaction(ctx, fn)
+		if errors.Is(err, context.Canceled) && context.Cause(ctx) != nil {
+			return context.Cause(ctx)
+		} else if err == nil {
 			// no error, break out of the loop
 			return nil
 		}
@@ -156,18 +158,18 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 		if !locked {
 			break
 		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		default:
-		}
 		// exponential backoff
 		sleep := time.Duration(math.Pow(factor, float64(attempt))) * time.Millisecond
 		if sleep > maxBackoff {
 			sleep = maxBackoff
 		}
 		log.Debug("database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
-		jitterSleep(sleep)
+
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-jitterAfter(sleep):
+		}
 	}
 	return fmt.Errorf("transaction failed (attempt %d): %w", attempt, err)
 }
@@ -180,9 +182,9 @@ func (s *DB) Close() error {
 // transaction is a helper function to execute a function within a transaction.
 // If fn returns an error, the transaction is rolled back. Otherwise, the
 // transaction is committed.
-func (s *DB) transaction(db *sql.DB, log *zap.Logger, fn func(tx Tx) error) error {
+func (s *DB) transaction(ctx context.Context, fn func(tx Tx) error) error {
 	start := time.Now()
-	tx, err := db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -194,13 +196,13 @@ func (s *DB) transaction(db *sql.DB, log *zap.Logger, fn func(tx Tx) error) erro
 	defer func() {
 		// log the transaction if it took longer than txn duration
 		if time.Since(start) > s.longTxDuration {
-			log.Debug("long transaction", zap.Duration("elapsed", time.Since(start)), zap.Stack("stack"), zap.Bool("failed", err != nil))
+			s.log.Debug("long transaction", zap.Duration("elapsed", time.Since(start)), zap.Stack("stack"), zap.Bool("failed", err != nil))
 		}
 	}()
 
 	ltx := &loggedTxn{
 		Tx:                tx,
-		log:               log,
+		log:               s.log,
 		longQueryDuration: s.longQueryDuration,
 	}
 	if err := fn(ltx); err != nil {
@@ -212,6 +214,6 @@ func (s *DB) transaction(db *sql.DB, log *zap.Logger, fn func(tx Tx) error) erro
 }
 
 // jitterSleep sleeps for a random duration between t and t*1.5.
-func jitterSleep(t time.Duration) {
-	time.Sleep(t + time.Duration(rand.Int63n(int64(t/2))))
+func jitterAfter(t time.Duration) <-chan time.Time {
+	return time.After(t + time.Duration(rand.Int63n(int64(t/2))))
 }

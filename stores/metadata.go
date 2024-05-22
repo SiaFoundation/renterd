@@ -2935,23 +2935,21 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 	batchSizeIdx := 0
 	for {
 		start := time.Now()
+		done := false
 		var duration time.Duration
-		var prune bool
 		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 			d, err := tx.DeleteObjects(ctx, bucket, path, objectDeleteBatchSizes[batchSizeIdx])
 			if err != nil {
 				return err
 			}
 			deleted = deleted || d
-			prune = d
+			done = !d
 			return nil
 		}); err != nil {
 			return false, fmt.Errorf("failed to delete objects: %w", err)
 		}
-		if prune {
-			s.triggerSlabPruning() // prune if we deleted an object
-		} else {
-			break // otherwise we are done
+		if done {
+			break // nothing more to delete
 		}
 		duration = time.Since(start)
 
@@ -2959,6 +2957,9 @@ func (s *SQLStore) deleteObjects(ctx context.Context, bucket string, path string
 		if duration < batchDurationThreshold && batchSizeIdx < len(objectDeleteBatchSizes)-1 {
 			batchSizeIdx++
 		}
+	}
+	if deleted {
+		s.triggerSlabPruning()
 	}
 	return deleted, nil
 }

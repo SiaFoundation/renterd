@@ -141,7 +141,7 @@ var (
 								return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
 							}
 
-							if _, err := tx.Exec(context.Background(), `
+							if _, err := tx.Exec(ctx, `
 							UPDATE objects
 							SET db_directory_id = ?
 							WHERE object_id LIKE ? AND
