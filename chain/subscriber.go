@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -18,7 +21,10 @@ import (
 const (
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
-	updatesBatchSize = 250
+	updatesBatchSize = 1e3
+
+	// syncUpdateFrequency is the frequency with which we log sync progress.
+	syncUpdateFrequency = 10 * updatesBatchSize
 )
 
 var (
@@ -116,7 +122,30 @@ func (s *Subscriber) Close() error {
 	return nil
 }
 
+func dumpMemProfile() {
+	// Generate a filename with a timestamp
+	filename := fmt.Sprintf("memprofile_%s.prof", time.Now().Format("20060102_150405"))
+	f, err := os.Create(filename)
+	if err != nil {
+		log.Println("Could not create memory profile: ", err)
+		return
+	}
+	defer f.Close()
+
+	// Write the memory profile to the file
+	if err := pprof.WriteHeapProfile(f); err != nil {
+		log.Println("Could not write memory profile: ", err)
+	}
+}
+
 func (s *Subscriber) Run() (func(), error) {
+	go func() {
+		for {
+			dumpMemProfile()
+			time.Sleep(5 * time.Minute)
+		}
+	}()
+
 	// perform an initial sync
 	start := time.Now()
 	if err := s.sync(); err != nil {
@@ -232,7 +261,7 @@ func (s *Subscriber) sync() error {
 		return fmt.Errorf("failed to get chain index: %w", err)
 	}
 	s.logger.Debugw("sync started", "height", index.Height, "block_id", index.ID)
-	sheight := index.Height / (100 * updatesBatchSize)
+	sheight := index.Height / syncUpdateFrequency
 
 	// fetch updates until we're caught up
 	var cnt uint64
@@ -243,7 +272,7 @@ func (s *Subscriber) sync() error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
-		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
+		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds(), "batch_size", updatesBatchSize)
 
 		// process updates
 		istart = time.Now()
@@ -257,8 +286,8 @@ func (s *Subscriber) sync() error {
 
 	s.logger.Debugw("sync completed", "height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
 
-	// roughly every 100 batches log progress
-	if index.Height/(100*updatesBatchSize) != sheight {
+	// info log sync progress
+	if index.Height/syncUpdateFrequency != sheight {
 		s.logger.Infow("sync progress", "height", index.Height, "block_id", index.ID)
 	}
 	return nil
