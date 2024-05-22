@@ -109,6 +109,15 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 }
 
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
+	// get bucket id
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrBucketNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
 	// insert object
 	objKey, err := o.Key.MarshalBinary()
 	if err != nil {
@@ -116,11 +125,11 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 	var objID int64
 	err = tx.QueryRow(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, key, size, mime_type, etag)
-						VALUES (?, ?, ?, (SELECT id FROM buckets WHERE buckets.name = ?), ?, ?, ?, ?) RETURNING id`,
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 		time.Now(),
 		key,
 		dirID,
-		bucket,
+		bucketID,
 		ssql.SecretKey(objKey),
 		o.TotalSize(),
 		mimeType,
