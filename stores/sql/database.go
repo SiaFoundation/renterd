@@ -33,8 +33,8 @@ type (
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (uint, error)
 
-		// PruneDirs prunes any directories that are empty.
-		PruneDirs(ctx context.Context) error
+		// PruneEmptydirs prunes any directories that are empty.
+		PruneEmptydirs(ctx context.Context) error
 
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.

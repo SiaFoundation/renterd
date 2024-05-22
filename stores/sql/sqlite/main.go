@@ -144,7 +144,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uin
 	return dirID, nil
 }
 
-func (tx *MainDatabaseTx) PruneDirs(ctx context.Context) error {
+func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
 	FROM directories

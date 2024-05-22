@@ -2815,7 +2815,7 @@ func (s *SQLStore) pruneSlabsLoop() {
 		pruneSuccess := true
 		for {
 			var deleted int64
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
+			ctx, cancel := context.WithTimeout(s.shutdownCtx, 10*time.Second+sumDurations(s.retryTransactionIntervals))
 			err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
 				var err error
 				deleted, err = dt.PruneSlabs(ctx, slabPruningBatchSize)
@@ -2845,9 +2845,9 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		// prune dirs
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second+sumDurations(s.retryTransactionIntervals))
+		ctx, cancel := context.WithTimeout(s.shutdownCtx, 10*time.Second+sumDurations(s.retryTransactionIntervals))
 		err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
-			return dt.PruneDirs(ctx)
+			return dt.PruneEmptydirs(ctx)
 		})
 		cancel()
 		if err != nil {

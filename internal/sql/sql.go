@@ -136,12 +136,14 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 	log := s.log.Named("transaction").With(zap.String("id", txnID))
 	start := time.Now()
 	attempt := 1
+LOOP:
 	for ; attempt < maxRetryAttempts; attempt++ {
 		attemptStart := time.Now()
 		log := log.With(zap.Int("attempt", attempt))
 		err = s.transaction(ctx, fn)
 		if errors.Is(err, context.Canceled) && context.Cause(ctx) != nil {
-			return context.Cause(ctx)
+			err = context.Cause(ctx)
+			break LOOP
 		} else if err == nil {
 			// no error, break out of the loop
 			return nil
@@ -156,7 +158,7 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 			}
 		}
 		if !locked {
-			break
+			break LOOP
 		}
 		// exponential backoff
 		sleep := time.Duration(math.Pow(factor, float64(attempt))) * time.Millisecond
@@ -167,7 +169,8 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 
 		select {
 		case <-ctx.Done():
-			return context.Cause(ctx)
+			err = errors.Join(err, context.Cause(ctx))
+			break LOOP
 		case <-jitterAfter(sleep):
 		}
 	}
