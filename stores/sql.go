@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -328,7 +329,10 @@ func (s *SQLStore) initSlabPruning() error {
 	}()
 
 	// prune once to guarantee consistency on startup
-	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
+	return s.bMain.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
+		return err
+	})
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
