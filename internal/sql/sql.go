@@ -168,7 +168,7 @@ LOOP:
 		if sleep > maxBackoff {
 			sleep = maxBackoff
 		}
-		log.Debug("database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
+		log.Warn("database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
 
 		select {
 		case <-ctx.Done():
