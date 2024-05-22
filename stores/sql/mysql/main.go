@@ -73,7 +73,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	if err != nil {
 		return fmt.Errorf("failed to marshal object key: %w", err)
 	}
-	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, key, size, mime_type, etag)
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
 						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now(),
 		key,
@@ -110,7 +110,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert slabs
-	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, key, min_shards, total_shards)
+	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, `+"`key`"+`, min_shards, total_shards)
 						VALUES (?, ?, ?, ?, ?)
 						ON DUPLICATE KEY UPDATE id = last_insert_id(id)`)
 	if err != nil {
@@ -118,7 +118,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 	defer insertSlabStmt.Close()
 
-	querySlabIDStmt, err := tx.Prepare(ctx, "SELECT id FROM slabs WHERE key = ?")
+	querySlabIDStmt, err := tx.Prepare(ctx, "SELECT id FROM slabs WHERE `key` = ?")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to query slab id: %w", err)
 	}
@@ -174,14 +174,14 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert sectors
-	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root) AS EXCLUDED
-								VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE latest_host = EXCLUDED.latest_host, id = last_insert_id(id)`)
+	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
+								VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE latest_host = VALUES(latest_host), id = last_insert_id(id)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
 	defer insertSectorStmt.Close()
 
-	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT id FROM slabs WHERE id = last_insert_id()")
+	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = last_insert_id()")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to query slab id: %w", err)
 	}
@@ -213,7 +213,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 
 	// insert contract <-> sector links
 	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id`)
+											VALUES (?, ?) ON DUPLICATE KEY UPDATE db_sector_id = db_sector_id`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
 	}
@@ -249,7 +249,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	if _, err := tx.Exec(ctx, "DELETE FROM object_user_metadata WHERE db_object_id = ?", objID); err != nil {
 		return fmt.Errorf("failed to delete object metadata: %w", err)
 	}
-	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, key, value) VALUES (?, ?, ?, ?)")
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
 	}
