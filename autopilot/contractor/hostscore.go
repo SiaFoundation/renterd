@@ -52,6 +52,8 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) 
 
 // priceAdjustmentScore computes a score between 0 and 1 for a host giving its
 // price settings and the autopilot's configuration.
+//   - If the given config is missing required fields (e.g. allowance or amount),
+//     math.SmallestNonzeroFloat64 is returned.
 //   - 0.5 is returned if the host's costs exactly match the settings.
 //   - If the host is cheaper than expected, a linear bonus is applied. The best
 //     score of 1 is reached when the ratio between host cost and expectations is
@@ -63,7 +65,7 @@ func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.ContractsCon
 	// return early if the allowance or amount of hosts is zero, avoiding a
 	// division by zero panic below.
 	if cfg.Allowance.IsZero() || cfg.Amount == 0 {
-		return 0.5
+		return math.SmallestNonzeroFloat64
 	}
 
 	hostPeriodBudget := cfg.Allowance.Div64(cfg.Amount)

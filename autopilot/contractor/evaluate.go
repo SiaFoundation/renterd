@@ -1,10 +1,14 @@
 package contractor
 
 import (
+	"errors"
+
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/worker"
 )
+
+var ErrMissingRequiredFields = errors.New("missing required fields in configuration, both allowance and amount must be set")
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
@@ -20,10 +24,10 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.
 // EvaluateConfig evaluates the given configuration and if the gouging settings
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
-func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse) {
+func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse, _ error) {
 	// we need an allowance and a target amount of contracts to evaluate
 	if cfg.Contracts.Allowance.IsZero() || cfg.Contracts.Amount == 0 {
-		return
+		return api.ConfigEvaluationResponse{}, ErrMissingRequiredFields
 	}
 
 	period := cfg.Contracts.Period
