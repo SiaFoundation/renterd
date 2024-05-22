@@ -209,9 +209,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		bMetrics, metricsErr = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
 	if mainErr != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create main database: %v", err)
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create main database: %v", mainErr)
 	} else if metricsErr != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create metrics database: %v", err)
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create metrics database: %v", metricsErr)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
