@@ -186,15 +186,14 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 
 	// insert slices
 	insertSliceStmt, err := tx.Prepare(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_multipart_part_id, db_slab_id, offset, length)
-								VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+								VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert slice: %w", err)
 	}
 	defer insertSliceStmt.Close()
 
 	for i := range slices {
-		var dummy int64
-		err := insertSliceStmt.QueryRow(ctx,
+		res, err := insertSliceStmt.Exec(ctx,
 			time.Now(),
 			objID,
 			uint(i+1),
@@ -202,15 +201,19 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 			slabIDs[i],
 			slices[i].Offset,
 			slices[i].Length,
-		).Scan(&dummy)
+		)
 		if err != nil {
 			return fmt.Errorf("failed to insert slice: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert slice: no rows affected")
 		}
 	}
 
 	// insert sectors
 	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
-								VALUES (?, ?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET latest_host = EXCLUDED.latest_host RETURNING id`)
+								VALUES (?, ?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET latest_host = EXCLUDED.latest_host RETURNING id, db_slab_id`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -219,16 +222,18 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	var sectorIDs []int64
 	for i, ss := range slices {
 		for j := range ss.Shards {
-			var sectorID int64
+			var sectorID, slabID int64
 			err := insertSectorStmt.QueryRow(ctx,
 				time.Now(),
 				slabIDs[i],
 				j+1,
 				ssql.PublicKey(ss.Shards[j].LatestHost),
 				ss.Shards[j].Root[:],
-			).Scan(&sectorID)
+			).Scan(&sectorID, &slabID)
 			if err != nil {
 				return fmt.Errorf("failed to insert sector: %w", err)
+			} else if slabID != slabIDs[i] {
+				return fmt.Errorf("failed to insert sector for slab %v: already exists for slab %v", slabIDs[i], slabID)
 			}
 			sectorIDs = append(sectorIDs, sectorID)
 		}

@@ -2743,8 +2743,8 @@ func TestPartialSlab(t *testing.T) {
 						Key:       object.GenerateEncryptionKey(),
 						MinShards: 1,
 						Shards: []object.Sector{
-							newTestShard(hk1, fcid1, types.Hash256{1}),
-							newTestShard(hk2, fcid2, types.Hash256{2}),
+							newTestShard(hk1, fcid1, frand.Entropy256()),
+							newTestShard(hk2, fcid2, frand.Entropy256()),
 						},
 					},
 					Offset: 0,
