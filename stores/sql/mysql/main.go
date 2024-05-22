@@ -491,6 +491,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 }
 
 func (tx *MainDatabaseTx) fetchUsedContracts(ctx context.Context, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
+	if len(fcids) == 0 {
+		return make(map[types.FileContractID]ssql.UsedContract), nil
+	}
+
 	// flatten map to get all used contract ids
 	usedFCIDs := make([]ssql.FileContractID, 0, len(fcids))
 	for _, fcid := range fcids {
