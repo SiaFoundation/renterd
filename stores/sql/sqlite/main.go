@@ -4,6 +4,7 @@ import (
 	"context"
 	dsql "database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -155,6 +156,12 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 	defer insertSlabStmt.Close()
 
+	querySlabIDStmt, err := tx.Prepare(ctx, "SELECT id FROM slabs WHERE key = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to query slab id: %w", err)
+	}
+	defer querySlabIDStmt.Close()
+
 	slabIDs := make([]int64, len(slices))
 	for i := range slices {
 		slabKey, err := slices[i].Key.MarshalBinary()
@@ -168,7 +175,11 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
 		).Scan(&slabIDs[i])
-		if err != nil {
+		if errors.Is(err, dsql.ErrNoRows) {
+			if err := querySlabIDStmt.QueryRow(ctx, ssql.SecretKey(slabKey)).Scan(&slabIDs[i]); err != nil {
+				return fmt.Errorf("failed to fetch slab id: %w", err)
+			}
+		} else if err != nil {
 			return fmt.Errorf("failed to insert slab: %w", err)
 		}
 	}
