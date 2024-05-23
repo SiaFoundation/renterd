@@ -29,7 +29,7 @@ func (b *MetricsDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx)
 }
 
 func (b *MetricsDatabase) Close() error {
-	return b.db.Close()
+	return closeDB(b.db, b.log)
 }
 
 func (b *MetricsDatabase) DB() *sql.DB {

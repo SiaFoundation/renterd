@@ -46,7 +46,7 @@ func (b *MainDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx) (b
 }
 
 func (b *MainDatabase) Close() error {
-	return b.db.Close()
+	return closeDB(b.db, b.log)
 }
 
 func (b *MainDatabase) DB() *sql.DB {
