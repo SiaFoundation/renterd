@@ -2309,8 +2309,10 @@ func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractS
 func (s *SQLStore) object(tx *gorm.DB, bucket, path string) (api.Object, error) {
 	// fetch raw object data
 	raw, err := s.objectRaw(tx, bucket, path)
-	if errors.Is(err, gorm.ErrRecordNotFound) || len(raw) == 0 {
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && len(raw) == 0) {
 		return api.Object{}, api.ErrObjectNotFound
+	} else if err != nil {
+		return api.Object{}, err
 	}
 
 	// hydrate raw object data
