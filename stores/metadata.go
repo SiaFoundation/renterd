@@ -1388,7 +1388,7 @@ GROUP BY d.id
 }
 
 func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		obj, err = s.object(tx, bucket, path)
 		return err
 	})

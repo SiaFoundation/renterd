@@ -497,9 +497,8 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 	}
 
 	// find shards of slab
-	var nSectors int
 	var roots []types.Hash256
-	rows, err := tx.Query(ctx, "SELECT COUNT(*), root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
+	rows, err := tx.Query(ctx, "SELECT root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch sectors: %w", err)
 	}
@@ -507,11 +506,12 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 	for rows.Next() {
 		var root ssql.Hash256
-		if err := rows.Scan(&nSectors, &root); err != nil {
+		if err := rows.Scan(&root); err != nil {
 			return fmt.Errorf("failed to scan sector id: %w", err)
 		}
 		roots = append(roots, types.Hash256(root))
 	}
+	nSectors := len(roots)
 
 	// make sure the number of shards doesn't change.
 	// NOTE: check both the slice as well as the TotalShards field to be
