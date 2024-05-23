@@ -206,7 +206,15 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts))
+	res, err := contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts)
+	if errors.Is(err, contractor.ErrMissingRequiredFields) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(res)
 }
 
 func (ap *Autopilot) Run() error {
