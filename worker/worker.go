@@ -208,6 +208,7 @@ type worker struct {
 	uploadManager   *uploadManager
 
 	accounts        *accounts
+	cache           *memoryCache
 	priceTables     *priceTables
 	transportPoolV3 *transportPoolV3
 
@@ -1281,6 +1282,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
+		cache:                   newMemoryCache(),
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
@@ -1554,15 +1556,23 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	opts.Range.Length = hor.Range.Length
 
 	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
+	gp, found := w.cache.Get(cacheKeyGougingParams)
+	if !found {
+		gp, err = w.bus.GougingParams(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
+		}
+		w.cache.Set(cacheKeyGougingParams, gp)
 	}
 
 	// fetch all contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
-		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	contracts, found := w.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		contracts, err = w.bus.Contracts(ctx, api.ContractsOpts{})
+		if err != nil {
+			return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+		}
+		w.cache.Set(cacheKeyDownloadContracts, contracts)
 	}
 
 	// prepare the content
@@ -1574,14 +1584,14 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	} else {
 		// otherwise return a pipe reader
 		downloadFn := func(wr io.Writer, offset, length int64) error {
-			ctx = WithGougingChecker(ctx, w.bus, gp)
-			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts)
+			ctx = WithGougingChecker(ctx, w.bus, gp.(api.GougingParams))
+			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts.([]api.ContractMetadata))
 			if err != nil {
 				w.logger.Error(err)
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts.([]api.ContractMetadata))), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
