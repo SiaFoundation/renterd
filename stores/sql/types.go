@@ -15,6 +15,7 @@ const (
 
 type (
 	FileContractID types.FileContractID
+	Hash256        types.Hash256
 	PublicKey      types.PublicKey
 	SecretKey      []byte
 )
@@ -40,6 +41,24 @@ func (fcid *FileContractID) Scan(value interface{}) error {
 // Value returns a fileContractID value, implements driver.Valuer interface.
 func (fcid FileContractID) Value() (driver.Value, error) {
 	return fcid[:], nil
+}
+
+// Scan scan value into address, implements sql.Scanner interface.
+func (h *Hash256) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal Hash256 value:", value))
+	}
+	if len(bytes) != len(Hash256{}) {
+		return fmt.Errorf("failed to unmarshal Hash256 value due to invalid number of bytes %v != %v: %v", len(bytes), len(Hash256{}), value)
+	}
+	*h = *(*Hash256)(bytes)
+	return nil
+}
+
+// Value returns an addr value, implements driver.Valuer interface.
+func (h Hash256) Value() (driver.Value, error) {
+	return h[:], nil
 }
 
 // Scan scan value into publicKey, implements sql.Scanner interface.

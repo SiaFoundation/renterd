@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
@@ -61,6 +62,14 @@ type (
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
+
+		// UpdateSlab updates the slab in the database. That includes the following:
+		// - Optimistically set health to 100%
+		// - Invalidate health_valid_until
+		// - Update LatestHost for every shard
+		// The operation is not allowed to update the number of shards
+		// associated with a slab or the root/slabIndex of any shard.
+		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
 	}
 
 	MetricsDatabase interface {

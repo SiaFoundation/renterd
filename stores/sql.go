@@ -559,8 +559,6 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 			errors.Is(err, context.Canceled) ||
 			errors.Is(err, context.DeadlineExceeded) ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
-			errors.Is(err, errInvalidNumberOfShards) ||
-			errors.Is(err, errShardRootChanged) ||
 			errors.Is(err, api.ErrContractNotFound) ||
 			errors.Is(err, api.ErrObjectNotFound) ||
 			errors.Is(err, api.ErrObjectCorrupted) ||

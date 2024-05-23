@@ -24,6 +24,9 @@ const (
 )
 
 var (
+	ErrInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	ErrShardRootChanged      = errors.New("shard root changed")
+
 	ErrRunV072               = errors.New("can't upgrade to >=v1.0.0 from your current version - please upgrade to v0.7.2 first (https://github.com/SiaFoundation/renterd/releases/tag/v0.7.2)")
 	ErrMySQLNoSuperPrivilege = errors.New("You do not have the SUPER privilege and binary logging is enabled")
 )

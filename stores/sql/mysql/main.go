@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
@@ -484,4 +485,8 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
+	panic("not implemented")
 }

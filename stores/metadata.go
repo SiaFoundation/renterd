@@ -62,9 +62,6 @@ var (
 )
 
 var (
-	errInvalidNumberOfShards = errors.New("slab has invalid number of shards")
-	errShardRootChanged      = errors.New("shard root changed")
-
 	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 )
 
@@ -1913,112 +1910,9 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 		}
 	}
 
-	// extract the slab key
-	key, err := s.Key.MarshalBinary()
-	if err != nil {
-		return err
-	}
-
-	// collect all used contracts
-	usedContracts := s.Contracts()
-
 	// Update slab.
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) (err error) {
-		// update slab
-		if err := tx.Model(&dbSlab{}).
-			Where("key", key).
-			Updates(map[string]interface{}{
-				"db_contract_set_id": gorm.Expr("(SELECT id FROM contract_sets WHERE name = ?)", contractSet),
-				"health_valid_until": time.Now().Unix(),
-				"health":             1,
-			}).
-			Error; err != nil {
-			return err
-		}
-
-		// find all used contracts
-		contracts, err := fetchUsedContracts(tx, usedContracts)
-		if err != nil {
-			return err
-		}
-
-		// find existing slab
-		var slab dbSlab
-		if err = tx.
-			Where(&dbSlab{Key: key}).
-			Preload("Shards").
-			Take(&slab).
-			Error; err == gorm.ErrRecordNotFound {
-			return fmt.Errorf("slab with key '%s' not found: %w", string(key), err)
-		} else if err != nil {
-			return err
-		}
-
-		// make sure the number of shards doesn't change.
-		// NOTE: check both the slice as well as the TotalShards field to be
-		// safe.
-		if len(s.Shards) != int(slab.TotalShards) {
-			return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", errInvalidNumberOfShards, slab.TotalShards, len(s.Shards))
-		} else if len(s.Shards) != len(slab.Shards) {
-			return fmt.Errorf("%w: expected %v shards (Shards) but got %v", errInvalidNumberOfShards, len(slab.Shards), len(s.Shards))
-		}
-
-		// make sure the roots stay the same.
-		for i, shard := range s.Shards {
-			if shard.Root != types.Hash256(slab.Shards[i].Root) {
-				return fmt.Errorf("%w: shard %v has changed root from %v to %v", errShardRootChanged, i, slab.Shards[i].Root, shard.Root[:])
-			}
-		}
-
-		// prepare sectors to update
-		sectors := make([]dbSector, len(s.Shards))
-		for i := range s.Shards {
-			sectors[i] = dbSector{
-				DBSlabID:   slab.ID,
-				SlabIndex:  i + 1,
-				LatestHost: publicKey(s.Shards[i].LatestHost),
-				Root:       s.Shards[i].Root[:],
-			}
-		}
-
-		// ensure the sectors exists
-		sectorIDs, err := upsertSectors(tx, sectors)
-		if err != nil {
-			return fmt.Errorf("failed to create sector: %w", err)
-		}
-
-		// build contract <-> sector links
-		var contractSectors []dbContractSector
-		for i, shard := range s.Shards {
-			sectorID := sectorIDs[i]
-
-			// ensure the associations are updated
-			for _, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, ok := contracts[fcid]; ok {
-						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sectorID,
-							DBContractID: contracts[fcid].ID,
-						})
-					}
-				}
-			}
-		}
-
-		// if there are no associations we are done
-		if len(contractSectors) == 0 {
-			return nil
-		}
-
-		// create associations
-		if err := tx.Table("contract_sectors").
-			Clauses(clause.OnConflict{
-				DoNothing: true,
-			}).
-			Create(&contractSectors).Error; err != nil {
-			return err
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateSlab(ctx, s, contractSet, s.Contracts())
 	})
 }
 
