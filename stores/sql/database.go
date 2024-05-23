@@ -33,8 +33,8 @@ type (
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (uint, error)
 
-		// PruneDirs prunes any directories that are empty.
-		PruneDirs(ctx context.Context) error
+		// PruneEmptydirs prunes any directories that are empty.
+		PruneEmptydirs(ctx context.Context) error
 
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
@@ -47,6 +47,14 @@ type (
 		// of returning api.ErrObjectExists, the existing object will be
 		// deleted.
 		RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID uint, force bool) error
+
+		// RenameObjects renames all objects in the database with the given
+		// prefix to the new prefix. If 'force' is true, it will overwrite any
+		// existing objects with the new prefix. If no object can be renamed,
+		// `api.ErrOBjectNotFound` is returned. If 'force' is false and an
+		// object already exists with the new prefix, `api.ErrObjectExists` is
+		// returned.
+		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID uint, force bool) error
 	}
 
 	MetricsDatabase interface {

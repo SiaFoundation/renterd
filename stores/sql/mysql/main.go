@@ -161,7 +161,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (uin
 	return dirID, nil
 }
 
-func (tx *MainDatabaseTx) PruneDirs(ctx context.Context) error {
+func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
 	FROM directories
@@ -227,6 +227,50 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 		return err
 	} else if n == 0 {
 		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID uint, force bool) error {
+	if force {
+		_, err := tx.Exec(ctx, `
+		DELETE
+		FROM objects
+		WHERE object_id IN (
+			SELECT *
+			FROM (
+				SELECT CONCAT(?, SUBSTR(object_id, ?))
+				FROM objects
+				WHERE object_id LIKE ? 
+				AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
+			) as i
+		)`,
+			prefixNew,
+			utf8.RuneCountInString(prefixOld)+1,
+			prefixOld+"%",
+			bucket)
+		if err != nil {
+			return err
+		}
+	}
+	resp, err := tx.Exec(ctx, `
+		UPDATE objects
+		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
+		db_directory_id = ?
+		WHERE object_id LIKE ? 
+		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
+		prefixNew, utf8.RuneCountInString(prefixOld)+1,
+		dirID,
+		prefixOld+"%",
+		bucket)
+	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
+		return api.ErrObjectExists
+	} else if err != nil {
+		return err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
 }
