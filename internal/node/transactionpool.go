@@ -15,8 +15,8 @@ type txpool struct {
 }
 
 func (tp txpool) RecommendedFee() (fee types.Currency) {
-	_, max := tp.tp.FeeEstimation()
-	convertToCore(&max, (*types.V1Currency)(&fee))
+	_, maxFee := tp.tp.FeeEstimation()
+	convertToCore(&maxFee, (*types.V1Currency)(&fee))
 	return
 }
 
