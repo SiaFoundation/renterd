@@ -166,7 +166,7 @@ var (
 			{
 				ID: "00009_json_settings",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00007_host_checks", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00009_json_settings", log)
 				},
 			},
 		}
