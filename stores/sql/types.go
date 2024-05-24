@@ -14,6 +14,7 @@ const (
 )
 
 type (
+	Currency       types.Currency
 	FileContractID types.FileContractID
 	Hash256        types.Hash256
 	PublicKey      types.PublicKey
@@ -21,9 +22,36 @@ type (
 )
 
 var (
-	_ sql.Scanner = &SecretKey{}
+	_ sql.Scanner = &Currency{}
 	_ sql.Scanner = &FileContractID{}
+	_ sql.Scanner = &Hash256{}
+	_ sql.Scanner = &PublicKey{}
+	_ sql.Scanner = &SecretKey{}
 )
+
+// Scan scan value into Currency, implements sql.Scanner interface.
+func (c *Currency) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal Currency value: %v %t", value, value)
+	}
+	curr, err := types.ParseCurrency(s)
+	if err != nil {
+		return err
+	}
+	*c = Currency(curr)
+	return nil
+}
+
+// Value returns a publicKey value, implements driver.Valuer interface.
+func (c Currency) Value() (driver.Value, error) {
+	return types.Currency(c).ExactString(), nil
+}
 
 // Scan scan value into fileContractID, implements sql.Scanner interface.
 func (fcid *FileContractID) Scan(value interface{}) error {

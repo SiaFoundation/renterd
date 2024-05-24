@@ -26,6 +26,8 @@ type (
 	}
 
 	DatabaseTx interface {
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+
 		// DeleteObject deletes an object from the database and returns true if
 		// the requested object was actually deleted.
 		DeleteObject(ctx context.Context, bucket, key string) (bool, error)

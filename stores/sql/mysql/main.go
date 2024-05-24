@@ -654,3 +654,7 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 	}
 	return sectorIDs, nil
 }
+
+func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
+	panic("not implemented")
+}
