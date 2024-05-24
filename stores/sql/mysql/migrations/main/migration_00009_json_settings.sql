@@ -1,0 +1,1 @@
+ALTER TABLE `hosts` MODIFY COLUMN `settings` JSON;
