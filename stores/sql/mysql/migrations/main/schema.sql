@@ -81,7 +81,7 @@ CREATE TABLE `hosts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `public_key` varbinary(32) NOT NULL,
-  `settings` longtext,
+  `settings` JSON,
   `price_table` longtext,
   `price_table_expiry` datetime(3) DEFAULT NULL,
   `total_scans` bigint unsigned DEFAULT NULL,

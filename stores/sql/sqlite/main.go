@@ -80,6 +80,84 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
+func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
+	var rows *sql.LoggedRows
+	var err error
+	if opts.ContractSet != "" {
+		// if we filter by contract set, we fetch the set first to check if it
+		// exists and then fetch the contracts. Knowing that the contracts are
+		// part of at least one set allows us to use INNER JOINs.
+		var contractSetID int64
+		err = tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
+			Scan(&contractSetID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return nil, api.ErrContractSetNotFound
+		}
+		rows, err = tx.Query(ctx, `
+			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
+			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
+			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
+			cs.name, h.net_address, h.public_key, JSON_EXTRACT(h.settings, '$.siamuxport') AS siamux_port
+			FROM (
+				SELECT *
+				FROM contracts
+				INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id
+				INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+				WHERE cs.id = ?
+			) AS c
+			INNER JOIN hosts h ON h.id = c.host_id
+			INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
+			INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+			ORDER BY c.id ASC`, contractSetID)
+	} else {
+		// if we don't filter, we need to left join here to ensure we don't miss
+		// contracts that are not part of any set
+		rows, err = tx.Query(ctx, `
+			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
+			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
+			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
+			COALESCE(cs.name, ""), h.net_address, h.public_key, JSON_EXTRACT(h.settings, '$.siamuxport') AS siamux_port
+			FROM contracts AS c
+			INNER JOIN hosts h ON h.id = c.host_id
+			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
+			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+			ORDER BY c.id ASC`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scannedRows []ssql.ContractRow
+	for rows.Next() {
+		var r ssql.ContractRow
+		if err := r.Scan(rows); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		scannedRows = append(scannedRows, r)
+	}
+
+	if len(scannedRows) == 0 {
+		return nil, nil
+	}
+
+	// merge 'Host', 'Name' and 'Contract' into dbContracts
+	var contracts []api.ContractMetadata
+	current, scannedRows := scannedRows[0].ContractMetadata(), scannedRows[1:]
+	for {
+		if len(scannedRows) == 0 {
+			contracts = append(contracts, current)
+			break
+		} else if current.ID != types.FileContractID(scannedRows[0].FCID) {
+			contracts = append(contracts, current)
+		} else if scannedRows[0].ContractSet != "" {
+			current.ContractSets = append(current.ContractSets, scannedRows[0].ContractSet)
+		}
+		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
+	}
+	return contracts, nil
+}
+
 func (tx *MainDatabaseTx) DeleteObject(ctx context.Context, bucket string, key string) (bool, error) {
 	resp, err := tx.Exec(ctx, "DELETE FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", key, bucket)
 	if err != nil {
@@ -618,82 +696,4 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 		sectorIDs = append(sectorIDs, sectorID)
 	}
 	return sectorIDs, nil
-}
-
-func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	var rows *sql.LoggedRows
-	var err error
-	if opts.ContractSet != "" {
-		// if we filter by contract set, we fetch the set first to check if it
-		// exists and then fetch the contracts. Knowing that the contracts are
-		// part of at least one set allows us to use INNER JOINs.
-		var contractSetID int64
-		err = tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
-			Scan(&contractSetID)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return nil, api.ErrContractSetNotFound
-		}
-		rows, err = tx.Query(ctx, `
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
-			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
-			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			cs.name, h.net_address, h.public_key, json_extract(h.settings, '$.siamuxport') AS siamux_port
-			FROM (
-				SELECT *
-				FROM contracts
-				INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id
-				INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-				WHERE cs.id = ?
-			) AS c
-			INNER JOIN hosts h ON h.id = c.host_id
-			INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-			INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			ORDER BY c.id ASC`, contractSetID)
-	} else {
-		// if we don't filter, we need to left join here to ensure we don't miss
-		// contracts that are not part of any set
-		rows, err = tx.Query(ctx, `
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
-			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
-			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, json_extract(h.settings, '$.siamuxport') AS siamux_port
-			FROM contracts AS c
-			INNER JOIN hosts h ON h.id = c.host_id
-			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			ORDER BY c.id ASC`)
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var scannedRows []ssql.ContractRow
-	for rows.Next() {
-		var r ssql.ContractRow
-		if err := r.Scan(rows); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		scannedRows = append(scannedRows, r)
-	}
-
-	if len(scannedRows) == 0 {
-		return nil, nil
-	}
-
-	// merge 'Host', 'Name' and 'Contract' into dbContracts
-	var contracts []api.ContractMetadata
-	current, scannedRows := scannedRows[0].ContractMetadata(), scannedRows[1:]
-	for {
-		if len(scannedRows) == 0 {
-			contracts = append(contracts, current)
-			break
-		} else if current.ID != types.FileContractID(scannedRows[0].FCID) {
-			contracts = append(contracts, current)
-		} else if scannedRows[0].ContractSet != "" {
-			current.ContractSets = append(current.ContractSets, scannedRows[0].ContractSet)
-		}
-		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
-	}
-	return contracts, nil
 }
