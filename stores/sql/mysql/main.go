@@ -10,7 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
@@ -97,7 +96,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		return nil // nothing to do
 	}
 
-	usedContracts, err := tx.fetchUsedContracts(ctx, o.Contracts())
+	usedContracts, err := ssql.FetchUsedContracts(ctx, tx.Tx, o.Contracts())
 	if err != nil {
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
 	}
@@ -173,7 +172,8 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		}
 	}
 
-	// insert sectors
+	// insert sectors - make sure to update last_insert_id in case of a
+	// duplicate key to be able to retrieve the id
 	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
 								VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE latest_host = VALUES(latest_host), id = last_insert_id(id)`)
 	if err != nil {
@@ -181,7 +181,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 	defer insertSectorStmt.Close()
 
-	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = last_insert_id()")
+	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = ?")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to query slab id: %w", err)
 	}
@@ -202,7 +202,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 				return fmt.Errorf("failed to insert sector: %w", err)
 			} else if sectorID, err = res.LastInsertId(); err != nil {
 				return fmt.Errorf("failed to fetch sector id: %w", err)
-			} else if err := querySectorSlabIDStmt.QueryRow(ctx).Scan(&slabID); err != nil {
+			} else if err := querySectorSlabIDStmt.QueryRow(ctx, sectorID).Scan(&slabID); err != nil {
 				return fmt.Errorf("failed to fetch slab id: %w", err)
 			} else if slabID != slabIDs[i] {
 				return fmt.Errorf("failed to insert sector for slab %v: already exists for slab %v", slabIDs[i], slabID)
@@ -246,9 +246,6 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// update metadata
-	if _, err := tx.Exec(ctx, "DELETE FROM object_user_metadata WHERE db_object_id = ?", objID); err != nil {
-		return fmt.Errorf("failed to delete object metadata: %w", err)
-	}
 	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
@@ -256,8 +253,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	defer insertMetadataStmt.Close()
 
 	for k, v := range md {
-		if _, err := insertMetadataStmt.Exec(ctx,
-			time.Now(), objID, k, v); err != nil {
+		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
 			return fmt.Errorf("failed to insert object metadata: %w", err)
 		}
 	}
@@ -488,63 +484,4 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
-}
-
-func (tx *MainDatabaseTx) fetchUsedContracts(ctx context.Context, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
-	if len(fcids) == 0 {
-		return make(map[types.FileContractID]ssql.UsedContract), nil
-	}
-
-	// flatten map to get all used contract ids
-	usedFCIDs := make([]ssql.FileContractID, 0, len(fcids))
-	for _, fcid := range fcids {
-		usedFCIDs = append(usedFCIDs, ssql.FileContractID(fcid))
-	}
-
-	placeholders := make([]string, len(usedFCIDs))
-	for i := range usedFCIDs {
-		placeholders[i] = "?"
-	}
-	placeholdersStr := strings.Join(placeholders, ", ")
-
-	args := make([]interface{}, len(usedFCIDs)*2)
-	for i := range args {
-		args[i] = usedFCIDs[i%len(usedFCIDs)]
-	}
-
-	// fetch all contracts, take into account renewals
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, fcid, renewed_from
-				   FROM contracts
-				   WHERE contracts.fcid IN (%s) OR renewed_from IN (%s)
-				   `, placeholdersStr, placeholdersStr), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-	defer rows.Close()
-
-	var contracts []ssql.UsedContract
-	for rows.Next() {
-		var c ssql.UsedContract
-		if err := rows.Scan(&c.ID, &c.FCID, &c.RenewedFrom); err != nil {
-			return nil, fmt.Errorf("failed to scan used contract: %w", err)
-		}
-		contracts = append(contracts, c)
-	}
-
-	fcidMap := make(map[types.FileContractID]struct{}, len(fcids))
-	for _, fcid := range fcids {
-		fcidMap[fcid] = struct{}{}
-	}
-
-	// build map of used contracts
-	usedContracts := make(map[types.FileContractID]ssql.UsedContract, len(contracts))
-	for _, c := range contracts {
-		if _, used := fcidMap[types.FileContractID(c.FCID)]; used {
-			usedContracts[types.FileContractID(c.FCID)] = c
-		}
-		if _, used := fcidMap[types.FileContractID(c.RenewedFrom)]; used {
-			usedContracts[types.FileContractID(c.RenewedFrom)] = c
-		}
-	}
-	return usedContracts, nil
 }

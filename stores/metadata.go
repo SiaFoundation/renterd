@@ -1824,11 +1824,11 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// NOTE: the metadata is not deleted because this delete will cascade,
 		// if we stop recreating the object we have to make sure to delete the
 		// object's metadata before trying to recreate it
-		deleted, err := tx.DeleteObject(ctx, bucket, path)
+		var err error
+		prune, err = tx.DeleteObject(ctx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
-		prune = deleted
 
 		// create the dir
 		dirID, err := tx.MakeDirsForPath(ctx, path)
