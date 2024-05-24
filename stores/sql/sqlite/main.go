@@ -99,7 +99,7 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
 			cs.name, h.net_address, h.public_key, JSON_EXTRACT(h.settings, '$.siamuxport') AS siamux_port
 			FROM (
-				SELECT *
+				SELECT contracts.*
 				FROM contracts
 				INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id
 				INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
