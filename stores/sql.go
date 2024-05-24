@@ -224,9 +224,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 	// Perform migrations.
 	if cfg.Migrate {
-		if err := dbMain.Migrate(ctx); err != nil {
+		if err := dbMain.Migrate(context.Background()); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
-		} else if err := bMetrics.Migrate(ctx); err != nil {
+		} else if err := bMetrics.Migrate(context.Background()); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
