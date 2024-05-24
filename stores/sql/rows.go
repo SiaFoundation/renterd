@@ -1,8 +1,6 @@
 package sql
 
 import (
-	"strings"
-
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -41,16 +39,10 @@ type ContractRow struct {
 }
 
 func (r *ContractRow) Scan(s scanner) error {
-	err := s.Scan(&r.FCID, &r.RenewedFrom, &r.ContractPrice, &r.State, &r.TotalCost, &r.ProofHeight,
+	return s.Scan(&r.FCID, &r.RenewedFrom, &r.ContractPrice, &r.State, &r.TotalCost, &r.ProofHeight,
 		&r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.WindowStart, &r.WindowEnd,
 		&r.UploadSpending, &r.DownloadSpending, &r.FundAccountSpending, &r.DeleteSpending, &r.ListSpending,
 		&r.ContractSet, &r.NetAddress, &r.PublicKey, &r.SiamuxPort)
-	if err != nil {
-		return err
-	}
-	r.SiamuxPort = strings.TrimPrefix(r.SiamuxPort, "\"")
-	r.SiamuxPort = strings.TrimSuffix(r.SiamuxPort, "\"")
-	return nil
 }
 
 func (r *ContractRow) ContractMetadata() api.ContractMetadata {
