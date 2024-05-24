@@ -628,7 +628,7 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 		// exists and then fetch the contracts. Knowing that the contracts are
 		// part of at least one set allows us to use INNER JOINs.
 		var contractSetID int64
-		err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
+		err = tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
 			Scan(&contractSetID)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return nil, api.ErrContractSetNotFound
@@ -637,7 +637,7 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			cs.name, h.net_address, json_extract(h.settings, '$.siamuxport') AS siamux_port
+			cs.name, h.net_address, h.public_key, json_extract(h.settings, '$.siamuxport') AS siamux_port
 			FROM (
 				SELECT *
 				FROM contracts
@@ -656,7 +656,7 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			cs.name, h.net_address, json_extract(h.settings, '$.siamuxport') AS siamux_port
+			COALESCE(cs.name, ""), h.net_address, h.public_key, json_extract(h.settings, '$.siamuxport') AS siamux_port
 			FROM contracts AS c
 			INNER JOIN hosts h ON h.id = c.host_id
 			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
@@ -668,77 +668,32 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 	}
 	defer rows.Close()
 
-	type row struct {
-		FCID        ssql.FileContractID
-		RenewedFrom ssql.FileContractID
-
-		ContractPrice  ssql.Currency
-		State          uint8
-		TotalCost      ssql.Currency
-		ProofHeight    uint64
-		RevisionHeight uint64
-		RevisionNumber string
-		Size           uint64
-		StartHeight    uint64
-		WindowStart    uint64
-		WindowEnd      uint64
-
-		// spending fields
-		UploadSpending      ssql.Currency
-		DownloadSpending    ssql.Currency
-		FundAccountSpending ssql.Currency
-		DeleteSpending      ssql.Currency
-		ListSpending        ssql.Currency
-
-		ContractSet string
-		NetAddress  string
-		SiamuxPort  string
-	}
-
-	var scannedRows []row
+	var scannedRows []ssql.ContractRow
 	for rows.Next() {
-		var r row
-		err = rows.Scan(&r.FCID, &r.RenewedFrom, &r.ContractPrice, &r.State, &r.TotalCost, &r.ProofHeight,
-			&r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.WindowStart, &r.WindowEnd,
-			&r.UploadSpending, &r.DownloadSpending, &r.FundAccountSpending, &r.DeleteSpending, &r.ListSpending,
-			&r.ContractSet, &r.NetAddress, &r.SiamuxPort)
-		if err != nil {
+		var r ssql.ContractRow
+		if err := r.Scan(rows); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		scannedRows = append(scannedRows, r)
 	}
 
-	panic("not implemented")
+	if len(scannedRows) == 0 {
+		return nil, nil
+	}
 
 	// merge 'Host', 'Name' and 'Contract' into dbContracts
-	//	var dbContracts []dbContract
-	//	for i := range rows {
-	//		dbContract := rows[i].Contract
-	//		dbContract.Host = rows[i].Host
-	//		if rows[i].Name != "" {
-	//			dbContract.ContractSets = append(dbContract.ContractSets, dbContractSet{Name: rows[i].Name})
-	//		}
-	//		dbContracts = append(dbContracts, dbContract)
-	//	}
-	//
-	//	// merge contract sets
-	//	var contracts []api.ContractMetadata
-	//	current, dbContracts := dbContracts[0], dbContracts[1:]
-	//	for {
-	//		if len(dbContracts) == 0 {
-	//			contracts = append(contracts, current.convert())
-	//			break
-	//		} else if current.ID != dbContracts[0].ID {
-	//			contracts = append(contracts, current.convert())
-	//		} else if len(dbContracts[0].ContractSets) > 0 {
-	//			current.ContractSets = append(current.ContractSets, dbContracts[0].ContractSets...)
-	//		}
-	//		current, dbContracts = dbContracts[0], dbContracts[1:]
-	//	}
-	//
-	//	// if no contracts are left, check if the set existed in the first place
-	//	if len(contracts) == 0 {
-	//		return nil, hasContractSet()
-	//	}
-	//	return contracts, nil
+	var contracts []api.ContractMetadata
+	current, scannedRows := scannedRows[0].ContractMetadata(), scannedRows[1:]
+	for {
+		if len(scannedRows) == 0 {
+			contracts = append(contracts, current)
+			break
+		} else if current.ID != types.FileContractID(scannedRows[0].FCID) {
+			contracts = append(contracts, current)
+		} else if scannedRows[0].ContractSet != "" {
+			current.ContractSets = append(current.ContractSets, scannedRows[0].ContractSet)
+		}
+		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
+	}
+	return contracts, nil
 }
