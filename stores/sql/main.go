@@ -16,7 +16,13 @@ import (
 )
 
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
-	return scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
+	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Bucket{}, api.ErrBucketNotFound
+	} else if err != nil {
+		return api.Bucket{}, fmt.Errorf("failed to fetch bucket: %w", err)
+	}
+	return b, nil
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
