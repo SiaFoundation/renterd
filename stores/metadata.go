@@ -1430,87 +1430,15 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 }
 
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		if srcBucket != dstBucket || srcPath != dstPath {
-			_, err = s.deleteObject(tx, dstBucket, dstPath)
+			_, err = tx.DeleteObject(ctx, dstBucket, dstPath)
 			if err != nil {
 				return fmt.Errorf("CopyObject: failed to delete object: %w", err)
 			}
 		}
-
-		var srcObj dbObject
-		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
-			Joins("DBBucket").
-			Take(&srcObj).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch src object: %w", err)
-		}
-
-		if srcBucket == dstBucket && srcPath == dstPath {
-			// No copying is happening. We just update the metadata on the src
-			// object.
-			srcObj.MimeType = mimeType
-			om = newObjectMetadata(
-				srcObj.ObjectID,
-				srcObj.Etag,
-				srcObj.MimeType,
-				srcObj.Health,
-				srcObj.CreatedAt,
-				srcObj.Size,
-			)
-			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
-				return fmt.Errorf("failed to update user metadata: %w", err)
-			}
-			return tx.Save(&srcObj).Error
-		}
-
-		var srcSlices []dbSlice
-		err = tx.Where("db_object_id = ?", srcObj.ID).
-			Find(&srcSlices).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch src slices: %w", err)
-		}
-		for i := range srcSlices {
-			srcSlices[i].Model = Model{}  // clear model
-			srcSlices[i].DBObjectID = nil // clear object id
-		}
-
-		var bucket dbBucket
-		err = tx.Where("name = ?", dstBucket).
-			Take(&bucket).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch dst bucket: %w", err)
-		}
-
-		dstObj := srcObj
-		dstObj.Model = Model{}        // clear model
-		dstObj.DBBucket = bucket      // set dst bucket
-		dstObj.ObjectID = dstPath     // set dst path
-		dstObj.DBBucketID = bucket.ID // set dst bucket id
-		dstObj.Slabs = srcSlices      // set slices
-		if mimeType != "" {
-			dstObj.MimeType = mimeType // override mime type
-		}
-		if err := tx.Create(&dstObj).Error; err != nil {
-			return fmt.Errorf("failed to create copy of object: %w", err)
-		}
-
-		if err := s.createUserMetadata(tx, dstObj.ID, metadata); err != nil {
-			return fmt.Errorf("failed to create object metadata: %w", err)
-		}
-
-		om = newObjectMetadata(
-			dstObj.ObjectID,
-			dstObj.Etag,
-			dstObj.MimeType,
-			dstObj.Health,
-			dstObj.CreatedAt,
-			dstObj.Size,
-		)
-		return nil
+		om, err = tx.CopyObject(ctx, srcBucket, dstBucket, srcPath, dstPath, mimeType, metadata)
+		return err
 	})
 	return
 }
@@ -1910,19 +1838,6 @@ func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, 
 		entities = append(entities, metadata)
 	}
 	return tx.CreateInBatches(&entities, 1000).Error
-}
-
-func (s *SQLStore) updateUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
-	// delete all existing metadata
-	err := tx.
-		Where("db_object_id = ?", objID).
-		Delete(&dbObjectUserMetadata{}).
-		Error
-	if err != nil {
-		return err
-	}
-
-	return s.createUserMetadata(tx, objID, metadata)
 }
 
 func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {

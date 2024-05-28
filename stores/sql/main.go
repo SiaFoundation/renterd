@@ -103,6 +103,108 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	return contracts, nil
 }
 
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+	// stmt to fetch bucket id
+	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to prepare statement to fetch bucket id: %w", err)
+	}
+	defer bucketIDStmt.Close()
+
+	// fetch source bucket
+	var srcBID int64
+	err = bucketIDStmt.QueryRow(ctx, srcBucket).Scan(&srcBID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectMetadata{}, fmt.Errorf("%w: source bucket", api.ErrBucketNotFound)
+	} else if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch src bucket id: %w", err)
+	}
+
+	// fetch src object id
+	var srcObjID int64
+	err = tx.QueryRow(ctx, "SELECT id FROM objects WHERE db_bucket_id = ? AND object_id = ?", srcBID, srcKey).
+		Scan(&srcObjID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectMetadata{}, api.ErrObjectNotFound
+	} else if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch object id: %w", err)
+	}
+
+	// helper to fetch metadata
+	fetchMetadata := func(objID int64) (om api.ObjectMetadata, err error) {
+		err = tx.QueryRow(ctx, "SELECT etag, health, created_at, object_id, size, mime_type FROM objects WHERE id = ?", objID).
+			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Name, &om.Size, &om.MimeType)
+		if err != nil {
+			return api.ObjectMetadata{}, fmt.Errorf("failed to fetch new object: %w", err)
+		}
+		return om, nil
+	}
+
+	if srcBucket == dstBucket && srcKey == dstKey {
+		// No copying is happening. We just update the metadata on the src
+		// object.
+		if _, err := tx.Exec(ctx, "UPDATE objects SET mime_type = ? WHERE id = ?", mimeType, srcObjID); err != nil {
+			return api.ObjectMetadata{}, fmt.Errorf("failed to update mime type: %w", err)
+		} else if err := UpdateMetadata(ctx, tx, srcObjID, metadata); err != nil {
+			return api.ObjectMetadata{}, fmt.Errorf("failed to update metadata: %w", err)
+		}
+		return fetchMetadata(srcObjID)
+	}
+
+	// fetch destination bucket
+	var dstBID int64
+	err = bucketIDStmt.QueryRow(ctx, dstBucket).Scan(&dstBID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectMetadata{}, fmt.Errorf("%w: destination bucket", api.ErrBucketNotFound)
+	} else if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch dest bucket id: %w", err)
+	}
+
+	// copy object
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
+						SELECT ?, ?, db_directory_id, ?, `+"`key`"+`, size, ?, etag
+						FROM objects
+						WHERE id = ?`, time.Now(), dstKey, dstBID, mimeType, srcObjID)
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to insert object: %w", err)
+	}
+	dstObjID, err := res.LastInsertId()
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch object id: %w", err)
+	}
+
+	// copy slices
+	_, err = tx.Exec(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_slab_id, offset, length)
+				SELECT ?, ?, object_index, db_slab_id, offset, length
+				FROM slices
+				WHERE db_object_id = ?`, time.Now(), dstObjID, srcObjID)
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to copy slices: %w", err)
+	}
+
+	// create metadata
+	if err := InsertMetadata(ctx, tx, dstObjID, metadata); err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to insert metadata: %w", err)
+	}
+
+	// fetch copied object
+	return fetchMetadata(dstObjID)
+}
+
+func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+	if err := DeleteMetadata(ctx, tx, objID); err != nil {
+		return err
+	} else if err := InsertMetadata(ctx, tx, objID, md); err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
+	_, err := tx.Exec(ctx, "DELETE FROM object_user_metadata WHERE db_object_id = ?", objID)
+	return err
+}
+
 func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
 	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
 	if err != nil {
