@@ -2743,8 +2743,8 @@ func TestPartialSlab(t *testing.T) {
 						Key:       object.GenerateEncryptionKey(),
 						MinShards: 1,
 						Shards: []object.Sector{
-							newTestShard(hk1, fcid1, types.Hash256{1}),
-							newTestShard(hk2, fcid2, types.Hash256{2}),
+							newTestShard(hk1, fcid1, frand.Entropy256()),
+							newTestShard(hk2, fcid2, frand.Entropy256()),
 						},
 					},
 					Offset: 0,
@@ -4137,7 +4137,7 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var dirID uint
+	var dirID int64
 	err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
 		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
@@ -4149,7 +4149,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create objects
 	obj1 := dbObject{
-		DBDirectoryID: dirID,
+		DBDirectoryID: uint(dirID),
 		ObjectID:      "1",
 		DBBucketID:    ss.DefaultBucketID(),
 		Health:        1,
@@ -4158,7 +4158,7 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj2 := dbObject{
-		DBDirectoryID: dirID,
+		DBDirectoryID: uint(dirID),
 		ObjectID:      "2",
 		DBBucketID:    ss.DefaultBucketID(),
 		Health:        1,
@@ -4232,7 +4232,7 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj3 := dbObject{
-		DBDirectoryID: dirID,
+		DBDirectoryID: uint(dirID),
 		ObjectID:      "3",
 		DBBucketID:    ss.DefaultBucketID(),
 		Health:        1,
@@ -4847,7 +4847,7 @@ func TestDirectories(t *testing.T) {
 	}
 
 	for _, o := range objects {
-		var dirID uint
+		var dirID int64
 		err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
 			dirID, err = tx.MakeDirsForPath(context.Background(), o)

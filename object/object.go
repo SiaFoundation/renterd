@@ -128,16 +128,17 @@ func NewObject(ec EncryptionKey) Object {
 	}
 }
 
-func (o Object) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
+func (o Object) Contracts() []types.FileContractID {
+	var usedContracts []types.FileContractID
+	added := make(map[types.FileContractID]struct{})
 	for _, s := range o.Slabs {
-		contracts := ContractsFromShards(s.Shards)
-		for h, fcids := range contracts {
-			for fcid := range fcids {
-				if _, exists := usedContracts[h]; !exists {
-					usedContracts[h] = fcids
-				} else {
-					usedContracts[h][fcid] = struct{}{}
+		for _, shard := range s.Shards {
+			for _, fcids := range shard.Contracts {
+				for _, fcid := range fcids {
+					if _, exists := added[fcid]; !exists {
+						added[fcid] = struct{}{}
+						usedContracts = append(usedContracts, fcid)
+					}
 				}
 			}
 		}

@@ -6,8 +6,10 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.sia.tech/renterd/internal/sql"
+	"go.uber.org/zap"
 )
 
 var deadlockMsgs = []string{
@@ -39,6 +41,17 @@ func applyMigration(ctx context.Context, db *sql.DB, fn func(tx sql.Tx) (bool, e
 		}
 		return nil
 	})
+}
+
+func closeDB(db *sql.DB, log *zap.SugaredLogger) error {
+	// NOTE: as recommended by https://www.sqlite.org/lang_analyze.html
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	_, err := db.Exec(ctx, "PRAGMA analysis_limit=400; PRAGMA optimize;")
+	if err != nil {
+		log.With(zap.Error(err)).Error("failed to optimize database before closing")
+	}
+	return db.Close()
 }
 
 func createMigrationTable(ctx context.Context, db *sql.DB) error {

@@ -17,12 +17,12 @@ type MetricsDatabase struct {
 }
 
 // NewMetricsDatabase creates a new MySQL backend.
-func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) *MetricsDatabase {
-	store := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
+func NewMetricsDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) (*MetricsDatabase, error) {
+	store, err := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
 	return &MetricsDatabase{
 		db:  store,
 		log: log,
-	}
+	}, err
 }
 
 func (b *MetricsDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx) (bool, error)) error {
