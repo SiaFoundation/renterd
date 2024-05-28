@@ -35,8 +35,8 @@ type (
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 
 		// CopyObject copies an object from one bucket and key to another. If
-		// src and dst are the same, only the metadata and mimeType are
-		// overwritten with the provided ones.
+		// source and destination are the same, only the metadata and mimeType
+		// are overwritten with the provided ones.
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
 
 		// CreateBucket creates a new bucket with the given name and policy. If
