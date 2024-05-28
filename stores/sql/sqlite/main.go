@@ -49,12 +49,12 @@ func (b *MainDatabase) Close() error {
 	return closeDB(b.db, b.log)
 }
 
-func (b *MainDatabase) DB() *sql.DB {
-	return b.db
-}
-
 func (b *MainDatabase) CreateMigrationTable(ctx context.Context) error {
 	return createMigrationTable(ctx, b.db)
+}
+
+func (b *MainDatabase) DB() *sql.DB {
+	return b.db
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
@@ -78,6 +78,26 @@ func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 
 func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
+}
+
+func (b *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
+	panic("implement me")
+}
+
+func (b *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	panic("implement me")
+}
+
+func (b *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
+	panic("implement me")
+}
+
+func (b *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
+	panic("implement me")
+}
+
+func (b *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	panic("implement me")
 }
 
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
