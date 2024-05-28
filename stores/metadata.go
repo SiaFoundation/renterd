@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -500,108 +499,38 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	return slice, nil
 }
 
-func (s *SQLStore) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
-	var b dbBucket
-	err := s.db.
-		WithContext(ctx).
-		Model(&dbBucket{}).
-		Where("name = ?", bucket).
-		Take(&b).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return api.Bucket{}, api.ErrBucketNotFound
-	} else if err != nil {
-		return api.Bucket{}, err
-	}
-	return api.Bucket{
-		CreatedAt: api.TimeRFC3339(b.CreatedAt.UTC()),
-		Name:      b.Name,
-		Policy:    b.Policy,
-	}, nil
+func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		b, err = tx.Bucket(ctx, bucket)
+		return
+	})
+	return
 }
 
 func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	// Create bucket.
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		res := tx.Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-			Create(&dbBucket{
-				Name:   bucket,
-				Policy: policy,
-			})
-		if res.Error != nil {
-			return res.Error
-		} else if res.RowsAffected == 0 {
-			return api.ErrBucketExists
-		}
-		return nil
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.CreateBucket(ctx, bucket, policy)
 	})
 }
 
 func (s *SQLStore) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	b, err := json.Marshal(policy)
-	if err != nil {
-		return err
-	}
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.
-			Model(&dbBucket{}).
-			Where("name", bucket).
-			Updates(map[string]interface{}{
-				"policy": string(b),
-			},
-			).
-			Error
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateBucketPolicy(ctx, bucket, policy)
 	})
 }
 
 func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
-	// Delete bucket.
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		var b dbBucket
-		if err := tx.Take(&b, "name = ?", bucket).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrBucketNotFound
-		} else if err != nil {
-			return err
-		}
-		var count int64
-		if err := tx.Model(&dbObject{}).Where("db_bucket_id = ?", b.ID).
-			Limit(1).
-			Count(&count).Error; err != nil {
-			return err
-		}
-		if count > 0 {
-			return api.ErrBucketNotEmpty
-		}
-		res := tx.Delete(&b)
-		if res.Error != nil {
-			return res.Error
-		}
-		return nil
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.DeleteBucket(ctx, bucket)
 	})
 }
 
-func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
-	var buckets []dbBucket
-	err := s.db.
-		WithContext(ctx).
-		Model(&dbBucket{}).
-		Find(&buckets).
-		Error
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]api.Bucket, len(buckets))
-	for i, b := range buckets {
-		resp[i] = api.Bucket{
-			CreatedAt: api.TimeRFC3339(b.CreatedAt.UTC()),
-			Name:      b.Name,
-			Policy:    b.Policy,
-		}
-	}
-	return resp, nil
+func (s *SQLStore) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		buckets, err = tx.ListBuckets(ctx)
+		return
+	})
+	return
 }
 
 // ObjectsStats returns some info related to the objects stored in the store. To

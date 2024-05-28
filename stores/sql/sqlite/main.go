@@ -4,6 +4,7 @@ import (
 	"context"
 	dsql "database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -80,28 +81,33 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
-func (b *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
-	panic("implement me")
-}
-
-func (b *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	panic("implement me")
-}
-
-func (b *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
-	panic("implement me")
-}
-
-func (b *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
-	panic("implement me")
-}
-
-func (b *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	panic("implement me")
+func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
+	return ssql.Bucket(ctx, tx, bucket)
 }
 
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return ssql.Contracts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
+	policy, err := json.Marshal(bp)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(ctx, "INSERT INTO buckets (created_at, name, policy) VALUES (?, ?, ?) ON CONFLICT(name) DO NOTHING",
+		time.Now(), bucket, policy)
+	if err != nil {
+		return fmt.Errorf("failed to create bucket: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return api.ErrBucketExists
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
+	return ssql.DeleteBucket(ctx, tx, bucket)
 }
 
 func (tx *MainDatabaseTx) DeleteObject(ctx context.Context, bucket string, key string) (bool, error) {
@@ -304,6 +310,10 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	return nil
 }
 
+func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
+	return ssql.ListBuckets(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
@@ -463,6 +473,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	return ssql.UpdateBucketPolicy(ctx, tx, bucket, policy)
 }
 
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
