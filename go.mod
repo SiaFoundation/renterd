@@ -5,7 +5,7 @@ go 1.21.7
 toolchain go1.21.8
 
 require (
-	github.com/gabriel-vasile/mimetype v1.4.3
+	github.com/gabriel-vasile/mimetype v1.4.4
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
