@@ -16,7 +16,7 @@ import (
 )
 
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
-	return scanBucket(tx.QueryRow(ctx, "SELECT name, policy FROM buckets WHERE name = ?", bucket))
+	return scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
@@ -179,7 +179,7 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 }
 
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
-	rows, err := tx.Query(ctx, "SELECT created_at, name, policy FROM buckets")
+	rows, err := tx.Query(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch buckets: %w", err)
 	}
