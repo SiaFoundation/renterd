@@ -27,7 +27,7 @@ type (
 
 	MainMigrator interface {
 		Migrator
-		MakeDirsForPath(ctx context.Context, tx Tx, path string) (uint, error)
+		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
 	}
 )
 

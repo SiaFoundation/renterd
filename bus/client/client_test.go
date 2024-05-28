@@ -78,6 +78,9 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
+		DatabaseLog: config.DatabaseLog{
+			SlowThreshold: 100 * time.Millisecond,
+		},
 		Miner:               node.NewMiner(client),
 		SlabPruningInterval: time.Minute,
 		Logger:              zap.NewNop(),

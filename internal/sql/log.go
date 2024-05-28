@@ -109,10 +109,10 @@ func (lt *loggedTxn) Exec(ctx context.Context, query string, args ...any) (sql.R
 func (lt *loggedTxn) Prepare(ctx context.Context, query string) (*loggedStmt, error) {
 	start := time.Now()
 	stmt, err := lt.Tx.PrepareContext(ctx, query)
-	if dur := time.Since(start); dur > lt.longQueryDuration {
-		lt.log.Warn("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	} else if err != nil {
+	if err != nil {
 		return nil, err
+	} else if dur := time.Since(start); dur > lt.longQueryDuration {
+		lt.log.Warn("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
 	return &loggedStmt{
 		Stmt:              stmt,
