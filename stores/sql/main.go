@@ -103,6 +103,21 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	return contracts, nil
 }
 
+func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
+	}
+	defer insertMetadataStmt.Close()
+
+	for k, v := range md {
+		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
+			return fmt.Errorf("failed to insert object metadata: %w", err)
+		}
+	}
+	return nil
+}
+
 func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 	var id int64
 	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE name = ?", bucket).Scan(&id)
