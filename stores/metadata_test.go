@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
+	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
@@ -3797,7 +3798,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err := ss.UpdateSlab(context.Background(), object.Slab{
 		Key:    slab.Key,
 		Shards: shards[:len(shards)-1],
-	}, testContractSet); !errors.Is(err, errInvalidNumberOfShards) {
+	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
 		t.Fatal(err)
 	}
 
@@ -3811,7 +3812,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		Key:    slab.Key,
 		Shards: reversedShards,
 	}
-	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, errShardRootChanged) {
+	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
 		t.Fatal(err)
 	}
 }
