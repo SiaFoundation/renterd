@@ -304,29 +304,24 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
-	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = id")
+	// Create root dir.
+	dirID := int64(sql.DirectoriesRootID)
+	if _, err := tx.Exec(ctx, "INSERT IGNORE INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL)", dirID); err != nil {
+		return 0, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	path = strings.TrimSuffix(path, "/")
+	if path == "/" {
+		return dirID, nil
+	}
+
+	// Create remaining directories.
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer insertDirStmt.Close()
 
-	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ?")
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer queryDirStmt.Close()
-
-	// Create root dir.
-	dirID := int64(sql.DirectoriesRootID)
-	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON DUPLICATE KEY UPDATE id = id", dirID); err != nil {
-		return 0, fmt.Errorf("failed to create root directory: %w", err)
-	}
-
-	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
 	for i := 0; i < utf8.RuneCountInString(path); i++ {
 		if path[i] != '/' {
 			continue
@@ -335,16 +330,11 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 		if dir == "/" {
 			continue
 		}
-		if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
+		if res, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		}
-		var childID int64
-		if err := queryDirStmt.QueryRow(ctx, dir).Scan(&childID); err != nil {
+		} else if dirID, err = res.LastInsertId(); err != nil {
 			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if childID == 0 {
-			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
 		}
-		dirID = childID
 	}
 	return dirID, nil
 }
@@ -589,8 +579,8 @@ func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSec
 	}
 
 	// insert contract <-> sector links
-	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON DUPLICATE KEY UPDATE db_sector_id = db_sector_id`)
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT IGNORE INTO contract_sectors (db_sector_id, db_contract_id)
+											VALUES (?, ?)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
 	}
