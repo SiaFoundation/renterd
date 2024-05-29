@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -337,6 +338,87 @@ func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 		buckets = append(buckets, bucket)
 	}
 	return buckets, nil
+}
+
+type multipartUpload struct {
+	ID       int64
+	Key      string
+	Bucket   string
+	BucketID int64
+	EC       []byte
+	MimeType string
+}
+
+type multipartUploadPart struct {
+	ID         int64
+	PartNumber int64
+	Etag       string
+	Size       int64
+}
+
+func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, parts []api.MultipartCompletedPart) (multipartUpload, []multipartUploadPart, int64, string, error) {
+	// fetch upload
+	var mpu multipartUpload
+	err := tx.QueryRow(ctx, "SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id").
+		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
+	if err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch upload: %w", err)
+	} else if mpu.Key != key {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("object id mismatch: %v != %v: %w", mpu.Key, key, api.ErrObjectNotFound)
+	} else if mpu.Bucket != bucket {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("bucket name mismatch: %v != %v: %w", mpu.Bucket, bucket, api.ErrBucketNotFound)
+	}
+
+	// find relevant parts
+	rows, err := tx.Query(ctx, "SELECT id, part_number, etag, size FROM multipart_parts WHERE db_multipart_upload_id = ? ORDER BY part_number ASC", mpu.ID)
+	if err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch parts: %w", err)
+	}
+	defer rows.Close()
+
+	var storedParts []multipartUploadPart
+	for rows.Next() {
+		var p multipartUploadPart
+		if err := rows.Scan(&p.ID, &p.PartNumber, &p.Etag, &p.Size); err != nil {
+			return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to scan part: %w", err)
+		}
+		storedParts = append(storedParts, p)
+	}
+
+	var neededParts []multipartUploadPart
+	var size int64
+	h := types.NewHasher()
+	j := 0
+	for _, part := range storedParts {
+		for {
+			if j >= len(storedParts) {
+				// ran out of parts in the database
+				return multipartUpload{}, nil, 0, "", api.ErrPartNotFound
+			} else if storedParts[j].PartNumber > part.PartNumber {
+				// missing part
+				return multipartUpload{}, nil, 0, "", api.ErrPartNotFound
+			} else if storedParts[j].PartNumber == part.PartNumber && storedParts[j].Etag == strings.Trim(part.Etag, "\"") {
+				// found a match
+				neededParts = append(neededParts, storedParts[j])
+				size += storedParts[j].Size
+				j++
+
+				// update hasher
+				if _, err = h.E.Write([]byte(part.Etag)); err != nil {
+					return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to hash etag: %w", err)
+				}
+				break
+			} else {
+				// try next
+				j++
+			}
+		}
+	}
+
+	// compute ETag.
+	sum := h.Sum()
+	eTag := hex.EncodeToString(sum[:])
+	return mpu, neededParts, size, eTag, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {

@@ -86,80 +86,10 @@ func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket
 }
 
 func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error) {
-	// fetch upload
-	var mpu struct {
-		ID       int64
-		Key      string
-		Bucket   string
-		BucketID int64
-		EC       []byte
-		MimeType string
-	}
-	err := tx.QueryRow(ctx, "SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id").
-		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
+	mpu, neededParts, size, eTag, err := ssql.MultipartUploadForCompletion(ctx, tx, bucket, key, uploadID, parts)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch upload: %w", err)
-	} else if mpu.Key != key {
-		return "", fmt.Errorf("object id mismatch: %v != %v: %w", mpu.Key, key, api.ErrObjectNotFound)
-	} else if mpu.Bucket != bucket {
-		return "", fmt.Errorf("bucket name mismatch: %v != %v: %w", mpu.Bucket, bucket, api.ErrBucketNotFound)
+		return "", fmt.Errorf("failed to fetch multipart upload: %w", err)
 	}
-
-	// find relevant parts
-	type part struct {
-		ID         int64
-		PartNumber int64
-		Etag       string
-		Size       int64
-	}
-	rows, err := tx.Query(ctx, "SELECT id, part_number, etag, size FROM multipart_parts WHERE db_multipart_upload_id = ? ORDER BY part_number ASC", mpu.ID)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch parts: %w", err)
-	}
-	defer rows.Close()
-
-	var storedParts []part
-	for rows.Next() {
-		var p part
-		if err := rows.Scan(&p.ID, &p.PartNumber, &p.Etag, &p.Size); err != nil {
-			return "", fmt.Errorf("failed to scan part: %w", err)
-		}
-		storedParts = append(storedParts, p)
-	}
-
-	var neededParts []part
-	var size int64
-	h := types.NewHasher()
-	j := 0
-	for _, part := range storedParts {
-		for {
-			if j >= len(storedParts) {
-				// ran out of parts in the database
-				return "", api.ErrPartNotFound
-			} else if storedParts[j].PartNumber > part.PartNumber {
-				// missing part
-				return "", api.ErrPartNotFound
-			} else if storedParts[j].PartNumber == part.PartNumber && storedParts[j].Etag == strings.Trim(part.Etag, "\"") {
-				// found a match
-				neededParts = append(neededParts, storedParts[j])
-				size += storedParts[j].Size
-				j++
-
-				// update hasher
-				if _, err = h.E.Write([]byte(part.Etag)); err != nil {
-					return "", fmt.Errorf("failed to hash etag: %w", err)
-				}
-				break
-			} else {
-				// try next
-				j++
-			}
-		}
-	}
-
-	// compute ETag.
-	sum := h.Sum()
-	eTag := hex.EncodeToString(sum[:])
 
 	// create the directory.
 	dirID, err := tx.MakeDirsForPath(ctx, key)
