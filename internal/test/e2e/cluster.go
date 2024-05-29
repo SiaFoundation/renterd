@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -332,12 +333,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bStopFn)
 
 	// Create worker.
-	w, s3Handler, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
+	w, s3Handler, webhooks, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, workerAddr, logger)
 	tt.OK(err)
 
-	workerAuth := jape.BasicAuth(workerPassword)
+	// workerAuth := jape.BasicAuth(workerPassword)
 	workerServer := http.Server{
-		Handler: workerAuth(w),
+		Handler: workerAuth(workerPassword, false)(w),
 	}
 
 	var workerShutdownFns []func(context.Context) error
@@ -440,6 +441,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
 	}))
 
+	// Register the worker webhooks
+	for _, webhook := range webhooks {
+		if err := busClient.RegisterWebhook(ctx, webhook); err != nil {
+			tt.Fatalf("failed to register webhook, err: %v", err)
+		}
+	}
+
 	// Fund the bus.
 	if funding {
 		cluster.MineBlocks(latestHardforkHeight)
@@ -479,6 +487,20 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	return cluster
+}
+
+func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
+				h.ServeHTTP(w, req)
+			} else if req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/events") {
+				h.ServeHTTP(w, req)
+			} else {
+				jape.BasicAuth(password)(h).ServeHTTP(w, req)
+			}
+		})
+	}
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.

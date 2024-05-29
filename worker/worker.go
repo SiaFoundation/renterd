@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/events"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -79,6 +80,7 @@ type (
 		HostStore
 		ObjectStore
 		SettingStore
+		WebhookStore
 
 		Syncer
 		Wallet
@@ -155,6 +157,10 @@ type (
 		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
 
+	WebhookStore interface {
+		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
+	}
+
 	ConsensusState interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
@@ -208,7 +214,7 @@ type worker struct {
 	uploadManager   *uploadManager
 
 	accounts        *accounts
-	cache           *memoryCache
+	cache           *cache
 	priceTables     *priceTables
 	transportPoolV3 *transportPoolV3
 
@@ -1224,6 +1230,25 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
+func (w *worker) eventsHandler(jc jape.Context) {
+	var webhook webhooks.Event
+	if jc.Decode(&webhook) != nil {
+		return
+	} else if webhook.Event == webhooks.WebhookEventPing {
+		jc.ResponseWriter.WriteHeader(http.StatusOK)
+		return
+	}
+
+	err := w.cache.handleEventWebhook(webhook.Event, webhook.Payload)
+	if errors.Is(err, errUnhandledEvent) {
+		jc.ResponseWriter.WriteHeader(http.StatusAccepted)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+}
+
 func (w *worker) memoryGET(jc jape.Context) {
 	jc.Encode(api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
@@ -1255,44 +1280,44 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, workerAddr string, l *zap.Logger) (*worker, []webhooks.Webhook, error) {
 	if contractLockingDuration == 0 {
-		return nil, errors.New("contract lock duration must be positive")
+		return nil, nil, errors.New("contract lock duration must be positive")
 	}
 	if busFlushInterval == 0 {
-		return nil, errors.New("bus flush interval must be positive")
+		return nil, nil, errors.New("bus flush interval must be positive")
 	}
 	if downloadOverdriveTimeout == 0 {
-		return nil, errors.New("download overdrive timeout must be positive")
+		return nil, nil, errors.New("download overdrive timeout must be positive")
 	}
 	if uploadOverdriveTimeout == 0 {
-		return nil, errors.New("upload overdrive timeout must be positive")
+		return nil, nil, errors.New("upload overdrive timeout must be positive")
 	}
 	if downloadMaxMemory == 0 {
-		return nil, errors.New("downloadMaxMemory cannot be 0")
+		return nil, nil, errors.New("downloadMaxMemory cannot be 0")
 	}
 	if uploadMaxMemory == 0 {
-		return nil, errors.New("uploadMaxMemory cannot be 0")
+		return nil, nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
 	l = l.Named("worker").Named(id)
-	ctx, cancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		id:                      id,
-		cache:                   newMemoryCache(),
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]struct{}),
-		shutdownCtx:             ctx,
-		shutdownCtxCancel:       cancel,
+		shutdownCtx:             shutdownCtx,
+		shutdownCtxCancel:       shutdownCancel,
 	}
 
 	w.initAccounts(b)
+	w.initCache()
 	w.initPriceTables()
 	w.initTransportPool()
 
@@ -1300,7 +1325,11 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
 
 	w.initContractSpendingRecorder(busFlushInterval)
-	return w, nil
+	return w, []webhooks.Webhook{
+		events.NewEventWebhook(fmt.Sprintf("%s/%s", workerAddr, "events"), events.WebhookEventSettingUpdate),
+		events.NewEventWebhook(fmt.Sprintf("%s/%s", workerAddr, "events"), events.WebhookEventContractSetUpdate),
+		events.NewEventWebhook(fmt.Sprintf("%s/%s", workerAddr, "events"), events.WebhookEventConsensusUpdate),
+	}, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
@@ -1308,6 +1337,8 @@ func (w *worker) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
+
+		"POST   /events": w.eventsHandler,
 
 		"GET /memory": w.memoryGET,
 
@@ -1556,23 +1587,15 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	opts.Range.Length = hor.Range.Length
 
 	// fetch gouging params
-	gp, found := w.cache.Get(cacheKeyGougingParams)
-	if !found {
-		gp, err = w.bus.GougingParams(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
-		}
-		w.cache.Set(cacheKeyGougingParams, gp)
+	gp, err := w.cache.GougingParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
 	}
 
 	// fetch all contracts
-	contracts, found := w.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		contracts, err = w.bus.Contracts(ctx, api.ContractsOpts{})
-		if err != nil {
-			return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
-		}
-		w.cache.Set(cacheKeyDownloadContracts, contracts)
+	contracts, err := w.cache.DownloadContracts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
 
 	// prepare the content
@@ -1584,14 +1607,14 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	} else {
 		// otherwise return a pipe reader
 		downloadFn := func(wr io.Writer, offset, length int64) error {
-			ctx = WithGougingChecker(ctx, w.bus, gp.(api.GougingParams))
-			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts.([]api.ContractMetadata))
+			ctx = WithGougingChecker(ctx, w.bus, gp)
+			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts)
 			if err != nil {
 				w.logger.Error(err)
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts.([]api.ContractMetadata))), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}

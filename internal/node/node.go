@@ -220,18 +220,18 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, workerAddr string, l *zap.Logger) (http.Handler, http.Handler, []webhooks.Webhook, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, l)
+	w, webhooks, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, workerAddr, l)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	s3Handler, err := s3.New(b, w, l.Named("s3").Sugar(), s3Opts)
 	if err != nil {
 		err = errors.Join(err, w.Shutdown(context.Background()))
-		return nil, nil, nil, fmt.Errorf("failed to create s3 handler: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to create s3 handler: %w", err)
 	}
-	return w.Handler(), s3Handler, w.Shutdown, nil
+	return w.Handler(), s3Handler, webhooks, w.Shutdown, nil
 }
 
 func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {

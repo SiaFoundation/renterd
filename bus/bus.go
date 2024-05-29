@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/events"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -228,6 +229,7 @@ type bus struct {
 
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
+	events   *events.BroadCaster
 	hooks    *webhooks.Manager
 	logger   *zap.SugaredLogger
 }
@@ -944,7 +946,19 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive))
+	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			for fcid, reason := range toArchive {
+				b.events.BroadcastEvent(ctx, events.EventContractArchived{
+					ContractID: fcid,
+					Reason:     reason,
+					Timestamp:  time.Now().UTC(),
+				})
+			}
+		}()
+	}
 }
 
 func (b *bus) contractsSetsHandlerGET(jc jape.Context) {
@@ -958,8 +972,26 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
-	} else if jc.Decode(&contractIds) == nil {
-		jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds))
+		return
+	} else if jc.Decode(&contractIds) != nil {
+		return
+	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
+		return
+	} else {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			if contracts, err := b.ms.Contracts(ctx, api.ContractsOpts{ContractSet: set}); err != nil {
+				b.logger.Errorf("failed to broadcast contract set update: %v", err)
+			} else {
+				b.events.BroadcastEvent(ctx, events.EventContractSetUpdate{
+					Name:      set,
+					Contracts: contracts,
+					Timestamp: time.Now().UTC(),
+				})
+			}
+		}()
 	}
 }
 
@@ -1639,7 +1671,13 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
+	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
+		b.events.BroadcastEvent(context.Background(), events.EventSettingUpdate{
+			Key:       key,
+			Update:    value,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
@@ -1648,7 +1686,13 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
-	jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key))
+
+	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
+		b.events.BroadcastEvent(context.Background(), events.EventSettingUpdate{
+			Key:       key,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -2342,11 +2386,26 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
+func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
+	// NOTE: the consensus set blocks until all subscribers are notified of the
+	// change, since we have fetch that new state from the chain manager we have
+	// to do it in a goroutine because otherwise we would deadlock
+	go func() {
+		if err := b.events.BroadcastEvent(context.Background(), events.EventConsensusUpdate{
+			ConsensusState: b.consensusState(),
+			TransactionFee: b.tp.RecommendedFee(),
+		}); err != nil {
+			b.logger.Errorf("failed to broadcast consensus update event: %v", err)
+		}
+	}()
+}
+
 // New returns a new Bus.
 func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
+		events:           events.NewBroadcaster(hm),
 		hooks:            hm,
 		s:                s,
 		cm:               cm,
@@ -2445,6 +2504,10 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	// accounts are saved on shutdown
 	if err := eas.SetUncleanShutdown(ctx); err != nil {
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
+	}
+
+	if err := cm.Subscribe(b, modules.ConsensusChangeRecent, nil); err != nil {
+		return nil, fmt.Errorf("failed to subscribe to consensus changes: %w", err)
 	}
 	return b, nil
 }

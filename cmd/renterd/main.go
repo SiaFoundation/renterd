@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -518,22 +519,24 @@ func main() {
 	var s3Srv *http.Server
 	var s3Listener net.Listener
 	var workers []autopilot.Worker
+	var workerWebhooks []webhooks.Webhook
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, s3Handler, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
+			workerAddr := cfg.HTTP.Address + "/api/worker"
+			w, s3Handler, webhooks, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, seed, logger)
+			}, bc, seed, workerAddr, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
+			workerWebhooks = webhooks
 			shutdownFns = append(shutdownFns, shutdownFn{
 				name: "Worker",
 				fn:   fn,
 			})
 
 			mux.Sub["/api/worker"] = utils.TreeMux{Handler: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
-			workerAddr := cfg.HTTP.Address + "/api/worker"
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
@@ -610,6 +613,13 @@ func main() {
 		// update settings
 		if err := bc.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
 			logger.Fatal("failed to update S3 authentication settings: " + err.Error())
+		}
+	}
+
+	// Register the webhooks with the bus
+	for _, wh := range workerWebhooks {
+		if err := bc.RegisterWebhook(context.Background(), wh); err != nil {
+			logger.Fatal("failed to register worker webhook: " + err.Error())
 		}
 	}
 
@@ -749,6 +759,8 @@ func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handle
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
+				h.ServeHTTP(w, req)
+			} else if req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/events") {
 				h.ServeHTTP(w, req)
 			} else {
 				jape.BasicAuth(password)(h).ServeHTTP(w, req)

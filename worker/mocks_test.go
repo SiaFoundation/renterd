@@ -85,6 +85,7 @@ type busMock struct {
 	*syncerMock
 	*walletMock
 	*webhookBroadcasterMock
+	*webhookStoreMock
 }
 
 func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *busMock {
@@ -686,5 +687,13 @@ var _ webhooks.Broadcaster = (*webhookBroadcasterMock)(nil)
 type webhookBroadcasterMock struct{}
 
 func (*webhookBroadcasterMock) BroadcastAction(context.Context, webhooks.Event) error {
+	return nil
+}
+
+var _ WebhookStore = (*webhookStoreMock)(nil)
+
+type webhookStoreMock struct{}
+
+func (*webhookStoreMock) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
 	return nil
 }
