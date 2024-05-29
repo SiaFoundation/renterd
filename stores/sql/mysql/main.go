@@ -236,22 +236,9 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	if err != nil {
 		return fmt.Errorf("failed to marshal object key: %w", err)
 	}
-	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		time.Now(),
-		key,
-		dirID,
-		bucketID,
-		ssql.SecretKey(objKey),
-		o.TotalSize(),
-		mimeType,
-		eTag)
+	objID, err := ssql.InsertObject(ctx, tx, key, dirID, bucketID, o.TotalSize(), objKey, mimeType, eTag)
 	if err != nil {
 		return fmt.Errorf("failed to insert object: %w", err)
-	}
-	objID, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to fetch object id: %w", err)
 	}
 
 	// if object has no slices there is nothing to do
