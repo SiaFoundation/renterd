@@ -80,6 +80,10 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
+func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
+	return ssql.Contracts(ctx, tx, opts)
+}
+
 func (tx *MainDatabaseTx) DeleteObject(ctx context.Context, bucket string, key string) (bool, error) {
 	resp, err := tx.Exec(ctx, "DELETE FROM objects WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", key, bucket)
 	if err != nil {
@@ -441,68 +445,9 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
-func (tx *MainDatabaseTx) fetchUsedContracts(ctx context.Context, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
-	if len(fcids) == 0 {
-		return make(map[types.FileContractID]ssql.UsedContract), nil
-	}
-
-	// flatten map to get all used contract ids
-	usedFCIDs := make([]ssql.FileContractID, 0, len(fcids))
-	for _, fcid := range fcids {
-		usedFCIDs = append(usedFCIDs, ssql.FileContractID(fcid))
-	}
-
-	placeholders := make([]string, len(usedFCIDs))
-	for i := range usedFCIDs {
-		placeholders[i] = "?"
-	}
-	placeholdersStr := strings.Join(placeholders, ", ")
-
-	args := make([]interface{}, len(usedFCIDs)*2)
-	for i := range args {
-		args[i] = usedFCIDs[i%len(usedFCIDs)]
-	}
-
-	// fetch all contracts, take into account renewals
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, fcid, renewed_from
-				   FROM contracts
-				   WHERE contracts.fcid IN (%s) OR renewed_from IN (%s)
-				   `, placeholdersStr, placeholdersStr), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-	defer rows.Close()
-
-	var contracts []ssql.UsedContract
-	for rows.Next() {
-		var c ssql.UsedContract
-		if err := rows.Scan(&c.ID, &c.FCID, &c.RenewedFrom); err != nil {
-			return nil, fmt.Errorf("failed to scan used contract: %w", err)
-		}
-		contracts = append(contracts, c)
-	}
-
-	fcidMap := make(map[types.FileContractID]struct{}, len(fcids))
-	for _, fcid := range fcids {
-		fcidMap[fcid] = struct{}{}
-	}
-
-	// build map of used contracts
-	usedContracts := make(map[types.FileContractID]ssql.UsedContract, len(contracts))
-	for _, c := range contracts {
-		if _, used := fcidMap[types.FileContractID(c.FCID)]; used {
-			usedContracts[types.FileContractID(c.FCID)] = c
-		}
-		if _, used := fcidMap[types.FileContractID(c.RenewedFrom)]; used {
-			usedContracts[types.FileContractID(c.RenewedFrom)] = c
-		}
-	}
-	return usedContracts, nil
-}
-
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
-	usedContracts, err := tx.fetchUsedContracts(ctx, fcids)
+	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
 	if err != nil {
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
 	}

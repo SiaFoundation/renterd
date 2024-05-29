@@ -746,83 +746,12 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 }
 
 func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	db := s.db.WithContext(ctx)
-
-	// helper to check whether a contract set exists
-	hasContractSet := func() error {
-		if opts.ContractSet == "" {
-			return nil
-		}
-		err := db.Where("name", opts.ContractSet).Take(&dbContractSet{}).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrContractSetNotFound
-		}
-		return err
-	}
-
-	// fetch all contracts, their hosts and the contract set name
-	var rows []struct {
-		Contract dbContract `gorm:"embedded"`
-		Host     dbHost     `gorm:"embedded"`
-		Name     string
-	}
-	tx := db
-	if opts.ContractSet == "" {
-		// no filter, use all contracts
-		tx = tx.Table("contracts")
-	} else {
-		// filter contracts by contract set first
-		tx = tx.Table("(?) contracts", db.Model(&dbContract{}).
-			Select("contracts.*").
-			Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
-			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", opts.ContractSet))
-	}
-	err := tx.
-		Select("contracts.*, h.*, cs.name as Name").
-		Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
-		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Order("contracts.id ASC").
-		Scan(&rows).
-		Error
-	if err != nil {
-		return nil, err
-	} else if len(rows) == 0 {
-		return nil, hasContractSet()
-	}
-
-	// merge 'Host', 'Name' and 'Contract' into dbContracts
-	var dbContracts []dbContract
-	for i := range rows {
-		dbContract := rows[i].Contract
-		dbContract.Host = rows[i].Host
-		if rows[i].Name != "" {
-			dbContract.ContractSets = append(dbContract.ContractSets, dbContractSet{Name: rows[i].Name})
-		}
-		dbContracts = append(dbContracts, dbContract)
-	}
-
-	// merge contract sets
 	var contracts []api.ContractMetadata
-	current, dbContracts := dbContracts[0], dbContracts[1:]
-	for {
-		if len(dbContracts) == 0 {
-			contracts = append(contracts, current.convert())
-			break
-		} else if current.ID != dbContracts[0].ID {
-			contracts = append(contracts, current.convert())
-		} else if len(dbContracts[0].ContractSets) > 0 {
-			current.ContractSets = append(current.ContractSets, dbContracts[0].ContractSets...)
-		}
-		current, dbContracts = dbContracts[0], dbContracts[1:]
-	}
-
-	// if no contracts are left, check if the set existed in the first place
-	if len(contracts) == 0 {
-		return nil, hasContractSet()
-	}
-	return contracts, nil
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		contracts, err = tx.Contracts(ctx, opts)
+		return err
+	})
+	return contracts, err
 }
 
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.

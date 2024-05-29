@@ -26,6 +26,10 @@ type (
 	}
 
 	DatabaseTx interface {
+		// Contracts returns contract metadata for all active contracts. The
+		// opts argument can be used to filter the result.
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+
 		// DeleteObject deletes an object from the database and returns true if
 		// the requested object was actually deleted.
 		DeleteObject(ctx context.Context, bucket, key string) (bool, error)
