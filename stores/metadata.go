@@ -2599,13 +2599,11 @@ func (s *SQLStore) pruneSlabsLoop() {
 		pruneSuccess := true
 		for {
 			var deleted int64
-			ctx, cancel := context.WithTimeout(s.shutdownCtx, 10*time.Second+sumDurations(s.retryTransactionIntervals))
-			err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
+			err := s.bMain.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
 				var err error
-				deleted, err = dt.PruneSlabs(ctx, slabPruningBatchSize)
+				deleted, err = dt.PruneSlabs(s.shutdownCtx, slabPruningBatchSize)
 				return err
 			})
-			cancel()
 			if err != nil {
 				s.logger.Errorw("slab pruning failed", zap.Error(err))
 				s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
@@ -2629,11 +2627,9 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		// prune dirs
-		ctx, cancel := context.WithTimeout(s.shutdownCtx, 10*time.Second+sumDurations(s.retryTransactionIntervals))
-		err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
-			return dt.PruneEmptydirs(ctx)
+		err := s.bMain.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
+			return dt.PruneEmptydirs(s.shutdownCtx)
 		})
-		cancel()
 		if err != nil {
 			s.logger.Errorw("dir pruning failed", zap.Error(err))
 			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
