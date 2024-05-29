@@ -191,6 +191,23 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec []byte, mimeType, eTag string) (int64, error) {
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, key, size, mime_type, etag)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		time.Now(),
+		key,
+		dirID,
+		bucketID,
+		SecretKey(ec),
+		size,
+		mimeType,
+		eTag)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
 	if err := DeleteMetadata(ctx, tx, objID); err != nil {
 		return err
@@ -206,6 +223,9 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 }
 
 func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+	if len(md) == 0 {
+		return nil
+	}
 	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)

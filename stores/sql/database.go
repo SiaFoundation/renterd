@@ -34,6 +34,12 @@ type (
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 
+		// CompleteMultipartUpload completes a multipart upload by combining the
+		// provided parts into an object in bucket 'bucket' with key 'key'. The
+		// parts need to be provided in ascending partNumber order without
+		// duplicates but can contain gaps.
+		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
+
 		// CopyObject copies an object from one bucket and key to another. If
 		// source and destination are the same, only the metadata and mimeType
 		// are overwritten with the provided ones.
