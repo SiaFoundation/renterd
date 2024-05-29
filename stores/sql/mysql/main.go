@@ -107,14 +107,14 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	// update slices
 	updateSlicesStmt, err := tx.Prepare(ctx, `
 			UPDATE slices s
-			SET s.db_object_id = ?,
-			s.db_multipart_part_id = NULL,
-			s.object_index = s.object_index + ?
 			INNER JOIN multipart_parts mpp ON s.db_multipart_part_id = mpp.id
+			SET s.db_object_id = ?,
+				s.db_multipart_part_id = NULL,
+				s.object_index = s.object_index + ?
 			WHERE mpp.id = ?
 	`)
 	if err != nil {
-		return "", fmt.Errorf("failed to prepare statement: %w", err)
+		return "", fmt.Errorf("failed to prepare statement to update slices: %w", err)
 	}
 	defer updateSlicesStmt.Close()
 
@@ -394,7 +394,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	// Create remaining directories.
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
 	}
 	defer insertDirStmt.Close()
 
