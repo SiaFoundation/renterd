@@ -28,24 +28,28 @@ type chainManager struct {
 	tp      bus.TransactionPool
 	network *consensus.Network
 
-	close  chan struct{}
-	mu     sync.Mutex
-	tip    consensus.State
-	synced bool
+	close         chan struct{}
+	mu            sync.Mutex
+	lastBlockTime time.Time
+	tip           consensus.State
+	synced        bool
 }
 
 // ProcessConsensusChange implements the modules.ConsensusSetSubscriber interface.
 func (m *chainManager) ProcessConsensusChange(cc modules.ConsensusChange) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	b := cc.AppliedBlocks[len(cc.AppliedBlocks)-1]
 	m.tip = consensus.State{
 		Network: m.network,
 		Index: types.ChainIndex{
-			ID:     types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID()),
+			ID:     types.BlockID(b.ID()),
 			Height: uint64(cc.BlockHeight),
 		},
 	}
-	m.synced = synced(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].Timestamp)
+	m.synced = synced(b.Timestamp)
+	m.lastBlockTime = time.Unix(int64(b.Timestamp), 0)
 }
 
 // Network returns the network name.
@@ -87,7 +91,9 @@ func (m *chainManager) BlockAtHeight(height uint64) (types.Block, bool) {
 }
 
 func (m *chainManager) LastBlockTime() time.Time {
-	return time.Unix(int64(m.cs.CurrentBlock().Timestamp), 0)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastBlockTime
 }
 
 // IndexAtHeight return the chain index at the given height.
@@ -155,8 +161,9 @@ func NewChainManager(cs modules.ConsensusSet, tp bus.TransactionPool, network *c
 				Height: uint64(height),
 			},
 		},
-		synced: synced(block.Timestamp),
-		close:  make(chan struct{}),
+		synced:        synced(block.Timestamp),
+		lastBlockTime: time.Unix(int64(block.Timestamp), 0),
+		close:         make(chan struct{}),
 	}
 
 	if err := cs.ConsensusSetSubscribe(m, modules.ConsensusChangeRecent, m.close); err != nil {
