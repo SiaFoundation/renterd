@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/events"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -1231,16 +1230,16 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 }
 
 func (w *worker) eventsHandler(jc jape.Context) {
-	var webhook webhooks.Event
-	if jc.Decode(&webhook) != nil {
+	var event webhooks.Event
+	if jc.Decode(&event) != nil {
 		return
-	} else if webhook.Event == webhooks.WebhookEventPing {
+	} else if event.Event == webhooks.WebhookEventPing {
 		jc.ResponseWriter.WriteHeader(http.StatusOK)
 		return
 	}
 
-	err := w.cache.handleEventWebhook(webhook.Event, webhook.Payload)
-	if errors.Is(err, errUnhandledEvent) {
+	err := w.cache.handleEvent(event)
+	if errors.Is(err, api.ErrUnknownEvent) {
 		jc.ResponseWriter.WriteHeader(http.StatusAccepted)
 		return
 	} else if err != nil {
@@ -1326,11 +1325,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 
 	w.initContractSpendingRecorder(busFlushInterval)
 	workerEventsURL := fmt.Sprintf("%s/%s", workerAddr, "events")
+
 	return w, []webhooks.Webhook{
-		events.NewEventWebhook(workerEventsURL, events.WebhookEventSettingUpdate),
-		events.NewEventWebhook(workerEventsURL, events.WebhookEventContractArchived),
-		events.NewEventWebhook(workerEventsURL, events.WebhookEventContractRenewal),
-		events.NewEventWebhook(workerEventsURL, events.WebhookEventConsensusUpdate),
+		api.NewEventWebhook(workerEventsURL, api.EventConsensusUpdate{}),
+		api.NewEventWebhook(workerEventsURL, api.EventContractArchive{}),
+		api.NewEventWebhook(workerEventsURL, api.EventContractRenew{}),
+		api.NewEventWebhook(workerEventsURL, api.EventSettingUpdate{}),
 	}, nil
 }
 

@@ -23,7 +23,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	"go.sia.tech/renterd/events"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -229,7 +229,7 @@ type bus struct {
 
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
-	events   *events.BroadCaster
+	events   ibus.EventBroadcaster
 	hooks    *webhooks.Manager
 	logger   *zap.SugaredLogger
 }
@@ -947,15 +947,13 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	}
 
 	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
-		go func() {
-			for fcid, reason := range toArchive {
-				b.events.BroadcastEvent(events.EventContractArchived{
-					ContractID: fcid,
-					Reason:     reason,
-					Timestamp:  time.Now().UTC(),
-				})
-			}
-		}()
+		for fcid, reason := range toArchive {
+			b.events.BroadcastEvent(api.EventContractArchive{
+				ContractID: fcid,
+				Reason:     reason,
+				Timestamp:  time.Now().UTC(),
+			})
+		}
 	}
 }
 
@@ -976,7 +974,7 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
 		return
 	} else {
-		go b.events.BroadcastEvent(events.EventContractSetUpdate{
+		b.events.BroadcastEvent(api.EventContractSetUpdate{
 			Name:        set,
 			ContractIDs: contractIds,
 			Timestamp:   time.Now().UTC(),
@@ -1166,7 +1164,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	}
 
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	go b.events.BroadcastEvent(events.EventContractRenewal{
+	b.events.BroadcastEvent(api.EventContractRenew{
 		Renewal:   r,
 		Timestamp: time.Now().UTC(),
 	})
@@ -1668,7 +1666,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
-		go b.events.BroadcastEvent(events.EventSettingUpdate{
+		b.events.BroadcastEvent(api.EventSettingUpdate{
 			Key:       key,
 			Update:    value,
 			Timestamp: time.Now().UTC(),
@@ -1684,7 +1682,7 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	}
 
 	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
-		go b.events.BroadcastEvent(events.EventSettingUpdate{
+		b.events.BroadcastEvent(api.EventSettingDelete{
 			Key:       key,
 			Timestamp: time.Now().UTC(),
 		})
@@ -2383,7 +2381,7 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	go b.events.BroadcastEvent(events.EventConsensusUpdate{
+	b.events.BroadcastEvent(api.EventConsensusUpdate{
 		ConsensusState: b.consensusState(),
 		TransactionFee: b.tp.RecommendedFee(),
 		Timestamp:      time.Now().UTC(),
@@ -2395,7 +2393,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
-		events:           events.NewBroadcaster(hm, l.Named("events").Sugar()),
+		events:           ibus.NewEventBroadcaster(hm, l.Named("events").Sugar()),
 		hooks:            hm,
 		s:                s,
 		cm:               cm,

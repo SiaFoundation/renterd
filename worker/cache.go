@@ -3,13 +3,12 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/events"
+	"go.sia.tech/renterd/webhooks"
 )
 
 const (
@@ -17,10 +16,6 @@ const (
 	cacheKeyGougingParams     = "gougingparams"
 
 	cacheEntryExpiry = 5 * time.Minute
-)
-
-var (
-	errUnhandledEvent = errors.New("unhandled event")
 )
 
 type memoryCache struct {
@@ -109,63 +104,95 @@ func (c *cache) GougingParams(ctx context.Context) (api.GougingParams, error) {
 	return gp, nil
 }
 
-func (c *cache) handleEventWebhook(event string, payload interface{}) error {
-	b, err := json.Marshal(payload)
+func (c *cache) handleEvent(event webhooks.Event) error {
+	parsed, err := api.ParseEvent(event)
 	if err != nil {
 		return err
 	}
 
-	switch event {
-	case events.WebhookEventSettingUpdate:
-		var update events.EventSettingUpdate
-		if err := json.Unmarshal(b, &update); err != nil {
-			return err
-		}
-		return c.handleSettingUpdate(update)
-	case events.WebhookEventConsensusUpdate:
-		var update events.EventConsensusUpdate
-		if err := json.Unmarshal(b, &update); err != nil {
-			return err
-		}
-		return c.handleConsensusUpdate(update)
-	case events.WebhookEventContractArchived:
-		var event events.EventContractArchived
-		if err := json.Unmarshal(b, &event); err != nil {
-			return err
-		}
-		return c.handleContractArchived(event)
-	case events.WebhookEventContractRenewal:
-		var event events.EventContractRenewal
-		if err := json.Unmarshal(b, &event); err != nil {
-			return err
-		}
-		return c.handleContractRenewal(event)
+	switch e := parsed.(type) {
+	case api.EventConsensusUpdate:
+		return c.handleConsensusUpdate(e)
+	case api.EventContractArchive:
+		return c.handleContractArchive(e)
+	case api.EventContractRenew:
+		return c.handleContractRenew(e)
+	case api.EventSettingUpdate:
+		return c.handleSettingUpdate(e)
+	case api.EventSettingDelete:
+		return c.handleSettingDelete(e)
 	default:
 	}
-
-	return errUnhandledEvent
+	return nil
 }
 
-func (c *cache) handleSettingUpdate(e events.EventSettingUpdate) (err error) {
+func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) error {
+	// return early if the doesn't have gouging params to update
+	value, found := c.cache.Get(cacheKeyGougingParams)
+	if !found {
+		return nil
+	}
+
+	// update gouging params
+	gp := value.(api.GougingParams)
+	gp.ConsensusState = event.ConsensusState
+	gp.TransactionFee = event.TransactionFee
+	c.cache.Set(cacheKeyGougingParams, gp)
+	return nil
+}
+
+func (c *cache) handleContractArchive(event api.EventContractArchive) error {
+	// return early if the cache doesn't have contracts
+	value, found := c.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		return nil
+	}
+	contracts := value.([]api.ContractMetadata)
+
+	// remove the contract from the cache
+	for i, contract := range contracts {
+		if contract.ID == event.ContractID {
+			contracts = append(contracts[:i], contracts[i+1:]...)
+			break
+		}
+	}
+	c.cache.Set(cacheKeyDownloadContracts, contracts)
+	return nil
+}
+
+func (c *cache) handleContractRenew(event api.EventContractRenew) error {
+	// return early if the cache doesn't have contracts
+	value, found := c.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		return nil
+	}
+	contracts := value.([]api.ContractMetadata)
+
+	// update the renewed contract in the cache
+	for i, contract := range contracts {
+		if contract.ID == event.Renewal.RenewedFrom {
+			contracts[i] = event.Renewal
+			break
+		}
+	}
+	c.cache.Set(cacheKeyDownloadContracts, contracts)
+	return nil
+}
+
+func (c *cache) handleSettingDelete(e api.EventSettingDelete) (err error) {
+	if e.Key == api.SettingGouging || e.Key == api.SettingRedundancy {
+		c.cache.Invalidate(cacheKeyGougingParams)
+	}
+	return nil
+}
+
+func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {
 	// return early if the cache doesn't have gouging params to update
 	value, found := c.cache.Get(cacheKeyGougingParams)
 	if !found {
 		return nil
 	}
 	gp := value.(api.GougingParams)
-
-	// invalidate the cache on error to be safe
-	defer func() {
-		if err != nil {
-			c.cache.Invalidate(cacheKeyGougingParams)
-		}
-	}()
-
-	// no updated setting, simply invalidate
-	if e.Update == nil {
-		c.cache.Invalidate(cacheKeyGougingParams)
-		return nil
-	}
 
 	// marshal the updated value
 	data, err := json.Marshal(e.Update)
@@ -197,58 +224,6 @@ func (c *cache) handleSettingUpdate(e events.EventSettingUpdate) (err error) {
 		c.cache.Set(cacheKeyGougingParams, gp)
 	default:
 	}
-	return nil
-}
 
-func (c *cache) handleContractArchived(event events.EventContractArchived) error {
-	// return early if the cache doesn't have contracts
-	value, found := c.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		return nil
-	}
-	contracts := value.([]api.ContractMetadata)
-
-	// remove the contract from the cache
-	for i, contract := range contracts {
-		if contract.ID == event.ContractID {
-			contracts = append(contracts[:i], contracts[i+1:]...)
-			break
-		}
-	}
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-	return nil
-}
-
-func (c *cache) handleContractRenewal(event events.EventContractRenewal) error {
-	// return early if the cache doesn't have contracts
-	value, found := c.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		return nil
-	}
-	contracts := value.([]api.ContractMetadata)
-
-	// update the renewed contract in the cache
-	for i, contract := range contracts {
-		if contract.ID == event.Renewal.RenewedFrom {
-			contracts[i] = event.Renewal
-			break
-		}
-	}
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-	return nil
-}
-
-func (c *cache) handleConsensusUpdate(event events.EventConsensusUpdate) error {
-	// return early if the doesn't have gouging params to update
-	value, found := c.cache.Get(cacheKeyGougingParams)
-	if !found {
-		return nil
-	}
-
-	// update gouging params
-	gp := value.(api.GougingParams)
-	gp.ConsensusState = event.ConsensusState
-	gp.TransactionFee = event.TransactionFee
-	c.cache.Set(cacheKeyGougingParams, gp)
 	return nil
 }
