@@ -271,7 +271,7 @@ func InsertMetadata(ctx context.Context, tx sql.Tx, objID, muID *int64, md api.O
 	} else if (objID == nil) == (muID == nil) {
 		return errors.New("either objID or muID must be set")
 	}
-	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, db_multipart_upload_id, `key`, value) VALUES (?, ?, ?, ?)")
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, db_multipart_upload_id, `key`, value) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
 	}
