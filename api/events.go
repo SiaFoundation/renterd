@@ -27,10 +27,6 @@ var (
 )
 
 type (
-	Event interface {
-		Event() webhooks.Event
-	}
-
 	EventConsensusUpdate struct {
 		ConsensusState
 		TransactionFee types.Currency `json:"transactionFee"`
@@ -111,14 +107,6 @@ func (e EventSettingDelete) Event() webhooks.Event {
 		Module:  ModuleSetting,
 		Event:   EventDelete,
 		Payload: e,
-	}
-}
-
-func NewEventWebhook(url string, e Event) webhooks.Webhook {
-	return webhooks.Webhook{
-		Module: e.Event().Module,
-		Event:  e.Event().Event,
-		URL:    url,
 	}
 }
 

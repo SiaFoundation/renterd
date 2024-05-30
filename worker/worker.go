@@ -1324,14 +1324,16 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
 
 	w.initContractSpendingRecorder(busFlushInterval)
-	workerEventsURL := fmt.Sprintf("%s/%s", workerAddr, "events")
 
-	return w, []webhooks.Webhook{
-		api.NewEventWebhook(workerEventsURL, api.EventConsensusUpdate{}),
-		api.NewEventWebhook(workerEventsURL, api.EventContractArchive{}),
-		api.NewEventWebhook(workerEventsURL, api.EventContractRenew{}),
-		api.NewEventWebhook(workerEventsURL, api.EventSettingUpdate{}),
-	}, nil
+	workerEventsURL := fmt.Sprintf("%s/%s", workerAddr, "events")
+	webhooks := []webhooks.Webhook{
+		webhooks.NewEventWebhook(workerEventsURL, api.EventConsensusUpdate{}),
+		webhooks.NewEventWebhook(workerEventsURL, api.EventContractArchive{}),
+		webhooks.NewEventWebhook(workerEventsURL, api.EventContractRenew{}),
+		webhooks.NewEventWebhook(workerEventsURL, api.EventSettingUpdate{}),
+	}
+
+	return w, webhooks, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
@@ -1598,6 +1600,10 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	contracts, err := w.cache.DownloadContracts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
+	}
+	fmt.Println("DEBUG PJ: downloading from contracts:")
+	for _, c := range contracts {
+		fmt.Println("DEBUG PJ: ", c.ID, c.RenewedFrom)
 	}
 
 	// prepare the content

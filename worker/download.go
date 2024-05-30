@@ -475,12 +475,14 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	want := make(map[types.PublicKey]api.ContractMetadata)
 	for _, c := range contracts {
 		want[c.HostKey] = c
+		fmt.Println("DEBUG PJ: refresh downloaders want", c.HostKey, c.ID)
 	}
 
 	// prune downloaders
 	for hk := range mgr.downloaders {
 		_, wanted := want[hk]
 		if !wanted {
+			fmt.Println("DEBUG PJ: downloader no longer wanted", mgr.downloaders[hk].host.PublicKey())
 			mgr.downloaders[hk].Stop()
 			delete(mgr.downloaders, hk)
 			continue
@@ -492,6 +494,7 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	// update downloaders
 	for _, c := range want {
 		// create a host
+		fmt.Println("DEBUG PJ: start downloader", c.ID, c.HostKey)
 		host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 		downloader := newDownloader(mgr.shutdownCtx, host)
 		mgr.downloaders[c.HostKey] = downloader
