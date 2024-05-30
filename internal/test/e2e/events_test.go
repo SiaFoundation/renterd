@@ -12,36 +12,54 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/events"
+	"go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/webhooks"
 )
 
-// TestEventWebhooks is a test that verifies the bus sends webhooks for certain
-// events, providing an event webhook was registered.
-func TestEventWebhooks(t *testing.T) {
-	// define all events
-	allEvents := map[string]struct{}{
-		events.WebhookEventConsensusUpdate:   {},
-		events.WebhookEventContractArchived:  {},
-		events.WebhookEventContractRenewal:   {},
-		events.WebhookEventContractSetUpdate: {},
-		events.WebhookEventSettingUpdate:     {},
+// TestEvents is a test that verifies the bus sends webhooks for certain events,
+// providing an event webhook was registered.
+func TestEvents(t *testing.T) {
+	// list all events
+	allEvents := []bus.Event{
+		api.EventConsensusUpdate{},
+		api.EventContractArchived{},
+		api.EventContractRenewed{},
+		api.EventContractSetUpdate{},
+		api.EventSettingUpdate{},
+	}
+
+	// define helper to check if the event is known
+	isKnownEvent := func(e webhooks.Event) bool {
+		for _, known := range allEvents {
+			module, event := known.Kind()
+			if module == e.Module && event == e.Event {
+				return true
+			}
+		}
+		return false
 	}
 
 	// define a small helper to keep track of received events
 	var mu sync.Mutex
 	received := make(map[string]webhooks.Event)
 	receiveEvent := func(event webhooks.Event) error {
-		_, ok := allEvents[event.Event]
-		if !ok && event.Event == webhooks.WebhookEventPing {
+		// ignore pings
+		if event.Event == webhooks.WebhookEventPing {
 			return nil
-		} else if !ok {
-			return fmt.Errorf("unexpected event %v", event.Event)
-		} else if _, ok := received[event.Event]; !ok {
-			mu.Lock()
-			received[event.Event] = event
-			mu.Unlock()
+		}
+
+		// check if the event is expected
+		if !isKnownEvent(event) {
+			return fmt.Errorf("unexpected event %+v", event)
+		}
+
+		// keep track of the event
+		mu.Lock()
+		defer mu.Unlock()
+		key := event.Module + "_" + event.Event
+		if _, ok := received[key]; !ok {
+			received[key] = event
 		}
 		return nil
 	}
@@ -64,11 +82,9 @@ func TestEventWebhooks(t *testing.T) {
 	b := cluster.Bus
 	tt := cluster.tt
 
-	// register webhooks for certain events
-	for we := range allEvents {
-		if err := b.RegisterWebhook(context.Background(), events.NewEventWebhook(server.URL, we)); err != nil {
-			t.Fatal(err)
-		}
+	// register webhooks
+	for _, e := range allEvents {
+		tt.OK(b.RegisterWebhook(context.Background(), bus.NewEventWebhook(server.URL, e)))
 	}
 
 	// fetch our contract
@@ -112,54 +128,85 @@ func TestEventWebhooks(t *testing.T) {
 		return nil
 	})
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	// assert contract renewal
-	var ecr events.EventContractRenewal
-	bytes, _ := json.Marshal(received[events.WebhookEventContractRenewal].Payload)
-	tt.OK(json.Unmarshal(bytes, &ecr))
-	if ecr.ContractID != renewed.ID || ecr.RenewedFromID != c.ID || ecr.Timestamp.IsZero() {
-		t.Fatalf("unexpected event %+v", ecr)
+	// assert the events we received contain the expected information
+	for _, r := range received {
+		event, err := parseEvent(r)
+		tt.OK(err)
+		switch e := event.(type) {
+		case api.EventContractRenewed:
+			if e.ContractID != renewed.ID || e.RenewedFromID != c.ID || e.Timestamp.IsZero() {
+				t.Fatalf("unexpected event %+v", e)
+			}
+		case api.EventContractArchived:
+			if e.ContractID != renewed.ID || e.Reason != t.Name() || e.Timestamp.IsZero() {
+				t.Fatalf("unexpected event %+v", e)
+			}
+		case api.EventContractSetUpdate:
+			if e.Name != test.ContractSet || len(e.ContractIDs) != 1 || e.ContractIDs[0] != c.ID || e.Timestamp.IsZero() {
+				t.Fatalf("unexpected event %+v", e)
+			}
+		case api.EventConsensusUpdate:
+			if e.TransactionFee.IsZero() || e.BlockHeight == 0 || e.Timestamp.IsZero() || !e.Synced {
+				t.Fatalf("unexpected event %+v", e)
+			}
+		case api.EventSettingUpdate:
+			if e.Key != api.SettingGouging || e.Timestamp.IsZero() {
+				t.Fatalf("unexpected event %+v", e)
+			}
+			var update api.GougingSettings
+			bytes, _ := json.Marshal(e.Update)
+			tt.OK(json.Unmarshal(bytes, &update))
+			if update.HostBlockHeightLeeway != 100 {
+				t.Fatalf("unexpected update %+v", update)
+			}
+		}
 	}
+}
 
-	// assert contract archived event
-	var eca events.EventContractArchived
-	bytes, _ = json.Marshal(received[events.WebhookEventContractArchived].Payload)
-	tt.OK(json.Unmarshal(bytes, &eca))
-	if eca.ContractID != renewed.ID || eca.Reason != t.Name() || eca.Timestamp.IsZero() {
-		t.Fatalf("unexpected event %+v", ecr)
+func parseEvent(event webhooks.Event) (interface{}, error) {
+	bytes, err := json.Marshal(event.Payload)
+	if err != nil {
+		return nil, err
 	}
-
-	// assert contract set update event
-	var ecsu events.EventContractSetUpdate
-	bytes, _ = json.Marshal(received[events.WebhookEventContractSetUpdate].Payload)
-	tt.OK(json.Unmarshal(bytes, &ecsu))
-	if ecsu.Name != test.ContractSet || len(ecsu.ContractIDs) != 1 || ecsu.ContractIDs[0] != c.ID || ecsu.Timestamp.IsZero() {
-		t.Fatalf("unexpected event %+v", ecsu)
+	switch event.Module {
+	case api.ModuleContracts:
+		if event.Event == api.EventArchived {
+			var e api.EventContractArchived
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		} else if event.Event == api.EventRenewed {
+			var e api.EventContractRenewed
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case api.ModuleContractSet:
+		if event.Event == api.EventUpdated {
+			var e api.EventContractSetUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case api.ModuleConsensus:
+		if event.Event == api.EventUpdated {
+			var e api.EventConsensusUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case api.ModuleSettings:
+		if event.Event == api.EventUpdated {
+			var e api.EventSettingUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
 	}
-
-	// assert consensus update
-	var ecu events.EventConsensusUpdate
-	bytes, _ = json.Marshal(received[events.WebhookEventConsensusUpdate].Payload)
-	tt.OK(json.Unmarshal(bytes, &ecu))
-	if ecu.TransactionFee.IsZero() || ecu.BlockHeight == 0 || ecu.Timestamp.IsZero() || !ecu.Synced {
-		t.Fatalf("unexpected event %+v", ecu)
-	}
-
-	// assert setting update
-	var esu events.EventSettingUpdate
-	bytes, _ = json.Marshal(received[events.WebhookEventSettingUpdate].Payload)
-	tt.OK(json.Unmarshal(bytes, &esu))
-	if esu.Key != api.SettingGouging || esu.Timestamp.IsZero() {
-		t.Fatalf("unexpected event %+v", esu)
-	}
-
-	// assert setting update payload
-	var update api.GougingSettings
-	bytes, _ = json.Marshal(esu.Update)
-	tt.OK(json.Unmarshal(bytes, &update))
-	if update.HostBlockHeightLeeway != 100 {
-		t.Fatalf("unexpected update %+v", update)
-	}
+	return nil, fmt.Errorf("unexpected event %+v", event)
 }
