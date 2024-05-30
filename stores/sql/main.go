@@ -385,7 +385,7 @@ func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 }
 
 func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.MultipartUpload, error) {
-	resp, err := scanMultipartUpload(tx.QueryRow(ctx, "SELECT b.name, mu.key, mu.object_id, upload_id, created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id WHERE mu.upload_id = ?", uploadID))
+	resp, err := scanMultipartUpload(tx.QueryRow(ctx, "SELECT b.name, mu.key, mu.object_id, mu.upload_id, mu.created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id WHERE mu.upload_id = ?", uploadID))
 	if err != nil {
 		return api.MultipartUpload{}, fmt.Errorf("failed to fetch multipart upload: %w", err)
 	}
@@ -423,11 +423,12 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 
 	// fetch multipart uploads
 	var uploads []api.MultipartUpload
-	rows, err := tx.Query(ctx, fmt.Sprintf("SELECT b.name, mu.key, mu.object_id, upload_id, created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id %s %s",
-		whereExpr, limitExpr), args)
+	rows, err := tx.Query(ctx, fmt.Sprintf("SELECT b.name, mu.key, mu.object_id, mu.upload_id, mu.created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id %s ORDER BY object_id ASC, upload_id ASC %s",
+		whereExpr, limitExpr), args...)
 	if err != nil {
 		return api.MultipartListUploadsResponse{}, fmt.Errorf("failed to fetch multipart uploads: %w", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		upload, err := scanMultipartUpload(rows)
 		if err != nil {
@@ -439,7 +440,7 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 	// check if there are more uploads beyond 'limit'.
 	var hasMore bool
 	var nextPathMarker, nextUploadIDMarker string
-	if limitUsed && len(uploads) == int(limit) {
+	if limitUsed && len(uploads) > int(limit) {
 		hasMore = true
 		uploads = uploads[:len(uploads)-1]
 		nextPathMarker = uploads[len(uploads)-1].Path
