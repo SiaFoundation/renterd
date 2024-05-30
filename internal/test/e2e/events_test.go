@@ -23,10 +23,11 @@ func TestEvents(t *testing.T) {
 	// list all events
 	allEvents := []bus.Event{
 		api.EventConsensusUpdate{},
-		api.EventContractArchived{},
-		api.EventContractRenewed{},
+		api.EventContractArchive{},
+		api.EventContractRenew{},
 		api.EventContractSetUpdate{},
 		api.EventSettingUpdate{},
+		api.EventSettingDelete{},
 	}
 
 	// define helper to check if the event is known
@@ -115,7 +116,10 @@ func TestEvents(t *testing.T) {
 	// update settings
 	gs := gp.GougingSettings
 	gs.HostBlockHeightLeeway = 100
-	b.UpdateSetting(context.Background(), api.SettingGouging, gs)
+	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, gs))
+
+	// delete setting
+	tt.OK(b.DeleteSetting(context.Background(), api.SettingRedundancy))
 
 	// wait until we received the events
 	tt.Retry(10, time.Second, func() error {
@@ -133,11 +137,11 @@ func TestEvents(t *testing.T) {
 		event, err := parseEvent(r)
 		tt.OK(err)
 		switch e := event.(type) {
-		case api.EventContractRenewed:
+		case api.EventContractRenew:
 			if e.ContractID != renewed.ID || e.RenewedFromID != c.ID || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
-		case api.EventContractArchived:
+		case api.EventContractArchive:
 			if e.ContractID != renewed.ID || e.Reason != t.Name() || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
@@ -159,6 +163,10 @@ func TestEvents(t *testing.T) {
 			if update.HostBlockHeightLeeway != 100 {
 				t.Fatalf("unexpected update %+v", update)
 			}
+		case api.EventSettingDelete:
+			if e.Key != api.SettingRedundancy || e.Timestamp.IsZero() {
+				t.Fatalf("unexpected event %+v", e)
+			}
 		}
 	}
 }
@@ -170,21 +178,21 @@ func parseEvent(event webhooks.Event) (interface{}, error) {
 	}
 	switch event.Module {
 	case api.ModuleContracts:
-		if event.Event == api.EventArchived {
-			var e api.EventContractArchived
+		if event.Event == api.EventArchive {
+			var e api.EventContractArchive
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}
 			return e, nil
-		} else if event.Event == api.EventRenewed {
-			var e api.EventContractRenewed
+		} else if event.Event == api.EventRenew {
+			var e api.EventContractRenew
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}
 			return e, nil
 		}
 	case api.ModuleContractSet:
-		if event.Event == api.EventUpdated {
+		if event.Event == api.EventUpdate {
 			var e api.EventContractSetUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
@@ -192,7 +200,7 @@ func parseEvent(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		}
 	case api.ModuleConsensus:
-		if event.Event == api.EventUpdated {
+		if event.Event == api.EventUpdate {
 			var e api.EventConsensusUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
@@ -200,8 +208,14 @@ func parseEvent(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		}
 	case api.ModuleSettings:
-		if event.Event == api.EventUpdated {
+		if event.Event == api.EventUpdate {
 			var e api.EventSettingUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		} else if event.Event == api.EventDelete {
+			var e api.EventSettingDelete
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}

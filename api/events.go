@@ -12,9 +12,10 @@ const (
 	ModuleContracts   = "contracts"
 	ModuleSettings    = "settings"
 
-	EventUpdated  = "updated"
-	EventArchived = "archived"
-	EventRenewed  = "renewed"
+	EventUpdate  = "update"
+	EventDelete  = "delete"
+	EventArchive = "archive"
+	EventRenew   = "renewed"
 )
 
 type (
@@ -24,13 +25,13 @@ type (
 		Timestamp      time.Time      `json:"timestamp"`
 	}
 
-	EventContractArchived struct {
+	EventContractArchive struct {
 		ContractID types.FileContractID `json:"contractID"`
 		Reason     string               `json:"reason"`
 		Timestamp  time.Time            `json:"timestamp"`
 	}
 
-	EventContractRenewed struct {
+	EventContractRenew struct {
 		ContractID    types.FileContractID `json:"contractID"`
 		RenewedFromID types.FileContractID `json:"renewedFromID"`
 		Timestamp     time.Time            `json:"timestamp"`
@@ -44,13 +45,19 @@ type (
 
 	EventSettingUpdate struct {
 		Key       string      `json:"key"`
-		Update    interface{} `json:"update,omitempty"`
+		Update    interface{} `json:"update"`
 		Timestamp time.Time   `json:"timestamp"`
+	}
+
+	EventSettingDelete struct {
+		Key       string    `json:"key"`
+		Timestamp time.Time `json:"timestamp"`
 	}
 )
 
-func (e EventConsensusUpdate) Kind() (string, string)   { return ModuleConsensus, EventUpdated }
-func (e EventContractArchived) Kind() (string, string)  { return ModuleContracts, EventArchived }
-func (e EventContractRenewed) Kind() (string, string)   { return ModuleContracts, EventRenewed }
-func (e EventContractSetUpdate) Kind() (string, string) { return ModuleContractSet, EventUpdated }
-func (e EventSettingUpdate) Kind() (string, string)     { return ModuleSettings, EventUpdated }
+func (e EventConsensusUpdate) Kind() (string, string)   { return ModuleConsensus, EventUpdate }
+func (e EventContractArchive) Kind() (string, string)   { return ModuleContracts, EventArchive }
+func (e EventContractRenew) Kind() (string, string)     { return ModuleContracts, EventRenew }
+func (e EventContractSetUpdate) Kind() (string, string) { return ModuleContractSet, EventUpdate }
+func (e EventSettingUpdate) Kind() (string, string)     { return ModuleSettings, EventUpdate }
+func (e EventSettingDelete) Kind() (string, string)     { return ModuleSettings, EventDelete }

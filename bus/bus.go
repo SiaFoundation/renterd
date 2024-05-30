@@ -947,15 +947,13 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	}
 
 	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
-		go func() {
-			for fcid, reason := range toArchive {
-				b.events.BroadcastEvent(api.EventContractArchived{
-					ContractID: fcid,
-					Reason:     reason,
-					Timestamp:  time.Now().UTC(),
-				})
-			}
-		}()
+		for fcid, reason := range toArchive {
+			b.events.BroadcastEvent(api.EventContractArchive{
+				ContractID: fcid,
+				Reason:     reason,
+				Timestamp:  time.Now().UTC(),
+			})
+		}
 	}
 }
 
@@ -976,7 +974,7 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
 		return
 	} else {
-		go b.events.BroadcastEvent(api.EventContractSetUpdate{
+		b.events.BroadcastEvent(api.EventContractSetUpdate{
 			Name:        set,
 			ContractIDs: contractIds,
 			Timestamp:   time.Now().UTC(),
@@ -1166,7 +1164,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	}
 
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	go b.events.BroadcastEvent(api.EventContractRenewed{
+	b.events.BroadcastEvent(api.EventContractRenew{
 		ContractID:    req.Contract.ID(),
 		RenewedFromID: req.RenewedFrom,
 		Timestamp:     time.Now().UTC(),
@@ -1669,7 +1667,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
-		go b.events.BroadcastEvent(api.EventSettingUpdate{
+		b.events.BroadcastEvent(api.EventSettingUpdate{
 			Key:       key,
 			Update:    value,
 			Timestamp: time.Now().UTC(),
@@ -1685,7 +1683,7 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	}
 
 	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
-		go b.events.BroadcastEvent(api.EventSettingUpdate{
+		b.events.BroadcastEvent(api.EventSettingDelete{
 			Key:       key,
 			Timestamp: time.Now().UTC(),
 		})
@@ -2384,7 +2382,7 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	go b.events.BroadcastEvent(api.EventConsensusUpdate{
+	b.events.BroadcastEvent(api.EventConsensusUpdate{
 		ConsensusState: b.consensusState(),
 		TransactionFee: b.tp.RecommendedFee(),
 		Timestamp:      time.Now().UTC(),
