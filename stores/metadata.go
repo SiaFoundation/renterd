@@ -863,6 +863,9 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 			return err
 		}
 
+		// Populate host.
+		newContract.Host = oldContract.Host
+
 		s.addKnownContract(c.ID())
 		renewed = newContract
 		return nil
