@@ -2616,3 +2616,92 @@ func TestHostScan(t *testing.T) {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
 }
+
+// TestRenewContractSameCollateral tests that renewing a contract with the same
+// settings multiple times without using it will not add to the host's outputs.
+// Especially the locked collateral.
+func TestRenewContractSameCollateral(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:  test.RedundancySettings.TotalShards,
+		logger: zap.NewNop(),
+	})
+	defer cluster.Shutdown()
+
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// upload some data
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(frand.Bytes(rhpv2.SectorSize)), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
+
+	// mine until contracts start to renew
+	cluster.MineToRenewWindow()
+
+	// wait for the contract to renew
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		resp, err := cluster.Worker.Contracts(context.Background(), time.Minute)
+		if err != nil {
+			return err
+		}
+		for _, contract := range resp.Contracts {
+			if contract.RenewedFrom == (types.FileContractID{}) {
+				return errors.New("contract not renewed")
+			}
+		}
+		return nil
+	})
+
+	// get contracts after first renewal
+	resp, err := cluster.Worker.Contracts(context.Background(), time.Minute)
+	tt.OK(err)
+
+	contractMap := make(map[types.FileContractID]api.Contract)
+	for _, contract := range resp.Contracts {
+		contractMap[contract.ID] = contract
+	}
+
+	// mine until contracts start to renew again
+	cluster.MineToRenewWindow()
+
+	// wait for contracts to renew
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		resp, err := cluster.Worker.Contracts(context.Background(), time.Minute)
+		if err != nil {
+			return err
+		}
+		for _, contract := range resp.Contracts {
+			if _, ok := contractMap[contract.ID]; ok {
+				return errors.New("contract not renewed")
+			}
+		}
+		return nil
+	})
+
+	// get contracts after second renewal
+	resp, err = cluster.Worker.Contracts(context.Background(), time.Minute)
+	tt.OK(err)
+
+	// the host should have the same valid and missed payouts
+	for _, newContract := range resp.Contracts {
+		newRevision := newContract.Revision
+		oldContract, ok := contractMap[newContract.RenewedFrom]
+		if !ok {
+			t.Fatalf("expected contract %v to be renewed", newContract.RenewedFrom)
+		}
+		oldRevision := oldContract.Revision
+
+		// valid and missed host payouts as well as missed void payouts should
+		// be the same since we didn't use the contract
+		if newRevision.ValidHostPayout() != oldRevision.ValidHostPayout() {
+			t.Fatalf("expected valid payout to be %v, got %v", oldRevision.ValidHostPayout(), newRevision.ValidHostPayout())
+		} else if newRevision.MissedHostPayout() != oldRevision.MissedHostPayout() {
+			t.Fatalf("expected missed payout to be %v, got %v", oldRevision.MissedHostPayout(), newRevision.MissedHostPayout())
+		} else if newRevision.MissedProofOutputs[2] != oldRevision.MissedProofOutputs[2] {
+			t.Fatalf("expected missed void payout to be %v, got %v", oldRevision.MissedProofOutputs[2], newRevision.MissedProofOutputs[2])
+		}
+	}
+}
