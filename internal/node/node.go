@@ -205,7 +205,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 
 	opts := []syncer.Option{
 		syncer.WithLogger(logger.Named("syncer")),
-		syncer.WithMaxSendBlocks(100),
+		syncer.WithSendBlocksTimeout(time.Minute),
 	}
 	if cfg.SyncerSyncInterval > 0 {
 		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))

@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"os"
-	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -122,30 +119,7 @@ func (s *Subscriber) Close() error {
 	return nil
 }
 
-func dumpMemProfile() {
-	// Generate a filename with a timestamp
-	filename := fmt.Sprintf("memprofile_%s.prof", time.Now().Format("20060102_150405"))
-	f, err := os.Create(filename)
-	if err != nil {
-		log.Println("Could not create memory profile: ", err)
-		return
-	}
-	defer f.Close()
-
-	// Write the memory profile to the file
-	if err := pprof.WriteHeapProfile(f); err != nil {
-		log.Println("Could not write memory profile: ", err)
-	}
-}
-
 func (s *Subscriber) Run() (func(), error) {
-	go func() {
-		for {
-			dumpMemProfile()
-			time.Sleep(5 * time.Minute)
-		}
-	}()
-
 	// start sync loop in separate goroutine
 	s.wg.Add(1)
 	go func() {
