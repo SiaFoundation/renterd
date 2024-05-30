@@ -42,11 +42,11 @@ func newMemoryCache() *memoryCache {
 func (c *memoryCache) Get(key string) (interface{}, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	value, ok := c.items[key]
-	if !ok || time.Now().After(value.expiry) {
+	entry, ok := c.items[key]
+	if !ok || time.Now().After(entry.expiry) {
 		return nil, false
 	}
-	return value, ok
+	return entry.value, ok
 }
 
 func (c *memoryCache) Set(key string, value interface{}) {

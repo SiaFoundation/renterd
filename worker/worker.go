@@ -1325,10 +1325,12 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
 
 	w.initContractSpendingRecorder(busFlushInterval)
+	workerEventsURL := fmt.Sprintf("%s/%s", workerAddr, "events")
 	return w, []webhooks.Webhook{
-		events.NewEventWebhook(fmt.Sprintf("%s/%s", workerAddr, "events"), events.WebhookEventSettingUpdate),
-		events.NewEventWebhook(fmt.Sprintf("%s/%s", workerAddr, "events"), events.WebhookEventContractSetUpdate),
-		events.NewEventWebhook(fmt.Sprintf("%s/%s", workerAddr, "events"), events.WebhookEventConsensusUpdate),
+		events.NewEventWebhook(workerEventsURL, events.WebhookEventSettingUpdate),
+		events.NewEventWebhook(workerEventsURL, events.WebhookEventContractArchived),
+		events.NewEventWebhook(workerEventsURL, events.WebhookEventContractRenewal),
+		events.NewEventWebhook(workerEventsURL, events.WebhookEventConsensusUpdate),
 	}, nil
 }
 
