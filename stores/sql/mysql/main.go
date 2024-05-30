@@ -176,7 +176,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create/update metadata
-	if err := ssql.InsertMetadata(ctx, tx, objID, opts.Metadata); err != nil {
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, opts.Metadata); err != nil {
 		return "", fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	_, err = tx.Exec(ctx, "UPDATE object_user_metadata SET db_multipart_upload_id = NULL, db_object_id = ? WHERE db_multipart_upload_id = ?",
@@ -216,6 +216,10 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 		return api.ErrBucketExists
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
@@ -291,7 +295,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert metadata
-	if err := ssql.InsertMetadata(ctx, tx, objID, md); err != nil {
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
 		return fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	return nil

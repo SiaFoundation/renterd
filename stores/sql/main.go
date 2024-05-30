@@ -15,6 +15,8 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/object"
+	"lukechampine.com/frand"
 )
 
 var ErrNegativeOffset = errors.New("offset can not be negative")
@@ -187,12 +189,50 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	}
 
 	// create metadata
-	if err := InsertMetadata(ctx, tx, dstObjID, metadata); err != nil {
+	if err := InsertMetadata(ctx, tx, &dstObjID, nil, metadata); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to insert metadata: %w", err)
 	}
 
 	// fetch copied object
 	return fetchMetadata(dstObjID)
+}
+
+func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	// fetch bucket id
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).
+		Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return "", fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return "", fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// marshal key
+	ecBytes, err := ec.MarshalBinary()
+	if err != nil {
+		return "", err
+	}
+
+	// insert multipart upload
+	uploadIDEntropy := frand.Entropy256()
+	uploadID := hex.EncodeToString(uploadIDEntropy[:])
+	var muID int64
+	res, err := tx.Exec(ctx, `
+		INSERT INTO multipart_uploads (created_at, key, upload_id, object_id, db_bucket_id, mime_type)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, time.Now(), ecBytes, uploadID, key, bucketID, mimeType)
+	if err != nil {
+		return "", fmt.Errorf("failed to create multipart upload: %w", err)
+	} else if muID, err = res.LastInsertId(); err != nil {
+		return "", fmt.Errorf("failed to fetch multipart upload id: %w", err)
+	}
+
+	// insert metadata
+	if err := InsertMetadata(ctx, tx, nil, &muID, metadata); err != nil {
+		return "", fmt.Errorf("failed to insert multipart metadata: %w", err)
+	}
+	return uploadID, nil
 }
 
 func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec []byte, mimeType, eTag string) (int64, error) {
@@ -215,7 +255,7 @@ func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, s
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
 	if err := DeleteMetadata(ctx, tx, objID); err != nil {
 		return err
-	} else if err := InsertMetadata(ctx, tx, objID, md); err != nil {
+	} else if err := InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
 		return err
 	}
 	return nil
@@ -226,18 +266,20 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 	return err
 }
 
-func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+func InsertMetadata(ctx context.Context, tx sql.Tx, objID, muID *int64, md api.ObjectUserMetadata) error {
 	if len(md) == 0 {
 		return nil
+	} else if (objID == nil) == (muID == nil) {
+		return errors.New("either objID or muID must be set")
 	}
-	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, db_multipart_upload_id, `key`, value) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
 	}
 	defer insertMetadataStmt.Close()
 
 	for k, v := range md {
-		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
+		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, muID, k, v); err != nil {
 			return fmt.Errorf("failed to insert object metadata: %w", err)
 		}
 	}

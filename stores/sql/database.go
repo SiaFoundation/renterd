@@ -52,6 +52,10 @@ type (
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
+		// InsertMultipartUpload creates a new multipart upload and returns a
+		// unique upload ID.
+		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+
 		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
 		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
 		// api.ErrBucketNotFound.

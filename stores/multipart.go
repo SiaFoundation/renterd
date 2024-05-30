@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -13,7 +12,6 @@ import (
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
-	"lukechampine.com/frand"
 )
 
 type (
@@ -49,44 +47,14 @@ func (dbMultipartPart) TableName() string {
 }
 
 func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error) {
-	// Marshal key
-	key, err := ec.MarshalBinary()
+	var uploadID string
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		uploadID, err = tx.InsertMultipartUpload(ctx, bucket, path, ec, mimeType, metadata)
+		return
+	})
 	if err != nil {
 		return api.MultipartCreateResponse{}, err
 	}
-	var uploadID string
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Get bucket id.
-		var bucketID uint
-		err := tx.Table("(SELECT id from buckets WHERE buckets.name = ?) bucket_id", bucket).
-			Take(&bucketID).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch bucket id: %w", err)
-		}
-
-		// Create multipart upload
-		uploadIDEntropy := frand.Entropy256()
-		uploadID = hex.EncodeToString(uploadIDEntropy[:])
-		multipartUpload := dbMultipartUpload{
-			DBBucketID: bucketID,
-			Key:        key,
-			UploadID:   uploadID,
-			ObjectID:   path,
-			MimeType:   mimeType,
-		}
-		if err := tx.Create(&multipartUpload).Error; err != nil {
-			return fmt.Errorf("failed to create multipart upload: %w", err)
-		}
-
-		// Create multipart metadata
-		if err := s.createMultipartMetadata(tx, multipartUpload.ID, metadata); err != nil {
-			return fmt.Errorf("failed to create multipart metadata: %w", err)
-		}
-
-		return nil
-	})
 	return api.MultipartCreateResponse{
 		UploadID: uploadID,
 	}, err
