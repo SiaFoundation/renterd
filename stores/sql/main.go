@@ -416,6 +416,10 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 		whereExprs = append(whereExprs, "SUBSTR(object_id, 1, ?) = ?")
 		args = append(args, utf8.RuneCountInString(prefix), prefix)
 	}
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		args = append(args, bucket)
+	}
 	whereExpr := ""
 	if len(whereExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
