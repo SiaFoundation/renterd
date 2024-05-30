@@ -24,6 +24,9 @@ const (
 )
 
 var (
+	ErrInvalidNumberOfShards = errors.New("slab has invalid number of shards")
+	ErrShardRootChanged      = errors.New("shard root changed")
+
 	ErrRunV072               = errors.New("can't upgrade to >=v1.0.0 from your current version - please upgrade to v0.7.2 first (https://github.com/SiaFoundation/renterd/releases/tag/v0.7.2)")
 	ErrMySQLNoSuperPrivilege = errors.New("You do not have the SUPER privilege and binary logging is enabled")
 )
@@ -60,14 +63,17 @@ type (
 	}
 )
 
-func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) *DB {
+func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) (*DB, error) {
+	if longQueryDuration == 0 || longTxDuration == 0 {
+		return nil, fmt.Errorf("longQueryDuration and longTxDuration must be non-zero: %d %d", longQueryDuration, longTxDuration)
+	}
 	return &DB{
 		dbLockedMsgs:      dbLockedMsgs,
 		db:                db,
 		log:               log,
 		longQueryDuration: longQueryDuration,
 		longTxDuration:    longTxDuration,
-	}
+	}, nil
 }
 
 // exec executes a query without returning any rows. The args are for
@@ -136,12 +142,14 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 	log := s.log.Named("transaction").With(zap.String("id", txnID))
 	start := time.Now()
 	attempt := 1
+LOOP:
 	for ; attempt < maxRetryAttempts; attempt++ {
 		attemptStart := time.Now()
 		log := log.With(zap.Int("attempt", attempt))
 		err = s.transaction(ctx, fn)
 		if errors.Is(err, context.Canceled) && context.Cause(ctx) != nil {
-			return context.Cause(ctx)
+			err = context.Cause(ctx)
+			break LOOP
 		} else if err == nil {
 			// no error, break out of the loop
 			return nil
@@ -156,18 +164,19 @@ func (s *DB) Transaction(ctx context.Context, fn func(Tx) error) error {
 			}
 		}
 		if !locked {
-			break
+			break LOOP
 		}
 		// exponential backoff
 		sleep := time.Duration(math.Pow(factor, float64(attempt))) * time.Millisecond
 		if sleep > maxBackoff {
 			sleep = maxBackoff
 		}
-		log.Debug("database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
+		log.Warn("database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
 
 		select {
 		case <-ctx.Done():
-			return context.Cause(ctx)
+			err = errors.Join(err, context.Cause(ctx))
+			break LOOP
 		case <-jitterAfter(sleep):
 		}
 	}

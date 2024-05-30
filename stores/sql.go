@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -199,13 +200,20 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	// Print DB version
 	var dbMain sql.Database
 	var bMetrics sql.MetricsDatabase
+	var mainErr, metricsErr error
 	if cfg.Conn.Name() == "sqlite" {
-		dbMain = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain, mainErr = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics, metricsErr = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
-		dbMain = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain, mainErr = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics, metricsErr = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
+	if mainErr != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create main database: %v", mainErr)
+	} else if metricsErr != nil {
+		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create metrics database: %v", metricsErr)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	dbName, dbVersion, err := dbMain.Version(ctx)
@@ -216,9 +224,9 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 
 	// Perform migrations.
 	if cfg.Migrate {
-		if err := dbMain.Migrate(ctx); err != nil {
+		if err := dbMain.Migrate(context.Background()); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
-		} else if err := bMetrics.Migrate(ctx); err != nil {
+		} else if err := bMetrics.Migrate(context.Background()); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
@@ -328,7 +336,10 @@ func (s *SQLStore) initSlabPruning() error {
 	}()
 
 	// prune once to guarantee consistency on startup
-	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
+	return s.bMain.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
+		return err
+	})
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
@@ -548,8 +559,6 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 			errors.Is(err, context.Canceled) ||
 			errors.Is(err, context.DeadlineExceeded) ||
 			errors.Is(err, gorm.ErrRecordNotFound) ||
-			errors.Is(err, errInvalidNumberOfShards) ||
-			errors.Is(err, errShardRootChanged) ||
 			errors.Is(err, api.ErrContractNotFound) ||
 			errors.Is(err, api.ErrObjectNotFound) ||
 			errors.Is(err, api.ErrObjectCorrupted) ||

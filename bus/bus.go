@@ -948,10 +948,8 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 
 	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
 			for fcid, reason := range toArchive {
-				b.events.BroadcastEvent(ctx, events.EventContractArchived{
+				b.events.BroadcastEvent(events.EventContractArchived{
 					ContractID: fcid,
 					Reason:     reason,
 					Timestamp:  time.Now().UTC(),
@@ -978,20 +976,11 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
 		return
 	} else {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			if contracts, err := b.ms.Contracts(ctx, api.ContractsOpts{ContractSet: set}); err != nil {
-				b.logger.Errorf("failed to broadcast contract set update: %v", err)
-			} else {
-				b.events.BroadcastEvent(ctx, events.EventContractSetUpdate{
-					Name:      set,
-					Contracts: contracts,
-					Timestamp: time.Now().UTC(),
-				})
-			}
-		}()
+		go b.events.BroadcastEvent(events.EventContractSetUpdate{
+			Name:        set,
+			ContractIDs: contractIds,
+			Timestamp:   time.Now().UTC(),
+		})
 	}
 }
 
@@ -1172,10 +1161,17 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		req.State = api.ContractStatePending
 	}
 	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
-	if jc.Check("couldn't store contract", err) == nil {
-		jc.Encode(r)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
 	}
+
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
+	go b.events.BroadcastEvent(events.EventContractRenewal{
+		Renewal:   r,
+		Timestamp: time.Now().UTC(),
+	})
+
+	jc.Encode(r)
 }
 
 func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1672,7 +1668,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
-		b.events.BroadcastEvent(context.Background(), events.EventSettingUpdate{
+		go b.events.BroadcastEvent(events.EventSettingUpdate{
 			Key:       key,
 			Update:    value,
 			Timestamp: time.Now().UTC(),
@@ -1688,7 +1684,7 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	}
 
 	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
-		b.events.BroadcastEvent(context.Background(), events.EventSettingUpdate{
+		go b.events.BroadcastEvent(events.EventSettingUpdate{
 			Key:       key,
 			Timestamp: time.Now().UTC(),
 		})
@@ -2387,17 +2383,11 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	// NOTE: the consensus set blocks until all subscribers are notified of the
-	// change, since we have fetch that new state from the chain manager we have
-	// to do it in a goroutine because otherwise we would deadlock
-	go func() {
-		if err := b.events.BroadcastEvent(context.Background(), events.EventConsensusUpdate{
-			ConsensusState: b.consensusState(),
-			TransactionFee: b.tp.RecommendedFee(),
-		}); err != nil {
-			b.logger.Errorf("failed to broadcast consensus update event: %v", err)
-		}
-	}()
+	go b.events.BroadcastEvent(events.EventConsensusUpdate{
+		ConsensusState: b.consensusState(),
+		TransactionFee: b.tp.RecommendedFee(),
+		Timestamp:      time.Now().UTC(),
+	})
 }
 
 // New returns a new Bus.
@@ -2405,7 +2395,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
-		events:           events.NewBroadcaster(hm),
+		events:           events.NewBroadcaster(hm, l.Named("events").Sugar()),
 		hooks:            hm,
 		s:                s,
 		cm:               cm,

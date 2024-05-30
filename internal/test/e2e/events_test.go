@@ -6,55 +6,91 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/events"
+	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/webhooks"
 )
 
 // TestEventWebhooks is a test that verifies the bus sends webhooks for certain
 // events, providing an event webhook was registered.
 func TestEventWebhooks(t *testing.T) {
+	// define all events
+	allEvents := map[string]struct{}{
+		events.WebhookEventConsensusUpdate:   {},
+		events.WebhookEventContractArchived:  {},
+		events.WebhookEventContractRenewal:   {},
+		events.WebhookEventContractSetUpdate: {},
+		events.WebhookEventSettingUpdate:     {},
+	}
+
+	// define a small helper to keep track of received events
+	var mu sync.Mutex
+	received := make(map[string]webhooks.Event)
+	receiveEvent := func(event webhooks.Event) error {
+		_, ok := allEvents[event.Event]
+		if !ok && event.Event == webhooks.WebhookEventPing {
+			return nil
+		} else if !ok {
+			return fmt.Errorf("unexpected event %v", event.Event)
+		} else if _, ok := received[event.Event]; !ok {
+			mu.Lock()
+			received[event.Event] = event
+			mu.Unlock()
+		}
+		return nil
+	}
+
+	// setup test server to receive webhooks
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var webhook webhooks.Event
+		if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
+			t.Fatal(err)
+		} else if err := receiveEvent(webhook); err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	// setup test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
 
-	// setup test server to receive webhooks
-	var mu sync.Mutex
-	var received []webhooks.Event
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var webhook webhooks.Event
-		if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
-			t.Fatal(err)
-		}
-
-		mu.Lock()
-		defer mu.Unlock()
-		received = append(received, webhook)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
 	// register webhooks for certain events
-	for _, wh := range []webhooks.Webhook{
-		events.NewEventWebhook(server.URL, events.WebhookEventSettingUpdate),
-		events.NewEventWebhook(server.URL, events.WebhookEventConsensusUpdate),
-		events.NewEventWebhook(server.URL, events.WebhookEventContractSetUpdate),
-	} {
-		if err := b.RegisterWebhook(context.Background(), wh); err != nil {
+	for we := range allEvents {
+		if err := b.RegisterWebhook(context.Background(), events.NewEventWebhook(server.URL, we)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// mine block to update consensus
-	cluster.MineBlocks(1)
+	// fetch our contract
+	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
+	tt.OK(err)
+	if len(contracts) != 1 {
+		tt.Fatalf("expected 1 contract, got %v", len(contracts))
+	}
+	c := contracts[0]
+
+	// mine blocks to update consensus & to renew
+	cluster.MineToRenewWindow()
+
+	// wait until our contract got renewed
+	var renewed api.ContractMetadata
+	tt.Retry(10, time.Second, func() (err error) {
+		renewed, err = b.RenewedContract(context.Background(), c.ID)
+		return err
+	})
+
+	// archive the renewal
+	tt.OK(b.ArchiveContracts(context.Background(), map[types.FileContractID]string{renewed.ID: t.Name()}))
 
 	// fetch current gouging params
 	gp, err := b.GougingParams(context.Background())
@@ -65,47 +101,65 @@ func TestEventWebhooks(t *testing.T) {
 	gs.HostBlockHeightLeeway = 100
 	b.UpdateSetting(context.Background(), api.SettingGouging, gs)
 
-	rs := gp.RedundancySettings
-	rs.MinShards = 1
-	rs.TotalShards = 1
-	b.UpdateSetting(context.Background(), api.SettingRedundancy, rs)
-
 	// wait until we received the events
-	var uniqueEvents []string
 	tt.Retry(10, time.Second, func() error {
 		mu.Lock()
 		defer mu.Unlock()
-
-		unique := make(map[string]struct{})
-		for _, wh := range received {
-			unique[wh.Event] = struct{}{}
+		if len(received) < len(allEvents) {
+			cluster.MineBlocks(1)
+			return fmt.Errorf("expected %d unique events, got %v", len(allEvents), len(received))
 		}
-		if len(unique) < 4 {
-			return fmt.Errorf("expected 4 unique events, got %v", len(unique))
-		}
-
-		for event := range unique {
-			uniqueEvents = append(uniqueEvents, event)
-		}
-		sort.Slice(uniqueEvents, func(i, j int) bool {
-			return uniqueEvents[i] < uniqueEvents[j]
-		})
 		return nil
 	})
 
-	// assert we received the events we expected
+	mu.Lock()
+	defer mu.Unlock()
 
-	if !reflect.DeepEqual(uniqueEvents, []string{
-		events.WebhookEventConsensusUpdate,
-		events.WebhookEventContractSetUpdate,
-		webhooks.WebhookEventPing,
-		events.WebhookEventSettingUpdate,
-	}) {
-		tt.Fatalf("expected events %v, got %v", []string{
-			events.WebhookEventConsensusUpdate,
-			events.WebhookEventContractSetUpdate,
-			webhooks.WebhookEventPing,
-			events.WebhookEventSettingUpdate,
-		}, uniqueEvents)
+	// assert contract renewal
+	var ecr events.EventContractRenewal
+	bytes, _ := json.Marshal(received[events.WebhookEventContractRenewal].Payload)
+	tt.OK(json.Unmarshal(bytes, &ecr))
+	if ecr.Renewal.ID != renewed.ID || ecr.Renewal.RenewedFrom != c.ID || ecr.Timestamp.IsZero() {
+		t.Fatalf("unexpected event %+v", ecr)
+	}
+
+	// assert contract archived event
+	var eca events.EventContractArchived
+	bytes, _ = json.Marshal(received[events.WebhookEventContractArchived].Payload)
+	tt.OK(json.Unmarshal(bytes, &eca))
+	if eca.ContractID != renewed.ID || eca.Reason != t.Name() || eca.Timestamp.IsZero() {
+		t.Fatalf("unexpected event %+v", ecr)
+	}
+
+	// assert contract set update event
+	var ecsu events.EventContractSetUpdate
+	bytes, _ = json.Marshal(received[events.WebhookEventContractSetUpdate].Payload)
+	tt.OK(json.Unmarshal(bytes, &ecsu))
+	if ecsu.Name != test.ContractSet || len(ecsu.ContractIDs) != 1 || ecsu.ContractIDs[0] != c.ID || ecsu.Timestamp.IsZero() {
+		t.Fatalf("unexpected event %+v", ecsu)
+	}
+
+	// assert consensus update
+	var ecu events.EventConsensusUpdate
+	bytes, _ = json.Marshal(received[events.WebhookEventConsensusUpdate].Payload)
+	tt.OK(json.Unmarshal(bytes, &ecu))
+	if ecu.TransactionFee.IsZero() || ecu.BlockHeight == 0 || ecu.Timestamp.IsZero() || !ecu.Synced {
+		t.Fatalf("unexpected event %+v", ecu)
+	}
+
+	// assert setting update
+	var esu events.EventSettingUpdate
+	bytes, _ = json.Marshal(received[events.WebhookEventSettingUpdate].Payload)
+	tt.OK(json.Unmarshal(bytes, &esu))
+	if esu.Key != api.SettingGouging || esu.Timestamp.IsZero() {
+		t.Fatalf("unexpected event %+v", esu)
+	}
+
+	// assert setting update payload
+	var update api.GougingSettings
+	bytes, _ = json.Marshal(esu.Update)
+	tt.OK(json.Unmarshal(bytes, &update))
+	if update.HostBlockHeightLeeway != 100 {
+		t.Fatalf("unexpected update %+v", update)
 	}
 }
