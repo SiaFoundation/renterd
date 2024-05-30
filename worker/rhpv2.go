@@ -24,9 +24,10 @@ const (
 	// minMessageSize is the minimum size of an RPC message
 	minMessageSize = 4096
 
-	// maxMerkleProofResponseSize caps the response message size to a generous 4
-	// MiB max length.
-	maxMerkleProofResponseSize = 1 << 22 // 4 MiB
+	// maxMerkleProofResponseSize caps the response message size to a generous
+	// 32 MiB max length since batchSizeDeleteSectors assumes ~16MiB of
+	// roots. So we double that to be safe.
+	maxMerkleProofResponseSize = 8 * 1 << 22 // 32 MiB
 )
 
 var (
