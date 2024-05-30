@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.sia.tech/renterd/webhooks"
@@ -16,7 +15,7 @@ type (
 	}
 
 	Event interface {
-		Kind() (string, string)
+		Event() webhooks.Event
 	}
 )
 
@@ -28,23 +27,17 @@ func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.SugaredLogger) EventBroa
 }
 
 func NewEventWebhook(url string, e Event) webhooks.Webhook {
-	module, event := e.Kind()
 	return webhooks.Webhook{
-		Module: module,
-		Event:  event,
+		Module: e.Event().Module,
+		Event:  e.Event().Event,
 		URL:    url,
 	}
 }
 
 func (b EventBroadcaster) BroadcastEvent(e Event) {
-	module, event := e.Kind()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	if err := b.broadcaster.BroadcastAction(ctx, webhooks.Event{
-		Module:  module,
-		Event:   event,
-		Payload: e,
-	}); err != nil {
-		b.logger.Errorw(fmt.Sprintf("failed to broadcast event %s %s", module, event), "event", e, "error", err)
+	if err := b.broadcaster.BroadcastAction(ctx, e.Event()); err != nil {
+		b.logger.Errorw("failed to broadcast event", "event", e, "error", err)
 	}
 	cancel()
 }

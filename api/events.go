@@ -4,18 +4,19 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/webhooks"
 )
 
 const (
 	ModuleContractSet = "contract_set"
 	ModuleConsensus   = "consensus"
-	ModuleContracts   = "contracts"
-	ModuleSettings    = "settings"
+	ModuleContract    = "contract"
+	ModuleSetting     = "setting"
 
 	EventUpdate  = "update"
 	EventDelete  = "delete"
 	EventArchive = "archive"
-	EventRenew   = "renewed"
+	EventRenew   = "renew"
 )
 
 type (
@@ -55,9 +56,50 @@ type (
 	}
 )
 
-func (e EventConsensusUpdate) Kind() (string, string)   { return ModuleConsensus, EventUpdate }
-func (e EventContractArchive) Kind() (string, string)   { return ModuleContracts, EventArchive }
-func (e EventContractRenew) Kind() (string, string)     { return ModuleContracts, EventRenew }
-func (e EventContractSetUpdate) Kind() (string, string) { return ModuleContractSet, EventUpdate }
-func (e EventSettingUpdate) Kind() (string, string)     { return ModuleSettings, EventUpdate }
-func (e EventSettingDelete) Kind() (string, string)     { return ModuleSettings, EventDelete }
+func (e EventConsensusUpdate) Event() webhooks.Event {
+	return webhooks.Event{
+		Module:  ModuleConsensus,
+		Event:   EventUpdate,
+		Payload: e,
+	}
+}
+
+func (e EventContractArchive) Event() webhooks.Event {
+	return webhooks.Event{
+		Module:  ModuleContract,
+		Event:   EventArchive,
+		Payload: e,
+	}
+}
+
+func (e EventContractRenew) Event() webhooks.Event {
+	return webhooks.Event{
+		Module:  ModuleContract,
+		Event:   EventRenew,
+		Payload: e,
+	}
+}
+
+func (e EventContractSetUpdate) Event() webhooks.Event {
+	return webhooks.Event{
+		Module:  ModuleContractSet,
+		Event:   EventUpdate,
+		Payload: e,
+	}
+}
+
+func (e EventSettingUpdate) Event() webhooks.Event {
+	return webhooks.Event{
+		Module:  ModuleSetting,
+		Event:   EventUpdate,
+		Payload: e,
+	}
+}
+
+func (e EventSettingDelete) Event() webhooks.Event {
+	return webhooks.Event{
+		Module:  ModuleSetting,
+		Event:   EventDelete,
+		Payload: e,
+	}
+}

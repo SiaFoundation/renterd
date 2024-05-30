@@ -33,8 +33,7 @@ func TestEvents(t *testing.T) {
 	// define helper to check if the event is known
 	isKnownEvent := func(e webhooks.Event) bool {
 		for _, known := range allEvents {
-			module, event := known.Kind()
-			if module == e.Module && event == e.Event {
+			if known.Event().Module == e.Module && known.Event().Event == e.Event {
 				return true
 			}
 		}
@@ -127,7 +126,7 @@ func TestEvents(t *testing.T) {
 		defer mu.Unlock()
 		if len(received) < len(allEvents) {
 			cluster.MineBlocks(1)
-			return fmt.Errorf("expected %d unique events, got %v", len(allEvents), len(received))
+			return fmt.Errorf("expected %d unique events, got %+v (%d)", len(allEvents), received, len(received))
 		}
 		return nil
 	})
@@ -177,7 +176,7 @@ func parseEvent(event webhooks.Event) (interface{}, error) {
 		return nil, err
 	}
 	switch event.Module {
-	case api.ModuleContracts:
+	case api.ModuleContract:
 		if event.Event == api.EventArchive {
 			var e api.EventContractArchive
 			if err := json.Unmarshal(bytes, &e); err != nil {
@@ -207,7 +206,7 @@ func parseEvent(event webhooks.Event) (interface{}, error) {
 			}
 			return e, nil
 		}
-	case api.ModuleSettings:
+	case api.ModuleSetting:
 		if event.Event == api.EventUpdate {
 			var e api.EventSettingUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
