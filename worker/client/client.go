@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 )
 
 // A Client provides methods for interacting with a worker.
@@ -265,6 +266,12 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 // UploadStats returns the upload stats.
 func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 	err = c.c.GET("/stats/uploads", &resp)
+	return
+}
+
+// RegisterEvent register an event.
+func (c *Client) RegisterEvent(ctx context.Context, e webhooks.Event) (err error) {
+	err = c.c.WithContext(ctx).POST("/events", e, nil)
 	return
 }
 
