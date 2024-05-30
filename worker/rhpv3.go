@@ -261,7 +261,14 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	p.mu.Unlock()
 
 	// Execute function.
-	err = fn(ctx, t)
+	err = func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic (withTransportV3): %v", r)
+			}
+		}()
+		return fn(ctx, t)
+	}()
 
 	// Decrement refcounter again and clean up pool.
 	p.mu.Lock()
