@@ -12,8 +12,8 @@ require (
 	github.com/minio/minio-go/v7 v7.0.70
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.3
-	go.sia.tech/coreutils v0.0.4-0.20240502154058-5df7ad9c0b7c
+	go.sia.tech/core v0.2.4
+	go.sia.tech/coreutils v0.0.4
 	go.sia.tech/gofakes3 v0.0.3
 	go.sia.tech/hostd v1.1.0
 	go.sia.tech/jape v0.11.2-0.20240306154058-9832414a5385
@@ -72,7 +72,6 @@ require (
 	gitlab.com/NebulousLabs/ratelimit v0.0.0-20200811080431-99b8f0768b2e // indirect
 	gitlab.com/NebulousLabs/siamux v0.0.2-0.20220630142132-142a1443a259 // indirect
 	gitlab.com/NebulousLabs/threadgroup v0.0.0-20200608151952-38921fbef213 // indirect
-	go.etcd.io/bbolt v1.3.10 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
