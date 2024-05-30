@@ -392,6 +392,52 @@ func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.Multi
 	return resp, nil
 }
 
+func MultipartUploadParts(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error) {
+	limitExpr := ""
+	limitUsed := limit > 0
+	if limitUsed {
+		limitExpr = fmt.Sprintf("LIMIT %d", limit+1)
+	}
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT part_number, created_at, etag, size
+		FROM multipart_parts
+		INNER JOIN multipart_uploads mus ON mus.id = multipart_parts.db_multipart_upload_id 
+		INNER JOIN buckets b ON b.id = mus.db_bucket_id
+		WHERE mus.object_id = ? AND b.name = ? AND mus.upload_id = ? AND part_number > ?
+		ORDER BY part_number ASC
+		%s
+	`, limitExpr))
+	if err != nil {
+		return api.MultipartListPartsResponse{}, fmt.Errorf("failed to fetch multipart parts: %w", err)
+	}
+	defer rows.Close()
+
+	var parts []api.MultipartListPartItem
+	for rows.Next() {
+		var part api.MultipartListPartItem
+		if err := rows.Scan(&part.PartNumber, (*time.Time)(&part.LastModified), &part.ETag, &part.Size); err != nil {
+			return api.MultipartListPartsResponse{}, fmt.Errorf("failed to scan part: %w", err)
+		}
+		parts = append(parts, part)
+	}
+
+	// check if there are more parts beyond 'limit'.
+	var hasMore bool
+	var nextMarker int
+	if limitUsed && len(parts) > int(limit) {
+		hasMore = true
+		parts = parts[:len(parts)-1]
+		nextMarker = parts[len(parts)-1].PartNumber
+	}
+
+	return api.MultipartListPartsResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Parts:      parts,
+	}, nil
+}
+
 func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
 	// both markers must be used together
 	if (keyMarker == "" && uploadIDMarker != "") || (keyMarker != "" && uploadIDMarker == "") {

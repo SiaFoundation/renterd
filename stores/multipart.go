@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 
 	"go.sia.tech/renterd/api"
@@ -82,42 +81,9 @@ func (s *SQLStore) MultipartUploads(ctx context.Context, bucket, prefix, keyMark
 }
 
 func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error) {
-	limitUsed := limit > 0
-	if !limitUsed {
-		limit = math.MaxInt64
-	} else {
-		limit++
-	}
-
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		var dbParts []dbMultipartPart
-		err := tx.
-			Model(&dbMultipartPart{}).
-			Joins("INNER JOIN multipart_uploads mus ON mus.id = multipart_parts.db_multipart_upload_id").
-			Joins("INNER JOIN buckets b ON b.name = ? AND b.id = mus.db_bucket_id", bucket).
-			Where("mus.object_id = ? AND mus.upload_id = ? AND part_number > ?", object, uploadID, marker).
-			Order("part_number ASC").
-			Limit(int(limit)).
-			Find(&dbParts).
-			Error
-		if err != nil {
-			return err
-		}
-		// Check if there are more parts beyond 'limit'.
-		if limitUsed && len(dbParts) == int(limit) {
-			resp.HasMore = true
-			dbParts = dbParts[:len(dbParts)-1]
-			resp.NextMarker = dbParts[len(dbParts)-1].PartNumber
-		}
-		for _, part := range dbParts {
-			resp.Parts = append(resp.Parts, api.MultipartListPartItem{
-				PartNumber:   part.PartNumber,
-				LastModified: api.TimeRFC3339(part.CreatedAt.UTC()),
-				ETag:         part.Etag,
-				Size:         int64(part.Size),
-			})
-		}
-		return nil
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		resp, err = tx.MultipartUploadParts(ctx, bucket, object, uploadID, marker, limit)
+		return
 	})
 	return resp, err
 }

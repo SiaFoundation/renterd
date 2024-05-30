@@ -345,6 +345,10 @@ func (tx *MainDatabaseTx) MultipartUpload(ctx context.Context, uploadID string) 
 	return ssql.MultipartUpload(ctx, tx, uploadID)
 }
 
+func (tx *MainDatabaseTx) MultipartUploadParts(ctx context.Context, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error) {
+	return ssql.MultipartUploadParts(ctx, tx, bucket, key, uploadID, marker, limit)
+}
+
 func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
 	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
 }

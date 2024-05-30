@@ -82,6 +82,10 @@ type (
 		// api.ErrMultipartUploadNotFound if the upload doesn't exist.
 		MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error)
 
+		// MultipartUploadParts returns a list of all parts for a given
+		// multipart upload
+		MultipartUploadParts(ctx context.Context, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error)
+
 		// MultipartUploads returns a list of all multipart uploads.
 		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error)
 
