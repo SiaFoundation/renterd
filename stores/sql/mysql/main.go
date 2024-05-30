@@ -126,6 +126,10 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
 }
 
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }

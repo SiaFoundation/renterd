@@ -26,6 +26,10 @@ type (
 	}
 
 	DatabaseTx interface {
+		// AbortMultipartUpload aborts a multipart upload and deletes it from
+		// the database.
+		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error
+
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 

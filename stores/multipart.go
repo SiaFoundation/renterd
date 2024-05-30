@@ -2,14 +2,12 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm"
 )
 
 type (
@@ -89,38 +87,14 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 }
 
 func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// delete multipart upload optimistically
-		res := tx.
-			Where("upload_id", uploadID).
-			Where("object_id", path).
-			Where("db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", bucket).
-			Delete(&dbMultipartUpload{})
-		if res.Error != nil {
-			return fmt.Errorf("failed to fetch multipart upload: %w", res.Error)
-		}
-		// if the upload wasn't found, find out why
-		if res.RowsAffected == 0 {
-			var mu dbMultipartUpload
-			err := tx.Where("upload_id = ?", uploadID).
-				Joins("DBBucket").
-				Take(&mu).
-				Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return api.ErrMultipartUploadNotFound
-			} else if err != nil {
-				return fmt.Errorf("failed to fetch multipart upload: %w", err)
-			} else if mu.ObjectID != path {
-				return fmt.Errorf("object id mismatch: %v != %v: %w", mu.ObjectID, path, api.ErrObjectNotFound)
-			} else if mu.DBBucket.Name != bucket {
-				return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
-			}
-			return errors.New("failed to delete multipart upload for unknown reason")
-		}
-		// Prune the dangling slabs.
-		s.triggerSlabPruning()
-		return nil
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.AbortMultipartUpload(ctx, bucket, path, uploadID)
 	})
+	if err != nil {
+		return err
+	}
+	s.triggerSlabPruning()
+	return nil
 }
 
 func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error) {

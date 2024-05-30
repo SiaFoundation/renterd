@@ -22,6 +22,39 @@ import (
 
 var ErrNegativeOffset = errors.New("offset can not be negative")
 
+func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, uploadID string) error {
+	res, err := tx.Exec(ctx, `
+		DELETE
+		FROM multipart_uploads
+		WHERE object_id = ? AND upload_id = ? AND db_bucket_id = (
+			SELECT id
+			FROM buckets
+			WHERE name = ?
+	)`, key, uploadID, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to delete multipart upload: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to fetch rows affected: %w", err)
+	} else if n > 0 {
+		return nil
+	}
+
+	// find out why the upload wasn't deleted
+	var muKey, bucketName string
+	err = tx.QueryRow(ctx, "SELECT object_id, b.name FROM multipart_uploads mu INNER JOIN buckets b ON mu.db_bucket_id = b.id WHERE upload_id = ?", uploadID).
+		Scan(&muKey, &bucketName)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrMultipartUploadNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch multipart upload: %w", err)
+	} else if muKey != key {
+		return fmt.Errorf("object id mismatch: %v != %v: %w", muKey, key, api.ErrObjectNotFound)
+	} else if bucketName != bucket {
+		return fmt.Errorf("bucket name mismatch: %v != %v: %w", bucketName, bucket, api.ErrBucketNotFound)
+	}
+	return errors.New("failed to delete multipart upload for unknown reason")
+}
+
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
 	if err != nil {
@@ -400,14 +433,14 @@ func MultipartUploadParts(ctx context.Context, tx sql.Tx, bucket, key, uploadID 
 	}
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT part_number, created_at, etag, size
-		FROM multipart_parts
-		INNER JOIN multipart_uploads mus ON mus.id = multipart_parts.db_multipart_upload_id 
+		SELECT mp.part_number, mp.created_at, mp.etag, mp.size
+		FROM multipart_parts mp
+		INNER JOIN multipart_uploads mus ON mus.id = mp.db_multipart_upload_id 
 		INNER JOIN buckets b ON b.id = mus.db_bucket_id
 		WHERE mus.object_id = ? AND b.name = ? AND mus.upload_id = ? AND part_number > ?
 		ORDER BY part_number ASC
 		%s
-	`, limitExpr))
+	`, limitExpr), key, bucket, uploadID, marker)
 	if err != nil {
 		return api.MultipartListPartsResponse{}, fmt.Errorf("failed to fetch multipart parts: %w", err)
 	}
