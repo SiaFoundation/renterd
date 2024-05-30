@@ -2,9 +2,11 @@ package sql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	dsql "database/sql"
 
@@ -12,6 +14,16 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 )
+
+func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
+	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Bucket{}, api.ErrBucketNotFound
+	} else if err != nil {
+		return api.Bucket{}, fmt.Errorf("failed to fetch bucket: %w", err)
+	}
+	return b, nil
+}
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	var rows *sql.LoggedRows
@@ -91,6 +103,28 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	return contracts, nil
 }
 
+func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
+	var id int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE name = ?", bucket).Scan(&id)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrBucketNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+	var empty bool
+	err = tx.QueryRow(ctx, "SELECT NOT EXISTS(SELECT 1 FROM objects WHERE db_bucket_id = ?)", id).Scan(&empty)
+	if err != nil {
+		return fmt.Errorf("failed to check if bucket is empty: %w", err)
+	} else if !empty {
+		return api.ErrBucketNotEmpty
+	}
+	_, err = tx.Exec(ctx, "DELETE FROM buckets WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete bucket: %w", err)
+	}
+	return nil
+}
+
 func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (map[types.FileContractID]UsedContract, error) {
 	if len(fcids) == 0 {
 		return make(map[types.FileContractID]UsedContract), nil
@@ -148,4 +182,56 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 		}
 	}
 	return usedContracts, nil
+}
+
+func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
+	rows, err := tx.Query(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch buckets: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []api.Bucket
+	for rows.Next() {
+		bucket, err := scanBucket(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan bucket: %w", err)
+		}
+		buckets = append(buckets, bucket)
+	}
+	return buckets, nil
+}
+
+func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
+	policy, err := json.Marshal(bp)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to update bucket policy: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return api.ErrBucketNotFound
+	}
+	return nil
+}
+
+func scanBucket(s scanner) (api.Bucket, error) {
+	var createdAt time.Time
+	var name, policy string
+	err := s.Scan(&createdAt, &name, &policy)
+	if err != nil {
+		return api.Bucket{}, err
+	}
+	var bp api.BucketPolicy
+	if err := json.Unmarshal([]byte(policy), &bp); err != nil {
+		return api.Bucket{}, err
+	}
+	return api.Bucket{
+		CreatedAt: api.TimeRFC3339(createdAt),
+		Name:      name,
+		Policy:    bp,
+	}, nil
 }
