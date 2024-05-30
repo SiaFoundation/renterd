@@ -661,6 +661,12 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 		return err
 	}
 	defer t.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic (withTransportV2): %v", r)
+		}
+	}()
 	return fn(t)
 }
 
