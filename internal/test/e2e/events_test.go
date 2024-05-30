@@ -12,7 +12,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -21,7 +20,7 @@ import (
 // providing an event webhook was registered.
 func TestEvents(t *testing.T) {
 	// list all events
-	allEvents := []bus.Event{
+	allEvents := []webhooks.WebhookEvent{
 		api.EventConsensusUpdate{},
 		api.EventContractArchive{},
 		api.EventContractRenew{},
@@ -84,7 +83,7 @@ func TestEvents(t *testing.T) {
 
 	// register webhooks
 	for _, e := range allEvents {
-		tt.OK(b.RegisterWebhook(context.Background(), bus.NewEventWebhook(server.URL, e)))
+		tt.OK(b.RegisterWebhook(context.Background(), webhooks.NewEventWebhook(server.URL, e)))
 	}
 
 	// fetch our contract
