@@ -116,6 +116,7 @@ type Autopilot struct {
 	mu               sync.Mutex
 	pruning          bool
 	pruningLastStart time.Time
+	pruningAlertIDs  map[types.FileContractID]types.Hash256
 
 	maintenanceTxnIDs []types.TransactionID
 }
@@ -135,6 +136,8 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 		shutdownCtxCancel: shutdownCtxCancel,
 
 		tickerDuration: heartbeat,
+
+		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 	scanner, err := newScanner(
 		ap,
@@ -202,7 +205,15 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts))
+	res, err := contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts)
+	if errors.Is(err, contractor.ErrMissingRequiredFields) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(res)
 }
 
 func (ap *Autopilot) Run() error {

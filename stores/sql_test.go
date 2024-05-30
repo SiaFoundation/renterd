@@ -136,6 +136,8 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		Migrate:                       !cfg.skipMigrate,
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop().Sugar(),
+		LongQueryDuration:             100 * time.Millisecond,
+		LongTxDuration:                100 * time.Millisecond,
 		GormLogger:                    newTestLogger(),
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
 	})

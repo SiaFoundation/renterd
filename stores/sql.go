@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -170,13 +171,20 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	// Print DB version
 	var dbMain sql.Database
 	var bMetrics sql.MetricsDatabase
+	var mainErr, metricsErr error
 	if cfg.Conn.Name() == "sqlite" {
-		dbMain = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain, mainErr = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics, metricsErr = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
-		dbMain = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		dbMain, mainErr = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
+		bMetrics, metricsErr = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
+	if mainErr != nil {
+		return nil, fmt.Errorf("failed to create main database: %v", mainErr)
+	} else if metricsErr != nil {
+		return nil, fmt.Errorf("failed to create metrics database: %v", metricsErr)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	dbName, dbVersion, err := dbMain.Version(ctx)
@@ -187,9 +195,9 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 
 	// Perform migrations.
 	if cfg.Migrate {
-		if err := dbMain.Migrate(); err != nil {
+		if err := dbMain.Migrate(context.Background()); err != nil {
 			return nil, fmt.Errorf("failed to perform migrations: %v", err)
-		} else if err := bMetrics.Migrate(); err != nil {
+		} else if err := bMetrics.Migrate(context.Background()); err != nil {
 			return nil, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
@@ -256,7 +264,10 @@ func (s *SQLStore) initSlabPruning() error {
 	}()
 
 	// prune once to guarantee consistency on startup
-	return s.retryTransaction(s.shutdownCtx, pruneSlabs)
+	return s.bMain.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
+		return err
+	})
 }
 
 func (ss *SQLStore) updateHasAllowlist(err *error) {
@@ -345,8 +356,6 @@ func (s *SQLStore) retryAbortFn(err error) bool {
 		utils.IsErr(err, context.Canceled) ||
 		utils.IsErr(err, context.DeadlineExceeded) ||
 		utils.IsErr(err, gorm.ErrRecordNotFound) ||
-		utils.IsErr(err, errInvalidNumberOfShards) ||
-		utils.IsErr(err, errShardRootChanged) ||
 		utils.IsErr(err, api.ErrContractNotFound) ||
 		utils.IsErr(err, api.ErrObjectNotFound) ||
 		utils.IsErr(err, api.ErrObjectCorrupted) ||
@@ -384,12 +393,4 @@ func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogge
 		time.Sleep(interval)
 	}
 	return fmt.Errorf("retryTransaction failed: %w", err)
-}
-
-func sumDurations(durations []time.Duration) time.Duration {
-	var sum time.Duration
-	for _, d := range durations {
-		sum += d
-	}
-	return sum
 }

@@ -11,7 +11,7 @@ import (
 // The following types are wrappers for the sql package types, adding logging
 // capabilities.
 type (
-	loggedStmt struct {
+	LoggedStmt struct {
 		*sql.Stmt
 		query             string
 		log               *zap.Logger
@@ -24,20 +24,20 @@ type (
 		longQueryDuration time.Duration
 	}
 
-	loggedRow struct {
+	LoggedRow struct {
 		*sql.Row
 		log               *zap.Logger
 		longQueryDuration time.Duration
 	}
 
-	loggedRows struct {
+	LoggedRows struct {
 		*sql.Rows
 		log               *zap.Logger
 		longQueryDuration time.Duration
 	}
 )
 
-func (lr *loggedRows) Next() bool {
+func (lr *LoggedRows) Next() bool {
 	start := time.Now()
 	next := lr.Rows.Next()
 	if dur := time.Since(start); dur > lr.longQueryDuration {
@@ -46,7 +46,7 @@ func (lr *loggedRows) Next() bool {
 	return next
 }
 
-func (lr *loggedRows) Scan(dest ...any) error {
+func (lr *LoggedRows) Scan(dest ...any) error {
 	start := time.Now()
 	err := lr.Rows.Scan(dest...)
 	if dur := time.Since(start); dur > lr.longQueryDuration {
@@ -55,7 +55,7 @@ func (lr *loggedRows) Scan(dest ...any) error {
 	return err
 }
 
-func (lr *loggedRow) Scan(dest ...any) error {
+func (lr *LoggedRow) Scan(dest ...any) error {
 	start := time.Now()
 	err := lr.Row.Scan(dest...)
 	if dur := time.Since(start); dur > lr.longQueryDuration {
@@ -64,11 +64,7 @@ func (lr *loggedRow) Scan(dest ...any) error {
 	return err
 }
 
-func (ls *loggedStmt) Exec(args ...any) (sql.Result, error) {
-	return ls.ExecContext(context.Background(), args...)
-}
-
-func (ls *loggedStmt) ExecContext(ctx context.Context, args ...any) (sql.Result, error) {
+func (ls *LoggedStmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 	start := time.Now()
 	result, err := ls.Stmt.ExecContext(ctx, args...)
 	if dur := time.Since(start); dur > ls.longQueryDuration {
@@ -77,11 +73,7 @@ func (ls *loggedStmt) ExecContext(ctx context.Context, args ...any) (sql.Result,
 	return result, err
 }
 
-func (ls *loggedStmt) Query(args ...any) (*sql.Rows, error) {
-	return ls.QueryContext(context.Background(), args...)
-}
-
-func (ls *loggedStmt) QueryContext(ctx context.Context, args ...any) (*sql.Rows, error) {
+func (ls *LoggedStmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
 	start := time.Now()
 	rows, err := ls.Stmt.QueryContext(ctx, args...)
 	if dur := time.Since(start); dur > ls.longQueryDuration {
@@ -90,24 +82,20 @@ func (ls *loggedStmt) QueryContext(ctx context.Context, args ...any) (*sql.Rows,
 	return rows, err
 }
 
-func (ls *loggedStmt) QueryRow(args ...any) *loggedRow {
-	return ls.QueryRowContext(context.Background(), args...)
-}
-
-func (ls *loggedStmt) QueryRowContext(ctx context.Context, args ...any) *loggedRow {
+func (ls *LoggedStmt) QueryRow(ctx context.Context, args ...any) *LoggedRow {
 	start := time.Now()
 	row := ls.Stmt.QueryRowContext(ctx, args...)
 	if dur := time.Since(start); dur > ls.longQueryDuration {
 		ls.log.Warn("slow query row", zap.String("query", ls.query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return &loggedRow{row, ls.log.Named("row"), ls.longQueryDuration}
+	return &LoggedRow{row, ls.log.Named("row"), ls.longQueryDuration}
 }
 
 // Exec executes a query without returning any rows. The args are for
 // any placeholder parameters in the query.
-func (lt *loggedTxn) Exec(query string, args ...any) (sql.Result, error) {
+func (lt *loggedTxn) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	start := time.Now()
-	result, err := lt.Tx.Exec(query, args...)
+	result, err := lt.Tx.ExecContext(ctx, query, args...)
 	if dur := time.Since(start); dur > lt.longQueryDuration {
 		lt.log.Warn("slow exec", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
@@ -118,15 +106,15 @@ func (lt *loggedTxn) Exec(query string, args ...any) (sql.Result, error) {
 // Multiple queries or executions may be run concurrently from the
 // returned statement. The caller must call the statement's Close method
 // when the statement is no longer needed.
-func (lt *loggedTxn) Prepare(query string) (*loggedStmt, error) {
+func (lt *loggedTxn) Prepare(ctx context.Context, query string) (*LoggedStmt, error) {
 	start := time.Now()
-	stmt, err := lt.Tx.Prepare(query)
-	if dur := time.Since(start); dur > lt.longQueryDuration {
-		lt.log.Warn("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	} else if err != nil {
+	stmt, err := lt.Tx.PrepareContext(ctx, query)
+	if err != nil {
 		return nil, err
+	} else if dur := time.Since(start); dur > lt.longQueryDuration {
+		lt.log.Warn("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return &loggedStmt{
+	return &LoggedStmt{
 		Stmt:              stmt,
 		query:             query,
 		log:               lt.log.Named("statement"),
@@ -136,13 +124,13 @@ func (lt *loggedTxn) Prepare(query string) (*loggedStmt, error) {
 
 // Query executes a query that returns rows, typically a SELECT. The
 // args are for any placeholder parameters in the query.
-func (lt *loggedTxn) Query(query string, args ...any) (*loggedRows, error) {
+func (lt *loggedTxn) Query(ctx context.Context, query string, args ...any) (*LoggedRows, error) {
 	start := time.Now()
-	rows, err := lt.Tx.Query(query, args...)
+	rows, err := lt.Tx.QueryContext(ctx, query, args...)
 	if dur := time.Since(start); dur > lt.longQueryDuration {
 		lt.log.Warn("slow query", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return &loggedRows{rows, lt.log.Named("rows"), lt.longQueryDuration}, err
+	return &LoggedRows{rows, lt.log.Named("rows"), lt.longQueryDuration}, err
 }
 
 // QueryRow executes a query that is expected to return at most one row.
@@ -150,11 +138,11 @@ func (lt *loggedTxn) Query(query string, args ...any) (*loggedRows, error) {
 // Row's Scan method is called. If the query selects no rows, the *Row's
 // Scan will return ErrNoRows. Otherwise, the *Row's Scan scans the
 // first selected row and discards the rest.
-func (lt *loggedTxn) QueryRow(query string, args ...any) *loggedRow {
+func (lt *loggedTxn) QueryRow(ctx context.Context, query string, args ...any) *LoggedRow {
 	start := time.Now()
-	row := lt.Tx.QueryRow(query, args...)
+	row := lt.Tx.QueryRowContext(ctx, query, args...)
 	if dur := time.Since(start); dur > lt.longQueryDuration {
 		lt.log.Warn("slow query row", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return &loggedRow{row, lt.log.Named("row"), lt.longQueryDuration}
+	return &LoggedRow{row, lt.log.Named("row"), lt.longQueryDuration}
 }
