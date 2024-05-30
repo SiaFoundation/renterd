@@ -34,6 +34,11 @@ type (
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 
+		// CopyObject copies an object from one bucket and key to another. If
+		// src and dst are the same, only the metadata and mimeType are
+		// overwritten with the provided ones.
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
+
 		// CreateBucket creates a new bucket with the given name and policy. If
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error

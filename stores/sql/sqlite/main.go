@@ -89,6 +89,10 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 	return ssql.Contracts(ctx, tx, opts)
 }
 
+func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
+}
+
 func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	policy, err := json.Marshal(bp)
 	if err != nil {
@@ -295,17 +299,9 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		return err
 	}
 
-	// update metadata
-	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, key, value) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
-	}
-	defer insertMetadataStmt.Close()
-
-	for k, v := range md {
-		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
-			return fmt.Errorf("failed to insert object metadata: %w", err)
-		}
+	// insert metadata
+	if err := ssql.InsertMetadata(ctx, tx, objID, md); err != nil {
+		return fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	return nil
 }
