@@ -78,6 +78,13 @@ type (
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
 
+		// MultipartUpload returns the multipart upload with the given ID or
+		// api.ErrMultipartUploadNotFound if the upload doesn't exist.
+		MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error)
+
+		// MultipartUploads returns a list of all multipart uploads.
+		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error)
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 

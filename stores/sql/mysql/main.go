@@ -341,6 +341,14 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	return dirID, nil
 }
 
+func (tx *MainDatabaseTx) MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error) {
+	return ssql.MultipartUpload(ctx, tx, uploadID)
+}
+
+func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
+	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
+}
+
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
