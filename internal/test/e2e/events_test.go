@@ -20,7 +20,7 @@ import (
 // providing an event webhook was registered.
 func TestEvents(t *testing.T) {
 	// list all events
-	allEvents := []api.Event{
+	allEvents := []webhooks.WebhookEvent{
 		api.EventConsensusUpdate{},
 		api.EventContractArchive{},
 		api.EventContractRenew{},
@@ -83,7 +83,7 @@ func TestEvents(t *testing.T) {
 
 	// register webhooks
 	for _, e := range allEvents {
-		tt.OK(b.RegisterWebhook(context.Background(), api.NewEventWebhook(server.URL, e)))
+		tt.OK(b.RegisterWebhook(context.Background(), webhooks.NewEventWebhook(server.URL, e)))
 	}
 
 	// fetch our contract

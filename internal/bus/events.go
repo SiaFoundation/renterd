@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -23,7 +22,7 @@ func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.SugaredLogger) EventBroa
 	}
 }
 
-func (b EventBroadcaster) BroadcastEvent(e api.Event) {
+func (b EventBroadcaster) BroadcastEvent(e webhooks.WebhookEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	if err := b.broadcaster.BroadcastAction(ctx, e.Event()); err != nil {
 		b.logger.Errorw("failed to broadcast event", "event", e, "error", err)
