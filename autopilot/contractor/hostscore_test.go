@@ -103,6 +103,15 @@ func TestHostScore(t *testing.T) {
 	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
+
+	// assert zero allowance does not panic
+	cfg.Contracts.Allowance = types.ZeroCurrency
+	_ = hostScore(cfg, h1, redundancy)
+
+	// assert missing amount does not panic
+	cfg.Contracts.Allowance = types.Siacoins(1000) // reset
+	cfg.Contracts.Amount = 0
+	_ = hostScore(cfg, h1, redundancy)
 }
 
 func TestPriceAdjustmentScore(t *testing.T) {

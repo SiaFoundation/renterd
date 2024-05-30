@@ -1317,6 +1317,13 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("foo_%d", i), api.DeleteObjectOptions{}))
 	}
 
+	// wait until the slabs and sectors were pruned before constructing the
+	// frankenstein object since constructing the object would otherwise violate
+	// the UNIQUE constraint for the slab_id and slab_index. That's because we
+	// don't want to allow inserting 2 sectors referencing the same slab with
+	// the same index within the slab which happens on an upsert
+	time.Sleep(time.Second)
+
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
 	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object.Object, api.AddObjectOptions{}))

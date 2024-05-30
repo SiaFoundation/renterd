@@ -1,24 +1,29 @@
 package mysql
 
 import (
+	"context"
 	"embed"
 	"fmt"
 
 	"go.sia.tech/renterd/internal/sql"
 )
 
+var deadlockMsgs = []string{
+	"Deadlock found when trying to get lock",
+}
+
 //go:embed all:migrations/*
 var migrationsFs embed.FS
 
-func applyMigration(db *sql.DB, fn func(tx sql.Tx) (bool, error)) error {
-	return db.Transaction(func(tx sql.Tx) error {
+func applyMigration(ctx context.Context, db *sql.DB, fn func(tx sql.Tx) (bool, error)) error {
+	return db.Transaction(ctx, func(tx sql.Tx) error {
 		_, err := fn(tx)
 		return err
 	})
 }
 
-func createMigrationTable(db *sql.DB) error {
-	if _, err := db.Exec(`
+func createMigrationTable(ctx context.Context, db *sql.DB) error {
+	if _, err := db.Exec(ctx, `
 			CREATE TABLE IF NOT EXISTS migrations (
 				id varchar(255) NOT NULL,
 				PRIMARY KEY (id)
@@ -28,9 +33,9 @@ func createMigrationTable(db *sql.DB) error {
 	return nil
 }
 
-func version(db *sql.DB) (string, string, error) {
+func version(ctx context.Context, db *sql.DB) (string, string, error) {
 	var version string
-	if err := db.QueryRow("select version()").Scan(&version); err != nil {
+	if err := db.QueryRow(ctx, "select version()").Scan(&version); err != nil {
 		return "", "", err
 	}
 	return "MySQL", version, nil

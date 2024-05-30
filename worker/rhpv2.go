@@ -23,6 +23,11 @@ import (
 const (
 	// minMessageSize is the minimum size of an RPC message
 	minMessageSize = 4096
+
+	// maxMerkleProofResponseSize caps the response message size to a generous
+	// 32 MiB max length since batchSizeDeleteSectors assumes ~16MiB of
+	// roots. So we double that to be safe.
+	maxMerkleProofResponseSize = 8 * 1 << 22 // 32 MiB
 )
 
 var (
@@ -428,17 +433,15 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			}
 			cost, _ = rpcCost.Total()
 
-			// calculate the response size
-			proofSize := rhpv2.DiffProofSize(actions, numSectors)
-			responseSize := (proofSize + 1) * crypto.HashSize
-
-			// TODO: remove once the host network is updated
-			if build.VersionCmp(settings.Version, "1.6.0") < 0 {
-				if responseSize < minMessageSize {
-					responseSize = minMessageSize
-				}
-				cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
-				cost = cost.Mul64(2) // generous leeway
+			// NOTE: we currently overpay hosts by quite a large margin (~10x)
+			// to ensure we cover both 1.5.9 and pre v0.2.1 hosts.
+			//
+			// TODO: remove once host network is updated, or once we include the
+			// host release in the scoring and stop using old hosts
+			proofSize := (128 + uint64(len(actions))) * crypto.HashSize
+			compatCost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
+			if cost.Cmp(compatCost) < 0 {
+				cost = compatCost
 			}
 
 			if rev.RenterFunds().Cmp(cost) < 0 {
@@ -474,7 +477,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			var merkleResp rhpv2.RPCWriteMerkleProof
 			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
-			} else if err := t.ReadResponse(&merkleResp, minMessageSize+responseSize); err != nil {
+			} else if err := t.ReadResponse(&merkleResp, maxMerkleProofResponseSize); err != nil {
 				err := fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
 				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				return err
@@ -658,6 +661,12 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 		return err
 	}
 	defer t.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic (withTransportV2): %v", r)
+		}
+	}()
 	return fn(t)
 }
 

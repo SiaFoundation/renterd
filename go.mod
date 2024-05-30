@@ -5,21 +5,21 @@ go 1.21.7
 toolchain go1.22.0
 
 require (
-	github.com/gabriel-vasile/mimetype v1.4.3
+	github.com/gabriel-vasile/mimetype v1.4.4
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
 	github.com/minio/minio-go/v7 v7.0.70
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.4-0.20240530083826-d1badd60c04d
-	go.sia.tech/coreutils v0.0.4-0.20240502154058-5df7ad9c0b7c
+	go.sia.tech/core v0.2.4
+	go.sia.tech/coreutils v0.0.4
 	go.sia.tech/gofakes3 v0.0.3
-	go.sia.tech/hostd v1.1.0-beta.2.0.20240507175533-83884e68bd38
-	go.sia.tech/jape v0.11.2-0.20240124024603-93559895d640
+	go.sia.tech/hostd v1.1.0
+	go.sia.tech/jape v0.11.2-0.20240306154058-9832414a5385
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.52.1
+	go.sia.tech/web/renterd v0.53.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.23.0
 	golang.org/x/sys v0.20.0
@@ -34,8 +34,8 @@ require (
 
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.52.3 // indirect
-	github.com/cloudflare/cloudflare-go v0.94.0 // indirect
+	github.com/aws/aws-sdk-go v1.53.1 // indirect
+	github.com/cloudflare/cloudflare-go v0.95.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-sql-driver/mysql v1.7.0 // indirect
@@ -75,7 +75,7 @@ require (
 	go.etcd.io/bbolt v1.3.10 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/text v0.15.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.20.0 // indirect
