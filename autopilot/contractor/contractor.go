@@ -1236,13 +1236,10 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 		return api.ContractMetadata{}, false, err
 	}
 
-	// keep the funds below the max funding for newly formed contracts
-	// if the contract sees more usage, it will get refreshed anyway
-	renterFunds := rev.ValidRenterPayout()
-	_, maxFunds := initialContractFundingMinMax(ctx.AutopilotConfig())
-	if renterFunds.Cmp(maxFunds) > 0 {
-		renterFunds = maxFunds
-	}
+	// calculate the renter funds for the renewal a.k.a. the funds the renter will
+	// be able to spend
+	minRenterFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
+	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds())
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
@@ -1498,6 +1495,30 @@ func refreshPriceTable(ctx context.Context, w Worker, host *api.Host) error {
 
 	host.PriceTable = hpt
 	return nil
+}
+
+// renewFundingEstimate computes the funds the renter should use to renew a
+// contract. 'minRenterFunds' is the minimum amount the renter should use to
+// renew a contract, 'initRenterFunds' is the amount the renter used to form the
+// contract we are about to renew, and 'remainingRenterFunds' is the amount the
+// contract currently has left.
+func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds types.Currency) types.Currency {
+	// usually the funds are not increased
+	renterFunds := remainingRenterFunds
+
+	// if the contract wasn't used at all, we reduce the funding since we don't
+	// expect it to be used next period either
+	used := !initRenterFunds.Equals(remainingRenterFunds)
+	if !used {
+		renterFunds = renterFunds.Div64(2) // cut in half
+	}
+
+	// the funds should not drop below the amount we'd fund a new contract with
+	if renterFunds.Cmp(minRenterFunds) < 0 {
+		renterFunds = minRenterFunds
+	}
+
+	return renterFunds
 }
 
 // renterFundsToExpectedStorage returns how much storage a renter is expected to
