@@ -1236,8 +1236,13 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 		return api.ContractMetadata{}, false, err
 	}
 
-	// keep the renter funds the same as before
+	// keep the funds below the max funding for newly formed contracts
+	// if the contract sees more usage, it will get refreshed anyway
 	renterFunds := rev.ValidRenterPayout()
+	_, maxFunds := initialContractFundingMinMax(ctx.AutopilotConfig())
+	if renterFunds.Cmp(maxFunds) > 0 {
+		renterFunds = maxFunds
+	}
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
