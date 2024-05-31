@@ -414,6 +414,10 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	return dirID, nil
 }
 
+func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	return ssql.ObjectsStats(ctx, tx, opts)
+}
+
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
