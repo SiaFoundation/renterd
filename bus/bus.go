@@ -709,6 +709,13 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Compute how much renter funds to put into the new contract.
 	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
 
+	// Make sure we don't exceed the max fund amount.
+	// TODO: remove the IsZero check for the v2 change
+	if /*!wprr.MaxFundAmount.IsZero() &&*/ wprr.MaxFundAmount.Cmp(cost) < 0 {
+		jc.Error(fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, wprr.MaxFundAmount), http.StatusBadRequest)
+		return
+	}
+
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
 	// the renter key by the worker.
@@ -724,6 +731,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(api.WalletPrepareRenewResponse{
+		FundAmount:     cost,
 		ToSign:         toSign,
 		TransactionSet: append(parents, txn),
 	})

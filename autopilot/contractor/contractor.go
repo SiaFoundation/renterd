@@ -104,7 +104,7 @@ type Worker interface {
 	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
-	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, expectedNewStorage, windowSize uint64) (api.RHPRenewResponse, error)
+	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage, windowSize uint64) (api.RHPRenewResponse, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
@@ -1092,91 +1092,6 @@ func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contract
 	return refreshAmountCapped
 }
 
-func (c *Contractor) renewFundingEstimate(ctx *mCtx, ci contractInfo, fee types.Currency, renewing bool) (types.Currency, error) {
-	// estimate the cost of the current data stored
-	dataStored := ci.contract.FileSize()
-	storageCost := sectorStorageCost(ci.priceTable, ctx.state.Period()).Mul64(bytesToSectors(dataStored))
-
-	// fetch the spending of the contract we want to renew.
-	prevSpending, err := c.contractSpending(ctx, ci.contract, ctx.state.Period())
-	if err != nil {
-		c.logger.Errorw(
-			fmt.Sprintf("could not retrieve contract spending, err: %v", err),
-			"hk", ci.contract.HostKey,
-			"fcid", ci.contract.ID,
-		)
-		return types.ZeroCurrency, err
-	}
-
-	// estimate the amount of data uploaded, sanity check with data stored
-	//
-	// TODO: estimate is not ideal because price can change, better would be to
-	// look at the amount of data stored in the contract from the previous cycle
-	prevUploadDataEstimate := types.NewCurrency64(dataStored) // default to assuming all data was uploaded
-	sectorUploadCost := sectorUploadCost(ci.priceTable, ctx.Period())
-	if !sectorUploadCost.IsZero() {
-		prevUploadDataEstimate = prevSpending.Uploads.Div(sectorUploadCost).Mul64(rhpv2.SectorSize)
-	}
-	if prevUploadDataEstimate.Cmp(types.NewCurrency64(dataStored)) > 0 {
-		prevUploadDataEstimate = types.NewCurrency64(dataStored)
-	}
-
-	// estimate the
-	// - upload cost: previous uploads + prev storage
-	// - download cost: assumed to be the same
-	// - fund acount cost: assumed to be the same
-	newUploadsCost := prevSpending.Uploads.Add(sectorUploadCost.Mul(prevUploadDataEstimate.Div64(rhpv2.SectorSize)))
-	newDownloadsCost := prevSpending.Downloads
-	newFundAccountCost := prevSpending.FundAccount
-
-	// estimate the siafund fees
-	//
-	// NOTE: the transaction fees are not included in the siafunds estimate
-	// because users are not charged siafund fees on money that doesn't go into
-	// the file contract (and the transaction fee goes to the miners, not the
-	// file contract).
-	subTotal := storageCost.Add(newUploadsCost).Add(newDownloadsCost).Add(newFundAccountCost).Add(ci.settings.ContractPrice)
-	siaFundFeeEstimate, err := c.bus.FileContractTax(ctx, subTotal)
-	if err != nil {
-		return types.ZeroCurrency, err
-	}
-
-	// estimate the txn fee
-	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
-
-	// add them all up and then return the estimate plus 33% for error margin
-	// and just general volatility of usage pattern.
-	estimatedCost := subTotal.Add(siaFundFeeEstimate).Add(txnFeeEstimate)
-	estimatedCost = estimatedCost.Add(estimatedCost.Div64(3)) // TODO: arbitrary divisor
-
-	// check for a sane minimum that is equal to the initial contract funding
-	// but without an upper cap.
-	minInitialContractFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
-	minimum := c.initialContractFunding(ci.settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
-	cappedEstimatedCost := estimatedCost
-	if cappedEstimatedCost.Cmp(minimum) < 0 {
-		cappedEstimatedCost = minimum
-	}
-
-	if renewing {
-		c.logger.Infow("renew estimate",
-			"fcid", ci.contract.ID,
-			"dataStored", dataStored,
-			"storageCost", storageCost.String(),
-			"newUploadsCost", newUploadsCost.String(),
-			"newDownloadsCost", newDownloadsCost.String(),
-			"newFundAccountCost", newFundAccountCost.String(),
-			"contractPrice", ci.settings.ContractPrice.String(),
-			"prevUploadDataEstimate", prevUploadDataEstimate.String(),
-			"estimatedCost", estimatedCost.String(),
-			"minInitialContractFunds", minInitialContractFunds.String(),
-			"minimum", minimum.String(),
-			"cappedEstimatedCost", cappedEstimatedCost.String(),
-		)
-	}
-	return cappedEstimatedCost, nil
-}
-
 func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uint64) float64 {
 	// return early if there's no hosts
 	if len(candidates) == 0 {
@@ -1321,12 +1236,8 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 		return api.ContractMetadata{}, false, err
 	}
 
-	// calculate the renter funds
-	renterFunds, err := c.renewFundingEstimate(ctx, ci, ctx.state.Fee, true)
-	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("could not get renew funding estimate, err: %v", err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, true, err
-	}
+	// keep the renter funds the same as before
+	renterFunds := rev.ValidRenterPayout()
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
@@ -1342,14 +1253,10 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	}
 
 	// calculate the expected new storage
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.priceTable)
-	var expectedNewStorage uint64
-	if expectedStorage > ci.contract.FileSize() {
-		expectedNewStorage = expectedStorage - ci.contract.FileSize()
-	}
+	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, ci.priceTable)
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, expectedNewStorage, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
 	if err != nil {
 		c.logger.Errorw(
 			"renewal failed",
@@ -1367,7 +1274,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	}
 
 	// update the budget
-	*budget = budget.Sub(renterFunds)
+	*budget = budget.Sub(resp.FundAmount)
 
 	// persist the contract
 	renewedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
@@ -1419,18 +1326,18 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
 	}
 
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
-	var expectedNewStorage uint64
-	if expectedStorage > ci.contract.FileSize() {
-		expectedNewStorage = expectedStorage - ci.contract.FileSize()
-	}
+	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, ci.priceTable)
 	unallocatedCollateral := contract.RemainingCollateral()
 
 	// a refresh should always result in a contract that has enough collateral
 	minNewCollateral := minRemainingCollateral(ctx.AutopilotConfig(), ctx.state.RS, renterFunds, settings, ci.priceTable).Mul64(2)
 
+	// maxFundAmount is the remaining funds of the contract to refresh plus the
+	// budget since the previous contract was in the same period
+	maxFundAmount := budget.Add(rev.ValidRenterPayout())
+
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, expectedNewStorage, settings.WindowSize)
+	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
 	if err != nil {
 		if strings.Contains(err.Error(), "new collateral is too low") {
 			c.logger.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
@@ -1444,12 +1351,14 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		if utils.IsErr(err, wallet.ErrInsufficientBalance) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
+		} else if utils.IsErr(err, api.ErrMaxFundAmountExceeded) {
+			return api.ContractMetadata{}, true, err
 		}
 		return api.ContractMetadata{}, true, err
 	}
 
 	// update the budget
-	*budget = budget.Sub(renterFunds)
+	*budget = budget.Sub(resp.FundAmount)
 
 	// persist the contract
 	refreshedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
