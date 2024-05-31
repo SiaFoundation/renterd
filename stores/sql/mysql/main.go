@@ -86,6 +86,69 @@ func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket
 	return ssql.Bucket(ctx, tx, bucket)
 }
 
+func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error) {
+	mpu, neededParts, size, eTag, err := ssql.MultipartUploadForCompletion(ctx, tx, bucket, key, uploadID, parts)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch multipart upload: %w", err)
+	}
+
+	// create the directory.
+	dirID, err := tx.MakeDirsForPath(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
+	}
+
+	// create the object
+	objID, err := ssql.InsertObject(ctx, tx, key, dirID, mpu.BucketID, size, mpu.EC, mpu.MimeType, eTag)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert object: %w", err)
+	}
+
+	// update slices
+	updateSlicesStmt, err := tx.Prepare(ctx, `
+			UPDATE slices s
+			INNER JOIN multipart_parts mpp ON s.db_multipart_part_id = mpp.id
+			SET s.db_object_id = ?,
+				s.db_multipart_part_id = NULL,
+				s.object_index = s.object_index + ?
+			WHERE mpp.id = ?
+	`)
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement to update slices: %w", err)
+	}
+	defer updateSlicesStmt.Close()
+
+	var updatedSlices int64
+	for _, part := range neededParts {
+		res, err := updateSlicesStmt.Exec(ctx, objID, updatedSlices, part.ID)
+		if err != nil {
+			return "", fmt.Errorf("failed to update slices: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return "", fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		updatedSlices += n
+	}
+
+	// create/update metadata
+	if err := ssql.InsertMetadata(ctx, tx, objID, opts.Metadata); err != nil {
+		return "", fmt.Errorf("failed to insert object metadata: %w", err)
+	}
+	_, err = tx.Exec(ctx, "UPDATE object_user_metadata SET db_multipart_upload_id = NULL, db_object_id = ? WHERE db_multipart_upload_id = ?",
+		objID, mpu.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to update object metadata: %w", err)
+	}
+
+	// delete the multipart upload
+	if _, err := tx.Exec(ctx, "DELETE FROM multipart_uploads WHERE id = ?", mpu.ID); err != nil {
+		return "", fmt.Errorf("failed to delete multipart upload: %w", err)
+	}
+
+	return eTag, nil
+}
+
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return ssql.Contracts(ctx, tx, opts)
 }
@@ -173,22 +236,9 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	if err != nil {
 		return fmt.Errorf("failed to marshal object key: %w", err)
 	}
-	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		time.Now(),
-		key,
-		dirID,
-		bucketID,
-		ssql.SecretKey(objKey),
-		o.TotalSize(),
-		mimeType,
-		eTag)
+	objID, err := ssql.InsertObject(ctx, tx, key, dirID, bucketID, o.TotalSize(), objKey, mimeType, eTag)
 	if err != nil {
 		return fmt.Errorf("failed to insert object: %w", err)
-	}
-	objID, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to fetch object id: %w", err)
 	}
 
 	// if object has no slices there is nothing to do
@@ -344,7 +394,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	// Create remaining directories.
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
 	}
 	defer insertDirStmt.Close()
 

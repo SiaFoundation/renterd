@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/modules"
@@ -1536,53 +1535,6 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 	return dir.ID, nil
 }
 
-func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
-	// Create root dir.
-	dirID := uint(isql.DirectoriesRootID)
-	if err := tx.Model(&dbDirectory{}).
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).Create(map[string]any{
-		"id":   dirID,
-		"name": "/",
-	}).Error; err != nil {
-		return 0, fmt.Errorf("failed to create root directory: %w", err)
-	}
-
-	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
-		if err := tx.Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-			Create(&dbDirectory{
-				Name:       dir,
-				DBParentID: dirID,
-			}).Error; err != nil {
-			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		}
-		var childID uint
-		if err := tx.Raw("SELECT id FROM directories WHERE name = ?", dir).
-			Scan(&childID).Error; err != nil {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if childID == 0 {
-			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
-		}
-		dirID = childID
-	}
-	return dirID, nil
-}
-
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	// Sanity check input.
 	for _, s := range o.Slabs {
@@ -1812,19 +1764,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		}
 	}
 	return slabs, nil
-}
-
-func (s *SQLStore) createUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
-	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		metadata := &dbObjectUserMetadata{
-			DBObjectID: &objID,
-			Key:        k,
-			Value:      v,
-		}
-		entities = append(entities, metadata)
-	}
-	return tx.CreateInBatches(&entities, 1000).Error
 }
 
 func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
