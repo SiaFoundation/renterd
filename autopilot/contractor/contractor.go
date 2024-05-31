@@ -1222,6 +1222,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
+	log := c.logger.With("fcid", ci.contract.ID, "hk", ci.contract.HostKey)
 
 	// convenience variables
 	contract := ci.contract
@@ -1239,18 +1240,18 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
 	minRenterFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
-	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds())
+	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds(), log)
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
+		log.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
 		return api.ContractMetadata{}, false, errors.New("insufficient budget")
 	}
 
 	// sanity check the endheight is not the same on renewals
 	endHeight := ctx.EndHeight()
 	if endHeight <= rev.EndHeight() {
-		c.logger.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
+		log.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
 		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
 	}
 
@@ -1260,11 +1261,9 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	// renew the contract
 	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
 	if err != nil {
-		c.logger.Errorw(
+		log.Errorw(
 			"renewal failed",
 			zap.Error(err),
-			"hk", hk,
-			"fcid", fcid,
 			"endHeight", endHeight,
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
@@ -1281,14 +1280,13 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	// persist the contract
 	renewedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
 	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err), "hk", hk, "fcid", fcid)
+		log.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err))
 		return api.ContractMetadata{}, false, err
 	}
 
 	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
-	c.logger.Infow(
+	log.Infow(
 		"renewal succeeded",
-		"fcid", renewedContract.ID,
 		"renewedFrom", fcid,
 		"renterFunds", renterFunds.String(),
 		"newCollateral", newCollateral.String(),
@@ -1502,22 +1500,31 @@ func refreshPriceTable(ctx context.Context, w Worker, host *api.Host) error {
 // renew a contract, 'initRenterFunds' is the amount the renter used to form the
 // contract we are about to renew, and 'remainingRenterFunds' is the amount the
 // contract currently has left.
-func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds types.Currency) types.Currency {
-	// usually the funds are not increased
+func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds types.Currency, log *zap.SugaredLogger) types.Currency {
+	log = log.With("minRenterFunds", minRenterFunds, "initRenterFunds", initRenterFunds, "remainingRenterFunds", remainingRenterFunds)
+
+	// compute the funds used
+	usedFunds := types.ZeroCurrency
+	if initRenterFunds.Cmp(remainingRenterFunds) >= 0 {
+		usedFunds = initRenterFunds.Sub(remainingRenterFunds)
+	}
+	log = log.With("usedFunds", usedFunds)
+
+	// if no funds were used, we use a fraction of the previous funding
+	if usedFunds.IsZero() {
+		log.Info("no funds were used, using half the funding from before")
+		return initRenterFunds.Div64(2) // half the funds from before
+	}
+
+	// otherwise we use the remaining funds from before because a renewal
+	// shouldn't add more funds, that's what a refresh is for
 	renterFunds := remainingRenterFunds
 
-	// if the contract wasn't used at all, we reduce the funding since we don't
-	// expect it to be used next period either
-	used := !initRenterFunds.Equals(remainingRenterFunds)
-	if !used {
-		renterFunds = renterFunds.Div64(2) // cut in half
-	}
-
-	// the funds should not drop below the amount we'd fund a new contract with
+	// but the funds should not drop below the amount we'd fund a new contract with
 	if renterFunds.Cmp(minRenterFunds) < 0 {
+		log.Info("funds would drop below the minimum, using the minimum")
 		renterFunds = minRenterFunds
 	}
-
 	return renterFunds
 }
 

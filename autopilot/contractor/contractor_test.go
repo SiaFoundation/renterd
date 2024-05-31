@@ -53,7 +53,7 @@ func TestRenewFundingEstimate(t *testing.T) {
 			minRenterFunds:       80,
 			initRenterFunds:      100,
 			remainingRenterFunds: 100,
-			expected:             80,
+			expected:             50,
 		},
 		{
 			name:                 "UnusedBelowMin",
@@ -73,13 +73,13 @@ func TestRenewFundingEstimate(t *testing.T) {
 			name:                 "UsedAboveMin",
 			minRenterFunds:       50,
 			initRenterFunds:      100,
-			remainingRenterFunds: 80,
-			expected:             80,
+			remainingRenterFunds: 90,
+			expected:             90,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			renterFunds := renewFundingEstimate(types.NewCurrency64(test.minRenterFunds), types.NewCurrency64(test.initRenterFunds), types.NewCurrency64(test.remainingRenterFunds))
+			renterFunds := renewFundingEstimate(types.NewCurrency64(test.minRenterFunds), types.NewCurrency64(test.initRenterFunds), types.NewCurrency64(test.remainingRenterFunds), zap.NewNop().Sugar())
 			if !renterFunds.Equals(types.NewCurrency64(test.expected)) {
 				t.Errorf("expected %v but got %v", test.expected, renterFunds)
 			}
