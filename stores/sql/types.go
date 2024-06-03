@@ -1,8 +1,10 @@
 package sql
 
 import (
+	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -21,12 +23,14 @@ type (
 	MerkleProof    struct{ Hashes []types.Hash256 }
 	PublicKey      types.PublicKey
 	SecretKey      []byte
+	Transaction    types.Transaction
 )
 
 var (
 	_ sql.Scanner = &Currency{}
 	_ sql.Scanner = &FileContractID{}
 	_ sql.Scanner = &Hash256{}
+	_ sql.Scanner = &MerkleProof{}
 	_ sql.Scanner = &PublicKey{}
 	_ sql.Scanner = &SecretKey{}
 )
@@ -150,4 +154,26 @@ func (k *SecretKey) Scan(value interface{}) error {
 	}
 	*k = append(SecretKey{}, SecretKey(bytes)...)
 	return nil
+}
+
+// Scan scans value into a Transaction, implements sql.Scanner interface.
+func (t *Transaction) Scan(value interface{}) error {
+	b, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal Transaction value:", value))
+	}
+
+	if err := json.NewDecoder(bytes.NewReader(b)).Decode(t); err != nil {
+		return fmt.Errorf("failed to decode Transaction value: %v", err)
+	}
+	return nil
+}
+
+// Value returns a Transaction value, implements driver.Valuer interface.
+func (t Transaction) Value() (driver.Value, error) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(&t); err != nil {
+		return nil, fmt.Errorf("failed to marshal Transaction value: %v", err)
+	}
+	return buf.Bytes(), nil
 }

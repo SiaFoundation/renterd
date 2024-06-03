@@ -85,12 +85,11 @@ func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileCo
 	l.Debugw("update contract proof height", "fcid", fcid, "proof_height", proofHeight)
 
 	for _, table := range contractTables {
-		err := updateContractProofHeight(ctx, tx, table, fcid, proofHeight)
+		ok, err := updateContractProofHeight(ctx, tx, table, fcid, proofHeight)
 		if err != nil {
-			if errors.Is(err, dsql.ErrNoRows) {
-				continue
-			}
 			return fmt.Errorf("failed to update %s proof height: %w", table[:len(table)-1], err)
+		} else if !ok {
+			continue
 		}
 		return nil
 	}
@@ -107,12 +106,11 @@ func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	}
 
 	for _, table := range contractTables {
-		err := updateContractState(ctx, tx, table, fcid, cs)
+		ok, err := updateContractState(ctx, tx, table, fcid, cs)
 		if err != nil {
-			if errors.Is(err, dsql.ErrNoRows) {
-				continue
-			}
 			return fmt.Errorf("failed to update %s state: %w", table[:len(table)-1], err)
+		} else if !ok {
+			continue
 		}
 		return nil
 	}
@@ -151,13 +149,8 @@ func UpdateStateElements(ctx context.Context, tx sql.Tx, elements []types.StateE
 	defer updateStmt.Close()
 
 	for _, el := range elements {
-		res, err := updateStmt.Exec(ctx, el.LeafIndex, MerkleProof{Hashes: el.MerkleProof}, el.ID)
-		if err != nil {
-			return fmt.Errorf("failed to update state element: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to update state element: no rows affected")
+		if _, err := updateStmt.Exec(ctx, el.LeafIndex, MerkleProof{Hashes: el.MerkleProof}, Hash256(el.ID)); err != nil {
+			return fmt.Errorf("failed to update state element '%v': %w", el.ID, err)
 		}
 	}
 
@@ -194,14 +187,14 @@ func contractNotFoundErr(fcid types.FileContractID) error {
 }
 
 func scanStateElement(s scanner) (types.StateElement, error) {
-	var id types.Hash256
+	var id Hash256
 	var leafIndex uint64
 	var merkleProof MerkleProof
 	if err := s.Scan(&id, &leafIndex, &merkleProof); err != nil {
 		return types.StateElement{}, err
 	}
 	return types.StateElement{
-		ID:          id,
+		ID:          types.Hash256(id),
 		LeafIndex:   leafIndex,
 		MerkleProof: merkleProof.Hashes,
 	}, nil
@@ -236,26 +229,26 @@ func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.Fil
 	return
 }
 
-func updateContractProofHeight(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, proofHeight uint64) error {
+func updateContractProofHeight(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, proofHeight uint64) (bool, error) {
 	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET proof_height = ? WHERE fcid = ?", table), proofHeight, FileContractID(fcid))
-	if err == nil {
-		if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return errors.New("no rows affected")
-		}
+	if err != nil {
+		return false, err
 	}
-	return err
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	return n == 1, nil
 }
 
-func updateContractState(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, cs ContractStateEnum) error {
+func updateContractState(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, cs ContractStateEnum) (bool, error) {
 	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET state = ? WHERE fcid = ?", table), cs, FileContractID(fcid))
-	if err == nil {
-		if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return errors.New("no rows affected")
-		}
+	if err != nil {
+		return false, err
 	}
-	return err
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	return n == 1, nil
 }

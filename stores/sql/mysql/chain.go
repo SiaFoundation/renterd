@@ -38,7 +38,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 		// delete spent outputs
 		for _, e := range spent {
 			c.l.Debugw(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
-			if res, err := deleteSpentStmt.Exec(c.ctx, e.ID); err != nil {
+			if res, err := deleteSpentStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete spent output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
@@ -50,7 +50,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 
 	if len(created) > 0 {
 		// prepare statement to insert new outputs
-		insertOutputStmt, err := c.tx.Prepare(c.ctx, "INSERT IGNORE INTO wallet_outputs (output_id, leaf_index, merkle_proof, value, address, maturity_height) VALUES (?, ?, ?, ?, ?, ?)")
+		insertOutputStmt, err := c.tx.Prepare(c.ctx, "INSERT IGNORE INTO wallet_outputs (created_at, output_id, leaf_index, merkle_proof, value, address, maturity_height) VALUES (?, ?, ?, ?, ?, ?, ?)")
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement to insert new outputs: %w", err)
 		}
@@ -60,7 +60,8 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 		for _, e := range created {
 			c.l.Debugw(fmt.Sprintf("create output %v", e.ID), "height", index.Height, "block_id", index.ID)
 			if _, err := insertOutputStmt.Exec(c.ctx,
-				e.ID,
+				time.Now().UTC(),
+				ssql.Hash256(e.ID),
 				e.StateElement.LeafIndex,
 				ssql.MerkleProof{Hashes: e.StateElement.MerkleProof},
 				ssql.Currency(e.SiacoinOutput.Value),
@@ -74,7 +75,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 
 	if len(events) > 0 {
 		// prepare statement to insert new events
-		insertEventStmt, err := c.tx.Prepare(c.ctx, "INSERT IGNORE INTO wallet_events (event_id, inflow, outflow, transaction, maturity_height, source, timestamp, height, block_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		insertEventStmt, err := c.tx.Prepare(c.ctx, "INSERT IGNORE INTO wallet_events (created_at, event_id, inflow, outflow, transaction, maturity_height, source, timestamp, height, block_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement to insert new events: %w", err)
 		}
@@ -84,15 +85,16 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 		for _, e := range events {
 			c.l.Debugw(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 			if _, err := insertEventStmt.Exec(c.ctx,
-				e.ID,
+				time.Now().UTC(),
+				ssql.Hash256(e.ID),
 				ssql.Currency(e.Inflow),
 				ssql.Currency(e.Outflow),
-				e.Transaction,
+				ssql.Transaction(e.Transaction),
 				e.MaturityHeight,
 				string(e.Source),
 				e.Timestamp.Unix(),
 				e.Index.Height,
-				e.Index.ID,
+				ssql.Hash256(e.Index.ID),
 			); err != nil {
 				return fmt.Errorf("failed to insert new event: %w", err)
 			}
@@ -119,7 +121,7 @@ func (c ChainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []ty
 		// delete removed outputs
 		for _, e := range removed {
 			c.l.Debugw(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
-			if res, err := deleteRemovedStmt.Exec(c.ctx, e.ID); err != nil {
+			if res, err := deleteRemovedStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete removed output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
@@ -131,7 +133,7 @@ func (c ChainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []ty
 
 	if len(unspent) > 0 {
 		// prepare statement to insert unspent outputs
-		insertOutputStmt, err := c.tx.Prepare(c.ctx, "INSERT IGNORE INTO wallet_outputs (output_id, leaf_index, merkle_proof, value, address, maturity_height) VALUES (?, ?, ?, ?, ?, ?)")
+		insertOutputStmt, err := c.tx.Prepare(c.ctx, "INSERT IGNORE INTO wallet_outputs (created_at, output_id, leaf_index, merkle_proof, value, address, maturity_height) VALUES (?, ?, ?, ?, ?, ?, ?)")
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement to insert unspent outputs: %w", err)
 		}
@@ -141,7 +143,8 @@ func (c ChainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []ty
 		for _, e := range unspent {
 			c.l.Debugw(fmt.Sprintf("recreate unspent output %v", e.ID), "height", index.Height, "block_id", index.ID)
 			if _, err := insertOutputStmt.Exec(c.ctx,
-				e.ID,
+				time.Now().UTC(),
+				ssql.Hash256(e.ID),
 				e.StateElement.LeafIndex,
 				ssql.MerkleProof{Hashes: e.StateElement.MerkleProof},
 				ssql.Currency(e.SiacoinOutput.Value),
@@ -190,7 +193,8 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 
 	// create the announcement
 	if _, err := c.tx.Exec(c.ctx,
-		"INSERT IGNORE INTO host_announcements (host_key, block_height, block_id, net_address) VALUES (?, ?, ?, ?)",
+		"INSERT IGNORE INTO host_announcements (created_at, host_key, block_height, block_id, net_address) VALUES (?, ?, ?, ?, ?)",
+		time.Now().UTC(),
 		ssql.PublicKey(hk),
 		bh,
 		blockID.String(),
@@ -201,13 +205,15 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 
 	// create the host
 	if res, err := c.tx.Exec(c.ctx, `
-	INSERT INTO hosts (public_key, last_announcement, net_address)
-	VALUES (?, ?, ?)
+	INSERT INTO hosts (created_at, public_key, last_scan, last_announcement, net_address)
+	VALUES (?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		last_announcement = VALUES(last_announcement),
 		net_address = VALUES(net_address)
 	`,
+		time.Now().UTC(),
 		ssql.PublicKey(hk),
+		0,
 		ts.UTC(),
 		ha.NetAddress,
 	); err != nil {
