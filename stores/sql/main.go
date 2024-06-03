@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 )
+
+var ErrNegativeOffset = errors.New("offset can not be negative")
 
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
@@ -435,6 +438,146 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 		return api.ErrBucketNotFound
 	}
 	return nil
+}
+
+func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	}
+
+	// validate filterMode
+	switch filterMode {
+	case api.HostFilterModeAllowed:
+	case api.HostFilterModeBlocked:
+	case api.HostFilterModeAll:
+	default:
+		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
+	}
+
+	var whereExprs []string
+	var args []any
+
+	// filter autopilot
+	if autopilotID != "" {
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h INNER JOIN host_checks hc ON hc.db_host_id = h.id INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id WHERE ap.identifer = ?)")
+		args = append(args, autopilotID)
+	}
+
+	// filter allowlist/blocklist
+	switch filterMode {
+	case api.HostFilterModeAllowed:
+		if hasAllowlist {
+			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+		if hasBlocklist {
+			whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+	case api.HostFilterModeBlocked:
+		if hasAllowlist {
+			whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+		if hasBlocklist {
+			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+	}
+
+	// filter address
+	if addressContains != "" {
+		whereExprs = append(whereExprs, "h.net_address LIKE ?")
+		args = append(args, "%"+addressContains+"%")
+	}
+
+	// filter public key
+	if len(keyIn) > 0 {
+		pubKeys := make([]any, len(keyIn))
+		for i, pk := range keyIn {
+			pubKeys[i] = PublicKey(pk)
+		}
+		placeholders := strings.Repeat("?, ", len(keyIn)-1) + "?"
+		whereExprs = append(whereExprs, fmt.Sprintf("h.public_key IN (%s)", placeholders))
+		args = append(args, pubKeys...)
+	}
+
+	// filter usability
+	switch usabilityMode {
+	case api.UsabilityFilterModeUsable:
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h INNER JOIN host_checks hc ON hc.db_host_id = h.id WHERE hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0)")
+	case api.UsabilityFilterModeUnusable:
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h INNER JOIN host_checks hc ON hc.db_host_id = h.id WHERE hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1)")
+	}
+
+	// offset + limit
+	if limit == -1 {
+		limit = math.MaxInt64
+	}
+	offsetLimitStr := fmt.Sprintf("LIMIT %d OFFSET %d", limit, offset)
+
+	// fetch stored data for each host
+	rows, err := tx.Query(ctx, "SELECT host_id, SUM(size) FROM contracts GROUP BY host_id")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stored data: %w", err)
+	}
+	defer rows.Close()
+
+	storedDataMap := make(map[int64]uint64)
+	for rows.Next() {
+		var hostID int64
+		var storedData uint64
+		if err := rows.Scan(&hostID, storedData); err != nil {
+			return nil, fmt.Errorf("failed to scan stored data: %w", err)
+		}
+		storedDataMap[hostID] = storedData
+	}
+
+	// query hosts
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
+	}
+	rows, err = tx.Query(ctx, fmt.Sprintf(`
+		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
+			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
+			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, h.lost_sectors,
+			h.scanned
+		FROM hosts h
+		%s
+		%s
+	`, whereExpr, offsetLimitStr), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.Host
+	for rows.Next() {
+		var h api.Host
+		var hostID int64
+		var pte dsql.NullTime
+		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
+			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
+			(*Settings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
+			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
+			&h.Scanned,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		h.PriceTable.Expiry = pte.Time
+		h.StoredData = storedDataMap[hostID]
+		hosts = append(hosts, h)
+	}
+
+	// query host checks
+	// TODO: implement
+
+	//	, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
+	//			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
+	//			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
+	//			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
+	//			hc.gouging_prune_err, hc.gouging_upload_errClose()
+
+	return hosts, nil
 }
 
 func scanBucket(s scanner) (api.Bucket, error) {
