@@ -1601,10 +1601,6 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
-	fmt.Println("DEBUG PJ: downloading from contracts:")
-	for _, c := range contracts {
-		fmt.Println("DEBUG PJ: ", c.ID, c.RenewedFrom)
-	}
 
 	// prepare the content
 	var content io.ReadCloser

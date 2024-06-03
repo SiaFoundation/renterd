@@ -41,7 +41,6 @@ func (c *memoryCache) Get(key string) (interface{}, bool) {
 	if !ok || time.Now().After(entry.expiry) {
 		return nil, false
 	}
-	fmt.Printf("DEBUG PJ GET from cache %s expires in %v\n", key, time.Until(entry.expiry))
 	return entry.value, ok
 }
 
@@ -52,14 +51,12 @@ func (c *memoryCache) Set(key string, value interface{}) {
 		value:  value,
 		expiry: time.Now().Add(cacheEntryExpiry),
 	}
-	fmt.Printf("DEBUG PJ SET cache %s\n", key)
 }
 
 func (c *memoryCache) Invalidate(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.items, key)
-	fmt.Printf("DEBUG PJ DELETE cache key %s\n", key)
 }
 
 type cache struct {
@@ -160,7 +157,6 @@ func (c *cache) handleContractArchive(event api.EventContractArchive) error {
 			break
 		}
 	}
-	fmt.Println("DEBUG PJ: handle contract archived", len(contracts), event)
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
 	return nil
 }
@@ -181,7 +177,6 @@ func (c *cache) handleContractRenew(event api.EventContractRenew) error {
 		}
 	}
 
-	fmt.Println("DEBUG PJ: handle contract renew", len(contracts), event)
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
 	return nil
 }
