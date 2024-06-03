@@ -193,16 +193,6 @@ func contractNotFoundErr(fcid types.FileContractID) error {
 	return fmt.Errorf("%w: %v", api.ErrContractNotFound, fcid)
 }
 
-func contractState(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID) (state api.ContractState, err error) {
-	var cse ContractStateEnum
-	if err = tx.
-		QueryRow(ctx, fmt.Sprintf("SELECT state FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
-		Scan(&cse); err == nil {
-		state = api.ContractState(cse.String())
-	}
-	return
-}
-
 func scanStateElement(s scanner) (types.StateElement, error) {
 	var id types.Hash256
 	var leafIndex uint64
