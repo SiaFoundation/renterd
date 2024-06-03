@@ -208,7 +208,7 @@ type (
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
-		ReleaseInputs(txns ...types.Transaction)
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
@@ -590,17 +590,44 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 		return
 	}
 
+	// convertToTransaction converts wallet event data to a Transaction.
+	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
+		ok = true
+		switch kind {
+		case wallet.EventTypeV1Transaction:
+			v1Txn, _ := data.(wallet.EventV1Transaction)
+			txn = types.Transaction(v1Txn)
+		case wallet.EventTypeFoundationSubsidy:
+			subsidy, _ := data.(wallet.EventFoundationSubsidy)
+			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{subsidy.SiacoinElement.SiacoinOutput}}
+		case wallet.EventTypeV1Contract:
+			payout, _ := data.(wallet.EventV1ContractPayout)
+			txn = types.Transaction{
+				FileContracts:  []types.FileContract{payout.FileContract.FileContract},
+				SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput},
+			}
+		case wallet.EventTypeMinerPayout:
+			payout, _ := data.(wallet.EventMinerPayout)
+			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
+		default:
+			ok = false
+		}
+		return
+	}
+
 	// convertToTransactions converts wallet events to API transactions.
 	convertToTransactions := func(events []wallet.Event) []api.Transaction {
-		transactions := make([]api.Transaction, len(events))
-		for i, e := range events {
-			transactions[i] = api.Transaction{
-				Raw:       e.Transaction,
-				Index:     e.Index,
-				ID:        types.TransactionID(e.ID),
-				Inflow:    e.Inflow,
-				Outflow:   e.Outflow,
-				Timestamp: e.Timestamp,
+		var transactions []api.Transaction
+		for _, e := range events {
+			if txn, ok := convertToTransaction(e.Type, e.Data); ok {
+				transactions = append(transactions, api.Transaction{
+					Raw:       txn,
+					Index:     e.Index,
+					ID:        types.TransactionID(e.ID),
+					Inflow:    e.Inflow,
+					Outflow:   e.Outflow,
+					Timestamp: e.Timestamp,
+				})
 			}
 		}
 		return transactions
@@ -717,7 +744,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 
 	_, err = b.cm.AddPoolTransactions(txns)
 	if jc.Check("couldn't broadcast the transaction", err) != nil {
-		b.w.ReleaseInputs(txns...)
+		b.w.ReleaseInputs(txns, nil)
 		return
 	}
 
@@ -727,7 +754,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 func (b *bus) walletDiscardHandler(jc jape.Context) {
 	var txn types.Transaction
 	if jc.Decode(&txn) == nil {
-		b.w.ReleaseInputs(txn)
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
 }
 
