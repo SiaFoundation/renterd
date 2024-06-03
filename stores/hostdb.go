@@ -36,7 +36,6 @@ const (
 )
 
 var (
-	ErrNegativeOffset      = errors.New("offset can not be negative")
 	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
 
@@ -400,7 +399,7 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 // HostsForScanning returns the address of hosts for scanning.
 func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	if offset < 0 {
-		return nil, ErrNegativeOffset
+		return nil, sql.ErrNegativeOffset
 	}
 
 	var hosts []struct {

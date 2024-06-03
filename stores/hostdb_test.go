@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	sql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
@@ -187,7 +188,7 @@ func TestSQLHosts(t *testing.T) {
 	if hosts, err := ss.Hosts(ctx, 3, 1); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if _, err := ss.Hosts(ctx, -1, -1); err != ErrNegativeOffset {
+	if _, err := ss.Hosts(ctx, -1, -1); err != sql.ErrNegativeOffset {
 		t.Fatal("unexpected error", err)
 	}
 
