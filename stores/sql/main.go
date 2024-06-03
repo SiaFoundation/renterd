@@ -459,7 +459,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 
 	// filter autopilot
 	if autopilotID != "" {
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h INNER JOIN host_checks hc ON hc.db_host_id = h.id INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id WHERE ap.identifer = ?)")
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h.id = h2.id INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id WHERE ap.identifier = ?)")
 		args = append(args, autopilotID)
 	}
 
@@ -501,9 +501,9 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	// filter usability
 	switch usabilityMode {
 	case api.UsabilityFilterModeUsable:
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h INNER JOIN host_checks hc ON hc.db_host_id = h.id WHERE hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0)")
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0)")
 	case api.UsabilityFilterModeUnusable:
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h INNER JOIN host_checks hc ON hc.db_host_id = h.id WHERE hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1)")
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1)")
 	}
 
 	// offset + limit
@@ -569,14 +569,55 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	}
 
 	// query host checks
-	// TODO: implement
+	var apExpr string
+	if autopilotID != "" {
+		apExpr = "WHERE ap.identifier = ?"
+		args = append(args, autopilotID)
+	}
+	rows, err = tx.Query(ctx, fmt.Sprintf(`
+		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
+			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
+			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
+			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
+			hc.gouging_prune_err, hc.gouging_upload_err
+		FROM (
+			SELECT h.id, h.public_key
+			FROM hosts h
+			%s
+			%s
+		) AS h
+		INNER JOIN host_checks hc ON hc.db_host_id = h.id
+		INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id
+		%s
+	`, whereExpr, offsetLimitStr, apExpr), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host checks: %w", err)
+	}
+	defer rows.Close()
 
-	//	, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
-	//			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
-	//			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
-	//			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
-	//			hc.gouging_prune_err, hc.gouging_upload_errClose()
+	hostChecks := make(map[types.PublicKey]map[string]api.HostCheck)
+	for rows.Next() {
+		var ap string
+		var pk PublicKey
+		var hc api.HostCheck
+		err := rows.Scan(&pk, &ap, &hc.Usability.Blocked, &hc.Usability.Offline, &hc.Usability.LowScore, &hc.Usability.RedundantIP,
+			&hc.Usability.Gouging, &hc.Usability.NotAcceptingContracts, &hc.Usability.NotAnnounced, &hc.Usability.NotCompletingScan,
+			&hc.Score.Age, &hc.Score.Collateral, &hc.Score.Interactions, &hc.Score.StorageRemaining, &hc.Score.Uptime,
+			&hc.Score.Version, &hc.Score.Prices, &hc.Gouging.ContractErr, &hc.Gouging.DownloadErr, &hc.Gouging.GougingErr,
+			&hc.Gouging.PruneErr, &hc.Gouging.UploadErr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		if _, ok := hostChecks[types.PublicKey(pk)]; !ok {
+			hostChecks[types.PublicKey(pk)] = make(map[string]api.HostCheck)
+		}
+		hostChecks[types.PublicKey(pk)][ap] = hc
+	}
 
+	// fill in hosts
+	for i := range hosts {
+		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
+	}
 	return hosts, nil
 }
 

@@ -336,7 +336,7 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add host checks, h1 gets ap1 and h2 gets both, h3 gets none
+	// add host checks, h1 gets ap1 and h2 gets both
 	h1c := newTestHostCheck()
 	h1c.Score.Age = .1
 	err = ss.UpdateHostCheck(context.Background(), ap1, hk1, h1c)
@@ -369,8 +369,8 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if cnt != 3 {
-		t.Fatal("unexpected", cnt)
+	} else if len(his) != 3 {
+		t.Fatal("unexpected", len(his))
 	}
 
 	// assert h1 and h2 have the expected checks
@@ -386,8 +386,8 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if cnt != 3 {
-		t.Fatal("unexpected", cnt)
+	} else if len(his) != 2 {
+		t.Fatal("unexpected", len(his))
 	}
 
 	// assert h1 and h2 have the expected checks
@@ -408,7 +408,7 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 1 {
+	} else if len(his) != 2 {
 		t.Fatal("unexpected", len(his))
 	}
 
