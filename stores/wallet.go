@@ -22,10 +22,10 @@ type (
 		EventID        hash256 `gorm:"unique;index:idx_events_event_id;NOT NULL;size:32"`
 		Inflow         currency
 		Outflow        currency
-		Transaction    types.Transaction `gorm:"serializer:json"`
-		MaturityHeight uint64            `gorm:"index:idx_wallet_events_maturity_height"`
-		Source         string            `gorm:"index:idx_wallet_events_source"`
-		Timestamp      int64             `gorm:"index:idx_wallet_events_timestamp"`
+		Type           string `gorm:"index:idx_wallet_events_type"`
+		Data           eventData
+		MaturityHeight uint64 `gorm:"index:idx_wallet_events_maturity_height"`
+		Timestamp      int64  `gorm:"index:idx_wallet_events_timestamp"`
 
 		// chain index
 		Height  uint64  `gorm:"index:idx_wallet_events_height"`
@@ -121,6 +121,10 @@ func (s *SQLStore) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 
 	events := make([]wallet.Event, len(dbEvents))
 	for i, e := range dbEvents {
+		data, err := e.Data.decodeToType(e.Type)
+		if err != nil {
+			return nil, err
+		}
 		events[i] = wallet.Event{
 			ID: types.Hash256(e.EventID),
 			Index: types.ChainIndex{
@@ -129,8 +133,8 @@ func (s *SQLStore) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 			},
 			Inflow:         types.Currency(e.Inflow),
 			Outflow:        types.Currency(e.Outflow),
-			Transaction:    e.Transaction,
-			Source:         wallet.EventSource(e.Source),
+			Type:           e.Type,
+			Data:           data,
 			MaturityHeight: e.MaturityHeight,
 			Timestamp:      time.Unix(e.Timestamp, 0),
 		}
