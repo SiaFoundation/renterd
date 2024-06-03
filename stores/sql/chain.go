@@ -18,17 +18,22 @@ var contractTables = []string{
 }
 
 func ContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractState, error) {
-	for _, table := range contractTables {
-		state, err := contractState(ctx, tx, table, fcid)
-		if err != nil {
-			if errors.Is(err, dsql.ErrNoRows) {
-				continue
-			}
-			return "", fmt.Errorf("failed to fetch %s state: %w", table[:len(table)-1], err)
-		}
-		return state, nil
+	var cse ContractStateEnum
+	err := tx.
+		QueryRow(ctx,
+			fmt.Sprintf("SELECT state FROM (SELECT state, fcid FROM %s UNION SELECT state, fcid FROM %s) as combined WHERE fcid = ?",
+				contractTables[0],
+				contractTables[1]),
+			FileContractID(fcid),
+		).
+		Scan(&cse)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return "", contractNotFoundErr(fcid)
+	} else if err != nil {
+		return "", fmt.Errorf("failed to fetch contract state: %w", err)
 	}
-	return "", contractNotFoundErr(fcid)
+
+	return api.ContractState(cse.String()), nil
 }
 
 func UpdateChainIndex(ctx context.Context, tx sql.Tx, index types.ChainIndex, l *zap.SugaredLogger) error {
