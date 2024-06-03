@@ -26,6 +26,34 @@ type (
 	}
 
 	DatabaseTx interface {
+		// Bucket returns the bucket with the given name. If the bucket doesn't
+		// exist, it returns api.ErrBucketNotFound.
+		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
+
+		// Contracts returns contract metadata for all active contracts. The
+		// opts argument can be used to filter the result.
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+
+		// CompleteMultipartUpload completes a multipart upload by combining the
+		// provided parts into an object in bucket 'bucket' with key 'key'. The
+		// parts need to be provided in ascending partNumber order without
+		// duplicates but can contain gaps.
+		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
+
+		// CopyObject copies an object from one bucket and key to another. If
+		// source and destination are the same, only the metadata and mimeType
+		// are overwritten with the provided ones.
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
+
+		// CreateBucket creates a new bucket with the given name and policy. If
+		// the bucket already exists, api.ErrBucketExists is returned.
+		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
+		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
+		// api.ErrBucketNotFound.
+		DeleteBucket(ctx context.Context, bucket string) error
+
 		// DeleteObject deletes an object from the database and returns true if
 		// the requested object was actually deleted.
 		DeleteObject(ctx context.Context, bucket, key string) (bool, error)
@@ -36,6 +64,9 @@ type (
 
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
+
+		// ListBuckets returns a list of all buckets in the database.
+		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -62,6 +93,10 @@ type (
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
+
+		// UpdateBucketPolicy updates the policy of the bucket with the provided
+		// one, fully overwriting the existing policy.
+		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%

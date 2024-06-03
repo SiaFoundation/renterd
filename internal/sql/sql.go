@@ -50,16 +50,16 @@ type (
 		// Multiple queries or executions may be run concurrently from the
 		// returned statement. The caller must call the statement's Close method
 		// when the statement is no longer needed.
-		Prepare(ctx context.Context, query string) (*loggedStmt, error)
+		Prepare(ctx context.Context, query string) (*LoggedStmt, error)
 		// Query executes a query that returns rows, typically a SELECT. The
 		// args are for any placeholder parameters in the query.
-		Query(ctx context.Context, query string, args ...any) (*loggedRows, error)
+		Query(ctx context.Context, query string, args ...any) (*LoggedRows, error)
 		// QueryRow executes a query that is expected to return at most one row.
 		// QueryRow always returns a non-nil value. Errors are deferred until
 		// Row's Scan method is called. If the query selects no rows, the *Row's
 		// Scan will return ErrNoRows. Otherwise, the *Row's Scan scans the
 		// first selected row and discards the rest.
-		QueryRow(ctx context.Context, query string, args ...any) *loggedRow
+		QueryRow(ctx context.Context, query string, args ...any) *LoggedRow
 	}
 )
 
@@ -91,7 +91,7 @@ func (s *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 // Multiple queries or executions may be run concurrently from the
 // returned statement. The caller must call the statement's Close method
 // when the statement is no longer needed.
-func (s *DB) Prepare(ctx context.Context, query string) (*loggedStmt, error) {
+func (s *DB) Prepare(ctx context.Context, query string) (*LoggedStmt, error) {
 	start := time.Now()
 	stmt, err := s.db.PrepareContext(ctx, query)
 	if dur := time.Since(start); dur > s.longQueryDuration {
@@ -99,7 +99,7 @@ func (s *DB) Prepare(ctx context.Context, query string) (*loggedStmt, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	return &loggedStmt{
+	return &LoggedStmt{
 		Stmt:              stmt,
 		query:             query,
 		log:               s.log.Named("statement"),
@@ -109,13 +109,13 @@ func (s *DB) Prepare(ctx context.Context, query string) (*loggedStmt, error) {
 
 // query executes a query that returns rows, typically a SELECT. The
 // args are for any placeholder parameters in the query.
-func (s *DB) Query(ctx context.Context, query string, args ...any) (*loggedRows, error) {
+func (s *DB) Query(ctx context.Context, query string, args ...any) (*LoggedRows, error) {
 	start := time.Now()
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if dur := time.Since(start); dur > s.longQueryDuration {
 		s.log.Debug("slow query", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return &loggedRows{rows, s.log.Named("rows"), s.longQueryDuration}, err
+	return &LoggedRows{rows, s.log.Named("rows"), s.longQueryDuration}, err
 }
 
 // queryRow executes a query that is expected to return at most one row.
@@ -123,13 +123,13 @@ func (s *DB) Query(ctx context.Context, query string, args ...any) (*loggedRows,
 // Row's Scan method is called. If the query selects no rows, the *Row's
 // Scan will return ErrNoRows. Otherwise, the *Row's Scan scans the
 // first selected row and discards the rest.
-func (s *DB) QueryRow(ctx context.Context, query string, args ...any) *loggedRow {
+func (s *DB) QueryRow(ctx context.Context, query string, args ...any) *LoggedRow {
 	start := time.Now()
 	row := s.db.QueryRowContext(ctx, query, args...)
 	if dur := time.Since(start); dur > s.longQueryDuration {
 		s.log.Debug("slow query row", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return &loggedRow{row, s.log.Named("row"), s.longQueryDuration}
+	return &LoggedRow{row, s.log.Named("row"), s.longQueryDuration}
 }
 
 // transaction executes a function within a database transaction. If the

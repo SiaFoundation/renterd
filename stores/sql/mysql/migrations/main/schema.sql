@@ -51,7 +51,7 @@ CREATE TABLE `autopilots` (
 CREATE TABLE `buckets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `policy` longtext,
+  `policy` JSON,
   `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`),
@@ -81,7 +81,7 @@ CREATE TABLE `hosts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `public_key` varbinary(32) NOT NULL,
-  `settings` longtext,
+  `settings` JSON,
   `price_table` longtext,
   `price_table_expiry` datetime(3) DEFAULT NULL,
   `total_scans` bigint unsigned DEFAULT NULL,

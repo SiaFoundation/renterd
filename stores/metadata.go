@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -14,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/modules"
@@ -500,108 +498,38 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 	return slice, nil
 }
 
-func (s *SQLStore) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
-	var b dbBucket
-	err := s.db.
-		WithContext(ctx).
-		Model(&dbBucket{}).
-		Where("name = ?", bucket).
-		Take(&b).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return api.Bucket{}, api.ErrBucketNotFound
-	} else if err != nil {
-		return api.Bucket{}, err
-	}
-	return api.Bucket{
-		CreatedAt: api.TimeRFC3339(b.CreatedAt.UTC()),
-		Name:      b.Name,
-		Policy:    b.Policy,
-	}, nil
+func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		b, err = tx.Bucket(ctx, bucket)
+		return
+	})
+	return
 }
 
 func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	// Create bucket.
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		res := tx.Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-			Create(&dbBucket{
-				Name:   bucket,
-				Policy: policy,
-			})
-		if res.Error != nil {
-			return res.Error
-		} else if res.RowsAffected == 0 {
-			return api.ErrBucketExists
-		}
-		return nil
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.CreateBucket(ctx, bucket, policy)
 	})
 }
 
 func (s *SQLStore) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	b, err := json.Marshal(policy)
-	if err != nil {
-		return err
-	}
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.
-			Model(&dbBucket{}).
-			Where("name", bucket).
-			Updates(map[string]interface{}{
-				"policy": string(b),
-			},
-			).
-			Error
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateBucketPolicy(ctx, bucket, policy)
 	})
 }
 
 func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
-	// Delete bucket.
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		var b dbBucket
-		if err := tx.Take(&b, "name = ?", bucket).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrBucketNotFound
-		} else if err != nil {
-			return err
-		}
-		var count int64
-		if err := tx.Model(&dbObject{}).Where("db_bucket_id = ?", b.ID).
-			Limit(1).
-			Count(&count).Error; err != nil {
-			return err
-		}
-		if count > 0 {
-			return api.ErrBucketNotEmpty
-		}
-		res := tx.Delete(&b)
-		if res.Error != nil {
-			return res.Error
-		}
-		return nil
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.DeleteBucket(ctx, bucket)
 	})
 }
 
-func (s *SQLStore) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
-	var buckets []dbBucket
-	err := s.db.
-		WithContext(ctx).
-		Model(&dbBucket{}).
-		Find(&buckets).
-		Error
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]api.Bucket, len(buckets))
-	for i, b := range buckets {
-		resp[i] = api.Bucket{
-			CreatedAt: api.TimeRFC3339(b.CreatedAt.UTC()),
-			Name:      b.Name,
-			Policy:    b.Policy,
-		}
-	}
-	return resp, nil
+func (s *SQLStore) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		buckets, err = tx.ListBuckets(ctx)
+		return
+	})
+	return
 }
 
 // ObjectsStats returns some info related to the objects stored in the store. To
@@ -746,83 +674,12 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 }
 
 func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	db := s.db.WithContext(ctx)
-
-	// helper to check whether a contract set exists
-	hasContractSet := func() error {
-		if opts.ContractSet == "" {
-			return nil
-		}
-		err := db.Where("name", opts.ContractSet).Take(&dbContractSet{}).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrContractSetNotFound
-		}
-		return err
-	}
-
-	// fetch all contracts, their hosts and the contract set name
-	var rows []struct {
-		Contract dbContract `gorm:"embedded"`
-		Host     dbHost     `gorm:"embedded"`
-		Name     string
-	}
-	tx := db
-	if opts.ContractSet == "" {
-		// no filter, use all contracts
-		tx = tx.Table("contracts")
-	} else {
-		// filter contracts by contract set first
-		tx = tx.Table("(?) contracts", db.Model(&dbContract{}).
-			Select("contracts.*").
-			Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
-			Joins("INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-			Joins("INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id AND cs.name = ?", opts.ContractSet))
-	}
-	err := tx.
-		Select("contracts.*, h.*, cs.name as Name").
-		Joins("INNER JOIN hosts h ON h.id = contracts.host_id").
-		Joins("LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id").
-		Joins("LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id").
-		Order("contracts.id ASC").
-		Scan(&rows).
-		Error
-	if err != nil {
-		return nil, err
-	} else if len(rows) == 0 {
-		return nil, hasContractSet()
-	}
-
-	// merge 'Host', 'Name' and 'Contract' into dbContracts
-	var dbContracts []dbContract
-	for i := range rows {
-		dbContract := rows[i].Contract
-		dbContract.Host = rows[i].Host
-		if rows[i].Name != "" {
-			dbContract.ContractSets = append(dbContract.ContractSets, dbContractSet{Name: rows[i].Name})
-		}
-		dbContracts = append(dbContracts, dbContract)
-	}
-
-	// merge contract sets
 	var contracts []api.ContractMetadata
-	current, dbContracts := dbContracts[0], dbContracts[1:]
-	for {
-		if len(dbContracts) == 0 {
-			contracts = append(contracts, current.convert())
-			break
-		} else if current.ID != dbContracts[0].ID {
-			contracts = append(contracts, current.convert())
-		} else if len(dbContracts[0].ContractSets) > 0 {
-			current.ContractSets = append(current.ContractSets, dbContracts[0].ContractSets...)
-		}
-		current, dbContracts = dbContracts[0], dbContracts[1:]
-	}
-
-	// if no contracts are left, check if the set existed in the first place
-	if len(contracts) == 0 {
-		return nil, hasContractSet()
-	}
-	return contracts, nil
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		contracts, err = tx.Contracts(ctx, opts)
+		return err
+	})
+	return contracts, err
 }
 
 // AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
@@ -1575,87 +1432,15 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 }
 
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		if srcBucket != dstBucket || srcPath != dstPath {
-			_, err = s.deleteObject(tx, dstBucket, dstPath)
+			_, err = tx.DeleteObject(ctx, dstBucket, dstPath)
 			if err != nil {
 				return fmt.Errorf("CopyObject: failed to delete object: %w", err)
 			}
 		}
-
-		var srcObj dbObject
-		err = tx.Where("objects.object_id = ? AND DBBucket.name = ?", srcPath, srcBucket).
-			Joins("DBBucket").
-			Take(&srcObj).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch src object: %w", err)
-		}
-
-		if srcBucket == dstBucket && srcPath == dstPath {
-			// No copying is happening. We just update the metadata on the src
-			// object.
-			srcObj.MimeType = mimeType
-			om = newObjectMetadata(
-				srcObj.ObjectID,
-				srcObj.Etag,
-				srcObj.MimeType,
-				srcObj.Health,
-				srcObj.CreatedAt,
-				srcObj.Size,
-			)
-			if err := s.updateUserMetadata(tx, srcObj.ID, metadata); err != nil {
-				return fmt.Errorf("failed to update user metadata: %w", err)
-			}
-			return tx.Save(&srcObj).Error
-		}
-
-		var srcSlices []dbSlice
-		err = tx.Where("db_object_id = ?", srcObj.ID).
-			Find(&srcSlices).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch src slices: %w", err)
-		}
-		for i := range srcSlices {
-			srcSlices[i].Model = Model{}  // clear model
-			srcSlices[i].DBObjectID = nil // clear object id
-		}
-
-		var bucket dbBucket
-		err = tx.Where("name = ?", dstBucket).
-			Take(&bucket).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch dst bucket: %w", err)
-		}
-
-		dstObj := srcObj
-		dstObj.Model = Model{}        // clear model
-		dstObj.DBBucket = bucket      // set dst bucket
-		dstObj.ObjectID = dstPath     // set dst path
-		dstObj.DBBucketID = bucket.ID // set dst bucket id
-		dstObj.Slabs = srcSlices      // set slices
-		if mimeType != "" {
-			dstObj.MimeType = mimeType // override mime type
-		}
-		if err := tx.Create(&dstObj).Error; err != nil {
-			return fmt.Errorf("failed to create copy of object: %w", err)
-		}
-
-		if err := s.createUserMetadata(tx, dstObj.ID, metadata); err != nil {
-			return fmt.Errorf("failed to create object metadata: %w", err)
-		}
-
-		om = newObjectMetadata(
-			dstObj.ObjectID,
-			dstObj.Etag,
-			dstObj.MimeType,
-			dstObj.Health,
-			dstObj.CreatedAt,
-			dstObj.Size,
-		)
-		return nil
+		om, err = tx.CopyObject(ctx, srcBucket, dstBucket, srcPath, dstPath, mimeType, metadata)
+		return err
 	})
 	return
 }
@@ -1751,53 +1536,6 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return dir.ID, nil
-}
-
-func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
-	// Create root dir.
-	dirID := uint(isql.DirectoriesRootID)
-	if err := tx.Model(&dbDirectory{}).
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).Create(map[string]any{
-		"id":   dirID,
-		"name": "/",
-	}).Error; err != nil {
-		return 0, fmt.Errorf("failed to create root directory: %w", err)
-	}
-
-	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
-		if err := tx.Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-			Create(&dbDirectory{
-				Name:       dir,
-				DBParentID: dirID,
-			}).Error; err != nil {
-			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		}
-		var childID uint
-		if err := tx.Raw("SELECT id FROM directories WHERE name = ?", dir).
-			Scan(&childID).Error; err != nil {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if childID == 0 {
-			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
-		}
-		dirID = childID
-	}
-	return dirID, nil
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
@@ -2031,19 +1769,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
-	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		metadata := &dbObjectUserMetadata{
-			DBObjectID: &objID,
-			Key:        k,
-			Value:      v,
-		}
-		entities = append(entities, metadata)
-	}
-	return tx.CreateInBatches(&entities, 1000).Error
-}
-
 func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
 	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
 	for k, v := range metadata {
@@ -2055,19 +1780,6 @@ func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, 
 		entities = append(entities, metadata)
 	}
 	return tx.CreateInBatches(&entities, 1000).Error
-}
-
-func (s *SQLStore) updateUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
-	// delete all existing metadata
-	err := tx.
-		Where("db_object_id = ?", objID).
-		Delete(&dbObjectUserMetadata{}).
-		Error
-	if err != nil {
-		return err
-	}
-
-	return s.createUserMetadata(tx, objID, metadata)
 }
 
 func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
@@ -2673,13 +2385,11 @@ func (s *SQLStore) pruneSlabsLoop() {
 		pruneSuccess := true
 		for {
 			var deleted int64
-			ctx, cancel := context.WithTimeout(s.shutdownCtx, 10*time.Second+sumDurations(s.retryTransactionIntervals))
-			err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
+			err := s.bMain.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
 				var err error
-				deleted, err = dt.PruneSlabs(ctx, slabPruningBatchSize)
+				deleted, err = dt.PruneSlabs(s.shutdownCtx, slabPruningBatchSize)
 				return err
 			})
-			cancel()
 			if err != nil {
 				s.logger.Errorw("slab pruning failed", zap.Error(err))
 				s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
@@ -2703,11 +2413,9 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		// prune dirs
-		ctx, cancel := context.WithTimeout(s.shutdownCtx, 10*time.Second+sumDurations(s.retryTransactionIntervals))
-		err := s.bMain.Transaction(ctx, func(dt sql.DatabaseTx) error {
-			return dt.PruneEmptydirs(ctx)
+		err := s.bMain.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
+			return dt.PruneEmptydirs(s.shutdownCtx)
 		})
-		cancel()
 		if err != nil {
 			s.logger.Errorw("dir pruning failed", zap.Error(err))
 			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{

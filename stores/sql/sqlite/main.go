@@ -4,6 +4,7 @@ import (
 	"context"
 	dsql "database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -49,12 +50,12 @@ func (b *MainDatabase) Close() error {
 	return closeDB(b.db, b.log)
 }
 
-func (b *MainDatabase) DB() *sql.DB {
-	return b.db
-}
-
 func (b *MainDatabase) CreateMigrationTable(ctx context.Context) error {
 	return createMigrationTable(ctx, b.db)
+}
+
+func (b *MainDatabase) DB() *sql.DB {
+	return b.db
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
@@ -78,6 +79,107 @@ func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 
 func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
+}
+
+func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
+	return ssql.Bucket(ctx, tx, bucket)
+}
+
+func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error) {
+	mpu, neededParts, size, eTag, err := ssql.MultipartUploadForCompletion(ctx, tx, bucket, key, uploadID, parts)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch multipart upload: %w", err)
+	}
+
+	// create the directory.
+	dirID, err := tx.MakeDirsForPath(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
+	}
+
+	// create the object
+	objID, err := ssql.InsertObject(ctx, tx, key, dirID, mpu.BucketID, size, mpu.EC, mpu.MimeType, eTag)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert object: %w", err)
+	}
+
+	// update slices
+	updateSlicesStmt, err := tx.Prepare(ctx, `
+			WITH cte AS (
+				SELECT s.rowid
+				FROM slices s
+				INNER JOIN multipart_parts mpp ON s.db_multipart_part_id = mpp.id
+				WHERE mpp.id = ?
+			)
+			UPDATE slices
+			SET db_object_id = ?,
+				db_multipart_part_id = NULL,
+				object_index = object_index + ?
+			WHERE rowid IN (SELECT rowid FROM cte);
+		`)
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer updateSlicesStmt.Close()
+
+	var updatedSlices int64
+	for _, part := range neededParts {
+		res, err := updateSlicesStmt.Exec(ctx, part.ID, objID, updatedSlices)
+		if err != nil {
+			return "", fmt.Errorf("failed to update slices: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return "", fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		updatedSlices += n
+	}
+
+	// create/update metadata
+	if err := ssql.InsertMetadata(ctx, tx, objID, opts.Metadata); err != nil {
+		return "", fmt.Errorf("failed to insert object metadata: %w", err)
+	}
+	_, err = tx.Exec(ctx, "UPDATE object_user_metadata SET db_multipart_upload_id = NULL, db_object_id = ? WHERE db_multipart_upload_id = ?",
+		objID, mpu.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to update object metadata: %w", err)
+	}
+
+	// delete the multipart upload
+	if _, err := tx.Exec(ctx, "DELETE FROM multipart_uploads WHERE id = ?", mpu.ID); err != nil {
+		return "", fmt.Errorf("failed to delete multipart upload: %w", err)
+	}
+
+	return eTag, nil
+}
+
+func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
+	return ssql.Contracts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
+}
+
+func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
+	policy, err := json.Marshal(bp)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(ctx, "INSERT INTO buckets (created_at, name, policy) VALUES (?, ?, ?) ON CONFLICT(name) DO NOTHING",
+		time.Now(), bucket, policy)
+	if err != nil {
+		return fmt.Errorf("failed to create bucket: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return api.ErrBucketExists
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
+	return ssql.DeleteBucket(ctx, tx, bucket)
 }
 
 func (tx *MainDatabaseTx) DeleteObject(ctx context.Context, bucket string, key string) (bool, error) {
@@ -123,17 +225,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	if err != nil {
 		return fmt.Errorf("failed to marshal object key: %w", err)
 	}
-	var objID int64
-	err = tx.QueryRow(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, key, size, mime_type, etag)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-		time.Now(),
-		key,
-		dirID,
-		bucketID,
-		ssql.SecretKey(objKey),
-		o.TotalSize(),
-		mimeType,
-		eTag).Scan(&objID)
+	objID, err := ssql.InsertObject(ctx, tx, key, dirID, bucketID, o.TotalSize(), objKey, mimeType, eTag)
 	if err != nil {
 		return fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -265,19 +357,15 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		return err
 	}
 
-	// update metadata
-	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, key, value) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
-	}
-	defer insertMetadataStmt.Close()
-
-	for k, v := range md {
-		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
-			return fmt.Errorf("failed to insert object metadata: %w", err)
-		}
+	// insert metadata
+	if err := ssql.InsertMetadata(ctx, tx, objID, md); err != nil {
+		return fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
+	return ssql.ListBuckets(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
@@ -441,68 +529,13 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
-func (tx *MainDatabaseTx) fetchUsedContracts(ctx context.Context, fcids []types.FileContractID) (map[types.FileContractID]ssql.UsedContract, error) {
-	if len(fcids) == 0 {
-		return make(map[types.FileContractID]ssql.UsedContract), nil
-	}
-
-	// flatten map to get all used contract ids
-	usedFCIDs := make([]ssql.FileContractID, 0, len(fcids))
-	for _, fcid := range fcids {
-		usedFCIDs = append(usedFCIDs, ssql.FileContractID(fcid))
-	}
-
-	placeholders := make([]string, len(usedFCIDs))
-	for i := range usedFCIDs {
-		placeholders[i] = "?"
-	}
-	placeholdersStr := strings.Join(placeholders, ", ")
-
-	args := make([]interface{}, len(usedFCIDs)*2)
-	for i := range args {
-		args[i] = usedFCIDs[i%len(usedFCIDs)]
-	}
-
-	// fetch all contracts, take into account renewals
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, fcid, renewed_from
-				   FROM contracts
-				   WHERE contracts.fcid IN (%s) OR renewed_from IN (%s)
-				   `, placeholdersStr, placeholdersStr), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-	defer rows.Close()
-
-	var contracts []ssql.UsedContract
-	for rows.Next() {
-		var c ssql.UsedContract
-		if err := rows.Scan(&c.ID, &c.FCID, &c.RenewedFrom); err != nil {
-			return nil, fmt.Errorf("failed to scan used contract: %w", err)
-		}
-		contracts = append(contracts, c)
-	}
-
-	fcidMap := make(map[types.FileContractID]struct{}, len(fcids))
-	for _, fcid := range fcids {
-		fcidMap[fcid] = struct{}{}
-	}
-
-	// build map of used contracts
-	usedContracts := make(map[types.FileContractID]ssql.UsedContract, len(contracts))
-	for _, c := range contracts {
-		if _, used := fcidMap[types.FileContractID(c.FCID)]; used {
-			usedContracts[types.FileContractID(c.FCID)] = c
-		}
-		if _, used := fcidMap[types.FileContractID(c.RenewedFrom)]; used {
-			usedContracts[types.FileContractID(c.RenewedFrom)] = c
-		}
-	}
-	return usedContracts, nil
+func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
+	return ssql.UpdateBucketPolicy(ctx, tx, bucket, policy)
 }
 
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
-	usedContracts, err := tx.fetchUsedContracts(ctx, fcids)
+	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
 	if err != nil {
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
 	}
