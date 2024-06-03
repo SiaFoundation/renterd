@@ -33,8 +33,8 @@ type (
 	}
 
 	ChainStore interface {
-		ProcessChainUpdate(ctx context.Context, fn func(ChainUpdateTx) error) error
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		ProcessChainUpdate(ctx context.Context, fn func(ChainUpdateTx) error) error
 	}
 
 	ChainUpdateTx interface {
@@ -48,6 +48,8 @@ type (
 
 		wallet.UpdateTx
 	}
+
+	ApplyChainUpdateFn = func(ChainUpdateTx) error
 
 	Subscriber struct {
 		cm     ChainManager

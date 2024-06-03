@@ -1,12 +1,14 @@
 package stores
 
 import (
+	"context"
 	"errors"
 	"math"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/chain"
 	"gorm.io/gorm"
 )
 
@@ -145,4 +147,11 @@ func (s *SQLStore) WalletEventCount() (uint64, error) {
 		return 0, err
 	}
 	return uint64(count), nil
+}
+
+// UpdateChainState process the given revert and apply updates.
+func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
+	return s.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
+	})
 }

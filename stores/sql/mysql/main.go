@@ -13,6 +13,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"lukechampine.com/frand"
@@ -367,6 +368,14 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 		}
 	}
 	return dirID, nil
+}
+
+func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn chain.ApplyChainUpdateFn) error {
+	return fn(&ChainUpdateTx{
+		ctx: ctx,
+		tx:  tx,
+		l:   tx.log.Named("ProcessChainUpdate"),
+	})
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {

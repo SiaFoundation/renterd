@@ -2,10 +2,12 @@ package sql
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/object"
 )
 
@@ -60,6 +62,9 @@ type (
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
 
+		// ProcessChainUpdate applies the given chain update to the database.
+		ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 
@@ -107,4 +112,16 @@ type (
 		FCID        FileContractID
 		RenewedFrom FileContractID
 	}
+
+	ContractInfo struct {
+		RevisionHeight uint64
+		RevisionNumber string
+		Size           uint64
+	}
 )
+
+func (c ContractInfo) RevNumber() uint64 {
+	var r uint64
+	fmt.Sscan(c.RevisionNumber, &r)
+	return r
+}

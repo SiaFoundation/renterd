@@ -6,17 +6,34 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-type ContractState uint8
+type ContractStateEnum uint8
 
 const (
-	contractStateInvalid ContractState = iota
+	contractStateInvalid ContractStateEnum = iota
 	contractStatePending
 	contractStateActive
 	contractStateComplete
 	contractStateFailed
 )
 
-func (s *ContractState) LoadString(state string) error {
+func ContractStateFromString(state string) ContractStateEnum {
+	switch strings.ToLower(state) {
+	case api.ContractStateInvalid:
+		return contractStateInvalid
+	case api.ContractStatePending:
+		return contractStatePending
+	case api.ContractStateActive:
+		return contractStateActive
+	case api.ContractStateComplete:
+		return contractStateComplete
+	case api.ContractStateFailed:
+		return contractStateFailed
+	default:
+		return contractStateInvalid
+	}
+}
+
+func (s *ContractStateEnum) LoadString(state string) error {
 	switch strings.ToLower(state) {
 	case api.ContractStateInvalid:
 		*s = contractStateInvalid
@@ -34,7 +51,7 @@ func (s *ContractState) LoadString(state string) error {
 	return nil
 }
 
-func (s ContractState) String() string {
+func (s ContractStateEnum) String() string {
 	switch s {
 	case contractStateInvalid:
 		return api.ContractStateInvalid

@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	proofHashSize = 32
 	secretKeySize = 32
 )
 
@@ -17,6 +18,7 @@ type (
 	Currency       types.Currency
 	FileContractID types.FileContractID
 	Hash256        types.Hash256
+	MerkleProof    struct{ Hashes []types.Hash256 }
 	PublicKey      types.PublicKey
 	SecretKey      []byte
 )
@@ -105,6 +107,31 @@ func (pk *PublicKey) Scan(value interface{}) error {
 // Value returns a publicKey value, implements driver.Valuer interface.
 func (pk PublicKey) Value() (driver.Value, error) {
 	return pk[:], nil
+}
+
+// Scan scans value into a MerkleProof, implements sql.Scanner interface.
+func (mp *MerkleProof) Scan(value interface{}) error {
+	b, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal MerkleProof value:", value))
+	} else if len(b)%proofHashSize != 0 {
+		return fmt.Errorf("failed to unmarshal MerkleProof value due to invalid number of bytes %v: %v", len(b), value)
+	}
+
+	mp.Hashes = make([]types.Hash256, len(b)/proofHashSize)
+	for i := range mp.Hashes {
+		copy(mp.Hashes[i][:], b[i*proofHashSize:])
+	}
+	return nil
+}
+
+// Value returns a MerkleProof value, implements driver.Valuer interface.
+func (mp MerkleProof) Value() (driver.Value, error) {
+	b := make([]byte, len(mp.Hashes)*proofHashSize)
+	for i, h := range mp.Hashes {
+		copy(b[i*proofHashSize:], h[:])
+	}
+	return b, nil
 }
 
 // String implements fmt.Stringer to prevent the key from getting leaked in
