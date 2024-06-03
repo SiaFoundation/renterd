@@ -177,7 +177,11 @@ func (u *UnixTimeNS) Scan(value interface{}) error {
 		return fmt.Errorf("failed to unmarshal UnixTimeNS value: %v %T", value, value)
 	}
 
-	*u = UnixTimeNS(time.Unix(0, nsec))
+	if nsec == 0 {
+		*u = UnixTimeNS{}
+	} else {
+		*u = UnixTimeNS(time.Unix(0, nsec))
+	}
 	return nil
 }
 
