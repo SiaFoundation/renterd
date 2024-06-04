@@ -2,11 +2,13 @@ package stores
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 )
 
 func TestTypeSetting(t *testing.T) {
@@ -161,5 +163,58 @@ func TestTypeMerkleProof(t *testing.T) {
 		t.Fatalf("unexpected number of proofs: %d", len(both))
 	} else if both[1].proof[0] != (types.Hash256{4}) {
 		t.Fatalf("unexpected proof %+v", both)
+	}
+}
+
+func TestTypeEventData(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// prepare the table
+	if isSQLite(ss.db) {
+		if err := ss.db.Exec("CREATE TABLE `event_datas` (`id` integer PRIMARY KEY AUTOINCREMENT,`data` text);").Error; err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		ss.db.Exec("DROP TABLE IF EXISTS event_datas;")
+		if err := ss.db.Exec("CREATE TABLE `event_datas` (`id` bigint unsigned NOT NULL AUTO_INCREMENT,`data` longtext, PRIMARY KEY (`id`));").Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// prepare event data
+	sk := types.GeneratePrivateKey()
+	txn := wallet.EventV1Transaction{
+		SiacoinOutputs: []types.SiacoinOutput{
+			{
+				Value:   types.Siacoins(1),
+				Address: types.StandardUnlockHash(sk.PublicKey()),
+			},
+		},
+	}
+	insert, err := toEventData(txn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// insert event data
+	if err := ss.db.Exec("INSERT INTO event_datas (data) VALUES (?);", insert).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch event data & compare
+	var data eventData
+	if err := ss.db.
+		Raw(`SELECT data FROM event_datas LIMIT 1`).
+		Scan(&data).
+		Error; err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := data.decodeToType(wallet.EventTypeV1Transaction)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(got, txn) {
+		t.Fatal("unexpected event data", got, txn)
 	}
 }

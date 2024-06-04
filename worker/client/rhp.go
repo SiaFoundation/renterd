@@ -79,13 +79,14 @@ func (c *Client) RHPPruneContract(ctx context.Context, contractID types.FileCont
 }
 
 // RHPRenew renews an existing contract with a host.
-func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, expectedStorage, windowSize uint64) (resp api.RHPRenewResponse, err error) {
+func (c *Client) RHPRenew(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage, windowSize uint64) (resp api.RHPRenewResponse, err error) {
 	req := api.RHPRenewRequest{
 		ContractID:         contractID,
 		EndHeight:          endHeight,
 		ExpectedNewStorage: expectedStorage,
 		HostAddress:        hostAddress,
 		HostKey:            hostKey,
+		MaxFundAmount:      maxFundAmount,
 		MinNewCollateral:   minNewCollateral,
 		RenterAddress:      renterAddress,
 		RenterFunds:        renterFunds,

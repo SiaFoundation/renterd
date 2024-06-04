@@ -26,7 +26,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	"go.sia.tech/renterd/chain"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
@@ -161,6 +161,11 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
+	// A ChainStore stores chain information.
+	ChainStore interface {
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+	}
+
 	// A SettingStore stores settings.
 	SettingStore interface {
 		DeleteSetting(ctx context.Context, key string) error
@@ -208,7 +213,7 @@ type (
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
-		ReleaseInputs(txns ...types.Transaction)
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
@@ -231,13 +236,14 @@ type bus struct {
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
 	webhooks WebhookManager
+	events   ibus.EventBroadcaster
 
 	cm ChainManager
 	s  Syncer
 	w  Wallet
 
 	as    AutopilotStore
-	cs    chain.ChainStore
+	cs    ChainStore
 	eas   EphemeralAccountStore
 	hdb   HostDB
 	ms    MetadataStore
@@ -590,17 +596,44 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 		return
 	}
 
+	// convertToTransaction converts wallet event data to a Transaction.
+	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
+		ok = true
+		switch kind {
+		case wallet.EventTypeV1Transaction:
+			v1Txn, _ := data.(wallet.EventV1Transaction)
+			txn = types.Transaction(v1Txn)
+		case wallet.EventTypeFoundationSubsidy:
+			subsidy, _ := data.(wallet.EventFoundationSubsidy)
+			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{subsidy.SiacoinElement.SiacoinOutput}}
+		case wallet.EventTypeV1Contract:
+			payout, _ := data.(wallet.EventV1ContractPayout)
+			txn = types.Transaction{
+				FileContracts:  []types.FileContract{payout.FileContract.FileContract},
+				SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput},
+			}
+		case wallet.EventTypeMinerPayout:
+			payout, _ := data.(wallet.EventMinerPayout)
+			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
+		default:
+			ok = false
+		}
+		return
+	}
+
 	// convertToTransactions converts wallet events to API transactions.
 	convertToTransactions := func(events []wallet.Event) []api.Transaction {
-		transactions := make([]api.Transaction, len(events))
-		for i, e := range events {
-			transactions[i] = api.Transaction{
-				Raw:       e.Transaction,
-				Index:     e.Index,
-				ID:        types.TransactionID(e.ID),
-				Inflow:    e.Inflow,
-				Outflow:   e.Outflow,
-				Timestamp: e.Timestamp,
+		var transactions []api.Transaction
+		for _, e := range events {
+			if txn, ok := convertToTransaction(e.Type, e.Data); ok {
+				transactions = append(transactions, api.Transaction{
+					Raw:       txn,
+					Index:     e.Index,
+					ID:        types.TransactionID(e.ID),
+					Inflow:    e.Inflow,
+					Outflow:   e.Outflow,
+					Timestamp: e.Timestamp,
+				})
 			}
 		}
 		return transactions
@@ -717,7 +750,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 
 	_, err = b.cm.AddPoolTransactions(txns)
 	if jc.Check("couldn't broadcast the transaction", err) != nil {
-		b.w.ReleaseInputs(txns...)
+		b.w.ReleaseInputs(txns, nil)
 		return
 	}
 
@@ -727,7 +760,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 func (b *bus) walletDiscardHandler(jc jape.Context) {
 	var txn types.Transaction
 	if jc.Decode(&txn) == nil {
-		b.w.ReleaseInputs(txn)
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
 }
 
@@ -797,6 +830,13 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Compute how much renter funds to put into the new contract.
 	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
 
+	// Make sure we don't exceed the max fund amount.
+	// TODO: remove the IsZero check for the v2 change
+	if /*!wprr.MaxFundAmount.IsZero() &&*/ wprr.MaxFundAmount.Cmp(cost) < 0 {
+		jc.Error(fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, wprr.MaxFundAmount), http.StatusBadRequest)
+		return
+	}
+
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
 	// the renter key by the worker.
@@ -806,6 +846,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	}
 
 	jc.Encode(api.WalletPrepareRenewResponse{
+		FundAmount:     cost,
 		ToSign:         toSign,
 		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
 	})
@@ -1026,7 +1067,15 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive))
+	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
+		for fcid, reason := range toArchive {
+			b.events.BroadcastEvent(api.EventContractArchive{
+				ContractID: fcid,
+				Reason:     reason,
+				Timestamp:  time.Now().UTC(),
+			})
+		}
+	}
 }
 
 func (b *bus) contractsSetsHandlerGET(jc jape.Context) {
@@ -1040,8 +1089,17 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
-	} else if jc.Decode(&contractIds) == nil {
-		jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds))
+		return
+	} else if jc.Decode(&contractIds) != nil {
+		return
+	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
+		return
+	} else {
+		b.events.BroadcastEvent(api.EventContractSetUpdate{
+			Name:        set,
+			ContractIDs: contractIds,
+			Timestamp:   time.Now().UTC(),
+		})
 	}
 }
 
@@ -1222,10 +1280,18 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		req.State = api.ContractStatePending
 	}
 	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
-	if jc.Check("couldn't store contract", err) == nil {
-		jc.Encode(r)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
 	}
+
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
+	b.events.BroadcastEvent(api.EventContractRenew{
+		ContractID:    req.Contract.ID(),
+		RenewedFromID: req.RenewedFrom,
+		Timestamp:     time.Now().UTC(),
+	})
+
+	jc.Encode(r)
 }
 
 func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1721,7 +1787,13 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
+	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
+		b.events.BroadcastEvent(api.EventSettingUpdate{
+			Key:       key,
+			Update:    value,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
@@ -1730,7 +1802,13 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
-	jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key))
+
+	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
+		b.events.BroadcastEvent(api.EventSettingDelete{
+			Key:       key,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -2439,11 +2517,12 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, cs chain.ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm WebhookManager, events ibus.EventBroadcaster, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		webhooks:         hm,
+		events:           events,
 		cm:               cm,
 		cs:               cs,
 		s:                s,

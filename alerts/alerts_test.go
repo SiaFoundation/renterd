@@ -47,7 +47,7 @@ var _ webhooks.WebhookStore = (*testWebhookStore)(nil)
 
 func TestWebhooks(t *testing.T) {
 	store := &testWebhookStore{}
-	mgr, err := webhooks.NewManager(zap.NewNop().Sugar(), store)
+	mgr, err := webhooks.NewManager(store, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
