@@ -523,7 +523,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	for rows.Next() {
 		var hostID int64
 		var storedData uint64
-		if err := rows.Scan(&hostID, storedData); err != nil {
+		if err := rows.Scan(&hostID, &storedData); err != nil {
 			return nil, fmt.Errorf("failed to scan stored data: %w", err)
 		}
 		storedDataMap[hostID] = storedData
