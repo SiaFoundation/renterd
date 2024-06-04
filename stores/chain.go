@@ -9,15 +9,10 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
+	"go.sia.tech/renterd/internal/chain"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-)
-
-var (
-	_ chain.ChainStore    = (*SQLStore)(nil)
-	_ chain.ChainUpdateTx = (*chainUpdateTx)(nil)
 )
 
 // chainUpdateTx implements the ChainUpdateTx interface.
@@ -93,21 +88,23 @@ func (u *chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []type
 	// create events
 	for _, e := range events {
 		u.debug(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
-		if err := u.tx.
+		if data, err := toEventData(e.Data); err != nil {
+			return err
+		} else if err := u.tx.
 			Clauses(clause.OnConflict{
 				DoNothing: true,
 				Columns:   []clause.Column{{Name: "event_id"}},
 			}).
 			Create(&dbWalletEvent{
 				EventID:        hash256(e.ID),
-				Inflow:         currency(e.Inflow),
-				Outflow:        currency(e.Outflow),
-				Transaction:    e.Transaction,
-				MaturityHeight: e.MaturityHeight,
-				Source:         string(e.Source),
-				Timestamp:      e.Timestamp.Unix(),
 				Height:         e.Index.Height,
 				BlockID:        hash256(e.Index.ID),
+				Inflow:         currency(e.Inflow),
+				Outflow:        currency(e.Outflow),
+				Type:           e.Type,
+				Data:           data,
+				MaturityHeight: e.MaturityHeight,
+				Timestamp:      e.Timestamp.Unix(),
 			}).Error; err != nil {
 			return err
 		}

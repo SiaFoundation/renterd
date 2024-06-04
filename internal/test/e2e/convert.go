@@ -1,4 +1,4 @@
-package node
+package e2e
 
 import (
 	"bytes"
