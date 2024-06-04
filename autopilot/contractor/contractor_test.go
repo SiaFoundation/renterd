@@ -49,11 +49,18 @@ func TestRenewFundingEstimate(t *testing.T) {
 		expected             uint64
 	}{
 		{
-			name:                 "UnusedAboveMin",
-			minRenterFunds:       80,
+			name:                 "UnusedAboveMinAboveInit",
+			minRenterFunds:       40,
 			initRenterFunds:      100,
 			remainingRenterFunds: 100,
 			expected:             50,
+		},
+		{
+			name:                 "UnusedAboveMinBelowInit",
+			minRenterFunds:       80,
+			initRenterFunds:      100,
+			remainingRenterFunds: 100,
+			expected:             80,
 		},
 		{
 			name:                 "UnusedBelowMin",

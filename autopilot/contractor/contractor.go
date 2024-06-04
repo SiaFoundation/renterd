@@ -1351,8 +1351,6 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		if utils.IsErr(err, wallet.ErrInsufficientBalance) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
-		} else if utils.IsErr(err, api.ErrMaxFundAmountExceeded) {
-			return api.ContractMetadata{}, true, err
 		}
 		return api.ContractMetadata{}, true, err
 	}
@@ -1510,15 +1508,16 @@ func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds 
 	}
 	log = log.With("usedFunds", usedFunds)
 
-	// if no funds were used, we use a fraction of the previous funding
+	var renterFunds types.Currency
 	if usedFunds.IsZero() {
+		// if no funds were used, we use a fraction of the previous funding
 		log.Info("no funds were used, using half the funding from before")
-		return initRenterFunds.Div64(2) // half the funds from before
+		renterFunds = initRenterFunds.Div64(2) // half the funds from before
+	} else {
+		// otherwise we use the remaining funds from before because a renewal
+		// shouldn't add more funds, that's what a refresh is for
+		renterFunds = remainingRenterFunds
 	}
-
-	// otherwise we use the remaining funds from before because a renewal
-	// shouldn't add more funds, that's what a refresh is for
-	renterFunds := remainingRenterFunds
 
 	// but the funds should not drop below the amount we'd fund a new contract with
 	if renterFunds.Cmp(minRenterFunds) < 0 {
