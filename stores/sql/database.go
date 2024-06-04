@@ -26,6 +26,9 @@ type (
 	}
 
 	DatabaseTx interface {
+		// AddMultipartPart adds a part to an unfinished multipart upload.
+		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
