@@ -1,15 +1,25 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 
 	"go.sia.tech/core/gateway"
+	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
-	"go.sia.tech/renterd/chain"
 	"go.uber.org/zap"
 )
+
+type Syncer interface {
+	Addr() string
+	BroadcastHeader(h gateway.BlockHeader)
+	BroadcastTransactionSet([]types.Transaction)
+	Close() error
+	Connect(ctx context.Context, addr string) (*syncer.Peer, error)
+	Peers() []*syncer.Peer
+}
 
 type nodeSyncer struct {
 	*syncer.Syncer
@@ -23,7 +33,7 @@ func (s *nodeSyncer) Close() error {
 // NewSyncer creates a syncer using the given configuration. The syncer that is
 // returned is already running, closing it will close the underlying listener
 // causing the syncer to stop.
-func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (chain.Syncer, error) {
+func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (Syncer, error) {
 	// validate config
 	if cfg.Bootstrap && cfg.Network == nil {
 		return nil, errors.New("cannot bootstrap without a network")
