@@ -555,7 +555,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
-			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, h.lost_sectors,
+			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
 			h.scanned, %s
 		FROM hosts h
 		%s
