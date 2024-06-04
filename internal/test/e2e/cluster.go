@@ -68,7 +68,7 @@ type TestCluster struct {
 
 	network *consensus.Network
 	cm      *chain.Manager
-	cs      *chain.Subscriber
+	cs      *node.ChainSubscriber
 	apID    string
 	dbName  string
 	dir     string
