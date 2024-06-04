@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/chain"
+	"go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -29,6 +30,7 @@ type (
 	ChainSubscriber struct {
 		cm     chain.ChainManager
 		cs     chain.ChainStore
+		events bus.EventBroadcaster
 		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
@@ -66,7 +68,7 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be shut down by calling the Close method.
-func NewChainSubscriber(cm chain.ChainManager, cs chain.ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
+func NewChainSubscriber(cm chain.ChainManager, cs chain.ChainStore, events bus.EventBroadcaster, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
@@ -76,6 +78,7 @@ func NewChainSubscriber(cm chain.ChainManager, cs chain.ChainStore, walletAddres
 	subscriber := &ChainSubscriber{
 		cm:     cm,
 		cs:     cs,
+		events: events,
 		logger: logger.Sugar(),
 
 		announcementMaxAge: announcementMaxAge,
@@ -246,6 +249,8 @@ func (s *ChainSubscriber) sync() error {
 		}
 		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
 		cnt++
+
+		// TODO: broadcast consensus update
 	}
 
 	s.logger.Debugw("sync completed", "start_height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)

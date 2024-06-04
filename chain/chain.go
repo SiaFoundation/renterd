@@ -22,8 +22,9 @@ var ForEachHostAnnouncement = chain.ForEachHostAnnouncement
 
 type (
 	ChainManager interface {
-		Tip() types.ChainIndex
+		Block(id types.BlockID) (types.Block, bool)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
+		Tip() types.ChainIndex
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
 	}
 

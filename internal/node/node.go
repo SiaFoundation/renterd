@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/config"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
@@ -133,13 +134,16 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 
 	// create webhooks manager
-	wh, err := webhooks.NewManager(logger.Named("webhooks").Sugar(), sqlStore)
+	wh, err := webhooks.NewManager(sqlStore, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
 	// hookup webhooks <-> alerts
 	alertsMgr.RegisterWebhookBroadcaster(wh)
+
+	// create event broadcaster
+	events := ibus.NewEventBroadcaster(wh, logger)
 
 	// create chain manager
 	store, state, err := chain.NewDBStore(bdb, cfg.Network, cfg.Genesis)
@@ -149,7 +153,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	cm := chain.NewManager(store, state)
 
 	// create chain subscriber
-	cs, err := NewChainSubscriber(cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
+	cs, err := NewChainSubscriber(cm, sqlStore, events, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

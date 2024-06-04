@@ -56,6 +56,10 @@ type (
 		Event   string      `json:"event"`
 		Payload interface{} `json:"payload,omitempty"`
 	}
+
+	WebhookEvent interface {
+		Event() Event
+	}
 )
 
 type Manager struct {
@@ -213,10 +217,10 @@ func (w Webhook) String() string {
 	return fmt.Sprintf("%v.%v.%v", w.URL, w.Module, w.Event)
 }
 
-func NewManager(logger *zap.SugaredLogger, store WebhookStore) (*Manager, error) {
+func NewManager(store WebhookStore, logger *zap.Logger) (*Manager, error) {
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		logger: logger.Named("webhooks"),
+		logger: logger.Named("webhooks").Sugar(),
 		store:  store,
 
 		shutdownCtx:       shutdownCtx,
