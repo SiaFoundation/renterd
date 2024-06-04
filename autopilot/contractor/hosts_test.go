@@ -70,7 +70,7 @@ func TestScoredHostsRandSelectByScore(t *testing.T) {
 	}
 	var chi2 float64
 	for i := 0; i < 2; i++ {
-		chi2 += math.Pow(float64(counts[i])-nRuns/2, 2) / nRuns / 2
+		chi2 += math.Pow(float64(counts[i])-nRuns/2, 2) / (nRuns / 2)
 	}
 	if chi2 > 6.635 {
 		t.Fatal("unexpected", counts[0], counts[1], chi2)
