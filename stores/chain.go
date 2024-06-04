@@ -7,17 +7,25 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
+	ichain "go.sia.tech/renterd/internal/chain"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 var (
-	_ chain.ChainStore    = (*SQLStore)(nil)
-	_ chain.ChainUpdateTx = (*chainUpdateTx)(nil)
+	_ ChainStore           = (*SQLStore)(nil)
+	_ ichain.ChainUpdateTx = (*chainUpdateTx)(nil)
+)
+
+type (
+	ChainStore interface {
+		ProcessChainUpdate(ctx context.Context, fn func(ichain.ChainUpdateTx) error) error
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+	}
 )
 
 // chainUpdateTx implements the ChainUpdateTx interface.
@@ -34,7 +42,7 @@ type logEntry struct {
 
 // ProcessChainUpdate returns a callback function that process a chain update
 // inside a transaction.
-func (s *SQLStore) ProcessChainUpdate(ctx context.Context, fn func(chain.ChainUpdateTx) error) error {
+func (s *SQLStore) ProcessChainUpdate(ctx context.Context, fn func(ichain.ChainUpdateTx) error) error {
 	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		updateTx := &chainUpdateTx{tx: tx}
 		err := fn(updateTx)
@@ -47,7 +55,7 @@ func (s *SQLStore) ProcessChainUpdate(ctx context.Context, fn func(chain.ChainUp
 
 // UpdateChainState process the given revert and apply updates.
 func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
-	return s.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	return s.ProcessChainUpdate(context.Background(), func(tx ichain.ChainUpdateTx) error {
 		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
 	})
 }

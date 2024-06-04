@@ -26,7 +26,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	"go.sia.tech/renterd/chain"
+	ichain "go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
@@ -161,6 +161,12 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
+	// A ChainStore stores chain information.
+	ChainStore interface {
+		ProcessChainUpdate(ctx context.Context, fn func(ichain.ChainUpdateTx) error) error
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+	}
+
 	// A SettingStore stores settings.
 	SettingStore interface {
 		DeleteSetting(ctx context.Context, key string) error
@@ -237,7 +243,7 @@ type bus struct {
 	w  Wallet
 
 	as    AutopilotStore
-	cs    chain.ChainStore
+	cs    ChainStore
 	eas   EphemeralAccountStore
 	hdb   HostDB
 	ms    MetadataStore
@@ -2466,7 +2472,7 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, cs chain.ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,

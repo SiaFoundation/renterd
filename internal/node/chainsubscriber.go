@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
 	"go.sia.tech/renterd/internal/bus"
+	ichain "go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -27,9 +28,21 @@ var (
 )
 
 type (
+	ChainManager interface {
+		Block(id types.BlockID) (types.Block, bool)
+		OnReorg(fn func(types.ChainIndex)) (cancel func())
+		Tip() types.ChainIndex
+		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
+	}
+
+	ChainStore interface {
+		ProcessChainUpdate(ctx context.Context, fn func(ichain.ChainUpdateTx) error) error
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+	}
+
 	ChainSubscriber struct {
-		cm     chain.ChainManager
-		cs     chain.ChainStore
+		cm     ChainManager
+		cs     ChainStore
 		events bus.EventBroadcaster
 		logger *zap.SugaredLogger
 
@@ -68,7 +81,7 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be shut down by calling the Close method.
-func NewChainSubscriber(cm chain.ChainManager, cs chain.ChainStore, events bus.EventBroadcaster, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
+func NewChainSubscriber(cm *chain.Manager, cs ChainStore, events bus.EventBroadcaster, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
@@ -151,7 +164,7 @@ func (s *ChainSubscriber) Run() (func(), error) {
 	}), nil
 }
 
-func (s *ChainSubscriber) applyChainUpdate(tx chain.ChainUpdateTx, cau chain.ApplyUpdate) error {
+func (s *ChainSubscriber) applyChainUpdate(tx ichain.ChainUpdateTx, cau chain.ApplyUpdate) error {
 	// apply host updates
 	b := cau.Block
 	if time.Since(b.Timestamp) <= s.announcementMaxAge {
@@ -192,7 +205,7 @@ func (s *ChainSubscriber) applyChainUpdate(tx chain.ChainUpdateTx, cau chain.App
 	return nil
 }
 
-func (s *ChainSubscriber) revertChainUpdate(tx chain.ChainUpdateTx, cru chain.RevertUpdate) error {
+func (s *ChainSubscriber) revertChainUpdate(tx ichain.ChainUpdateTx, cru chain.RevertUpdate) error {
 	// NOTE: host updates are not reverted
 
 	// v1 contracts
@@ -259,7 +272,7 @@ func (s *ChainSubscriber) sync() error {
 
 func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (types.ChainIndex, error) {
 	var index types.ChainIndex
-	if err := s.cs.ProcessChainUpdate(ctx, func(tx chain.ChainUpdateTx) error {
+	if err := s.cs.ProcessChainUpdate(ctx, func(tx ichain.ChainUpdateTx) error {
 		// process wallet updates
 		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
 			return fmt.Errorf("failed to process wallet updates: %w", err)
@@ -297,7 +310,7 @@ func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 	return index, nil
 }
 
-func (s *ChainSubscriber) updateContract(tx chain.ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
+func (s *ChainSubscriber) updateContract(tx ichain.ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
 	// sanity check at least one is not nil
 	if prev == nil && curr == nil {
 		return errors.New("both prev and curr revisions are nil") // developer error
