@@ -880,32 +880,15 @@ SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as secto
 	return sizes, nil
 }
 
-func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
+func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (cs api.ContractSize, err error) {
 	if !s.isKnownContract(id) {
 		return api.ContractSize{}, api.ErrContractNotFound
 	}
-
-	var size struct {
-		Size     uint64 `json:"size"`
-		Prunable uint64 `json:"prunable"`
-	}
-
-	if err := s.db.
-		WithContext(ctx).
-		Raw(`
-SELECT contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
-SELECT MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id WHERE c.fcid = ?
-) i
-`, rhpv2.SectorSize, fileContractID(id)).
-		Take(&size).
-		Error; err != nil {
-		return api.ContractSize{}, err
-	}
-
-	return api.ContractSize{
-		Size:     size.Size,
-		Prunable: size.Prunable,
-	}, nil
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		cs, err = tx.ContractSize(ctx, id)
+		return
+	})
+	return cs, err
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {

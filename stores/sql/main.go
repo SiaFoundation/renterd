@@ -12,6 +12,8 @@ import (
 
 	dsql "database/sql"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
+
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
@@ -242,6 +244,32 @@ func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUs
 		}
 	}
 	return nil
+}
+
+func ContractSize(ctx context.Context, tx sql.Tx, id types.FileContractID) (api.ContractSize, error) {
+	var contractID, size uint64
+	if err := tx.QueryRow(ctx, "SELECT id, size FROM contracts WHERE fcid = ?", FileContractID(id)).
+		Scan(&contractID, &size); errors.Is(err, dsql.ErrNoRows) {
+		return api.ContractSize{}, api.ErrContractNotFound
+	} else if err != nil {
+		return api.ContractSize{}, err
+	}
+
+	var nSectors uint64
+	if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contract_sectors WHERE db_contract_id = ?", contractID).
+		Scan(&nSectors); err != nil {
+		return api.ContractSize{}, err
+	}
+	sectorsSize := nSectors * rhpv2.SectorSize
+
+	var prunable uint64
+	if size > sectorsSize {
+		prunable = size - sectorsSize
+	}
+	return api.ContractSize{
+		Size:     size,
+		Prunable: prunable,
+	}, nil
 }
 
 func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
