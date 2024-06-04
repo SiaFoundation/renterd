@@ -17,13 +17,13 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -66,7 +66,7 @@ type TestCluster struct {
 
 	network *consensus.Network
 	cm      *chain.Manager
-	cs      *node.ChainSubscriber
+	cs      *chain.ChainSubscriber
 	apID    string
 	dbName  string
 	dir     string

@@ -26,7 +26,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	ichain "go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
@@ -163,7 +162,6 @@ type (
 
 	// A ChainStore stores chain information.
 	ChainStore interface {
-		ProcessChainUpdate(ctx context.Context, fn func(ichain.ChainUpdateTx) error) error
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 	}
 

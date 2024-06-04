@@ -14,13 +14,13 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
@@ -64,7 +64,7 @@ type (
 	ShutdownFn = func(context.Context) error
 )
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, *ChainSubscriber, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, *chain.ChainSubscriber, error) {
 	// create consensus directory
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
@@ -153,7 +153,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	cm := chain.NewManager(store, state)
 
 	// create chain subscriber
-	cs, err := NewChainSubscriber(cm, sqlStore, events, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
+	cs, err := chain.NewChainSubscriber(cm, sqlStore, events, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
