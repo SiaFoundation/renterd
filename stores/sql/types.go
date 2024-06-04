@@ -97,7 +97,7 @@ func (h Hash256) Value() (driver.Value, error) {
 	return h[:], nil
 }
 
-// Scan scan value into hostSettings, implements sql.Scanner interface.
+// Scan scan value into Settings, implements sql.Scanner interface.
 func (hs *Settings) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
@@ -111,7 +111,7 @@ func (hs Settings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 
-// Scan scan value into hostPriceTable, implements sql.Scanner interface.
+// Scan scan value into PriceTable, implements sql.Scanner interface.
 func (pt *PriceTable) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
@@ -161,7 +161,7 @@ func (k *SecretKey) Scan(value interface{}) error {
 	return nil
 }
 
-// Scan scan value into balance, implements sql.Scanner interface.
+// Scan scan value into UnixTimeNS, implements sql.Scanner interface.
 func (u *UnixTimeNS) Scan(value interface{}) error {
 	var nsec int64
 	var err error
