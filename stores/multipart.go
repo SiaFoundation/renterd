@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"unicode/utf8"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
 )
@@ -94,68 +93,8 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 }
 
 func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
-	// collect all used contracts
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	for _, s := range slices {
-		for _, shard := range s.Shards {
-			for h, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, exists := usedContracts[h]; !exists {
-						usedContracts[h] = make(map[types.FileContractID]struct{})
-					}
-					usedContracts[h][fcid] = struct{}{}
-				}
-			}
-		}
-	}
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Fetch contract set.
-		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
-		}
-		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, usedContracts)
-		if err != nil {
-			return fmt.Errorf("failed to fetch used contracts: %w", err)
-		}
-		// Find multipart upload.
-		var mu dbMultipartUpload
-		err = tx.Where("upload_id", uploadID).
-			Take(&mu).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch multipart upload: %w", err)
-		}
-		// Delete a potentially existing part.
-		err = tx.Model(&dbMultipartPart{}).
-			Where("db_multipart_upload_id = ? AND part_number = ?", mu.ID, partNumber).
-			Delete(&dbMultipartPart{}).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to delete existing part: %w", err)
-		}
-		var size uint64
-		for _, slice := range slices {
-			size += uint64(slice.Length)
-		}
-		// Create a new part.
-		part := dbMultipartPart{
-			Etag:                eTag,
-			PartNumber:          partNumber,
-			DBMultipartUploadID: mu.ID,
-			Size:                size,
-		}
-		err = tx.Create(&part).Error
-		if err != nil {
-			return fmt.Errorf("failed to create part: %w", err)
-		}
-		// Create the slices.
-		err = s.createSlices(tx, nil, &part.ID, cs.ID, contracts, slices)
-		if err != nil {
-			return fmt.Errorf("failed to create slices: %w", err)
-		}
-		return nil
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.AddMultipartPart(ctx, bucket, path, contractSet, eTag, uploadID, partNumber, slices)
 	})
 }
 
@@ -323,152 +262,27 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 			return api.MultipartCompleteResponse{}, fmt.Errorf("duplicate part number %v", parts[i].PartNumber)
 		}
 	}
+
 	var eTag string
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
+	var prune bool
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// Delete potentially existing object.
-		_, err := s.deleteObject(tx, bucket, path)
+		prune, err = tx.DeleteObject(ctx, bucket, path)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
-		// Find multipart upload.
-		var mu dbMultipartUpload
-		err = tx.Where("upload_id = ?", uploadID).
-			Preload("Parts").
-			Joins("DBBucket").
-			Take(&mu).
-			Error
+		// Complete upload
+		eTag, err = tx.CompleteMultipartUpload(ctx, bucket, path, uploadID, parts, opts)
 		if err != nil {
-			return fmt.Errorf("failed to fetch multipart upload: %w", err)
+			return fmt.Errorf("failed to complete multipart upload: %w", err)
 		}
-		// Check object id.
-		if mu.ObjectID != path {
-			return fmt.Errorf("object id mismatch: %v != %v: %w", mu.ObjectID, path, api.ErrObjectNotFound)
-		}
-
-		// Check bucket name.
-		if mu.DBBucket.Name != bucket {
-			return fmt.Errorf("bucket name mismatch: %v != %v: %w", mu.DBBucket.Name, bucket, api.ErrBucketNotFound)
-		}
-
-		// Sort the parts.
-		sort.Slice(mu.Parts, func(i, j int) bool {
-			return mu.Parts[i].PartNumber < mu.Parts[j].PartNumber
-		})
-		// Find relevant parts.
-		var dbParts []dbMultipartPart
-		var size uint64
-		j := 0
-		for _, part := range parts {
-			for {
-				if j >= len(mu.Parts) {
-					// ran out of parts in the database
-					return api.ErrPartNotFound
-				} else if mu.Parts[j].PartNumber > part.PartNumber {
-					// missing part
-					return api.ErrPartNotFound
-				} else if mu.Parts[j].PartNumber == part.PartNumber && mu.Parts[j].Etag == strings.Trim(part.ETag, "\"") {
-					// found a match
-					dbParts = append(dbParts, mu.Parts[j])
-					size += mu.Parts[j].Size
-					j++
-					break
-				} else {
-					// try next
-					j++
-				}
-			}
-		}
-
-		// Fetch all the slices in the right order.
-		var slices []dbSlice
-		h := types.NewHasher()
-		for _, part := range dbParts {
-			var partSlices []dbSlice
-			err = tx.Model(&dbSlice{}).
-				Joins("INNER JOIN multipart_parts mp ON mp.id = slices.db_multipart_part_id AND mp.id = ?", part.ID).
-				Joins("INNER JOIN multipart_uploads mus ON mus.id = mp.db_multipart_upload_id").
-				Find(&partSlices).
-				Error
-			if err != nil {
-				return fmt.Errorf("failed to fetch slices: %w", err)
-			}
-			slices = append(slices, partSlices...)
-			if _, err = h.E.Write([]byte(part.Etag)); err != nil {
-				return fmt.Errorf("failed to hash etag: %w", err)
-			}
-		}
-
-		// Compute ETag.
-		sum := h.Sum()
-		eTag = hex.EncodeToString(sum[:])
-
-		// Create the directory.
-		dirID, err := makeDirsForPath(tx, path)
-		if err != nil {
-			return fmt.Errorf("failed to create directory for path %s: %w", path, err)
-		}
-
-		// Create the object.
-		obj := dbObject{
-			DBDirectoryID: dirID,
-			DBBucketID:    mu.DBBucketID,
-			ObjectID:      path,
-			Key:           mu.Key,
-			Size:          int64(size),
-			MimeType:      mu.MimeType,
-			Etag:          eTag,
-		}
-		if err := tx.Create(&obj).Error; err != nil {
-			return fmt.Errorf("failed to create object: %w", err)
-		}
-
-		// Assign the right object id and unassign the multipart upload. Also
-		// set the right object_index to make sure the slices are sorted
-		// correctly when retrieving the object later.
-		for i := range slices {
-			err = tx.Model(&dbSlice{}).
-				Where("id", slices[i].ID).
-				Updates(map[string]interface{}{
-					"db_object_id":         obj.ID,
-					"object_index":         uint(i + 1),
-					"db_multipart_part_id": nil,
-				}).Error
-			if err != nil {
-				return fmt.Errorf("failed to update slice %v: %w", i, err)
-			}
-		}
-
-		// Create new metadata.
-		if len(opts.Metadata) > 0 {
-			err = s.createUserMetadata(tx, obj.ID, opts.Metadata)
-			if err != nil {
-				return fmt.Errorf("failed to create metadata: %w", err)
-			}
-		}
-
-		// Update user metadata.
-		if err := tx.
-			Model(&dbObjectUserMetadata{}).
-			Where("db_multipart_upload_id = ?", mu.ID).
-			Updates(map[string]interface{}{
-				"db_object_id":           obj.ID,
-				"db_multipart_upload_id": nil,
-			}).Error; err != nil {
-			return fmt.Errorf("failed to update user metadata: %w", err)
-		}
-
-		// Delete the multipart upload.
-		if err := tx.Delete(&mu).Error; err != nil {
-			return fmt.Errorf("failed to delete multipart upload: %w", err)
-		}
-
-		// Prune the slabs.
-		s.triggerSlabPruning()
 		return nil
 	})
 	if err != nil {
 		return api.MultipartCompleteResponse{}, err
+	} else if prune {
+		s.triggerSlabPruning()
 	}
 	return api.MultipartCompleteResponse{
 		ETag: eTag,

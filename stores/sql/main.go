@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -191,6 +192,23 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec []byte, mimeType, eTag string) (int64, error) {
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, `+"`key`"+`, size, mime_type, etag)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		time.Now(),
+		key,
+		dirID,
+		bucketID,
+		SecretKey(ec),
+		size,
+		mimeType,
+		eTag)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
 	if err := DeleteMetadata(ctx, tx, objID); err != nil {
 		return err
@@ -206,6 +224,9 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 }
 
 func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+	if len(md) == 0 {
+		return nil
+	}
 	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
@@ -317,6 +338,87 @@ func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 		buckets = append(buckets, bucket)
 	}
 	return buckets, nil
+}
+
+type multipartUpload struct {
+	ID       int64
+	Key      string
+	Bucket   string
+	BucketID int64
+	EC       []byte
+	MimeType string
+}
+
+type multipartUploadPart struct {
+	ID         int64
+	PartNumber int64
+	Etag       string
+	Size       int64
+}
+
+func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, parts []api.MultipartCompletedPart) (multipartUpload, []multipartUploadPart, int64, string, error) {
+	// fetch upload
+	var mpu multipartUpload
+	err := tx.QueryRow(ctx, "SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id").
+		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
+	if err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch upload: %w", err)
+	} else if mpu.Key != key {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("object id mismatch: %v != %v: %w", mpu.Key, key, api.ErrObjectNotFound)
+	} else if mpu.Bucket != bucket {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("bucket name mismatch: %v != %v: %w", mpu.Bucket, bucket, api.ErrBucketNotFound)
+	}
+
+	// find relevant parts
+	rows, err := tx.Query(ctx, "SELECT id, part_number, etag, size FROM multipart_parts WHERE db_multipart_upload_id = ? ORDER BY part_number ASC", mpu.ID)
+	if err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch parts: %w", err)
+	}
+	defer rows.Close()
+
+	var storedParts []multipartUploadPart
+	for rows.Next() {
+		var p multipartUploadPart
+		if err := rows.Scan(&p.ID, &p.PartNumber, &p.Etag, &p.Size); err != nil {
+			return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to scan part: %w", err)
+		}
+		storedParts = append(storedParts, p)
+	}
+
+	var neededParts []multipartUploadPart
+	var size int64
+	h := types.NewHasher()
+	j := 0
+	for _, part := range storedParts {
+		for {
+			if j >= len(storedParts) {
+				// ran out of parts in the database
+				return multipartUpload{}, nil, 0, "", api.ErrPartNotFound
+			} else if storedParts[j].PartNumber > part.PartNumber {
+				// missing part
+				return multipartUpload{}, nil, 0, "", api.ErrPartNotFound
+			} else if storedParts[j].PartNumber == part.PartNumber && storedParts[j].Etag == strings.Trim(part.Etag, "\"") {
+				// found a match
+				neededParts = append(neededParts, storedParts[j])
+				size += storedParts[j].Size
+				j++
+
+				// update hasher
+				if _, err = h.E.Write([]byte(part.Etag)); err != nil {
+					return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to hash etag: %w", err)
+				}
+				break
+			} else {
+				// try next
+				j++
+			}
+		}
+	}
+
+	// compute ETag.
+	sum := h.Sum()
+	eTag := hex.EncodeToString(sum[:])
+	return mpu, neededParts, size, eTag, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {

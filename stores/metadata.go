@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/modules"
@@ -678,7 +677,7 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 	var contracts []api.ContractMetadata
 	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		contracts, err = tx.Contracts(ctx, opts)
-		return err
+		return
 	})
 	return contracts, err
 }
@@ -1536,53 +1535,6 @@ func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
 	return dir.ID, nil
 }
 
-func makeDirsForPath(tx *gorm.DB, path string) (uint, error) {
-	// Create root dir.
-	dirID := uint(isql.DirectoriesRootID)
-	if err := tx.Model(&dbDirectory{}).
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).Create(map[string]any{
-		"id":   dirID,
-		"name": "/",
-	}).Error; err != nil {
-		return 0, fmt.Errorf("failed to create root directory: %w", err)
-	}
-
-	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
-		if err := tx.Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-			Create(&dbDirectory{
-				Name:       dir,
-				DBParentID: dirID,
-			}).Error; err != nil {
-			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		}
-		var childID uint
-		if err := tx.Raw("SELECT id FROM directories WHERE name = ?", dir).
-			Scan(&childID).Error; err != nil {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if childID == 0 {
-			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
-		}
-		dirID = childID
-	}
-	return dirID, nil
-}
-
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	// Sanity check input.
 	for _, s := range o.Slabs {
@@ -1814,19 +1766,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createUserMetadata(tx *gorm.DB, objID uint, metadata api.ObjectUserMetadata) error {
-	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		metadata := &dbObjectUserMetadata{
-			DBObjectID: &objID,
-			Key:        k,
-			Value:      v,
-		}
-		entities = append(entities, metadata)
-	}
-	return tx.CreateInBatches(&entities, 1000).Error
-}
-
 func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
 	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
 	for k, v := range metadata {
@@ -1838,138 +1777,6 @@ func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, 
 		entities = append(entities, metadata)
 	}
 	return tx.CreateInBatches(&entities, 1000).Error
-}
-
-func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
-	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
-		return fmt.Errorf("either objID or multiPartID must be set")
-	} else if len(slices) == 0 {
-		return nil // nothing to do
-	}
-
-	// build slabs
-	slabs := make([]dbSlab, len(slices))
-	for i := range slices {
-		slabKey, err := slices[i].Key.MarshalBinary()
-		if err != nil {
-			return fmt.Errorf("failed to marshal slab key: %w", err)
-		}
-		slabs[i] = dbSlab{
-			Key:             slabKey,
-			DBContractSetID: contractSetID,
-			MinShards:       slices[i].MinShards,
-			TotalShards:     uint8(len(slices[i].Shards)),
-		}
-	}
-
-	// create slabs that don't exist yet
-	err := tx.
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-			Columns:   []clause.Column{{Name: "key"}},
-		}).
-		Create(&slabs).Error
-	if err != nil {
-		return fmt.Errorf("failed to create slabs %w", err)
-	}
-
-	// fetch the upserted slabs
-	for i := range slabs {
-		if err := tx.Raw("SELECT * FROM slabs WHERE `key` = ?", slabs[i].Key).
-			Scan(&slabs[i]).
-			Error; err != nil {
-			return fmt.Errorf("failed to fetch slab: %w", err)
-		} else if slabs[i].DBContractSetID != contractSetID {
-			return fmt.Errorf("slab already exists in another contract set %v != %v", slabs[i].DBContractSetID, contractSetID)
-		}
-	}
-
-	// build slices
-	dbSlices := make([]dbSlice, len(slices))
-	for i := range slices {
-		slab := slabs[i]
-		dbSlices[i] = dbSlice{
-			DBSlabID:          slab.ID,
-			DBObjectID:        objID,
-			ObjectIndex:       uint(i + 1),
-			DBMultipartPartID: multiPartID,
-			Offset:            slices[i].Offset,
-			Length:            slices[i].Length,
-		}
-	}
-
-	// if there are no slices we are done
-	if len(dbSlices) == 0 {
-		return nil
-	}
-
-	// create slices
-	err = tx.Create(&dbSlices).Error
-	if err != nil {
-		return fmt.Errorf("failed to create slice %w", err)
-	}
-
-	// build sectors
-	var sectors []dbSector
-	for i, ss := range slices {
-		slab := slabs[i]
-		for j := range ss.Shards {
-			sectors = append(sectors, dbSector{
-				DBSlabID:   slab.ID,
-				SlabIndex:  j + 1,
-				LatestHost: publicKey(ss.Shards[j].LatestHost),
-				Root:       ss.Shards[j].Root[:],
-			})
-		}
-	}
-
-	// create sector that don't exist yet
-	sectorIDs, err := upsertSectors(tx, sectors)
-	if err != nil {
-		return fmt.Errorf("failed to create sectors: %w", err)
-	}
-
-	// build contract <-> sector links
-	sectorIdx := 0
-	var contractSectors []dbContractSector
-	for _, ss := range slices {
-		for _, shard := range ss.Shards {
-			sectorID := sectorIDs[sectorIdx]
-			for _, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, ok := contracts[fcid]; ok {
-						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sectorID,
-							DBContractID: contracts[fcid].ID,
-						})
-					} else {
-						s.logger.Warn("missing contract for shard",
-							"contract", fcid,
-							"root", shard.Root,
-							"latest_host", shard.LatestHost,
-						)
-					}
-				}
-			}
-			sectorIdx++
-		}
-	}
-
-	// if there are no associations we are done
-	if len(contractSectors) == 0 {
-		return nil
-	}
-
-	// create associations
-	if err := tx.
-		Table("contract_sectors").
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-		CreateInBatches(&contractSectors, sectorInsertionBatchSize).Error; err != nil {
-		return err
-	}
-	return nil
 }
 
 // object retrieves an object from the store.
