@@ -240,10 +240,3 @@ func TestCollateralScore(t *testing.T) {
 		t.Errorf("expected %v but got %v", 0, s)
 	}
 }
-
-func absDiffInt(x, y int) int {
-	if x < y {
-		return y - x
-	}
-	return x - y
-}
