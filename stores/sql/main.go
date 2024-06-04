@@ -479,6 +479,11 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 		if hasBlocklist {
 			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
 		}
+		if !hasAllowlist && !hasBlocklist {
+			// if neither an allowlist nor a blocklist exist, all hosts are
+			// allowed which means we return none
+			return []api.Host{}, nil
+		}
 	}
 
 	// filter address
@@ -530,6 +535,19 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	}
 
 	// query hosts
+	var blockedExprs []string
+	if hasAllowlist {
+		blockedExprs = append(blockedExprs, "NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+	if hasBlocklist {
+		blockedExprs = append(blockedExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+	var blockedExpr string
+	if len(blockedExprs) > 0 {
+		blockedExpr = strings.Join(blockedExprs, " AND ")
+	} else {
+		blockedExpr = "FALSE"
+	}
 	var whereExpr string
 	if len(whereExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
@@ -538,11 +556,11 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
 			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, h.lost_sectors,
-			h.scanned
+			h.scanned, %s
 		FROM hosts h
 		%s
 		%s
-	`, whereExpr, offsetLimitStr), args...)
+	`, blockedExpr, whereExpr, offsetLimitStr), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -558,11 +576,12 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 			(*Settings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned,
+			&h.Scanned, &h.Blocked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
+
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[hostID]
 		hosts = append(hosts, h)
