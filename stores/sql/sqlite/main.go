@@ -81,6 +81,50 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
+func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
+	// fetch contract set
+	var csID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE name = ?", contractSet).
+		Scan(&csID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrContractSetNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+
+	// find multipart upload
+	var muID int64
+	err = tx.QueryRow(ctx, "SELECT id FROM multipart_uploads WHERE upload_id = ?", uploadID).
+		Scan(&muID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch multipart upload: %w", err)
+	}
+
+	// delete a potentially existing part
+	_, err = tx.Exec(ctx, "DELETE FROM multipart_parts WHERE db_multipart_upload_id = ? AND part_number = ?",
+		muID, partNumber)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing part: %w", err)
+	}
+
+	// insert new part
+	var size uint64
+	for _, slice := range slices {
+		size += uint64(slice.Length)
+	}
+	var partID int64
+	res, err := tx.Exec(ctx, "INSERT INTO multipart_parts (created_at, etag, part_number, size, db_multipart_upload_id) VALUES (?, ?, ?, ?, ?)",
+		time.Now(), eTag, partNumber, size, muID)
+	if err != nil {
+		return fmt.Errorf("failed to insert part: %w", err)
+	} else if partID, err = res.LastInsertId(); err != nil {
+		return fmt.Errorf("failed to fetch part id: %w", err)
+	}
+
+	// create slices
+	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
@@ -230,131 +274,9 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		return fmt.Errorf("failed to insert object: %w", err)
 	}
 
-	// if object has no slices there is nothing to do
-	slices := o.Slabs
-	if len(slices) == 0 {
-		return nil // nothing to do
-	}
-
-	usedContracts, err := ssql.FetchUsedContracts(ctx, tx.Tx, o.Contracts())
-	if err != nil {
-		return fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// get contract set id
-	var contractSetID int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", contractSet).
-		Scan(&contractSetID); err != nil {
-		return fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-
 	// insert slabs
-	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, key, min_shards, total_shards)
-						VALUES (?, ?, ?, ?, ?)
-						ON CONFLICT(key) DO NOTHING RETURNING id`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert slab: %w", err)
-	}
-	defer insertSlabStmt.Close()
-
-	querySlabIDStmt, err := tx.Prepare(ctx, "SELECT id FROM slabs WHERE key = ?")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to query slab id: %w", err)
-	}
-	defer querySlabIDStmt.Close()
-
-	slabIDs := make([]int64, len(slices))
-	for i := range slices {
-		slabKey, err := slices[i].Key.MarshalBinary()
-		if err != nil {
-			return fmt.Errorf("failed to marshal slab key: %w", err)
-		}
-		err = insertSlabStmt.QueryRow(ctx,
-			time.Now(),
-			contractSetID,
-			ssql.SecretKey(slabKey),
-			slices[i].MinShards,
-			uint8(len(slices[i].Shards)),
-		).Scan(&slabIDs[i])
-		if errors.Is(err, dsql.ErrNoRows) {
-			if err := querySlabIDStmt.QueryRow(ctx, ssql.SecretKey(slabKey)).Scan(&slabIDs[i]); err != nil {
-				return fmt.Errorf("failed to fetch slab id: %w", err)
-			}
-		} else if err != nil {
-			return fmt.Errorf("failed to insert slab: %w", err)
-		}
-	}
-
-	// insert slices
-	insertSliceStmt, err := tx.Prepare(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_multipart_part_id, db_slab_id, offset, length)
-								VALUES (?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert slice: %w", err)
-	}
-	defer insertSliceStmt.Close()
-
-	for i := range slices {
-		res, err := insertSliceStmt.Exec(ctx,
-			time.Now(),
-			objID,
-			uint(i+1),
-			nil,
-			slabIDs[i],
-			slices[i].Offset,
-			slices[i].Length,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert slice: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert slice: no rows affected")
-		}
-	}
-
-	// insert sectors
-	var upsertSectors []upsertSector
-	for i, ss := range slices {
-		for j := range ss.Shards {
-			upsertSectors = append(upsertSectors, upsertSector{
-				slabIDs[i],
-				j + 1,
-				ss.Shards[j].LatestHost,
-				ss.Shards[j].Root,
-			})
-		}
-	}
-	sectorIDs, err := tx.upsertSectors(ctx, upsertSectors)
-	if err != nil {
-		return fmt.Errorf("failed to insert sectors: %w", err)
-	}
-
-	// insert contract <-> sector links
-	sectorIdx := 0
-	var upsertContractSectors []upsertContractSector
-	for _, ss := range slices {
-		for _, shard := range ss.Shards {
-			for _, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, ok := usedContracts[fcid]; ok {
-						upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-							sectorIDs[sectorIdx],
-							usedContracts[fcid].ID,
-						})
-					} else {
-						tx.log.Named("InsertObject").Warn("missing contract for shard",
-							"contract", fcid,
-							"root", shard.Root,
-							"latest_host", shard.LatestHost,
-						)
-					}
-				}
-			}
-			sectorIdx++
-		}
-	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
-		return err
+	if err := tx.insertSlabs(ctx, &objID, nil, contractSet, o.Slabs); err != nil {
+		return fmt.Errorf("failed to insert slabs: %w", err)
 	}
 
 	// insert metadata
@@ -638,6 +560,136 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		return err
 	}
 
+	return nil
+}
+
+func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {
+	if (objID == nil) == (partID == nil) {
+		return errors.New("exactly one of objID and partID must be set")
+	} else if len(slices) == 0 {
+		return nil // nothing to do
+	}
+
+	usedContracts, err := ssql.FetchUsedContracts(ctx, tx.Tx, slices.Contracts())
+	if err != nil {
+		return fmt.Errorf("failed to fetch used contracts: %w", err)
+	}
+
+	// get contract set id
+	var contractSetID int64
+	if err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", contractSet).
+		Scan(&contractSetID); err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+
+	// insert slabs
+	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, key, min_shards, total_shards)
+						VALUES (?, ?, ?, ?, ?)
+						ON CONFLICT(key) DO NOTHING RETURNING id`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert slab: %w", err)
+	}
+	defer insertSlabStmt.Close()
+
+	querySlabIDStmt, err := tx.Prepare(ctx, "SELECT id FROM slabs WHERE key = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to query slab id: %w", err)
+	}
+	defer querySlabIDStmt.Close()
+
+	slabIDs := make([]int64, len(slices))
+	for i := range slices {
+		slabKey, err := slices[i].Key.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("failed to marshal slab key: %w", err)
+		}
+		err = insertSlabStmt.QueryRow(ctx,
+			time.Now(),
+			contractSetID,
+			ssql.SecretKey(slabKey),
+			slices[i].MinShards,
+			uint8(len(slices[i].Shards)),
+		).Scan(&slabIDs[i])
+		if errors.Is(err, dsql.ErrNoRows) {
+			if err := querySlabIDStmt.QueryRow(ctx, ssql.SecretKey(slabKey)).Scan(&slabIDs[i]); err != nil {
+				return fmt.Errorf("failed to fetch slab id: %w", err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to insert slab: %w", err)
+		}
+	}
+
+	// insert slices
+	insertSliceStmt, err := tx.Prepare(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_multipart_part_id, db_slab_id, offset, length)
+								VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert slice: %w", err)
+	}
+	defer insertSliceStmt.Close()
+
+	for i := range slices {
+		res, err := insertSliceStmt.Exec(ctx,
+			time.Now(),
+			objID,
+			uint(i+1),
+			partID,
+			slabIDs[i],
+			slices[i].Offset,
+			slices[i].Length,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert slice: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert slice: no rows affected")
+		}
+	}
+
+	// insert sectors
+	var upsertSectors []upsertSector
+	for i, ss := range slices {
+		for j := range ss.Shards {
+			upsertSectors = append(upsertSectors, upsertSector{
+				slabIDs[i],
+				j + 1,
+				ss.Shards[j].LatestHost,
+				ss.Shards[j].Root,
+			})
+		}
+	}
+	sectorIDs, err := tx.upsertSectors(ctx, upsertSectors)
+	if err != nil {
+		return fmt.Errorf("failed to insert sectors: %w", err)
+	}
+
+	// insert contract <-> sector links
+	sectorIdx := 0
+	var upsertContractSectors []upsertContractSector
+	for _, ss := range slices {
+		for _, shard := range ss.Shards {
+			for _, fcids := range shard.Contracts {
+				for _, fcid := range fcids {
+					if _, ok := usedContracts[fcid]; ok {
+						upsertContractSectors = append(upsertContractSectors, upsertContractSector{
+							sectorIDs[sectorIdx],
+							usedContracts[fcid].ID,
+						})
+					} else {
+						tx.log.Named("InsertObject").Warn("missing contract for shard",
+							"contract", fcid,
+							"root", shard.Root,
+							"latest_host", shard.LatestHost,
+						)
+					}
+				}
+			}
+			sectorIdx++
+		}
+	}
+	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
+		return err
+	}
 	return nil
 }
 
