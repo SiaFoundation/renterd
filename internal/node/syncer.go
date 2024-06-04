@@ -20,6 +20,9 @@ func (s *nodeSyncer) Close() error {
 	return s.l.Close()
 }
 
+// NewSyncer creates a syncer using the given configuration. The syncer that is
+// returned is already running, closing it will close the underlying listener
+// causing the syncer to stop.
 func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (chain.Syncer, error) {
 	// validate config
 	if cfg.Bootstrap && cfg.Network == nil {

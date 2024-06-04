@@ -148,6 +148,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 	cm := chain.NewManager(store, state)
 
+	// create chain subscriber
+	cs, err := NewChainSubscriber(cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
@@ -165,22 +171,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	cs, err := NewChainSubscriber(cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger.Named("chainsubscriber"))
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	// start the subscriber
-	unsubscribeFn, err := cs.Run()
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
 	shutdownFn := func(ctx context.Context) error {
-		unsubscribeFn()
 		return errors.Join(
-			s.Close(),
 			cs.Close(),
+			s.Close(),
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),

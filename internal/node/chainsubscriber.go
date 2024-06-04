@@ -36,6 +36,7 @@ type (
 
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelCauseFunc
+		unsubscribeFn     func()
 		syncSig           chan struct{}
 		wg                sync.WaitGroup
 
@@ -62,13 +63,17 @@ type (
 	}
 )
 
+// NewChainSubscriber creates a new chain subscriber that will sync with the
+// given chain manager and chain store. The returned subscriber is already
+// running and can be shut down by calling the Close method.
 func NewChainSubscriber(cm chain.ChainManager, cs chain.ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
 
+	// create subscriber
 	ctx, cancel := context.WithCancelCause(context.Background())
-	return &ChainSubscriber{
+	subscriber := &ChainSubscriber{
 		cm:     cm,
 		cs:     cs,
 		logger: logger.Sugar(),
@@ -81,12 +86,24 @@ func NewChainSubscriber(cm chain.ChainManager, cs chain.ChainStore, walletAddres
 		syncSig:           make(chan struct{}, 1),
 
 		knownContracts: make(map[types.FileContractID]bool),
-	}, nil
+	}
+
+	// start the subscriber
+	unsubscribeFn, err := subscriber.Run()
+	if err != nil {
+		return nil, err
+	}
+	subscriber.unsubscribeFn = unsubscribeFn
+
+	return subscriber, nil
 }
 
 func (s *ChainSubscriber) Close() error {
 	// cancel shutdown context
 	s.shutdownCtxCancel(errClosed)
+
+	// unsubscribe from the chain manager
+	s.unsubscribeFn()
 
 	// wait for sync loop to finish
 	s.wg.Wait()
