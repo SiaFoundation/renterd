@@ -42,7 +42,7 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	ulmm := newMemoryManagerMock()
 
 	// create worker
-	w, _, err := New(blake2b.Sum256([]byte("testwork")), "test", b, time.Second, time.Second, time.Second, time.Second, 0, 0, 1, 1, false, "", zap.NewNop())
+	w, err := New(blake2b.Sum256([]byte("testwork")), "test", b, time.Second, time.Second, time.Second, time.Second, 0, 0, 1, 1, false, "", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

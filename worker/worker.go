@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/internal/utils"
+	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
@@ -213,7 +214,7 @@ type worker struct {
 	uploadManager   *uploadManager
 
 	accounts        *accounts
-	cache           *cache
+	cache           iworker.WorkerCache
 	priceTables     *priceTables
 	transportPoolV3 *transportPoolV3
 
@@ -1238,7 +1239,7 @@ func (w *worker) eventsHandler(jc jape.Context) {
 		return
 	}
 
-	err := w.cache.handleEvent(event)
+	err := w.cache.HandleEvent(event)
 	if errors.Is(err, api.ErrUnknownEvent) {
 		jc.ResponseWriter.WriteHeader(http.StatusAccepted)
 		return
@@ -1279,24 +1280,24 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, workerAddr string, l *zap.Logger) (*worker, []webhooks.Webhook, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, workerAddr string, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
-		return nil, nil, errors.New("contract lock duration must be positive")
+		return nil, errors.New("contract lock duration must be positive")
 	}
 	if busFlushInterval == 0 {
-		return nil, nil, errors.New("bus flush interval must be positive")
+		return nil, errors.New("bus flush interval must be positive")
 	}
 	if downloadOverdriveTimeout == 0 {
-		return nil, nil, errors.New("download overdrive timeout must be positive")
+		return nil, errors.New("download overdrive timeout must be positive")
 	}
 	if uploadOverdriveTimeout == 0 {
-		return nil, nil, errors.New("upload overdrive timeout must be positive")
+		return nil, errors.New("upload overdrive timeout must be positive")
 	}
 	if downloadMaxMemory == 0 {
-		return nil, nil, errors.New("downloadMaxMemory cannot be 0")
+		return nil, errors.New("downloadMaxMemory cannot be 0")
 	}
 	if uploadMaxMemory == 0 {
-		return nil, nil, errors.New("uploadMaxMemory cannot be 0")
+		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
 	l = l.Named("worker").Named(id)
@@ -1305,6 +1306,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
+		cache:                   iworker.NewCache(b, fmt.Sprintf("%s/%s", workerAddr, "events"), l),
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
@@ -1316,7 +1318,6 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	w.initAccounts(b)
-	w.initCache()
 	w.initPriceTables()
 	w.initTransportPool()
 
@@ -1324,16 +1325,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
 
 	w.initContractSpendingRecorder(busFlushInterval)
-
-	workerEventsURL := fmt.Sprintf("%s/%s", workerAddr, "events")
-	webhooks := []webhooks.Webhook{
-		webhooks.NewEventWebhook(workerEventsURL, api.EventConsensusUpdate{}),
-		webhooks.NewEventWebhook(workerEventsURL, api.EventContractArchive{}),
-		webhooks.NewEventWebhook(workerEventsURL, api.EventContractRenew{}),
-		webhooks.NewEventWebhook(workerEventsURL, api.EventSettingUpdate{}),
-	}
-
-	return w, webhooks, nil
+	return w, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
@@ -1370,6 +1362,11 @@ func (w *worker) Handler() http.Handler {
 
 		"GET    /state": w.stateHandlerGET,
 	})
+}
+
+// Setup initializes the worker cache.
+func (w *worker) Setup(ctx context.Context) error {
+	return w.cache.Initialize(ctx)
 }
 
 // Shutdown shuts down the worker.

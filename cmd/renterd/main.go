@@ -27,7 +27,7 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/webhooks"
+	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -455,11 +455,11 @@ func main() {
 		SlabPruningInterval: time.Hour,
 	}
 
-	type shutdownFn struct {
+	type shutdownFnEntry struct {
 		name string
 		fn   func(context.Context) error
 	}
-	var shutdownFns []shutdownFn
+	var shutdownFns []shutdownFnEntry
 
 	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
 		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
@@ -485,7 +485,7 @@ func main() {
 
 	// Create the webserver.
 	srv := &http.Server{Handler: mux}
-	shutdownFns = append(shutdownFns, shutdownFn{
+	shutdownFns = append(shutdownFns, shutdownFnEntry{
 		name: "HTTP Server",
 		fn:   srv.Shutdown,
 	})
@@ -500,7 +500,7 @@ func main() {
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		shutdownFns = append(shutdownFns, shutdownFn{
+		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
 			fn:   fn,
 		})
@@ -519,24 +519,25 @@ func main() {
 	var s3Srv *http.Server
 	var s3Listener net.Listener
 	var workers []autopilot.Worker
-	var workerWebhooks []webhooks.Webhook
+	setupWorkerFn := node.NoopFn
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
 			workerAddr := cfg.HTTP.Address + "/api/worker"
-			w, s3Handler, webhooks, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
+			var shutdownFn node.ShutdownFn
+			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
 			}, bc, seed, workerAddr, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			workerWebhooks = webhooks
-			shutdownFns = append(shutdownFns, shutdownFn{
+			setupWorkerFn = setupFn
+			shutdownFns = append(shutdownFns, shutdownFnEntry{
 				name: "Worker",
-				fn:   fn,
+				fn:   shutdownFn,
 			})
 
-			mux.Sub["/api/worker"] = utils.TreeMux{Handler: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: iworker.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
@@ -549,7 +550,7 @@ func main() {
 				if err != nil {
 					logger.Fatal("failed to create listener: " + err.Error())
 				}
-				shutdownFns = append(shutdownFns, shutdownFn{
+				shutdownFns = append(shutdownFns, shutdownFnEntry{
 					name: "S3",
 					fn:   s3Srv.Shutdown,
 				})
@@ -575,7 +576,7 @@ func main() {
 		}
 
 		// NOTE: the autopilot shutdown function needs to be called first.
-		shutdownFns = append(shutdownFns, shutdownFn{
+		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Autopilot",
 			fn:   fn,
 		})
@@ -616,11 +617,9 @@ func main() {
 		}
 	}
 
-	// Register the webhooks with the bus
-	for _, wh := range workerWebhooks {
-		if err := bc.RegisterWebhook(context.Background(), wh); err != nil {
-			logger.Fatal("failed to register worker webhook: " + err.Error())
-		}
+	// Finish worker setup.
+	if err := setupWorkerFn(context.Background()); err != nil {
+		logger.Fatal("failed to setup worker: " + err.Error())
 	}
 
 	logger.Info("api: Listening on " + l.Addr().String())
@@ -753,18 +752,4 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 	}
 
 	return nil
-}
-
-func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
-	return func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
-				h.ServeHTTP(w, req)
-			} else if req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/events") {
-				h.ServeHTTP(w, req)
-			} else {
-				jape.BasicAuth(password)(h).ServeHTTP(w, req)
-			}
-		})
-	}
 }
