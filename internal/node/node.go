@@ -170,7 +170,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	b, err := bus.New(alertsMgr, wh, cm, sqlStore, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	b, err := bus.New(alertsMgr, wh, events, cm, sqlStore, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

@@ -12,7 +12,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.70
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.4
+	go.sia.tech/core v0.2.5
 	go.sia.tech/coreutils v0.0.4
 	go.sia.tech/gofakes3 v0.0.3
 	go.sia.tech/hostd v1.1.0

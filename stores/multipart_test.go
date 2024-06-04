@@ -85,7 +85,6 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 
 	// Complete the upload. Check that the number of slices stays the same.
-	ts := time.Now()
 	var nSlicesBefore int64
 	var nSlicesAfter int64
 	if err := ss.db.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
@@ -98,8 +97,6 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatal(err)
 	} else if nSlicesBefore != nSlicesAfter {
 		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
-	} else if err := ss.waitForPruneLoop(ts); err != nil {
-		t.Fatal(err)
 	}
 
 	// Fetch the object.

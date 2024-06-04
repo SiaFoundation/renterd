@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/hostd/wallet"
 	"go.sia.tech/hostd/webhooks"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
@@ -82,7 +83,7 @@ type txpool struct {
 
 func (tp txpool) RecommendedFee() (fee types.Currency) {
 	_, maxFee := tp.tp.FeeEstimation()
-	convertToCore(&maxFee, (*types.V1Currency)(&fee))
+	utils.ConvertToCore(&maxFee, (*types.V1Currency)(&fee))
 	return
 }
 
@@ -90,7 +91,7 @@ func (tp txpool) Transactions() []types.Transaction {
 	stxns := tp.tp.Transactions()
 	txns := make([]types.Transaction, len(stxns))
 	for i := range txns {
-		convertToCore(&stxns[i], &txns[i])
+		utils.ConvertToCore(&stxns[i], &txns[i])
 	}
 	return txns
 }
@@ -98,7 +99,7 @@ func (tp txpool) Transactions() []types.Transaction {
 func (tp txpool) AcceptTransactionSet(txns []types.Transaction) error {
 	stxns := make([]stypes.Transaction, len(txns))
 	for i := range stxns {
-		convertToSiad(&txns[i], &stxns[i])
+		utils.ConvertToSiad(&txns[i], &stxns[i])
 	}
 	err := tp.tp.AcceptTransactionSet(stxns)
 	if errors.Is(err, modules.ErrDuplicateTransactionSet) {
@@ -218,7 +219,7 @@ func (m *chainManager) Synced() bool {
 func (m *chainManager) BlockAtHeight(height uint64) (types.Block, bool) {
 	sb, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
 	var c types.Block
-	convertToCore(sb, (*types.V1Block)(&c))
+	utils.ConvertToCore(sb, (*types.V1Block)(&c))
 	return types.Block(c), ok
 }
 
@@ -248,7 +249,7 @@ func (m *chainManager) TipState() consensus.State {
 // AcceptBlock adds b to the consensus set.
 func (m *chainManager) AcceptBlock(b types.Block) error {
 	var sb stypes.Block
-	convertToSiad(types.V1Block(b), &sb)
+	utils.ConvertToSiad(types.V1Block(b), &sb)
 	return m.cs.AcceptBlock(sb)
 }
 
