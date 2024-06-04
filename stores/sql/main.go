@@ -544,7 +544,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	}
 	var blockedExpr string
 	if len(blockedExprs) > 0 {
-		blockedExpr = strings.Join(blockedExprs, " AND ")
+		blockedExpr = strings.Join(blockedExprs, " OR ")
 	} else {
 		blockedExpr = "FALSE"
 	}
