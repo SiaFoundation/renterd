@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,10 +12,8 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
-	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
@@ -134,12 +131,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
+	// create webhooks manager
 	wh, err := webhooks.NewManager(logger.Named("webhooks").Sugar(), sqlStore)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	// Hook up webhooks to alerts.
+	// hookup webhooks <-> alerts
 	alertsMgr.RegisterWebhookBroadcaster(wh)
 
 	// create chain manager
@@ -156,32 +155,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 
 	// create syncer
-	l, err := net.Listen("tcp", cfg.GatewayAddr)
+	s, err := NewSyncer(cfg, cm, sqlStore, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	syncerAddr := l.Addr().String()
-
-	// peers will reject us if our hostname is empty or unspecified, so use loopback
-	host, port, _ := net.SplitHostPort(syncerAddr)
-	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
-		syncerAddr = net.JoinHostPort("127.0.0.1", port)
-	}
-
-	header := gateway.Header{
-		GenesisID:  cfg.Genesis.ID(),
-		UniqueID:   gateway.GenerateUniqueID(),
-		NetAddress: syncerAddr,
-	}
-
-	opts := []syncer.Option{syncer.WithLogger(logger.Named("syncer"))}
-	if cfg.SyncerSyncInterval > 0 {
-		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
-	}
-	if cfg.SyncerPeerDiscoveryInterval > 0 {
-		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
-	}
-	s := syncer.New(l, cm, sqlStore, header, opts...)
 
 	b, err := bus.New(alertsMgr, wh, cm, sqlStore, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {
@@ -193,34 +170,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	// bootstrap the syncer
-	if cfg.Bootstrap {
-		if cfg.Network == nil {
-			return nil, nil, nil, nil, errors.New("cannot bootstrap without a network")
-		}
-
-		var bootstrapPeers []string
-		switch cfg.Network.Name {
-		case "mainnet":
-			bootstrapPeers = syncer.MainnetBootstrapPeers
-		case "zen":
-			bootstrapPeers = syncer.ZenBootstrapPeers
-		case "anagami":
-			bootstrapPeers = syncer.AnagamiBootstrapPeers
-		default:
-			return nil, nil, nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", cfg.Network.Name)
-		}
-
-		for _, addr := range bootstrapPeers {
-			if err := sqlStore.AddPeer(addr); err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("%w: failed to add bootstrap peer '%s'", err, addr)
-			}
-		}
-	}
-
-	// start the syncer
-	go s.Run()
-
 	// start the subscriber
 	unsubscribeFn, err := cs.Run()
 	if err != nil {
@@ -230,7 +179,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	shutdownFn := func(ctx context.Context) error {
 		unsubscribeFn()
 		return errors.Join(
-			l.Close(),
+			s.Close(),
 			cs.Close(),
 			w.Close(),
 			b.Shutdown(ctx),

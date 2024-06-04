@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"gitlab.com/NebulousLabs/encoding"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
@@ -850,16 +848,6 @@ func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
 		}
 	}
 	return nil
-}
-
-func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
-	var buf bytes.Buffer
-	siad.MarshalSia(&buf)
-	d := types.NewBufDecoder(buf.Bytes())
-	core.DecodeFrom(d)
-	if d.Err() != nil {
-		panic(d.Err())
-	}
 }
 
 // testNetwork returns a modified version of Zen used for testing
