@@ -201,6 +201,26 @@ func (ss SlabSlice) Recover(w io.Writer, shards [][]byte) error {
 	return stripedJoin(w, shards[:ss.MinShards], int(skip), int(ss.Length))
 }
 
+type SlabSlices []SlabSlice
+
+func (ss SlabSlices) Contracts() []types.FileContractID {
+	var usedContracts []types.FileContractID
+	added := make(map[types.FileContractID]struct{})
+	for _, s := range ss {
+		for _, shard := range s.Shards {
+			for _, fcids := range shard.Contracts {
+				for _, fcid := range fcids {
+					if _, exists := added[fcid]; !exists {
+						added[fcid] = struct{}{}
+						usedContracts = append(usedContracts, fcid)
+					}
+				}
+			}
+		}
+	}
+	return usedContracts
+}
+
 // stripedSplit splits data into striped data shards, which must have sufficient
 // capacity.
 func stripedSplit(data []byte, dataShards [][]byte) {

@@ -1,4 +1,4 @@
-package e2e
+package utils
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"go.sia.tech/core/types"
 )
 
-func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
+func ConvertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
 	core.EncodeTo(e)
@@ -17,7 +17,7 @@ func convertToSiad(core types.EncoderTo, siad encoding.SiaUnmarshaler) {
 	}
 }
 
-func convertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
+func ConvertToCore(siad encoding.SiaMarshaler, core types.DecoderFrom) {
 	var buf bytes.Buffer
 	siad.MarshalSia(&buf)
 	d := types.NewBufDecoder(buf.Bytes())

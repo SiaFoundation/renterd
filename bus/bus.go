@@ -26,15 +26,13 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 )
-
-// maxSyncTime is the maximum time since the last block before we consider
-// ourselves unsynced.
-const maxSyncTime = time.Hour
 
 // Client re-exports the client from the client package.
 type Client struct {
@@ -235,6 +233,7 @@ type bus struct {
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
 	webhooks WebhookManager
+	events   ibus.EventBroadcaster
 
 	cm ChainManager
 	s  Syncer
@@ -828,6 +827,13 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Compute how much renter funds to put into the new contract.
 	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
 
+	// Make sure we don't exceed the max fund amount.
+	// TODO: remove the IsZero check for the v2 change
+	if /*!wprr.MaxFundAmount.IsZero() &&*/ wprr.MaxFundAmount.Cmp(cost) < 0 {
+		jc.Error(fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, wprr.MaxFundAmount), http.StatusBadRequest)
+		return
+	}
+
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
 	// the renter key by the worker.
@@ -837,6 +843,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	}
 
 	jc.Encode(api.WalletPrepareRenewResponse{
+		FundAmount:     cost,
 		ToSign:         toSign,
 		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
 	})
@@ -1057,7 +1064,15 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive))
+	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
+		for fcid, reason := range toArchive {
+			b.events.BroadcastEvent(api.EventContractArchive{
+				ContractID: fcid,
+				Reason:     reason,
+				Timestamp:  time.Now().UTC(),
+			})
+		}
+	}
 }
 
 func (b *bus) contractsSetsHandlerGET(jc jape.Context) {
@@ -1071,8 +1086,17 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
-	} else if jc.Decode(&contractIds) == nil {
-		jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds))
+		return
+	} else if jc.Decode(&contractIds) != nil {
+		return
+	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
+		return
+	} else {
+		b.events.BroadcastEvent(api.EventContractSetUpdate{
+			Name:        set,
+			ContractIDs: contractIds,
+			Timestamp:   time.Now().UTC(),
+		})
 	}
 }
 
@@ -1253,10 +1277,18 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		req.State = api.ContractStatePending
 	}
 	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
-	if jc.Check("couldn't store contract", err) == nil {
-		jc.Encode(r)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
 	}
+
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
+	b.events.BroadcastEvent(api.EventContractRenew{
+		ContractID:    req.Contract.ID(),
+		RenewedFromID: req.RenewedFrom,
+		Timestamp:     time.Now().UTC(),
+	})
+
+	jc.Encode(r)
 }
 
 func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1752,7 +1784,13 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		}
 	}
 
-	jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data)))
+	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
+		b.events.BroadcastEvent(api.EventSettingUpdate{
+			Key:       key,
+			Update:    value,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
@@ -1761,7 +1799,13 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
 		return
 	}
-	jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key))
+
+	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
+		b.events.BroadcastEvent(api.EventSettingDelete{
+			Key:       key,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 }
 
 func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -1820,8 +1864,8 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 
 	var synced bool
 	block, found := b.cm.Block(index.ID)
-	if found && time.Since(block.Timestamp) <= maxSyncTime {
-		synced = true
+	if found {
+		synced = chain.IsSynced(block)
 	}
 
 	return api.ConsensusState{
@@ -2470,11 +2514,12 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 // New returns a new Bus.
-func New(am *alerts.Manager, hm WebhookManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, hm WebhookManager, events ibus.EventBroadcaster, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		webhooks:         hm,
+		events:           events,
 		cm:               cm,
 		cs:               cs,
 		s:                s,

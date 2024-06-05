@@ -873,7 +873,7 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkV2.RequireHeight = 1020
 
 	// TODO: remove once we got rid of all siad dependencies
-	convertToCore(stypes.GenesisBlock, (*types.V1Block)(&genesis))
+	utils.ConvertToCore(stypes.GenesisBlock, (*types.V1Block)(&genesis))
 	return n, genesis
 }
 
