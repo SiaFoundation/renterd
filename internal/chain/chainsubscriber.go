@@ -19,10 +19,10 @@ import (
 const (
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
-	updatesBatchSize = 1e3
+	updatesBatchSize = 100
 
 	// syncUpdateFrequency is the frequency with which we log sync progress.
-	syncUpdateFrequency = 10 * updatesBatchSize
+	syncUpdateFrequency = 1e3 * updatesBatchSize
 )
 
 var (

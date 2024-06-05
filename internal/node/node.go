@@ -169,7 +169,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 
 	// create chain database
-	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "chain.db"))
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "blockchain.db"))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}
