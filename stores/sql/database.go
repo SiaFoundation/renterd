@@ -97,6 +97,9 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// SearchHosts returns a list of hosts that match the provided filters
+		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
+
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
