@@ -13,6 +13,7 @@ import (
 
 	dsql "database/sql"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
@@ -617,6 +618,85 @@ func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, u
 	sum := h.Sum()
 	eTag := hex.EncodeToString(sum[:])
 	return mpu, neededParts, size, eTag, nil
+}
+
+func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	var args []any
+	var bucketExpr string
+	var bucketID int64
+	if opts.Bucket != "" {
+		err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE name = ?", opts.Bucket).
+			Scan(&bucketID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ObjectsStatsResponse{}, api.ErrBucketNotFound
+		} else if err != nil {
+			return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch bucket id: %w", err)
+		}
+		bucketExpr = "WHERE db_bucket_id = ?"
+		args = append(args, bucketID)
+	}
+
+	// objects stats
+	var numObjects, totalObjectsSize uint64
+	var minHealth float64
+	err := tx.QueryRow(ctx, "SELECT COUNT(*), COALESCE(MIN(health), 1), COALESCE(SUM(size), 0) FROM objects "+bucketExpr, args...).
+		Scan(&numObjects, &minHealth, &totalObjectsSize)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch objects stats: %w", err)
+	}
+
+	// multipart upload stats
+	var unfinishedObjects uint64
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM multipart_uploads "+bucketExpr, args...).
+		Scan(&unfinishedObjects)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch multipart upload stats: %w", err)
+	}
+
+	// multipart upload part stats
+	var totalUnfinishedObjectsSize uint64
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(size), 0) FROM multipart_parts mp INNER JOIN multipart_uploads mu ON mp.db_multipart_upload_id = mu.id "+bucketExpr, args...).
+		Scan(&totalUnfinishedObjectsSize)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch multipart upload part stats: %w", err)
+	}
+
+	// total sectors
+	var whereExpr string
+	var whereArgs []any
+	if opts.Bucket != "" {
+		whereExpr = `
+			AND EXISTS (
+				SELECT 1 FROM slices sli
+				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
+				WHERE sli.db_slab_id = sla.id 
+			)
+		`
+		whereArgs = append(whereArgs, bucketID)
+	}
+	var totalSectors uint64
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(total_shards), 0) FROM slabs sla WHERE db_buffered_slab_id IS NULL "+whereExpr, whereArgs...).
+		Scan(&totalSectors)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch total sector stats: %w", err)
+	}
+
+	var totalUploaded uint64
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(size), 0) FROM contracts").
+		Scan(&totalUploaded)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch contract stats: %w", err)
+	}
+
+	return api.ObjectsStatsResponse{
+		MinHealth:                  minHealth,
+		NumObjects:                 numObjects,
+		NumUnfinishedObjects:       unfinishedObjects,
+		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
+		TotalObjectsSize:           totalObjectsSize,
+		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
+		TotalUploadedSize:          totalUploaded,
+	}, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {

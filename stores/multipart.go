@@ -10,38 +10,6 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
-type (
-	dbMultipartUpload struct {
-		Model
-
-		Key        secretKey
-		UploadID   string                 `gorm:"uniqueIndex;NOT NULL;size:64"`
-		ObjectID   string                 `gorm:"index:idx_multipart_uploads_object_id;NOT NULL"`
-		DBBucket   dbBucket               `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete uploads when bucket is deleted
-		DBBucketID uint                   `gorm:"index:idx_multipart_uploads_db_bucket_id;NOT NULL"`
-		Parts      []dbMultipartPart      // no CASCADE, parts are deleted via trigger
-		Metadata   []dbObjectUserMetadata `gorm:"constraint:OnDelete:SET NULL"` // CASCADE to delete parts too
-		MimeType   string                 `gorm:"index:idx_multipart_uploads_mime_type"`
-	}
-
-	dbMultipartPart struct {
-		Model
-		Etag                string `gorm:"index"`
-		PartNumber          int    `gorm:"index"`
-		Size                uint64
-		DBMultipartUploadID uint      `gorm:"index;NOT NULL"`
-		Slabs               []dbSlice // no CASCADE, slices are deleted via trigger
-	}
-)
-
-func (dbMultipartUpload) TableName() string {
-	return "multipart_uploads"
-}
-
-func (dbMultipartPart) TableName() string {
-	return "multipart_parts"
-}
-
 func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error) {
 	var uploadID string
 	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
