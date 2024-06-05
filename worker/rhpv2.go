@@ -27,7 +27,7 @@ const (
 	// maxMerkleProofResponseSize caps the response message size to a generous
 	// 32 MiB max length since batchSizeDeleteSectors assumes ~16MiB of
 	// roots. So we double that to be safe.
-	maxMerkleProofResponseSize = 8 * 1 << 22 // 32 MiB
+	maxMerkleProofResponseSize = 1200 * 1 << 20 // 1200 MB
 )
 
 var (
