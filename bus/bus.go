@@ -2513,6 +2513,14 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
+func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
+	b.events.BroadcastEvent(api.EventConsensusUpdate{
+		ConsensusState: b.consensusState(),
+		TransactionFee: b.tp.RecommendedFee(),
+		Timestamp:      time.Now().UTC(),
+	})
+}
+
 // New returns a new Bus.
 func New(am *alerts.Manager, hm WebhookManager, events ibus.EventBroadcaster, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
