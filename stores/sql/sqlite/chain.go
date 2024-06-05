@@ -102,7 +102,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 				e.Type,
 				data,
 				e.MaturityHeight,
-				e.Timestamp.Unix(),
+				ssql.UnixTimeNS(e.Timestamp),
 			); err != nil {
 				return fmt.Errorf("failed to insert new event: %w", err)
 			}

@@ -7,7 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 )
@@ -22,9 +26,12 @@ type (
 	FileContractID types.FileContractID
 	Hash256        types.Hash256
 	MerkleProof    struct{ Hashes []types.Hash256 }
+	Settings       rhpv2.HostSettings
+	PriceTable     rhpv3.HostPriceTable
 	PublicKey      types.PublicKey
 	SecretKey      []byte
 	EventData      []byte
+	UnixTimeNS     time.Time
 )
 
 var (
@@ -94,6 +101,34 @@ func (h *Hash256) Scan(value interface{}) error {
 // Value returns an addr value, implements driver.Valuer interface.
 func (h Hash256) Value() (driver.Value, error) {
 	return h[:], nil
+}
+
+// Scan scan value into Settings, implements sql.Scanner interface.
+func (hs *Settings) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
+	}
+	return json.Unmarshal(bytes, hs)
+}
+
+// Value returns a Settings value, implements driver.Valuer interface.
+func (hs Settings) Value() (driver.Value, error) {
+	return json.Marshal(hs)
+}
+
+// Scan scan value into PriceTable, implements sql.Scanner interface.
+func (pt *PriceTable) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal PriceTable value:", value))
+	}
+	return json.Unmarshal(bytes, pt)
+}
+
+// Value returns a PriceTable value, implements driver.Valuer interface.
+func (pt PriceTable) Value() (driver.Value, error) {
+	return json.Marshal(pt)
 }
 
 // Scan scan value into publicKey, implements sql.Scanner interface.
@@ -170,6 +205,36 @@ func (e *EventData) Scan(value interface{}) error {
 // Value returns a Transaction value, implements driver.Valuer interface.
 func (e EventData) Value() (driver.Value, error) {
 	return []byte(e), nil
+}
+
+// Scan scan value into UnixTimeNS, implements sql.Scanner interface.
+func (u *UnixTimeNS) Scan(value interface{}) error {
+	var nsec int64
+	var err error
+	switch value := value.(type) {
+	case int64:
+		nsec = value
+	case []uint8:
+		nsec, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal UnixTimeNS value: %v %T", value, value)
+		}
+	default:
+		return fmt.Errorf("failed to unmarshal UnixTimeNS value: %v %T", value, value)
+	}
+
+	if nsec == 0 {
+		*u = UnixTimeNS{}
+	} else {
+		*u = UnixTimeNS(time.Unix(0, nsec))
+	}
+	return nil
+}
+
+// Value returns a int64 value representing a unix timestamp in milliseconds,
+// implements driver.Valuer interface.
+func (u UnixTimeNS) Value() (driver.Value, error) {
+	return time.Time(u).UnixNano(), nil
 }
 
 func FromEventData(e EventData, t string) (wallet.EventData, error) {
