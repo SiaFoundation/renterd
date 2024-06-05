@@ -27,15 +27,12 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 )
-
-// maxSyncTime is the maximum time since the last block before we consider
-// ourselves unsynced.
-const maxSyncTime = time.Hour
 
 // Client re-exports the client from the client package.
 type Client struct {
@@ -1867,8 +1864,8 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 
 	var synced bool
 	block, found := b.cm.Block(index.ID)
-	if found && time.Since(block.Timestamp) <= maxSyncTime {
-		synced = true
+	if found {
+		synced = chain.IsSynced(block)
 	}
 
 	return api.ConsensusState{

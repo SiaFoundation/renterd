@@ -262,7 +262,7 @@ func (s *ChainSubscriber) sync() error {
 		cnt++
 
 		// broadcast consensus update
-		if time.Since(block.Timestamp) <= time.Hour {
+		if IsSynced(block) {
 			s.events.BroadcastEvent(api.EventConsensusUpdate{
 				ConsensusState: api.ConsensusState{
 					BlockHeight:   index.Height,
@@ -461,6 +461,10 @@ func (s *ChainSubscriber) updateKnownContracts(fcid types.FileContractID, known 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.knownContracts[fcid] = known
+}
+
+func IsSynced(b types.Block) bool {
+	return time.Since(b.Timestamp) <= time.Hour
 }
 
 func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) contractUpdate {
