@@ -453,7 +453,7 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 }
 
 func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {
-	rows, err := tx.Query(ctx, "SELECT event_id, leaf_index, merkle_proof, address, value, maturity_height FROM wallet_outputs")
+	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof, address, value, maturity_height FROM wallet_outputs")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch wallet events: %w", err)
 	}
@@ -558,31 +558,26 @@ func scanWalletEvent(s scanner) (wallet.Event, error) {
 }
 
 func scanSiacoinElement(s scanner) (el types.SiacoinElement, err error) {
-	el.StateElement, err = scanStateElement(s)
-	if err != nil {
-		return
-	}
-	el.SiacoinOutput, err = scanSiacoinOutput(s)
-	if err != nil {
-		return
-	}
-	var maturityHeight uint64
-	err = s.Scan(&maturityHeight)
-	if err != nil {
-		return
-	}
-	return
-}
-
-func scanSiacoinOutput(s scanner) (types.SiacoinOutput, error) {
+	var id Hash256
+	var leafIndex, maturityHeight uint64
+	var merkleProof MerkleProof
 	var address Hash256
 	var value Currency
-	if err := s.Scan(&address, &value); err != nil {
-		return types.SiacoinOutput{}, err
+	err = s.Scan(&id, &leafIndex, &merkleProof, &address, &value, &maturityHeight)
+	if err != nil {
+		return types.SiacoinElement{}, err
 	}
-	return types.SiacoinOutput{
-		Address: types.Address(address),
-		Value:   types.Currency(value),
+	return types.SiacoinElement{
+		StateElement: types.StateElement{
+			ID:          types.Hash256(id),
+			LeafIndex:   leafIndex,
+			MerkleProof: merkleProof.Hashes,
+		},
+		SiacoinOutput: types.SiacoinOutput{
+			Address: types.Address(address),
+			Value:   types.Currency(value),
+		},
+		MaturityHeight: maturityHeight,
 	}, nil
 }
 
