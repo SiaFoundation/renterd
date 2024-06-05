@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/hostdb"
+	sql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/siad/crypto"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
@@ -187,7 +188,7 @@ func TestSQLHosts(t *testing.T) {
 	if hosts, err := ss.Hosts(ctx, 3, 1); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if _, err := ss.Hosts(ctx, -1, -1); err != ErrNegativeOffset {
+	if _, err := ss.Hosts(ctx, -1, -1); !errors.Is(err, sql.ErrNegativeOffset) {
 		t.Fatal("unexpected error", err)
 	}
 
@@ -336,7 +337,7 @@ func TestSearchHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add host checks, h1 gets ap1 and h2 gets both, h3 gets none
+	// add host checks, h1 gets ap1 and h2 gets both
 	h1c := newTestHostCheck()
 	h1c.Score.Age = .1
 	err = ss.UpdateHostCheck(context.Background(), ap1, hk1, h1c)
@@ -369,8 +370,8 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if cnt != 3 {
-		t.Fatal("unexpected", cnt)
+	} else if len(his) != 3 {
+		t.Fatal("unexpected", len(his))
 	}
 
 	// assert h1 and h2 have the expected checks
@@ -386,8 +387,8 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if cnt != 3 {
-		t.Fatal("unexpected", cnt)
+	} else if len(his) != 2 {
+		t.Fatal("unexpected", len(his))
 	}
 
 	// assert h1 and h2 have the expected checks
@@ -408,7 +409,7 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 1 {
+	} else if len(his) != 2 {
 		t.Fatal("unexpected", len(his))
 	}
 
