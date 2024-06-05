@@ -755,7 +755,7 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 	}
 	defer insertSectorStmt.Close()
 
-	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = last_insert_id()")
+	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = ?")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to query slab id: %w", err)
 	}
@@ -775,7 +775,7 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 			return nil, fmt.Errorf("failed to insert sector: %w", err)
 		} else if sectorID, err = res.LastInsertId(); err != nil {
 			return nil, fmt.Errorf("failed to fetch sector id: %w", err)
-		} else if err := querySectorSlabIDStmt.QueryRow(ctx).Scan(&slabID); err != nil {
+		} else if err := querySectorSlabIDStmt.QueryRow(ctx, sectorID).Scan(&slabID); err != nil {
 			return nil, fmt.Errorf("failed to fetch slab id: %w", err)
 		} else if slabID != s.slabID {
 			return nil, fmt.Errorf("failed to insert sector for slab %v: already exists for slab %v", s.slabID, slabID)
