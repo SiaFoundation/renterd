@@ -210,14 +210,27 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 
 	// create the host
 	if res, err := c.tx.Exec(c.ctx, `
-	INSERT INTO hosts (created_at, public_key, last_scan, last_announcement, net_address)
-	VALUES (?, ?, ?, ?, ?)
+	INSERT INTO hosts (created_at, public_key, settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		last_announcement = VALUES(last_announcement),
 		net_address = VALUES(net_address)
 	`,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
+		ssql.Settings{},
+		ssql.PriceTable{},
+		0,
+		0,
+		false,
+		false,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
 		0,
 		ts.UTC(),
 		ha.NetAddress,
