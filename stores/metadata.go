@@ -1766,19 +1766,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return slabs, nil
 }
 
-func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
-	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		metadata := &dbObjectUserMetadata{
-			DBMultipartUploadID: &multipartUploadID,
-			Key:                 k,
-			Value:               v,
-		}
-		entities = append(entities, metadata)
-	}
-	return tx.CreateInBatches(&entities, 1000).Error
-}
-
 // object retrieves an object from the store.
 func (s *SQLStore) object(tx *gorm.DB, bucket, path string) (api.Object, error) {
 	// fetch raw object data

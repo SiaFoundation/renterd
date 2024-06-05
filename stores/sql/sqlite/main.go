@@ -125,6 +125,10 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
 }
 
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
@@ -180,7 +184,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create/update metadata
-	if err := ssql.InsertMetadata(ctx, tx, objID, opts.Metadata); err != nil {
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, opts.Metadata); err != nil {
 		return "", fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	_, err = tx.Exec(ctx, "UPDATE object_user_metadata SET db_multipart_upload_id = NULL, db_object_id = ? WHERE db_multipart_upload_id = ?",
@@ -220,6 +224,10 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 		return api.ErrBucketExists
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
@@ -280,7 +288,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert metadata
-	if err := ssql.InsertMetadata(ctx, tx, objID, md); err != nil {
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
 		return fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	return nil
@@ -334,6 +342,18 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 		dirID = childID
 	}
 	return dirID, nil
+}
+
+func (tx *MainDatabaseTx) MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error) {
+	return ssql.MultipartUpload(ctx, tx, uploadID)
+}
+
+func (tx *MainDatabaseTx) MultipartUploadParts(ctx context.Context, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error) {
+	return ssql.MultipartUploadParts(ctx, tx, bucket, key, uploadID, marker, limit)
+}
+
+func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
+	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
