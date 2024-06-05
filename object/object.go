@@ -118,7 +118,7 @@ func GenerateEncryptionKey() EncryptionKey {
 // clean.
 type Object struct {
 	Key   EncryptionKey `json:"key,omitempty"`
-	Slabs []SlabSlice   `json:"slabs,omitempty"`
+	Slabs SlabSlices    `json:"slabs,omitempty"`
 }
 
 // NewObject returns a new Object with a random key.
@@ -129,21 +129,7 @@ func NewObject(ec EncryptionKey) Object {
 }
 
 func (o Object) Contracts() []types.FileContractID {
-	var usedContracts []types.FileContractID
-	added := make(map[types.FileContractID]struct{})
-	for _, s := range o.Slabs {
-		for _, shard := range s.Shards {
-			for _, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, exists := added[fcid]; !exists {
-						added[fcid] = struct{}{}
-						usedContracts = append(usedContracts, fcid)
-					}
-				}
-			}
-		}
-	}
-	return usedContracts
+	return o.Slabs.Contracts()
 }
 
 // TotalSize returns the total size of the object.

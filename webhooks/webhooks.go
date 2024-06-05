@@ -62,6 +62,14 @@ type (
 	}
 )
 
+func NewEventWebhook(url string, e WebhookEvent) Webhook {
+	return Webhook{
+		Module: e.Event().Module,
+		Event:  e.Event().Event,
+		URL:    url,
+	}
+}
+
 type Manager struct {
 	logger *zap.SugaredLogger
 	wg     sync.WaitGroup

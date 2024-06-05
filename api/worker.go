@@ -133,6 +133,7 @@ type (
 		ExpectedNewStorage uint64               `json:"expectedNewStorage"`
 		HostAddress        types.Address        `json:"hostAddress"`
 		HostKey            types.PublicKey      `json:"hostKey"`
+		MaxFundAmount      types.Currency       `json:"maxFundAmount"`
 		MinNewCollateral   types.Currency       `json:"minNewCollateral"`
 		SiamuxAddr         string               `json:"siamuxAddr"`
 		RenterAddress      types.Address        `json:"renterAddress"`
@@ -146,6 +147,7 @@ type (
 		ContractID     types.FileContractID   `json:"contractID"`
 		Contract       rhpv2.ContractRevision `json:"contract"`
 		ContractPrice  types.Currency         `json:"contractPrice"`
+		FundAmount     types.Currency         `json:"fundAmount"`
 		TransactionSet []types.Transaction    `json:"transactionSet"`
 	}
 

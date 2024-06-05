@@ -30,6 +30,7 @@ type (
 	ChainManager interface {
 		Block(id types.BlockID) (types.Block, bool)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
+		RecommendedFee() types.Currency
 		Tip() types.ChainIndex
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
 	}
@@ -254,23 +255,34 @@ func (s *ChainSubscriber) sync() error {
 		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
 
 		// process updates
+		var block types.Block
 		istart = time.Now()
-		index, err = s.processUpdates(s.shutdownCtx, crus, caus)
+		index, block, err = s.processUpdates(s.shutdownCtx, crus, caus)
 		if err != nil {
 			return fmt.Errorf("failed to process updates: %w", err)
 		}
 		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
 		cnt++
 
-		// TODO: broadcast consensus update
+		// broadcast consensus update
+		if IsSynced(block) {
+			s.events.BroadcastEvent(api.EventConsensusUpdate{
+				ConsensusState: api.ConsensusState{
+					BlockHeight:   index.Height,
+					LastBlockTime: api.TimeRFC3339(block.Timestamp),
+					Synced:        true,
+				},
+				TransactionFee: s.cm.RecommendedFee(),
+				Timestamp:      time.Now().UTC(),
+			})
+		}
 	}
 
 	s.logger.Debugw("sync completed", "start_height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
 	return nil
 }
 
-func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (types.ChainIndex, error) {
-	var index types.ChainIndex
+func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, tip types.Block, _ error) {
 	if err := s.cs.ProcessChainUpdate(ctx, func(tx ChainUpdateTx) error {
 		// process wallet updates
 		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
@@ -302,11 +314,12 @@ func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 			return fmt.Errorf("failed to update failed contracts: %w", err)
 		}
 
+		tip = caus[len(caus)-1].Block
 		return nil
 	}); err != nil {
-		return types.ChainIndex{}, err
+		return types.ChainIndex{}, types.Block{}, err
 	}
-	return index, nil
+	return
 }
 
 func (s *ChainSubscriber) updateContract(tx ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
@@ -446,6 +459,10 @@ func (s *ChainSubscriber) updateKnownContracts(fcid types.FileContractID, known 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.knownContracts[fcid] = known
+}
+
+func IsSynced(b types.Block) bool {
+	return time.Since(b.Timestamp) <= time.Hour
 }
 
 func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) contractUpdate {

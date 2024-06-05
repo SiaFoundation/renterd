@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,6 +104,143 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	return contracts, nil
 }
 
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+	// stmt to fetch bucket id
+	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to prepare statement to fetch bucket id: %w", err)
+	}
+	defer bucketIDStmt.Close()
+
+	// fetch source bucket
+	var srcBID int64
+	err = bucketIDStmt.QueryRow(ctx, srcBucket).Scan(&srcBID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectMetadata{}, fmt.Errorf("%w: source bucket", api.ErrBucketNotFound)
+	} else if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch src bucket id: %w", err)
+	}
+
+	// fetch src object id
+	var srcObjID int64
+	err = tx.QueryRow(ctx, "SELECT id FROM objects WHERE db_bucket_id = ? AND object_id = ?", srcBID, srcKey).
+		Scan(&srcObjID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectMetadata{}, api.ErrObjectNotFound
+	} else if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch object id: %w", err)
+	}
+
+	// helper to fetch metadata
+	fetchMetadata := func(objID int64) (om api.ObjectMetadata, err error) {
+		err = tx.QueryRow(ctx, "SELECT etag, health, created_at, object_id, size, mime_type FROM objects WHERE id = ?", objID).
+			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Name, &om.Size, &om.MimeType)
+		if err != nil {
+			return api.ObjectMetadata{}, fmt.Errorf("failed to fetch new object: %w", err)
+		}
+		return om, nil
+	}
+
+	if srcBucket == dstBucket && srcKey == dstKey {
+		// No copying is happening. We just update the metadata on the src
+		// object.
+		if _, err := tx.Exec(ctx, "UPDATE objects SET mime_type = ? WHERE id = ?", mimeType, srcObjID); err != nil {
+			return api.ObjectMetadata{}, fmt.Errorf("failed to update mime type: %w", err)
+		} else if err := UpdateMetadata(ctx, tx, srcObjID, metadata); err != nil {
+			return api.ObjectMetadata{}, fmt.Errorf("failed to update metadata: %w", err)
+		}
+		return fetchMetadata(srcObjID)
+	}
+
+	// fetch destination bucket
+	var dstBID int64
+	err = bucketIDStmt.QueryRow(ctx, dstBucket).Scan(&dstBID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectMetadata{}, fmt.Errorf("%w: destination bucket", api.ErrBucketNotFound)
+	} else if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch dest bucket id: %w", err)
+	}
+
+	// copy object
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
+						SELECT ?, ?, db_directory_id, ?, `+"`key`"+`, size, ?, etag
+						FROM objects
+						WHERE id = ?`, time.Now(), dstKey, dstBID, mimeType, srcObjID)
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to insert object: %w", err)
+	}
+	dstObjID, err := res.LastInsertId()
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch object id: %w", err)
+	}
+
+	// copy slices
+	_, err = tx.Exec(ctx, `INSERT INTO slices (created_at, db_object_id, object_index, db_slab_id, offset, length)
+				SELECT ?, ?, object_index, db_slab_id, offset, length
+				FROM slices
+				WHERE db_object_id = ?`, time.Now(), dstObjID, srcObjID)
+	if err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to copy slices: %w", err)
+	}
+
+	// create metadata
+	if err := InsertMetadata(ctx, tx, dstObjID, metadata); err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to insert metadata: %w", err)
+	}
+
+	// fetch copied object
+	return fetchMetadata(dstObjID)
+}
+
+func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec []byte, mimeType, eTag string) (int64, error) {
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, `+"`key`"+`, size, mime_type, etag)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		time.Now(),
+		key,
+		dirID,
+		bucketID,
+		SecretKey(ec),
+		size,
+		mimeType,
+		eTag)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+	if err := DeleteMetadata(ctx, tx, objID); err != nil {
+		return err
+	} else if err := InsertMetadata(ctx, tx, objID, md); err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
+	_, err := tx.Exec(ctx, "DELETE FROM object_user_metadata WHERE db_object_id = ?", objID)
+	return err
+}
+
+func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+	if len(md) == 0 {
+		return nil
+	}
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
+	}
+	defer insertMetadataStmt.Close()
+
+	for k, v := range md {
+		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
+			return fmt.Errorf("failed to insert object metadata: %w", err)
+		}
+	}
+	return nil
+}
+
 func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 	var id int64
 	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE name = ?", bucket).Scan(&id)
@@ -200,6 +338,87 @@ func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 		buckets = append(buckets, bucket)
 	}
 	return buckets, nil
+}
+
+type multipartUpload struct {
+	ID       int64
+	Key      string
+	Bucket   string
+	BucketID int64
+	EC       []byte
+	MimeType string
+}
+
+type multipartUploadPart struct {
+	ID         int64
+	PartNumber int64
+	Etag       string
+	Size       int64
+}
+
+func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, parts []api.MultipartCompletedPart) (multipartUpload, []multipartUploadPart, int64, string, error) {
+	// fetch upload
+	var mpu multipartUpload
+	err := tx.QueryRow(ctx, "SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id").
+		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
+	if err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch upload: %w", err)
+	} else if mpu.Key != key {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("object id mismatch: %v != %v: %w", mpu.Key, key, api.ErrObjectNotFound)
+	} else if mpu.Bucket != bucket {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("bucket name mismatch: %v != %v: %w", mpu.Bucket, bucket, api.ErrBucketNotFound)
+	}
+
+	// find relevant parts
+	rows, err := tx.Query(ctx, "SELECT id, part_number, etag, size FROM multipart_parts WHERE db_multipart_upload_id = ? ORDER BY part_number ASC", mpu.ID)
+	if err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch parts: %w", err)
+	}
+	defer rows.Close()
+
+	var storedParts []multipartUploadPart
+	for rows.Next() {
+		var p multipartUploadPart
+		if err := rows.Scan(&p.ID, &p.PartNumber, &p.Etag, &p.Size); err != nil {
+			return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to scan part: %w", err)
+		}
+		storedParts = append(storedParts, p)
+	}
+
+	var neededParts []multipartUploadPart
+	var size int64
+	h := types.NewHasher()
+	j := 0
+	for _, part := range storedParts {
+		for {
+			if j >= len(storedParts) {
+				// ran out of parts in the database
+				return multipartUpload{}, nil, 0, "", api.ErrPartNotFound
+			} else if storedParts[j].PartNumber > part.PartNumber {
+				// missing part
+				return multipartUpload{}, nil, 0, "", api.ErrPartNotFound
+			} else if storedParts[j].PartNumber == part.PartNumber && storedParts[j].Etag == strings.Trim(part.Etag, "\"") {
+				// found a match
+				neededParts = append(neededParts, storedParts[j])
+				size += storedParts[j].Size
+				j++
+
+				// update hasher
+				if _, err = h.E.Write([]byte(part.Etag)); err != nil {
+					return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to hash etag: %w", err)
+				}
+				break
+			} else {
+				// try next
+				j++
+			}
+		}
+	}
+
+	// compute ETag.
+	sum := h.Sum()
+	eTag := hex.EncodeToString(sum[:])
+	return mpu, neededParts, size, eTag, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
