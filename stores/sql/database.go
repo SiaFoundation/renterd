@@ -6,8 +6,9 @@ import (
 	"io"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 )
 
@@ -28,6 +29,9 @@ type (
 	}
 
 	DatabaseTx interface {
+		// AddMultipartPart adds a part to an unfinished multipart upload.
+		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
@@ -35,6 +39,17 @@ type (
 		// Contracts returns contract metadata for all active contracts. The
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+
+		// CompleteMultipartUpload completes a multipart upload by combining the
+		// provided parts into an object in bucket 'bucket' with key 'key'. The
+		// parts need to be provided in ascending partNumber order without
+		// duplicates but can contain gaps.
+		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
+
+		// CopyObject copies an object from one bucket and key to another. If
+		// source and destination are the same, only the metadata and mimeType
+		// are overwritten with the provided ones.
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
 
 		// CreateBucket creates a new bucket with the given name and policy. If
 		// the bucket already exists, api.ErrBucketExists is returned.
@@ -88,6 +103,12 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// Tip returns the sync height.
+		Tip(ctx context.Context) (types.ChainIndex, error)
+
+		// UnspentSiacoinElements returns all wallet outputs in the database.
+		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
+
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
@@ -99,6 +120,12 @@ type (
 		// The operation is not allowed to update the number of shards
 		// associated with a slab or the root/slabIndex of any shard.
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
+
+		// WalletEvents returns all wallet events in the database.
+		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
+
+		// WalletEventCount returns the total number of events in the database.
+		WalletEventCount(ctx context.Context) (uint64, error)
 	}
 
 	MetricsDatabase interface {

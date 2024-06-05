@@ -8,7 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
+	"go.sia.tech/renterd/internal/chain"
 )
 
 // TestProcessChainUpdate tests the ProcessChainUpdate method on the SQL store.

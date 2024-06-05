@@ -186,20 +186,6 @@ func contractNotFoundErr(fcid types.FileContractID) error {
 	return fmt.Errorf("%w: %v", api.ErrContractNotFound, fcid)
 }
 
-func scanStateElement(s scanner) (types.StateElement, error) {
-	var id Hash256
-	var leafIndex uint64
-	var merkleProof MerkleProof
-	if err := s.Scan(&id, &leafIndex, &merkleProof); err != nil {
-		return types.StateElement{}, err
-	}
-	return types.StateElement{
-		ID:          types.Hash256(id),
-		LeafIndex:   leafIndex,
-		MerkleProof: merkleProof.Hashes,
-	}, nil
-}
-
 func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, revisionHeight, revisionNumber, currRevisionNumber, size uint64) (err error) {
 	var res dsql.Result
 	if revisionNumber > currRevisionNumber {

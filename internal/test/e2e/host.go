@@ -2,9 +2,13 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -24,11 +28,12 @@ import (
 	"go.sia.tech/hostd/wallet"
 	"go.sia.tech/hostd/webhooks"
 	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/node"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
 	"go.sia.tech/siad/modules/gateway"
 	"go.sia.tech/siad/modules/transactionpool"
+	stypes "go.sia.tech/siad/types"
 	"go.uber.org/zap"
 )
 
@@ -70,6 +75,231 @@ type Host struct {
 
 	rhpv2 *rhpv2.SessionHandler
 	rhpv3 *rhpv3.SessionHandler
+}
+
+type txpool struct {
+	tp modules.TransactionPool
+}
+
+func (tp txpool) RecommendedFee() (fee types.Currency) {
+	_, maxFee := tp.tp.FeeEstimation()
+	utils.ConvertToCore(&maxFee, (*types.V1Currency)(&fee))
+	return
+}
+
+func (tp txpool) Transactions() []types.Transaction {
+	stxns := tp.tp.Transactions()
+	txns := make([]types.Transaction, len(stxns))
+	for i := range txns {
+		utils.ConvertToCore(&stxns[i], &txns[i])
+	}
+	return txns
+}
+
+func (tp txpool) AcceptTransactionSet(txns []types.Transaction) error {
+	stxns := make([]stypes.Transaction, len(txns))
+	for i := range stxns {
+		utils.ConvertToSiad(&txns[i], &stxns[i])
+	}
+	err := tp.tp.AcceptTransactionSet(stxns)
+	if errors.Is(err, modules.ErrDuplicateTransactionSet) {
+		err = nil
+	}
+	return err
+}
+
+func (tp txpool) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
+	return unconfirmedParents(txn, tp.Transactions()), nil
+}
+
+func (tp txpool) Subscribe(subscriber modules.TransactionPoolSubscriber) {
+	tp.tp.TransactionPoolSubscribe(subscriber)
+}
+
+func (tp txpool) Close() error {
+	return tp.tp.Close()
+}
+
+func unconfirmedParents(txn types.Transaction, pool []types.Transaction) []types.Transaction {
+	outputToParent := make(map[types.SiacoinOutputID]*types.Transaction)
+	for i, txn := range pool {
+		for j := range txn.SiacoinOutputs {
+			outputToParent[txn.SiacoinOutputID(j)] = &pool[i]
+		}
+	}
+	var parents []types.Transaction
+	txnsToCheck := []*types.Transaction{&txn}
+	seen := make(map[types.TransactionID]bool)
+	for len(txnsToCheck) > 0 {
+		nextTxn := txnsToCheck[0]
+		txnsToCheck = txnsToCheck[1:]
+		for _, sci := range nextTxn.SiacoinInputs {
+			if parent, ok := outputToParent[sci.ParentID]; ok {
+				if txid := parent.ID(); !seen[txid] {
+					seen[txid] = true
+					parents = append(parents, *parent)
+					txnsToCheck = append(txnsToCheck, parent)
+				}
+			}
+		}
+	}
+	slices.Reverse(parents)
+	return parents
+}
+
+func NewTransactionPool(tp modules.TransactionPool) bus.TransactionPool {
+	return &txpool{tp: tp}
+}
+
+const (
+	maxSyncTime = time.Hour
+)
+
+var (
+	ErrBlockNotFound   = errors.New("block not found")
+	ErrInvalidChangeID = errors.New("invalid change id")
+)
+
+type chainManager struct {
+	cs      modules.ConsensusSet
+	tp      bus.TransactionPool
+	network *consensus.Network
+
+	close  chan struct{}
+	mu     sync.Mutex
+	tip    consensus.State
+	synced bool
+}
+
+// ProcessConsensusChange implements the modules.ConsensusSetSubscriber interface.
+func (m *chainManager) ProcessConsensusChange(cc modules.ConsensusChange) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tip = consensus.State{
+		Network: m.network,
+		Index: types.ChainIndex{
+			ID:     types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID()),
+			Height: uint64(cc.BlockHeight),
+		},
+	}
+	m.synced = synced(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].Timestamp)
+}
+
+// Network returns the network name.
+func (m *chainManager) Network() string {
+	switch m.network.Name {
+	case "zen":
+		return "Zen Testnet"
+	case "mainnet":
+		return "Mainnet"
+	default:
+		return m.network.Name
+	}
+}
+
+// Close closes the chain manager.
+func (m *chainManager) Close() error {
+	select {
+	case <-m.close:
+		return nil
+	default:
+	}
+	close(m.close)
+	return m.cs.Close()
+}
+
+// Synced returns true if the chain manager is synced with the consensus set.
+func (m *chainManager) Synced() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.synced
+}
+
+// BlockAtHeight returns the block at the given height.
+func (m *chainManager) BlockAtHeight(height uint64) (types.Block, bool) {
+	sb, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
+	var c types.Block
+	utils.ConvertToCore(sb, (*types.V1Block)(&c))
+	return types.Block(c), ok
+}
+
+func (m *chainManager) LastBlockTime() time.Time {
+	return time.Unix(int64(m.cs.CurrentBlock().Timestamp), 0)
+}
+
+// IndexAtHeight return the chain index at the given height.
+func (m *chainManager) IndexAtHeight(height uint64) (types.ChainIndex, error) {
+	block, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
+	if !ok {
+		return types.ChainIndex{}, ErrBlockNotFound
+	}
+	return types.ChainIndex{
+		ID:     types.BlockID(block.ID()),
+		Height: height,
+	}, nil
+}
+
+// TipState returns the current chain state.
+func (m *chainManager) TipState() consensus.State {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.tip
+}
+
+// AcceptBlock adds b to the consensus set.
+func (m *chainManager) AcceptBlock(b types.Block) error {
+	var sb stypes.Block
+	utils.ConvertToSiad(types.V1Block(b), &sb)
+	return m.cs.AcceptBlock(sb)
+}
+
+// PoolTransactions returns all transactions in the transaction pool
+func (m *chainManager) PoolTransactions() []types.Transaction {
+	return m.tp.Transactions()
+}
+
+// Subscribe subscribes to the consensus set.
+func (m *chainManager) Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error {
+	if err := m.cs.ConsensusSetSubscribe(s, ccID, cancel); err != nil {
+		if strings.Contains(err.Error(), "consensus subscription has invalid id") {
+			return ErrInvalidChangeID
+		}
+		return err
+	}
+	return nil
+}
+
+func synced(timestamp stypes.Timestamp) bool {
+	return time.Since(time.Unix(int64(timestamp), 0)) <= maxSyncTime
+}
+
+// NewManager creates a new chain manager.
+func NewChainManager(cs modules.ConsensusSet, tp bus.TransactionPool, network *consensus.Network) (*chainManager, error) {
+	height := cs.Height()
+	block, ok := cs.BlockAtHeight(height)
+	if !ok {
+		return nil, fmt.Errorf("failed to get block at height %d", height)
+	}
+
+	m := &chainManager{
+		cs:      cs,
+		tp:      tp,
+		network: network,
+		tip: consensus.State{
+			Network: network,
+			Index: types.ChainIndex{
+				ID:     types.BlockID(block.ID()),
+				Height: uint64(height),
+			},
+		},
+		synced: synced(block.Timestamp),
+		close:  make(chan struct{}),
+	}
+
+	if err := cs.ConsensusSetSubscribe(m, modules.ConsensusChangeRecent, m.close); err != nil {
+		return nil, fmt.Errorf("failed to subscribe to consensus set: %w", err)
+	}
+	return m, nil
 }
 
 // defaultHostSettings returns the default settings for the test host
@@ -179,8 +409,8 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transaction pool: %w", err)
 	}
-	tp := node.NewTransactionPool(tpool)
-	cm, err := node.NewChainManager(cs, tp, network)
+	tp := NewTransactionPool(tpool)
+	cm, err := NewChainManager(cs, tp, network)
 	if err != nil {
 		return nil, err
 	}

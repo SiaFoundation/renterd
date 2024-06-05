@@ -13,7 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/chain"
+	"go.sia.tech/renterd/internal/chain"
 	isql "go.sia.tech/renterd/internal/sql"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"go.uber.org/zap"
@@ -78,7 +78,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 
 	if len(events) > 0 {
 		// prepare statement to insert new events
-		insertEventStmt, err := c.tx.Prepare(c.ctx, `INSERT OR IGNORE INTO wallet_events (created_at, event_id, inflow, outflow, "transaction", maturity_height, source, timestamp, height, block_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		insertEventStmt, err := c.tx.Prepare(c.ctx, `INSERT OR IGNORE INTO wallet_events (created_at, height, block_id, event_id, inflow, outflow, type, data, maturity_height, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement to insert new events: %w", err)
 		}
@@ -87,17 +87,22 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 		// insert new events
 		for _, e := range events {
 			c.l.Debugw(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
+			data, err := ssql.ToEventData(e.Data)
+			if err != nil {
+				c.l.Error(err)
+				return err
+			}
 			if _, err := insertEventStmt.Exec(c.ctx,
 				time.Now().UTC(),
+				e.Index.Height,
+				ssql.Hash256(e.Index.ID),
 				ssql.Hash256(e.ID),
 				ssql.Currency(e.Inflow),
 				ssql.Currency(e.Outflow),
-				ssql.Transaction(e.Transaction),
+				e.Type,
+				data,
 				e.MaturityHeight,
-				string(e.Source),
 				e.Timestamp.Unix(),
-				e.Index.Height,
-				ssql.Hash256(e.Index.ID),
 			); err != nil {
 				return fmt.Errorf("failed to insert new event: %w", err)
 			}

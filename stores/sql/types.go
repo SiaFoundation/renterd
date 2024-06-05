@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 )
 
 const (
@@ -23,7 +24,7 @@ type (
 	MerkleProof    struct{ Hashes []types.Hash256 }
 	PublicKey      types.PublicKey
 	SecretKey      []byte
-	Transaction    types.Transaction
+	EventData      []byte
 )
 
 var (
@@ -156,23 +157,68 @@ func (k *SecretKey) Scan(value interface{}) error {
 	return nil
 }
 
-// Scan scans value into a Transaction, implements sql.Scanner interface.
-func (t *Transaction) Scan(value interface{}) error {
+// Scan scans value into a EventData, implements sql.Scanner interface.
+func (e *EventData) Scan(value interface{}) error {
 	b, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal Transaction value:", value))
 	}
-
-	if err := json.NewDecoder(bytes.NewReader(b)).Decode(t); err != nil {
-		return fmt.Errorf("failed to decode Transaction value: %v", err)
-	}
+	*e = b
 	return nil
 }
 
 // Value returns a Transaction value, implements driver.Valuer interface.
-func (t Transaction) Value() (driver.Value, error) {
+func (e EventData) Value() (driver.Value, error) {
+	return []byte(e), nil
+}
+
+func FromEventData(e EventData, t string) (wallet.EventData, error) {
+	dec := json.NewDecoder(bytes.NewReader(e))
+	switch t {
+	case wallet.EventTypeMinerPayout:
+		var payout wallet.EventMinerPayout
+		if err := dec.Decode(&payout); err != nil {
+			return nil, err
+		}
+		return payout, nil
+	case wallet.EventTypeFoundationSubsidy:
+		var subsidy wallet.EventFoundationSubsidy
+		if err := dec.Decode(&subsidy); err != nil {
+			return nil, err
+		}
+		return subsidy, nil
+	case wallet.EventTypeV1Contract:
+		var v1c wallet.EventV1ContractPayout
+		if err := dec.Decode(&v1c); err != nil {
+			return nil, err
+		}
+		return v1c, nil
+	case wallet.EventTypeV1Transaction:
+		var v1txn wallet.EventV1Transaction
+		if err := dec.Decode(&v1txn); err != nil {
+			return nil, err
+		}
+		return v1txn, nil
+	case wallet.EventTypeV2Contract:
+		var v2c wallet.EventV2ContractPayout
+		if err := dec.Decode(&v2c); err != nil {
+			return nil, err
+		}
+		return v2c, nil
+	case wallet.EventTypeV2Transaction:
+		var v2txn wallet.EventV2Transaction
+		if err := dec.Decode(&v2txn); err != nil {
+			return nil, err
+		}
+		return v2txn, nil
+	default:
+		return nil, fmt.Errorf("unknown event type %v", t)
+	}
+}
+
+func ToEventData(e wallet.EventData) (EventData, error) {
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(&t); err != nil {
+	if err := json.NewEncoder(&buf).Encode(e); err != nil {
 		return nil, fmt.Errorf("failed to marshal Transaction value: %v", err)
 	}
 	return buf.Bytes(), nil

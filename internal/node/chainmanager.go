@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
 )
@@ -28,24 +29,28 @@ type chainManager struct {
 	tp      bus.TransactionPool
 	network *consensus.Network
 
-	close  chan struct{}
-	mu     sync.Mutex
-	tip    consensus.State
-	synced bool
+	close         chan struct{}
+	mu            sync.Mutex
+	lastBlockTime time.Time
+	tip           consensus.State
+	synced        bool
 }
 
 // ProcessConsensusChange implements the modules.ConsensusSetSubscriber interface.
 func (m *chainManager) ProcessConsensusChange(cc modules.ConsensusChange) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	b := cc.AppliedBlocks[len(cc.AppliedBlocks)-1]
 	m.tip = consensus.State{
 		Network: m.network,
 		Index: types.ChainIndex{
-			ID:     types.BlockID(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].ID()),
+			ID:     types.BlockID(b.ID()),
 			Height: uint64(cc.BlockHeight),
 		},
 	}
-	m.synced = synced(cc.AppliedBlocks[len(cc.AppliedBlocks)-1].Timestamp)
+	m.synced = synced(b.Timestamp)
+	m.lastBlockTime = time.Unix(int64(b.Timestamp), 0)
 }
 
 // Network returns the network name.
@@ -82,12 +87,14 @@ func (m *chainManager) Synced() bool {
 func (m *chainManager) BlockAtHeight(height uint64) (types.Block, bool) {
 	sb, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
 	var c types.Block
-	convertToCore(sb, (*types.V1Block)(&c))
+	utils.ConvertToCore(sb, (*types.V1Block)(&c))
 	return types.Block(c), ok
 }
 
 func (m *chainManager) LastBlockTime() time.Time {
-	return time.Unix(int64(m.cs.CurrentBlock().Timestamp), 0)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastBlockTime
 }
 
 // IndexAtHeight return the chain index at the given height.
@@ -112,13 +119,8 @@ func (m *chainManager) TipState() consensus.State {
 // AcceptBlock adds b to the consensus set.
 func (m *chainManager) AcceptBlock(b types.Block) error {
 	var sb stypes.Block
-	convertToSiad(types.V1Block(b), &sb)
+	utils.ConvertToSiad(types.V1Block(b), &sb)
 	return m.cs.AcceptBlock(sb)
-}
-
-// PoolTransactions returns all transactions in the transaction pool
-func (m *chainManager) PoolTransactions() []types.Transaction {
-	return m.tp.Transactions()
 }
 
 // Subscribe subscribes to the consensus set.
@@ -130,6 +132,11 @@ func (m *chainManager) Subscribe(s modules.ConsensusSetSubscriber, ccID modules.
 		return err
 	}
 	return nil
+}
+
+// PoolTransactions returns all transactions in the transaction pool
+func (m *chainManager) PoolTransactions() []types.Transaction {
+	return m.tp.Transactions()
 }
 
 func synced(timestamp stypes.Timestamp) bool {
@@ -155,8 +162,9 @@ func NewChainManager(cs modules.ConsensusSet, tp bus.TransactionPool, network *c
 				Height: uint64(height),
 			},
 		},
-		synced: synced(block.Timestamp),
-		close:  make(chan struct{}),
+		synced:        synced(block.Timestamp),
+		lastBlockTime: time.Unix(int64(block.Timestamp), 0),
+		close:         make(chan struct{}),
 	}
 
 	if err := cs.ConsensusSetSubscribe(m, modules.ConsensusChangeRecent, m.close); err != nil {
