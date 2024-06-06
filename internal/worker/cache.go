@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -23,10 +25,11 @@ const (
 
 var (
 	errCacheNotReady = errors.New("cache is not ready yet, required webhooks have not been registered")
+	errCacheOutdated = errors.New("cache is outdated, the value fetched from the bus does not match the cached value")
 )
 
 type memoryCache struct {
-	items map[string]cacheEntry
+	items map[string]*cacheEntry
 	mu    sync.RWMutex
 }
 
@@ -37,24 +40,26 @@ type cacheEntry struct {
 
 func newMemoryCache() *memoryCache {
 	return &memoryCache{
-		items: make(map[string]cacheEntry),
+		items: make(map[string]*cacheEntry),
 	}
 }
 
-func (c *memoryCache) Get(key string) (interface{}, bool) {
+func (c *memoryCache) Get(key string) (value interface{}, found bool, expired bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	entry, ok := c.items[key]
-	if !ok || time.Now().After(entry.expiry) {
-		return nil, false
+	if !ok {
+		return nil, false, false
+	} else if time.Now().After(entry.expiry) {
+		return entry.value, true, true
 	}
-	return entry.value, ok
+	return entry.value, true, false
 }
 
 func (c *memoryCache) Set(key string, value interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.items[key] = cacheEntry{
+	c.items[key] = &cacheEntry{
 		value:  value,
 		expiry: time.Now().Add(cacheEntryExpiry),
 	}
@@ -102,40 +107,52 @@ func NewCache(b Bus, workerAddr string, logger *zap.Logger) WorkerCache {
 	}
 }
 
-func (c *cache) DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error) {
-	if c.isReady() {
-		value, ok := c.cache.Get(cacheKeyDownloadContracts)
-		if ok {
-			return value.([]api.ContractMetadata), nil
-		}
-	} else {
+func (c *cache) DownloadContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
+	// fetch directly from bus if the cache is not ready
+	if !c.isReady() {
 		c.logger.Warn(errCacheNotReady)
+		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{})
+		return
 	}
 
-	contracts, err := c.b.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
-		return nil, err
+	// fetch from bus if it's not cached or expired
+	value, found, expired := c.cache.Get(cacheKeyDownloadContracts)
+	if !found || expired {
+		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{})
+		if err == nil {
+			c.cache.Set(cacheKeyDownloadContracts, contracts)
+		}
+		if expired && !contractsEqual(value.([]api.ContractMetadata), contracts) {
+			c.logger.Warn(fmt.Errorf("%w: key %v", errCacheOutdated, cacheKeyDownloadContracts))
+		}
+		return
 	}
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-	return contracts, nil
+
+	return value.([]api.ContractMetadata), nil
 }
 
-func (c *cache) GougingParams(ctx context.Context) (api.GougingParams, error) {
-	if c.isReady() {
-		value, ok := c.cache.Get(cacheKeyGougingParams)
-		if ok {
-			return value.(api.GougingParams), nil
-		}
-	} else {
+func (c *cache) GougingParams(ctx context.Context) (gp api.GougingParams, err error) {
+	// fetch directly from bus if the cache is not ready
+	if !c.isReady() {
 		c.logger.Warn(errCacheNotReady)
+		gp, err = c.b.GougingParams(ctx)
+		return
 	}
 
-	gp, err := c.b.GougingParams(ctx)
-	if err != nil {
-		return api.GougingParams{}, err
+	// fetch from bus if it's not cached or expired
+	value, found, expired := c.cache.Get(cacheKeyGougingParams)
+	if !found || expired {
+		gp, err = c.b.GougingParams(ctx)
+		if err == nil {
+			c.cache.Set(cacheKeyGougingParams, gp)
+		}
+		if expired && !gougingParamsEqual(value.(api.GougingParams), gp) {
+			c.logger.Warn(fmt.Errorf("%w: key %v", errCacheOutdated, cacheKeyGougingParams))
+		}
+		return
 	}
-	c.cache.Set(cacheKeyGougingParams, gp)
-	return gp, nil
+
+	return value.(api.GougingParams), nil
 }
 
 func (c *cache) HandleEvent(event webhooks.Event) error {
@@ -185,7 +202,7 @@ func (c *cache) isReady() bool {
 
 func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) error {
 	// return early if the doesn't have gouging params to update
-	value, found := c.cache.Get(cacheKeyGougingParams)
+	value, found, _ := c.cache.Get(cacheKeyGougingParams)
 	if !found {
 		return nil
 	}
@@ -200,7 +217,7 @@ func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) error {
 
 func (c *cache) handleContractArchive(event api.EventContractArchive) error {
 	// return early if the cache doesn't have contracts
-	value, found := c.cache.Get(cacheKeyDownloadContracts)
+	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
 	if !found {
 		return nil
 	}
@@ -219,7 +236,7 @@ func (c *cache) handleContractArchive(event api.EventContractArchive) error {
 
 func (c *cache) handleContractRenew(event api.EventContractRenew) error {
 	// return early if the cache doesn't have contracts
-	value, found := c.cache.Get(cacheKeyDownloadContracts)
+	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
 	if !found {
 		return nil
 	}
@@ -246,7 +263,7 @@ func (c *cache) handleSettingDelete(e api.EventSettingDelete) (err error) {
 
 func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {
 	// return early if the cache doesn't have gouging params to update
-	value, found := c.cache.Get(cacheKeyGougingParams)
+	value, found, _ := c.cache.Get(cacheKeyGougingParams)
 	if !found {
 		return nil
 	}
@@ -284,4 +301,26 @@ func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {
 	}
 
 	return nil
+}
+
+func contractsEqual(x, y []api.ContractMetadata) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	sort.Slice(x, func(i, j int) bool { return x[i].ID.String() < x[j].ID.String() })
+	sort.Slice(y, func(i, j int) bool { return y[i].ID.String() < y[j].ID.String() })
+	for i, c := range x {
+		if c.ID.String() != y[i].ID.String() {
+			return false
+		}
+	}
+	return true
+}
+
+func gougingParamsEqual(x, y api.GougingParams) bool {
+	var xb bytes.Buffer
+	var yb bytes.Buffer
+	json.NewEncoder(&xb).Encode(x)
+	json.NewEncoder(&yb).Encode(y)
+	return bytes.Equal(xb.Bytes(), yb.Bytes())
 }
