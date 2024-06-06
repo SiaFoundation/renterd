@@ -741,7 +741,7 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 	return nil
 }
 
-func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
+func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -758,13 +758,18 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	var whereExprs []string
 	var args []any
 
-	// filter autopilot
-	if autopilotID != "" {
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h.id = h2.id INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id WHERE ap.identifier = ?)")
-		args = append(args, autopilotID)
+	// fetch autopilot id
+	var autopilotID int64
+	if autopilot != "" {
+		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", autopilot).
+			Scan(&autopilotID); errors.Is(err, dsql.ErrNoRows) {
+			return nil, api.ErrAutopilotNotFound
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
+		}
 	}
 
-	// filter allowlist/blocklist
+	// filter alowlist/blocklist
 	switch filterMode {
 	case api.HostFilterModeAllowed:
 		if hasAllowlist {
@@ -805,11 +810,17 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	}
 
 	// filter usability
+	whereApExpr := ""
+	if autopilot != "" {
+		whereApExpr = "AND hc.db_autopilot_id = ?"
+	}
 	switch usabilityMode {
 	case api.UsabilityFilterModeUsable:
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0)")
+		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
+		args = append(args, autopilotID)
 	case api.UsabilityFilterModeUnusable:
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1)")
+		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
+		args = append(args, autopilotID)
 	}
 
 	// offset + limit
@@ -890,9 +901,9 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 
 	// query host checks
 	var apExpr string
-	if autopilotID != "" {
+	if autopilot != "" {
 		apExpr = "WHERE ap.identifier = ?"
-		args = append(args, autopilotID)
+		args = append(args, autopilot)
 	}
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
