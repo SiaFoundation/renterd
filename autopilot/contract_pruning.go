@@ -191,7 +191,7 @@ func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types
 	ap.mu.Lock()
 	defer ap.mu.Unlock()
 	alertID := alerts.IDForContract(alertPruningID, fcid)
-	if shouldSendPruneAlert(err, hostVersion) {
+	if shouldSendPruneAlert(err, hostVersion, hostRelease) {
 		ap.RegisterAlert(ctx, newContractPruningFailedAlert(hk, hostVersion, hostRelease, fcid, err))
 		ap.pruningAlertIDs[fcid] = alertID // store id to dismiss stale alerts
 	} else {
@@ -236,8 +236,11 @@ func humanReadableSize(b int) string {
 		float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func shouldSendPruneAlert(err error, version string) bool {
-	return err != nil && !((utils.IsErr(err, errInvalidMerkleProof) && build.VersionCmp(version, "1.6.0") < 0) ||
+func shouldSendPruneAlert(err error, version, release string) bool {
+	merkleRootIssue := utils.IsErr(err, errInvalidMerkleProof) &&
+		build.VersionCmp(version, "1.6.0") < 0 &&
+		release == ""
+	return err != nil && !(merkleRootIssue ||
 		utils.IsErr(err, utils.ErrConnectionRefused) ||
 		utils.IsErr(err, utils.ErrConnectionTimedOut) ||
 		utils.IsErr(err, utils.ErrConnectionResetByPeer) ||
