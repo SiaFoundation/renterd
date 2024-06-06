@@ -9,7 +9,6 @@ import (
 	"sort"
 	"unicode/utf8"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
@@ -94,68 +93,8 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 }
 
 func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
-	// collect all used contracts
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	for _, s := range slices {
-		for _, shard := range s.Shards {
-			for h, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, exists := usedContracts[h]; !exists {
-						usedContracts[h] = make(map[types.FileContractID]struct{})
-					}
-					usedContracts[h][fcid] = struct{}{}
-				}
-			}
-		}
-	}
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Fetch contract set.
-		var cs dbContractSet
-		if err := tx.Take(&cs, "name = ?", contractSet).Error; err != nil {
-			return fmt.Errorf("contract set %v not found: %w", contractSet, err)
-		}
-		// Fetch the used contracts.
-		contracts, err := fetchUsedContracts(tx, usedContracts)
-		if err != nil {
-			return fmt.Errorf("failed to fetch used contracts: %w", err)
-		}
-		// Find multipart upload.
-		var mu dbMultipartUpload
-		err = tx.Where("upload_id", uploadID).
-			Take(&mu).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch multipart upload: %w", err)
-		}
-		// Delete a potentially existing part.
-		err = tx.Model(&dbMultipartPart{}).
-			Where("db_multipart_upload_id = ? AND part_number = ?", mu.ID, partNumber).
-			Delete(&dbMultipartPart{}).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to delete existing part: %w", err)
-		}
-		var size uint64
-		for _, slice := range slices {
-			size += uint64(slice.Length)
-		}
-		// Create a new part.
-		part := dbMultipartPart{
-			Etag:                eTag,
-			PartNumber:          partNumber,
-			DBMultipartUploadID: mu.ID,
-			Size:                size,
-		}
-		err = tx.Create(&part).Error
-		if err != nil {
-			return fmt.Errorf("failed to create part: %w", err)
-		}
-		// Create the slices.
-		err = s.createSlices(tx, nil, &part.ID, cs.ID, contracts, slices)
-		if err != nil {
-			return fmt.Errorf("failed to create slices: %w", err)
-		}
-		return nil
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.AddMultipartPart(ctx, bucket, path, contractSet, eTag, uploadID, partNumber, slices)
 	})
 }
 

@@ -677,7 +677,7 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 	var contracts []api.ContractMetadata
 	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		contracts, err = tx.Contracts(ctx, opts)
-		return err
+		return
 	})
 	return contracts, err
 }
@@ -1780,138 +1780,6 @@ func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, 
 		entities = append(entities, metadata)
 	}
 	return tx.CreateInBatches(&entities, 1000).Error
-}
-
-func (s *SQLStore) createSlices(tx *gorm.DB, objID, multiPartID *uint, contractSetID uint, contracts map[types.FileContractID]dbContract, slices []object.SlabSlice) error {
-	if (objID == nil && multiPartID == nil) || (objID != nil && multiPartID != nil) {
-		return fmt.Errorf("either objID or multiPartID must be set")
-	} else if len(slices) == 0 {
-		return nil // nothing to do
-	}
-
-	// build slabs
-	slabs := make([]dbSlab, len(slices))
-	for i := range slices {
-		slabKey, err := slices[i].Key.MarshalBinary()
-		if err != nil {
-			return fmt.Errorf("failed to marshal slab key: %w", err)
-		}
-		slabs[i] = dbSlab{
-			Key:             slabKey,
-			DBContractSetID: contractSetID,
-			MinShards:       slices[i].MinShards,
-			TotalShards:     uint8(len(slices[i].Shards)),
-		}
-	}
-
-	// create slabs that don't exist yet
-	err := tx.
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-			Columns:   []clause.Column{{Name: "key"}},
-		}).
-		Create(&slabs).Error
-	if err != nil {
-		return fmt.Errorf("failed to create slabs %w", err)
-	}
-
-	// fetch the upserted slabs
-	for i := range slabs {
-		if err := tx.Raw("SELECT * FROM slabs WHERE `key` = ?", slabs[i].Key).
-			Scan(&slabs[i]).
-			Error; err != nil {
-			return fmt.Errorf("failed to fetch slab: %w", err)
-		} else if slabs[i].DBContractSetID != contractSetID {
-			return fmt.Errorf("slab already exists in another contract set %v != %v", slabs[i].DBContractSetID, contractSetID)
-		}
-	}
-
-	// build slices
-	dbSlices := make([]dbSlice, len(slices))
-	for i := range slices {
-		slab := slabs[i]
-		dbSlices[i] = dbSlice{
-			DBSlabID:          slab.ID,
-			DBObjectID:        objID,
-			ObjectIndex:       uint(i + 1),
-			DBMultipartPartID: multiPartID,
-			Offset:            slices[i].Offset,
-			Length:            slices[i].Length,
-		}
-	}
-
-	// if there are no slices we are done
-	if len(dbSlices) == 0 {
-		return nil
-	}
-
-	// create slices
-	err = tx.Create(&dbSlices).Error
-	if err != nil {
-		return fmt.Errorf("failed to create slice %w", err)
-	}
-
-	// build sectors
-	var sectors []dbSector
-	for i, ss := range slices {
-		slab := slabs[i]
-		for j := range ss.Shards {
-			sectors = append(sectors, dbSector{
-				DBSlabID:   slab.ID,
-				SlabIndex:  j + 1,
-				LatestHost: publicKey(ss.Shards[j].LatestHost),
-				Root:       ss.Shards[j].Root[:],
-			})
-		}
-	}
-
-	// create sector that don't exist yet
-	sectorIDs, err := upsertSectors(tx, sectors)
-	if err != nil {
-		return fmt.Errorf("failed to create sectors: %w", err)
-	}
-
-	// build contract <-> sector links
-	sectorIdx := 0
-	var contractSectors []dbContractSector
-	for _, ss := range slices {
-		for _, shard := range ss.Shards {
-			sectorID := sectorIDs[sectorIdx]
-			for _, fcids := range shard.Contracts {
-				for _, fcid := range fcids {
-					if _, ok := contracts[fcid]; ok {
-						contractSectors = append(contractSectors, dbContractSector{
-							DBSectorID:   sectorID,
-							DBContractID: contracts[fcid].ID,
-						})
-					} else {
-						s.logger.Warn("missing contract for shard",
-							"contract", fcid,
-							"root", shard.Root,
-							"latest_host", shard.LatestHost,
-						)
-					}
-				}
-			}
-			sectorIdx++
-		}
-	}
-
-	// if there are no associations we are done
-	if len(contractSectors) == 0 {
-		return nil
-	}
-
-	// create associations
-	if err := tx.
-		Table("contract_sectors").
-		Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).
-		CreateInBatches(&contractSectors, sectorInsertionBatchSize).Error; err != nil {
-		return err
-	}
-	return nil
 }
 
 // object retrieves an object from the store.
