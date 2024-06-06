@@ -9,21 +9,56 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	dsql "database/sql"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/object"
+	"lukechampine.com/frand"
 )
 
 var ErrNegativeOffset = errors.New("offset can not be negative")
 
+func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, uploadID string) error {
+	res, err := tx.Exec(ctx, `
+		DELETE
+		FROM multipart_uploads
+		WHERE object_id = ? AND upload_id = ? AND db_bucket_id = (
+			SELECT id
+			FROM buckets
+			WHERE name = ?
+	)`, key, uploadID, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to delete multipart upload: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to fetch rows affected: %w", err)
+	} else if n > 0 {
+		return nil
+	}
+
+	// find out why the upload wasn't deleted
+	var muKey, bucketName string
+	err = tx.QueryRow(ctx, "SELECT object_id, b.name FROM multipart_uploads mu INNER JOIN buckets b ON mu.db_bucket_id = b.id WHERE upload_id = ?", uploadID).
+		Scan(&muKey, &bucketName)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrMultipartUploadNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch multipart upload: %w", err)
+	} else if muKey != key {
+		return fmt.Errorf("object id mismatch: %v != %v: %w", muKey, key, api.ErrObjectNotFound)
+	} else if bucketName != bucket {
+		return fmt.Errorf("bucket name mismatch: %v != %v: %w", bucketName, bucket, api.ErrBucketNotFound)
+	}
+	return errors.New("failed to delete multipart upload for unknown reason")
+}
+
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.Bucket{}, api.ErrBucketNotFound
-	} else if err != nil {
+	if err != nil {
 		return api.Bucket{}, fmt.Errorf("failed to fetch bucket: %w", err)
 	}
 	return b, nil
@@ -187,12 +222,50 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	}
 
 	// create metadata
-	if err := InsertMetadata(ctx, tx, dstObjID, metadata); err != nil {
+	if err := InsertMetadata(ctx, tx, &dstObjID, nil, metadata); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to insert metadata: %w", err)
 	}
 
 	// fetch copied object
 	return fetchMetadata(dstObjID)
+}
+
+func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	// fetch bucket id
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).
+		Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return "", fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return "", fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// marshal key
+	ecBytes, err := ec.MarshalBinary()
+	if err != nil {
+		return "", err
+	}
+
+	// insert multipart upload
+	uploadIDEntropy := frand.Entropy256()
+	uploadID := hex.EncodeToString(uploadIDEntropy[:])
+	var muID int64
+	res, err := tx.Exec(ctx, `
+		INSERT INTO multipart_uploads (created_at, `+"`key`"+`, upload_id, object_id, db_bucket_id, mime_type)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, time.Now(), SecretKey(ecBytes), uploadID, key, bucketID, mimeType)
+	if err != nil {
+		return "", fmt.Errorf("failed to create multipart upload: %w", err)
+	} else if muID, err = res.LastInsertId(); err != nil {
+		return "", fmt.Errorf("failed to fetch multipart upload id: %w", err)
+	}
+
+	// insert metadata
+	if err := InsertMetadata(ctx, tx, nil, &muID, metadata); err != nil {
+		return "", fmt.Errorf("failed to insert multipart metadata: %w", err)
+	}
+	return uploadID, nil
 }
 
 func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec []byte, mimeType, eTag string) (int64, error) {
@@ -215,7 +288,7 @@ func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, s
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
 	if err := DeleteMetadata(ctx, tx, objID); err != nil {
 		return err
-	} else if err := InsertMetadata(ctx, tx, objID, md); err != nil {
+	} else if err := InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
 		return err
 	}
 	return nil
@@ -226,18 +299,20 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 	return err
 }
 
-func InsertMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
+func InsertMetadata(ctx context.Context, tx sql.Tx, objID, muID *int64, md api.ObjectUserMetadata) error {
 	if len(md) == 0 {
 		return nil
+	} else if (objID == nil) == (muID == nil) {
+		return errors.New("either objID or muID must be set")
 	}
-	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, `key`, value) VALUES (?, ?, ?, ?)")
+	insertMetadataStmt, err := tx.Prepare(ctx, "INSERT INTO object_user_metadata (created_at, db_object_id, db_multipart_upload_id, `key`, value) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert object metadata: %w", err)
 	}
 	defer insertMetadataStmt.Close()
 
 	for k, v := range md {
-		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, k, v); err != nil {
+		if _, err := insertMetadataStmt.Exec(ctx, time.Now(), objID, muID, k, v); err != nil {
 			return fmt.Errorf("failed to insert object metadata: %w", err)
 		}
 	}
@@ -343,6 +418,127 @@ func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 	return buckets, nil
 }
 
+func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.MultipartUpload, error) {
+	resp, err := scanMultipartUpload(tx.QueryRow(ctx, "SELECT b.name, mu.key, mu.object_id, mu.upload_id, mu.created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id WHERE mu.upload_id = ?", uploadID))
+	if err != nil {
+		return api.MultipartUpload{}, fmt.Errorf("failed to fetch multipart upload: %w", err)
+	}
+	return resp, nil
+}
+
+func MultipartUploadParts(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error) {
+	limitExpr := ""
+	limitUsed := limit > 0
+	if limitUsed {
+		limitExpr = fmt.Sprintf("LIMIT %d", limit+1)
+	}
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT mp.part_number, mp.created_at, mp.etag, mp.size
+		FROM multipart_parts mp
+		INNER JOIN multipart_uploads mus ON mus.id = mp.db_multipart_upload_id 
+		INNER JOIN buckets b ON b.id = mus.db_bucket_id
+		WHERE mus.object_id = ? AND b.name = ? AND mus.upload_id = ? AND part_number > ?
+		ORDER BY part_number ASC
+		%s
+	`, limitExpr), key, bucket, uploadID, marker)
+	if err != nil {
+		return api.MultipartListPartsResponse{}, fmt.Errorf("failed to fetch multipart parts: %w", err)
+	}
+	defer rows.Close()
+
+	var parts []api.MultipartListPartItem
+	for rows.Next() {
+		var part api.MultipartListPartItem
+		if err := rows.Scan(&part.PartNumber, (*time.Time)(&part.LastModified), &part.ETag, &part.Size); err != nil {
+			return api.MultipartListPartsResponse{}, fmt.Errorf("failed to scan part: %w", err)
+		}
+		parts = append(parts, part)
+	}
+
+	// check if there are more parts beyond 'limit'.
+	var hasMore bool
+	var nextMarker int
+	if limitUsed && len(parts) > int(limit) {
+		hasMore = true
+		parts = parts[:len(parts)-1]
+		nextMarker = parts[len(parts)-1].PartNumber
+	}
+
+	return api.MultipartListPartsResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Parts:      parts,
+	}, nil
+}
+
+func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
+	// both markers must be used together
+	if (keyMarker == "" && uploadIDMarker != "") || (keyMarker != "" && uploadIDMarker == "") {
+		return api.MultipartListUploadsResponse{}, errors.New("both keyMarker and uploadIDMarker must be set or neither")
+	}
+
+	// prepare 'limit' expression
+	limitExpr := ""
+	limitUsed := limit > 0
+	if limitUsed {
+		limitExpr = fmt.Sprintf("LIMIT %d", limit+1)
+	}
+
+	// prepare 'where' expression
+	var whereExprs []string
+	var args []any
+	if keyMarker != "" {
+		whereExprs = append(whereExprs, "object_id > ? OR (object_id = ? AND upload_id > ?)")
+		args = append(args, keyMarker, keyMarker, uploadIDMarker)
+	}
+	if prefix != "" {
+		whereExprs = append(whereExprs, "SUBSTR(object_id, 1, ?) = ?")
+		args = append(args, utf8.RuneCountInString(prefix), prefix)
+	}
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		args = append(args, bucket)
+	}
+	whereExpr := ""
+	if len(whereExprs) > 0 {
+		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
+	}
+
+	// fetch multipart uploads
+	var uploads []api.MultipartUpload
+	rows, err := tx.Query(ctx, fmt.Sprintf("SELECT b.name, mu.key, mu.object_id, mu.upload_id, mu.created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id %s ORDER BY object_id ASC, upload_id ASC %s",
+		whereExpr, limitExpr), args...)
+	if err != nil {
+		return api.MultipartListUploadsResponse{}, fmt.Errorf("failed to fetch multipart uploads: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		upload, err := scanMultipartUpload(rows)
+		if err != nil {
+			return api.MultipartListUploadsResponse{}, fmt.Errorf("failed to scan multipart upload: %w", err)
+		}
+		uploads = append(uploads, upload)
+	}
+
+	// check if there are more uploads beyond 'limit'.
+	var hasMore bool
+	var nextPathMarker, nextUploadIDMarker string
+	if limitUsed && len(uploads) > int(limit) {
+		hasMore = true
+		uploads = uploads[:len(uploads)-1]
+		nextPathMarker = uploads[len(uploads)-1].Path
+		nextUploadIDMarker = uploads[len(uploads)-1].UploadID
+	}
+
+	return api.MultipartListUploadsResponse{
+		HasMore:            hasMore,
+		NextPathMarker:     nextPathMarker,
+		NextUploadIDMarker: nextUploadIDMarker,
+		Uploads:            uploads,
+	}, nil
+}
+
 type multipartUpload struct {
 	ID       int64
 	Key      string
@@ -422,6 +618,85 @@ func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, u
 	sum := h.Sum()
 	eTag := hex.EncodeToString(sum[:])
 	return mpu, neededParts, size, eTag, nil
+}
+
+func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	var args []any
+	var bucketExpr string
+	var bucketID int64
+	if opts.Bucket != "" {
+		err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE name = ?", opts.Bucket).
+			Scan(&bucketID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ObjectsStatsResponse{}, api.ErrBucketNotFound
+		} else if err != nil {
+			return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch bucket id: %w", err)
+		}
+		bucketExpr = "WHERE db_bucket_id = ?"
+		args = append(args, bucketID)
+	}
+
+	// objects stats
+	var numObjects, totalObjectsSize uint64
+	var minHealth float64
+	err := tx.QueryRow(ctx, "SELECT COUNT(*), COALESCE(MIN(health), 1), COALESCE(SUM(size), 0) FROM objects "+bucketExpr, args...).
+		Scan(&numObjects, &minHealth, &totalObjectsSize)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch objects stats: %w", err)
+	}
+
+	// multipart upload stats
+	var unfinishedObjects uint64
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM multipart_uploads "+bucketExpr, args...).
+		Scan(&unfinishedObjects)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch multipart upload stats: %w", err)
+	}
+
+	// multipart upload part stats
+	var totalUnfinishedObjectsSize uint64
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(size), 0) FROM multipart_parts mp INNER JOIN multipart_uploads mu ON mp.db_multipart_upload_id = mu.id "+bucketExpr, args...).
+		Scan(&totalUnfinishedObjectsSize)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch multipart upload part stats: %w", err)
+	}
+
+	// total sectors
+	var whereExpr string
+	var whereArgs []any
+	if opts.Bucket != "" {
+		whereExpr = `
+			AND EXISTS (
+				SELECT 1 FROM slices sli
+				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
+				WHERE sli.db_slab_id = sla.id 
+			)
+		`
+		whereArgs = append(whereArgs, bucketID)
+	}
+	var totalSectors uint64
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(total_shards), 0) FROM slabs sla WHERE db_buffered_slab_id IS NULL "+whereExpr, whereArgs...).
+		Scan(&totalSectors)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch total sector stats: %w", err)
+	}
+
+	var totalUploaded uint64
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(size), 0) FROM contracts").
+		Scan(&totalUploaded)
+	if err != nil {
+		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch contract stats: %w", err)
+	}
+
+	return api.ObjectsStatsResponse{
+		MinHealth:                  minHealth,
+		NumObjects:                 numObjects,
+		NumUnfinishedObjects:       unfinishedObjects,
+		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
+		TotalObjectsSize:           totalObjectsSize,
+		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
+		TotalUploadedSize:          totalUploaded,
+	}, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
@@ -644,7 +919,9 @@ func scanBucket(s scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string
 	err := s.Scan(&createdAt, &name, &policy)
-	if err != nil {
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Bucket{}, api.ErrBucketNotFound
+	} else if err != nil {
 		return api.Bucket{}, err
 	}
 	var bp api.BucketPolicy
@@ -656,4 +933,17 @@ func scanBucket(s scanner) (api.Bucket, error) {
 		Name:      name,
 		Policy:    bp,
 	}, nil
+}
+
+func scanMultipartUpload(s scanner) (resp api.MultipartUpload, _ error) {
+	var key SecretKey
+	err := s.Scan(&resp.Bucket, &key, &resp.Path, &resp.UploadID, &resp.CreatedAt)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.MultipartUpload{}, api.ErrMultipartUploadNotFound
+	} else if err != nil {
+		return api.MultipartUpload{}, fmt.Errorf("failed to fetch multipart upload: %w", err)
+	} else if err := resp.Key.UnmarshalBinary(key); err != nil {
+		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal encryption key: %w", err)
+	}
+	return
 }

@@ -238,8 +238,7 @@ func humanReadableSize(b int) string {
 
 func shouldSendPruneAlert(err error, version, release string) bool {
 	merkleRootIssue := utils.IsErr(err, errInvalidMerkleProof) &&
-		build.VersionCmp(version, "1.6.0") < 0 &&
-		release == ""
+		(build.VersionCmp(version, "1.6.0") < 0 || version == "1.6.0" && release == "")
 	return err != nil && !(merkleRootIssue ||
 		utils.IsErr(err, utils.ErrConnectionRefused) ||
 		utils.IsErr(err, utils.ErrConnectionTimedOut) ||
