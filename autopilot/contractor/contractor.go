@@ -696,8 +696,9 @@ LOOP:
 		// if we were not able to the contract's revision, we can't properly
 		// perform the checks that follow, however we do want to be lenient if
 		// this contract is in the current set and we still have leeway left
+		_, inSet := inCurrentSet[fcid]
 		if contract.Revision == nil {
-			if _, found := inCurrentSet[fcid]; !found || remainingKeepLeeway == 0 {
+			if !inSet || remainingKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
 			} else if !ctx.AllowRedundantIPs() && ipFilter.IsRedundantIP(contract.HostIP, contract.HostKey) {
 				toStopUsing[fcid] = fmt.Sprintf("%v; %v", api.ErrUsabilityHostRedundantIP, errContractNoRevision)
@@ -711,7 +712,7 @@ LOOP:
 
 		// decide whether the contract is still good
 		ci := contractInfo{contract: contract, priceTable: host.PriceTable.HostPriceTable, settings: host.Settings}
-		usable, recoverable, refresh, renew, reasons := c.isUsableContract(ctx.AutopilotConfig(), ctx.state.RS, ci, bh, ipFilter)
+		usable, recoverable, refresh, renew, reasons := c.isUsableContract(ctx.AutopilotConfig(), ctx.state.RS, ci, inSet, bh, ipFilter)
 		ci.usable = usable
 		ci.recoverable = recoverable
 		if !usable {
