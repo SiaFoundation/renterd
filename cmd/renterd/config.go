@@ -246,8 +246,8 @@ func setAdvancedConfig() {
 	// database
 	fmt.Println("")
 	fmt.Println("The database is used to store the renter's metadata.")
-	fmt.Println("The embedded SQLite database is recommended for small (< 50TB), single-user setups. Choose this for the easiest setup.")
-	fmt.Println("MySQL database is recommended for larger (> 50TB) or multi-user setups. MySQL requires a separate MySQL server to connect to.")
+	fmt.Println("The embedded SQLite database requires no additional configuration and is ideal for testing or demo purposes.")
+	fmt.Println("For production usage, we recommend MySQL, which requires a separate MySQL server.")
 	setStoreConfig()
 }
 

@@ -20,6 +20,12 @@ Sia applications. Useful links:
 - [Project Roadmap](https://github.com/orgs/SiaFoundation/projects/5)
 - [Setup Guide](https://docs.sia.tech/renting/setting-up-renterd)
 
+## Database
+
+`renterd` requires a database to store its operational data. We support both
+SQLite and MySQL, with SQLite set as the default due to its ease of setup.
+SQLite is ideal for testing and development purposes, whereas MySQL is
+recommended for production environments.
 
 ## Configuration
 
