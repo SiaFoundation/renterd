@@ -76,11 +76,6 @@ type (
 		resolved bool
 		valid    bool
 	}
-
-	hostUpdate struct {
-		hk types.PublicKey
-		ha chain.HostAnnouncement
-	}
 )
 
 // NewChainSubscriber creates a new chain subscriber that will sync with the
@@ -166,14 +161,14 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 	// apply host updates
 	b := cau.Block
 	if time.Since(b.Timestamp) <= s.announcementMaxAge {
-		var hus []hostUpdate
+		hus := make(map[types.PublicKey]chain.HostAnnouncement)
 		chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
 			if ha.NetAddress != "" {
-				hus = append(hus, hostUpdate{hk, ha})
+				hus[hk] = ha
 			}
 		})
-		for _, hu := range hus {
-			if err := tx.UpdateHost(hu.hk, hu.ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
+		for hk, ha := range hus {
+			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
 			}
 		}
