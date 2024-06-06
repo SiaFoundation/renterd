@@ -209,12 +209,14 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	}
 
 	// create the host
+	var hostID int64
 	if res, err := c.tx.Exec(c.ctx, `
 	INSERT INTO hosts (created_at, public_key, settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		last_announcement = VALUES(last_announcement),
-		net_address = VALUES(net_address)
+		net_address = VALUES(net_address),
+		id = last_insert_id(id)
 	`,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
@@ -236,18 +238,7 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		ha.NetAddress,
 	); err != nil {
 		return fmt.Errorf("failed to insert host: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("failed to insert host: no rows affected")
-	}
-
-	// fetch host id
-	var hostID int64
-	if err := c.tx.QueryRow(c.ctx,
-		"SELECT id FROM hosts WHERE public_key = ?",
-		ssql.PublicKey(hk),
-	).Scan(&hostID); err != nil {
+	} else if hostID, err = res.LastInsertId(); err != nil {
 		return fmt.Errorf("failed to fetch host id: %w", err)
 	}
 
