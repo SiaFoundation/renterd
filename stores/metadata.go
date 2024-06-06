@@ -534,101 +534,12 @@ func (s *SQLStore) ListBuckets(ctx context.Context) (buckets []api.Bucket, err e
 // ObjectsStats returns some info related to the objects stored in the store. To
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
-func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
-	db := s.db.WithContext(ctx)
-
-	// fetch bucket id if a bucket was specified
-	var bucketID uint
-	if opts.Bucket != "" {
-		err := db.Model(&dbBucket{}).Select("id").Where("name = ?", opts.Bucket).Take(&bucketID).Error
-		if err != nil {
-			return api.ObjectsStatsResponse{}, err
-		}
-	}
-
-	// number of objects
-	var objInfo struct {
-		NumObjects       uint64
-		MinHealth        float64
-		TotalObjectsSize uint64
-	}
-	objInfoQuery := db.
-		Model(&dbObject{}).
-		Select("COUNT(*) AS NumObjects, COALESCE(MIN(health), 1) as MinHealth, SUM(size) AS TotalObjectsSize")
-	if opts.Bucket != "" {
-		objInfoQuery = objInfoQuery.Where("db_bucket_id", bucketID)
-	}
-	err := objInfoQuery.Scan(&objInfo).Error
-	if err != nil {
-		return api.ObjectsStatsResponse{}, err
-	}
-
-	// number of unfinished objects
-	var unfinishedObjects uint64
-	unfinishedObjectsQuery := db.
-		Model(&dbMultipartUpload{}).
-		Select("COUNT(*)")
-	if opts.Bucket != "" {
-		unfinishedObjectsQuery = unfinishedObjectsQuery.Where("db_bucket_id", bucketID)
-	}
-	err = unfinishedObjectsQuery.Scan(&unfinishedObjects).Error
-	if err != nil {
-		return api.ObjectsStatsResponse{}, err
-	}
-
-	// size of unfinished objects
-	var totalUnfinishedObjectsSize uint64
-	totalUnfinishedObjectsSizeQuery := db.
-		Model(&dbMultipartPart{}).
-		Joins("INNER JOIN multipart_uploads mu ON multipart_parts.db_multipart_upload_id = mu.id").
-		Select("COALESCE(SUM(size), 0)")
-	if opts.Bucket != "" {
-		totalUnfinishedObjectsSizeQuery = totalUnfinishedObjectsSizeQuery.Where("db_bucket_id", bucketID)
-	}
-	err = totalUnfinishedObjectsSizeQuery.Scan(&totalUnfinishedObjectsSize).Error
-	if err != nil {
-		return api.ObjectsStatsResponse{}, err
-	}
-
-	var totalSectors int64
-	totalSectorsQuery := db.
-		Table("slabs sla").
-		Select("COALESCE(SUM(total_shards), 0)").
-		Where("db_buffered_slab_id IS NULL")
-
-	if opts.Bucket != "" {
-		totalSectorsQuery = totalSectorsQuery.Where(`
-			EXISTS (
-				SELECT 1 FROM slices sli
-				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
-				WHERE sli.db_slab_id = sla.id
-			)
-		`, bucketID)
-	}
-	err = totalSectorsQuery.Scan(&totalSectors).Error
-	if err != nil {
-		return api.ObjectsStatsResponse{}, err
-	}
-
-	var totalUploaded int64
-	err = db.
-		Model(&dbContract{}).
-		Select("COALESCE(SUM(size), 0)").
-		Scan(&totalUploaded).
-		Error
-	if err != nil {
-		return api.ObjectsStatsResponse{}, err
-	}
-
-	return api.ObjectsStatsResponse{
-		MinHealth:                  objInfo.MinHealth,
-		NumObjects:                 objInfo.NumObjects,
-		NumUnfinishedObjects:       unfinishedObjects,
-		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
-		TotalObjectsSize:           objInfo.TotalObjectsSize,
-		TotalSectorsSize:           uint64(totalSectors) * rhpv2.SectorSize,
-		TotalUploadedSize:          uint64(totalUploaded),
-	}, nil
+func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (resp api.ObjectsStatsResponse, _ error) {
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		resp, err = tx.ObjectsStats(ctx, opts)
+		return
+	})
+	return resp, err
 }
 
 func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
@@ -1743,19 +1654,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 		}
 	}
 	return slabs, nil
-}
-
-func (s *SQLStore) createMultipartMetadata(tx *gorm.DB, multipartUploadID uint, metadata api.ObjectUserMetadata) error {
-	entities := make([]*dbObjectUserMetadata, 0, len(metadata))
-	for k, v := range metadata {
-		metadata := &dbObjectUserMetadata{
-			DBMultipartUploadID: &multipartUploadID,
-			Key:                 k,
-			Value:               v,
-		}
-		entities = append(entities, metadata)
-	}
-	return tx.CreateInBatches(&entities, 1000).Error
 }
 
 // object retrieves an object from the store.
