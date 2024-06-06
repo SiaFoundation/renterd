@@ -400,6 +400,26 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	return usedContracts, nil
 }
 
+func HealthQuery(limit int64, now time.Time) (string, []any) {
+	return `SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
+	THEN
+		CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+		THEN -1
+		ELSE 1
+		END
+	ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+	END AS health
+	FROM slabs
+	INNER JOIN sectors s ON s.db_slab_id = slabs.id
+	LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+	LEFT JOIN contracts c ON se.db_contract_id = c.id
+	LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
+	LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+	WHERE slabs.health_valid_until <= ?
+	GROUP BY slabs.id
+	LIMIT ?`, []any{now.Unix(), limit}
+}
+
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 	rows, err := tx.Query(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets")
 	if err != nil {
@@ -915,6 +935,19 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	return hosts, nil
 }
 
+func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE objects SET health = (
+			SELECT MIN(slabs.health)
+			FROM slabs
+			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
+		) WHERE health != (
+			SELECT MIN(slabs.health)
+			FROM slabs
+			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
+		)`)
+	return err
+}
 func scanBucket(s scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string
