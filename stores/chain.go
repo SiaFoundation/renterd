@@ -43,3 +43,10 @@ func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []cha
 		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
 	})
 }
+
+// ResetChainState deletes all chain data in the database.
+func (s *SQLStore) ResetChainState(ctx context.Context) error {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.ResetChainState(ctx)
+	})
+}

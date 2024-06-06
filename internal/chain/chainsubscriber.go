@@ -19,7 +19,10 @@ import (
 const (
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
-	updatesBatchSize = 50
+	updatesBatchSize = 100
+
+	// syncUpdateFrequency is the frequency with which we log sync progress.
+	syncUpdateFrequency = 1e3 * updatesBatchSize
 )
 
 var (
@@ -129,13 +132,6 @@ func (s *ChainSubscriber) Close() error {
 }
 
 func (s *ChainSubscriber) Run() (func(), error) {
-	// perform an initial sync
-	start := time.Now()
-	if err := s.sync(); err != nil {
-		return nil, fmt.Errorf("initial sync failed: %w", err)
-	}
-	s.logger.Debugw("initial sync completed", "duration", time.Since(start))
-
 	// start sync loop in separate goroutine
 	s.wg.Add(1)
 	go func() {
@@ -244,6 +240,7 @@ func (s *ChainSubscriber) sync() error {
 		return fmt.Errorf("failed to get chain index: %w", err)
 	}
 	s.logger.Debugw("sync started", "height", index.Height, "block_id", index.ID)
+	sheight := index.Height / syncUpdateFrequency
 
 	// fetch updates until we're caught up
 	var cnt uint64
@@ -254,7 +251,7 @@ func (s *ChainSubscriber) sync() error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
-		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
+		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds(), "batch_size", updatesBatchSize)
 
 		// process updates
 		var block types.Block
@@ -280,7 +277,12 @@ func (s *ChainSubscriber) sync() error {
 		}
 	}
 
-	s.logger.Debugw("sync completed", "start_height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
+	s.logger.Debugw("sync completed", "height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
+
+	// info log sync progress
+	if index.Height/syncUpdateFrequency != sheight {
+		s.logger.Infow("sync progress", "height", index.Height, "block_id", index.ID)
+	}
 	return nil
 }
 

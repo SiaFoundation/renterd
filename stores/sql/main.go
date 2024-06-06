@@ -425,6 +425,17 @@ func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, u
 	return mpu, neededParts, size, eTag, nil
 }
 
+func ResetChainState(ctx context.Context, tx sql.Tx) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM consensus_infos"); err != nil {
+		return err
+	} else if _, err := tx.Exec(ctx, "DELETE FROM wallet_events"); err != nil {
+		return err
+	} else if _, err := tx.Exec(ctx, "DELETE FROM wallet_outputs"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset

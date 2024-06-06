@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -80,8 +81,14 @@ func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logge
 }
 
 func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {
-	opts = append(opts, syncer.WithLogger(logger.Named("syncer")))
+	opts = append(opts,
+		syncer.WithLogger(logger.Named("syncer")),
+		syncer.WithSendBlocksTimeout(time.Minute),
+	)
 
+	if cfg.SyncerPeerDiscoveryInterval > 0 {
+		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
+	}
 	if cfg.SyncerSyncInterval > 0 {
 		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
 	}
