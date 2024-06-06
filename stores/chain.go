@@ -452,6 +452,19 @@ func (u *chainUpdateTx) WalletStateElements() ([]types.StateElement, error) {
 	return elements, nil
 }
 
+func (s *SQLStore) ResetChainState(ctx context.Context) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
+		if err := s.db.Exec("DELETE FROM consensus_infos").Error; err != nil {
+			return err
+		} else if err := s.db.Exec("DELETE FROM wallet_events").Error; err != nil {
+			return err
+		} else if err := s.db.Exec("DELETE FROM wallet_outputs").Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 func (u *chainUpdateTx) outputs() (outputs []dbWalletOutput, err error) {
 	err = u.tx.
 		Model(&dbWalletOutput{}).

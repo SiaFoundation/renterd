@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/renterd/config"
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/chain"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
@@ -65,16 +66,6 @@ type (
 )
 
 func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, *chain.ChainSubscriber, error) {
-	// create consensus directory
-	consensusDir := filepath.Join(dir, "consensus")
-	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "chain.db"))
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
-	}
-
 	// create database connections
 	var dbConn, dbMetricsConn gorm.Dialector
 	if cfg.Database.MySQL.URI != "" {
@@ -144,6 +135,44 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 
 	// create event broadcaster
 	events := ibus.NewEventBroadcaster(wh, logger)
+
+	// create consensus directory
+	consensusDir := filepath.Join(dir, "consensus")
+	if err := os.MkdirAll(consensusDir, 0700); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// migrate consensus database
+	oldConsensus, err := os.Stat(filepath.Join(consensusDir, "consensus.db"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, nil, nil, err
+	} else if err == nil {
+		logger.Warn("found old consensus.db, indicating a migration is necessary")
+
+		// reset chain state
+		logger.Warn("Resetting chain state...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := sqlStore.ResetChainState(ctx); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		logger.Warn("Chain state was successfully reset.")
+
+		// remove consensus.db and consensus.log file
+		logger.Warn("Removing consensus database...")
+		_ = os.RemoveAll(filepath.Join(consensusDir, "consensus.log")) // ignore error
+		if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
+		logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
+	}
+
+	// create chain database
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "blockchain.db"))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+	}
 
 	// create chain manager
 	store, state, err := chain.NewDBStore(bdb, cfg.Network, cfg.Genesis)
