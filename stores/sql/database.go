@@ -26,6 +26,10 @@ type (
 	}
 
 	DatabaseTx interface {
+		// AbortMultipartUpload aborts a multipart upload and deletes it from
+		// the database.
+		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error
+
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
@@ -52,6 +56,10 @@ type (
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
+		// InsertMultipartUpload creates a new multipart upload and returns a
+		// unique upload ID.
+		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+
 		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
 		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
 		// api.ErrBucketNotFound.
@@ -73,6 +81,20 @@ type (
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
+
+		// MultipartUpload returns the multipart upload with the given ID or
+		// api.ErrMultipartUploadNotFound if the upload doesn't exist.
+		MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error)
+
+		// MultipartUploadParts returns a list of all parts for a given
+		// multipart upload
+		MultipartUploadParts(ctx context.Context, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error)
+
+		// MultipartUploads returns a list of all multipart uploads.
+		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error)
+
+		// ObjectsStats returns overall stats about stored objects
+		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
