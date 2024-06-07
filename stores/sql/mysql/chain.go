@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -84,7 +85,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 		// insert new events
 		for _, e := range events {
 			c.l.Debugw(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
-			data, err := ssql.ToEventData(e.Data)
+			data, err := json.Marshal(e.Data)
 			if err != nil {
 				c.l.Error(err)
 				return err

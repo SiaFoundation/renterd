@@ -1024,7 +1024,7 @@ func scanWalletEvent(s scanner) (wallet.Event, error) {
 	var blockID, eventID Hash256
 	var height, maturityHeight uint64
 	var inflow, outflow Currency
-	var edata EventData
+	var edata []byte
 	var etype string
 	var ts UnixTimeNS
 	if err := s.Scan(
@@ -1041,7 +1041,7 @@ func scanWalletEvent(s scanner) (wallet.Event, error) {
 		return wallet.Event{}, err
 	}
 
-	data, err := FromEventData(edata, etype)
+	data, err := UnmarshalEventData(edata, etype)
 	if err != nil {
 		return wallet.Event{}, err
 	}
