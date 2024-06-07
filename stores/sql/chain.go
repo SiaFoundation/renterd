@@ -88,13 +88,12 @@ func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileCo
 		ok, err := updateContractProofHeight(ctx, tx, table, fcid, proofHeight)
 		if err != nil {
 			return fmt.Errorf("failed to update '%s' %v proof height: %w", table[:len(table)-1], fcid, err)
-		} else if !ok {
-			continue
+		} else if ok {
+			break
 		}
-		return nil
 	}
 
-	return contractNotFoundErr(fcid)
+	return nil
 }
 
 func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID, state api.ContractState, l *zap.SugaredLogger) error {
@@ -109,13 +108,12 @@ func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContract
 		ok, err := updateContractState(ctx, tx, table, fcid, cs)
 		if err != nil {
 			return fmt.Errorf("failed to update %s state: %w", table[:len(table)-1], err)
-		} else if !ok {
-			continue
+		} else if ok {
+			break
 		}
-		return nil
 	}
 
-	return contractNotFoundErr(fcid)
+	return nil
 }
 
 func UpdateFailedContracts(ctx context.Context, tx sql.Tx, blockHeight uint64, l *zap.SugaredLogger) error {
