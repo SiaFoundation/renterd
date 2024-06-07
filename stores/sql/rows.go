@@ -15,7 +15,7 @@ type ContractRow struct {
 	RenewedFrom FileContractID
 
 	ContractPrice  Currency
-	State          ContractStateEnum
+	State          ContractState
 	TotalCost      Currency
 	ProofHeight    uint64
 	RevisionHeight uint64

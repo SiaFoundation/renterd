@@ -17,8 +17,8 @@ var contractTables = []string{
 	"archived_contracts",
 }
 
-func ContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractState, error) {
-	var cse ContractStateEnum
+func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractState, error) {
+	var cse ContractState
 	err := tx.
 		QueryRow(ctx,
 			fmt.Sprintf("SELECT state FROM (SELECT state, fcid FROM %s UNION SELECT state, fcid FROM %s) as combined WHERE fcid = ?",
@@ -60,7 +60,11 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, r
 		// perform the conditional update, however we have to compare the
 		// revision number which are stored as strings so we need to fetch the
 		// current contract info separately
-		curr, err := contractInfo(ctx, tx, table, fcid)
+		var currRevisionHeight, currSize uint64
+		var currRevisionNumber Uint64
+		err := tx.
+			QueryRow(ctx, fmt.Sprintf("SELECT revision_height, revision_number, size FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
+			Scan(&currRevisionHeight, &currRevisionNumber, &currSize)
 		if err != nil {
 			if errors.Is(err, dsql.ErrNoRows) {
 				continue
@@ -69,12 +73,12 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, r
 		}
 
 		// update contract
-		err = updateContract(ctx, tx, table, fcid, revisionHeight, revisionNumber, curr.RevNumber(), curr.RevisionHeight, size)
+		err = updateContract(ctx, tx, table, fcid, currRevisionHeight, uint64(currRevisionNumber), revisionHeight, revisionNumber, size)
 		if err != nil {
 			return fmt.Errorf("failed to update '%s' %v: %w", table[:len(table)-1], fcid, err)
 		}
 
-		l.Debugw(fmt.Sprintf("update %s, revision number %s -> %s, revision height %d -> %d, size %d -> %d", table[:len(table)-1], curr.RevisionNumber, fmt.Sprint(revisionNumber), curr.RevisionHeight, revisionHeight, curr.Size, size), "fcid", fcid)
+		l.Debugw(fmt.Sprintf("update %s, revision number %d -> %d, revision height %d -> %d, size %d -> %d", table[:len(table)-1], currRevisionNumber, revisionNumber, currRevisionHeight, revisionHeight, currSize, size), "fcid", fcid)
 		return nil
 	}
 
@@ -99,7 +103,7 @@ func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileCo
 func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID, state api.ContractState, l *zap.SugaredLogger) error {
 	l.Debugw("update contract state", "fcid", fcid, "state", state)
 
-	var cs ContractStateEnum
+	var cs ContractState
 	if err := cs.LoadString(string(state)); err != nil {
 		return err
 	}
@@ -173,18 +177,11 @@ func WalletStateElements(ctx context.Context, tx sql.Tx) ([]types.StateElement, 
 	return elements, nil
 }
 
-func contractInfo(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID) (info ContractInfo, err error) {
-	err = tx.
-		QueryRow(ctx, fmt.Sprintf("SELECT revision_height, revision_number, size FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
-		Scan(&info.RevisionHeight, &info.RevisionNumber, &info.Size)
-	return
-}
-
 func contractNotFoundErr(fcid types.FileContractID) error {
 	return fmt.Errorf("%w: %v", api.ErrContractNotFound, fcid)
 }
 
-func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, revisionHeight, revisionNumber, currRevisionNumber, currRevisionHeight, size uint64) (err error) {
+func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, currRevisionHeight, currRevisionNumber, revisionHeight, revisionNumber, size uint64) (err error) {
 	var res dsql.Result
 	if revisionNumber > currRevisionNumber {
 		res, err = tx.Exec(
@@ -228,7 +225,7 @@ func updateContractProofHeight(ctx context.Context, tx sql.Tx, table string, fci
 	return n == 1, nil
 }
 
-func updateContractState(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, cs ContractStateEnum) (bool, error) {
+func updateContractState(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, cs ContractState) (bool, error) {
 	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET state = ? WHERE fcid = ?", table), cs, FileContractID(fcid))
 	if err != nil {
 		return false, err

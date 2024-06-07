@@ -109,7 +109,7 @@ func (c ChainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types
 }
 
 func (c ChainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
-	return ssql.ContractState(c.ctx, c.tx, fcid)
+	return ssql.GetContractState(c.ctx, c.tx, fcid)
 }
 
 func (c ChainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement) error {

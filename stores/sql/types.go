@@ -32,6 +32,7 @@ type (
 	SecretKey      []byte
 	EventData      []byte
 	UnixTimeNS     time.Time
+	Uint64         uint64
 )
 
 var (
@@ -235,6 +236,31 @@ func (u *UnixTimeNS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u UnixTimeNS) Value() (driver.Value, error) {
 	return time.Time(u).UnixNano(), nil
+}
+
+// Scan scan value into Uint64, implements sql.Scanner interface.
+func (u *Uint64) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal Uint64 value: %v %t", value, value)
+	}
+	var val uint64
+	_, err := fmt.Sscan(s, &val)
+	if err != nil {
+		return fmt.Errorf("failed to scan Uint64 value: %v", err)
+	}
+	*u = Uint64(val)
+	return nil
+}
+
+// Value returns a Uint64 value, implements driver.Valuer interface.
+func (u Uint64) Value() (driver.Value, error) {
+	return fmt.Sprint(u), nil
 }
 
 func FromEventData(e EventData, t string) (wallet.EventData, error) {

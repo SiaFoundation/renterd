@@ -2,7 +2,6 @@ package sql
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"go.sia.tech/core/types"
@@ -167,16 +166,4 @@ type (
 		FCID        FileContractID
 		RenewedFrom FileContractID
 	}
-
-	ContractInfo struct {
-		RevisionHeight uint64
-		RevisionNumber string
-		Size           uint64
-	}
 )
-
-func (c ContractInfo) RevNumber() uint64 {
-	var r uint64
-	fmt.Sscan(c.RevisionNumber, &r)
-	return r
-}
