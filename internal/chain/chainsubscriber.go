@@ -398,7 +398,7 @@ func (s *ChainSubscriber) updateContract(tx ChainUpdateTx, index types.ChainInde
 
 	// handle apply
 	if err := tx.UpdateContract(fcid, index.Height, curr.revisionNumber, curr.fileSize); err != nil {
-		return fmt.Errorf("failed to update contract: %w", err)
+		return fmt.Errorf("failed to update contract %v: %w", fcid, err)
 	}
 
 	// update state from 'pending' -> 'active'

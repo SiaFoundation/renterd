@@ -65,13 +65,13 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, r
 			if errors.Is(err, dsql.ErrNoRows) {
 				continue
 			}
-			return fmt.Errorf("failed to fetch %s info: %w", table[:len(table)-1], err)
+			return fmt.Errorf("failed to fetch '%s' info for %v: %w", table[:len(table)-1], fcid, err)
 		}
 
 		// update contract
-		err = updateContract(ctx, tx, table, fcid, revisionHeight, revisionNumber, curr.RevNumber(), size)
+		err = updateContract(ctx, tx, table, fcid, revisionHeight, revisionNumber, curr.RevNumber(), curr.RevisionHeight, size)
 		if err != nil {
-			return fmt.Errorf("failed to update %s: %w", table[:len(table)-1], err)
+			return fmt.Errorf("failed to update '%s' %v: %w", table[:len(table)-1], fcid, err)
 		}
 
 		l.Debugw(fmt.Sprintf("update %s, revision number %s -> %s, revision height %d -> %d, size %d -> %d", table[:len(table)-1], curr.RevisionNumber, fmt.Sprint(revisionNumber), curr.RevisionHeight, revisionHeight, curr.Size, size), "fcid", fcid)
@@ -87,7 +87,7 @@ func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileCo
 	for _, table := range contractTables {
 		ok, err := updateContractProofHeight(ctx, tx, table, fcid, proofHeight)
 		if err != nil {
-			return fmt.Errorf("failed to update %s proof height: %w", table[:len(table)-1], err)
+			return fmt.Errorf("failed to update '%s' %v proof height: %w", table[:len(table)-1], fcid, err)
 		} else if !ok {
 			continue
 		}
@@ -186,7 +186,7 @@ func contractNotFoundErr(fcid types.FileContractID) error {
 	return fmt.Errorf("%w: %v", api.ErrContractNotFound, fcid)
 }
 
-func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, revisionHeight, revisionNumber, currRevisionNumber, size uint64) (err error) {
+func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, revisionHeight, revisionNumber, currRevisionNumber, currRevisionHeight, size uint64) (err error) {
 	var res dsql.Result
 	if revisionNumber > currRevisionNumber {
 		res, err = tx.Exec(
@@ -197,14 +197,17 @@ func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.Fil
 			size,
 			FileContractID(fcid),
 		)
-	} else {
+	} else if revisionHeight > currRevisionHeight {
 		res, err = tx.Exec(
 			ctx,
 			fmt.Sprintf("UPDATE %s SET revision_height = ? WHERE fcid = ?", table),
 			revisionHeight,
 			FileContractID(fcid),
 		)
+	} else {
+		return nil
 	}
+
 	if err == nil {
 		if n, err := res.RowsAffected(); err != nil {
 			return fmt.Errorf("failed to get rows affected: %w", err)
