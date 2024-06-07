@@ -313,12 +313,14 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	if len(fcids) == 0 {
 		return 0, nil
 	}
-	converted := make([]ssql.FileContractID, len(fcids))
-	for i, fcid := range fcids {
-		converted[i] = ssql.FileContractID(fcid)
+	// prepare args
+	var args []any
+	for _, fcid := range fcids {
+		args = append(args, ssql.FileContractID(fcid))
 	}
-	now := time.Now().Unix()
-	res, err := tx.Exec(ctx, `
+	args = append(args, time.Now().Unix())
+	args = append(args, limit)
+	res, err := tx.Exec(ctx, fmt.Sprintf(`
 		UPDATE slabs SET health_valid_until = 0 WHERE id in (
 			SELECT *
 			FROM (
@@ -327,10 +329,11 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 				INNER JOIN sectors se ON se.db_slab_id = slabs.id
 				INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
 				INNER JOIN contracts c ON c.id = cs.db_contract_id
-				WHERE c.fcid IN (?) AND slabs.health_valid_until >= ?
+				WHERE c.fcid IN (%s) AND slabs.health_valid_until >= ?
 				LIMIT ?
 			) slab_ids
-	`, now, converted, now, limit)
+		)
+	`, strings.Repeat("?, ", len(fcids)-1)+"?"), args...)
 	if err != nil {
 		return 0, err
 	}

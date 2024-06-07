@@ -64,7 +64,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 			host, reason)
 		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
 			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
-			delete_spending, list_spending, renewed_to, h.public_key, ?
+			delete_spending, list_spending, NULL, h.public_key, ?
 		FROM contracts c
 		INNER JOIN hosts h ON h.id = c.host_id
 		WHERE fcid = ?
@@ -72,7 +72,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	if err != nil {
 		return fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
 	}
-	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", fcid)
+	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", FileContractID(fcid))
 	if err != nil {
 		return fmt.Errorf("failed to delete contract from contracts: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
