@@ -356,7 +356,7 @@ func (s *ChainSubscriber) updateContract(tx ChainUpdateTx, index types.ChainInde
 	// define a helper function to update the contract state
 	updateState := func(update api.ContractState) (err error) {
 		if state != update {
-			err = tx.UpdateContractState(fcid, api.ContractStatePending)
+			err = tx.UpdateContractState(fcid, update)
 			if err == nil {
 				state = update
 			}
