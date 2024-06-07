@@ -56,6 +56,33 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
+func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
+			proof_height, revision_height, revision_number, size, start_height, window_start, window_end,
+			upload_spending, download_spending, fund_account_spending, delete_spending, list_spending, renewed_to,
+			host, reason)
+		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
+			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
+			delete_spending, list_spending, renewed_to, h.public_key, ?
+		FROM contracts c
+		INNER JOIN hosts h ON h.id = c.host_id
+		WHERE fcid = ?
+	`, time.Now(), reason, FileContractID(fcid))
+	if err != nil {
+		return fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
+	}
+	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", fcid)
+	if err != nil {
+		return fmt.Errorf("failed to delete contract from contracts: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to fetch rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("expected to delete 1 row, deleted %d", n)
+	}
+	return nil
+}
+
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
 	if err != nil {

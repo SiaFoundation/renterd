@@ -484,7 +484,7 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 			}
 
 			// archive host contracts
-			if err := archiveContracts(tx, hcs, toArchive); err != nil {
+			if err := archiveContractsGorm(tx, hcs, toArchive); err != nil {
 				return err
 			}
 

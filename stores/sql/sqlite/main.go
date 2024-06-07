@@ -129,6 +129,10 @@ func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path
 	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
 }
 
+func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
+	return ssql.ArchiveContract(ctx, tx, fcid, reason)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
@@ -292,6 +296,31 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 		return fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error) {
+	if len(fcids) == 0 {
+		return 0, nil
+	}
+	converted := make([]ssql.FileContractID, len(fcids))
+	for i, fcid := range fcids {
+		converted[i] = ssql.FileContractID(fcid)
+	}
+	now := time.Now().Unix()
+	res, err := tx.Exec(ctx, `
+		UPDATE slabs SET health_valid_until = 0 WHERE id in (
+			SELECT slabs.id
+			FROM slabs
+			INNER JOIN sectors se ON se.db_slab_id = slabs.id
+			INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
+			INNER JOIN contracts c ON c.id = cs.db_contract_id
+			WHERE c.fcid IN (?) AND slabs.health_valid_until >= ?
+			LIMIT ?
+	`, now, converted, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {

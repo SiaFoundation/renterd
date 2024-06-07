@@ -34,6 +34,10 @@ type (
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
+		// ArchiveContract moves a contract from the regular contracts to the
+		// archived ones.
+		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
@@ -60,6 +64,10 @@ type (
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+
+		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
+		// are associated with any of the provided contracts.
+		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
 		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
 		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
