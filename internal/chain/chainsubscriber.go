@@ -175,9 +175,14 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 	}
 
 	// v1 contracts
-	var cus []contractUpdate
+	cus := make(map[types.FileContractID]contractUpdate)
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
-		cus = append(cus, v1ContractUpdate(fce, rev, resolved, valid))
+		cu, ok := cus[types.FileContractID(fce.ID)]
+		if !ok {
+			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
+		} else if fce.FileContract.RevisionNumber > cu.curr.revisionNumber {
+			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
+		}
 	})
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
@@ -186,9 +191,14 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 	}
 
 	// v2 contracts
-	cus = cus[:0]
+	cus = make(map[types.FileContractID]contractUpdate)
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		cus = append(cus, v2ContractUpdate(fce, rev, res))
+		cu, ok := cus[types.FileContractID(fce.ID)]
+		if !ok {
+			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
+		} else if fce.V2FileContract.RevisionNumber > cu.curr.revisionNumber {
+			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
+		}
 	})
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
