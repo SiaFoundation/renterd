@@ -118,8 +118,8 @@ func (h *testHost) FundAccount(ctx context.Context, balance types.Currency, rev 
 	return nil
 }
 
-func (h *testHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
-	return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, nil
+func (h *testHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
+	return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, nil
 }
 
 func (h *testHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
