@@ -450,62 +450,11 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	if maxDowntime < 0 {
 		return 0, ErrNegativeMaxDowntime
 	}
-
-	// fetch all hosts outside of the transaction
-	var hosts []dbHost
-	if err := ss.db.
-		WithContext(ctx).
-		Model(&dbHost{}).
-		Where("recent_downtime >= ? AND recent_scan_failures >= ?", maxDowntime, minRecentFailures).
-		Find(&hosts).
-		Error; err != nil {
-		return 0, err
-	}
-
-	// return early
-	if len(hosts) == 0 {
-		return 0, nil
-	}
-
-	// remove every host one by one
-	var errs []error
-	for _, h := range hosts {
-		if err := ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			// fetch host contracts
-			hcs, err := contractsForHost(tx, h)
-			if err != nil {
-				return err
-			}
-
-			// create map
-			toArchive := make(map[types.FileContractID]string)
-			for _, c := range hcs {
-				toArchive[types.FileContractID(c.FCID)] = api.ContractArchivalReasonHostPruned
-			}
-
-			// archive host contracts
-			if err := archiveContractsGorm(tx, hcs, toArchive); err != nil {
-				return err
-			}
-
-			// remove the host
-			if err := tx.Delete(&h).Error; err != nil {
-				return err
-			}
-			removed++
-			return nil
-		}); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	if len(errs) > 0 {
-		var msgs []string
-		for _, err := range errs {
-			msgs = append(msgs, err.Error())
-		}
-		err = errors.New(strings.Join(msgs, ";"))
-	}
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		n, err := tx.RemoveOfflineHosts(ctx, minRecentFailures, maxDowntime)
+		removed = uint64(n)
+		return err
+	})
 	return
 }
 

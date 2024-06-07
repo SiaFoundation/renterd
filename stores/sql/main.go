@@ -746,6 +746,44 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
+	// fetch contracts
+	rows, err := tx.Query(ctx, `
+		SELECT fcid
+		FROM contracts
+		INNER JOIN hosts h ON h.id = contracts.host_id
+		WHERE recent_downtime >= ? AND recent_scan_failures >= ?
+	`, maxDownTime, minRecentFailures)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch contracts: %w", err)
+	}
+	defer rows.Close()
+
+	var fcids []types.FileContractID
+	for rows.Next() {
+		var fcid FileContractID
+		if err := rows.Scan(&fcid); err != nil {
+			return 0, fmt.Errorf("failed to scan contract: %w", err)
+		}
+		fcids = append(fcids, types.FileContractID(fcid))
+	}
+
+	// archive contracts
+	for _, fcid := range fcids {
+		if err := ArchiveContract(ctx, tx, fcid, api.ContractArchivalReasonHostPruned); err != nil {
+			return 0, fmt.Errorf("failed to archive contract %v: %w", fcid, err)
+		}
+	}
+
+	// delete hosts
+	res, err := tx.Exec(ctx, "DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?",
+		maxDownTime, minRecentFailures)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete hosts: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
 	policy, err := json.Marshal(bp)
 	if err != nil {

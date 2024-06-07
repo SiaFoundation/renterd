@@ -2074,44 +2074,6 @@ func archiveContracts(ctx context.Context, tx sql.DatabaseTx, toArchive map[type
 	return nil
 }
 
-func archiveContractsGorm(tx *gorm.DB, contracts []dbContract, toArchive map[types.FileContractID]string) error {
-	var toInvalidate []fileContractID
-	for _, contract := range contracts {
-		toInvalidate = append(toInvalidate, contract.FCID)
-	}
-	// Invalidate the health on the slabs before deleting the contracts to avoid
-	// breaking the relations beforehand.
-	if err := invalidateSlabHealthByFCIDGorm(tx, toInvalidate); err != nil {
-		return fmt.Errorf("invalidating slab health failed: %w", err)
-	}
-	for _, contract := range contracts {
-		// sanity check the host is populated
-		if contract.Host.ID == 0 {
-			return fmt.Errorf("host not populated for contract %v", contract.FCID)
-		}
-
-		// create a copy in the archive
-		if err := tx.Create(&dbArchivedContract{
-			Host:   publicKey(contract.Host.PublicKey),
-			Reason: toArchive[types.FileContractID(contract.FCID)],
-
-			ContractCommon: contract.ContractCommon,
-		}).Error; err != nil {
-			return err
-		}
-
-		// remove the contract
-		res := tx.Delete(&contract)
-		if err := res.Error; err != nil {
-			return err
-		}
-		if res.RowsAffected != 1 {
-			return fmt.Errorf("expected to delete 1 row, deleted %d", res.RowsAffected)
-		}
-	}
-	return nil
-}
-
 func (s *SQLStore) pruneSlabsLoop() {
 	for {
 		select {
@@ -2202,34 +2164,6 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 		}
 		time.Sleep(time.Second)
 	}
-}
-
-func invalidateSlabHealthByFCIDGorm(tx *gorm.DB, fcids []fileContractID) error {
-	if len(fcids) == 0 {
-		return nil
-	}
-	for {
-		now := time.Now().Unix()
-		if resp := tx.Exec(`
-               UPDATE slabs SET health_valid_until = ? WHERE id in (
-                          SELECT *
-                          FROM (
-                                          SELECT slabs.id
-                                          FROM slabs
-                                          INNER JOIN sectors se ON se.db_slab_id = slabs.id
-                                          INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
-                                          INNER JOIN contracts c ON c.id = cs.db_contract_id
-                                          WHERE c.fcid IN (?) AND slabs.health_valid_until >= ?
-                                          LIMIT ?
-                          ) slab_ids
-               )`, now, fcids, now, refreshHealthBatchSize); resp.Error != nil {
-			return fmt.Errorf("failed to invalidate slab health: %w", resp.Error)
-		} else if resp.RowsAffected < refreshHealthBatchSize {
-			break // done
-		}
-		time.Sleep(time.Second)
-	}
-	return nil
 }
 
 // TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as

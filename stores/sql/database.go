@@ -112,6 +112,11 @@ type (
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
 
+		// RemoveOfflineHosts removes all hosts that have been offline for
+		// longer than maxDownTime and been scanned at least minRecentFailures
+		// times. The contracts of those hosts are also removed.
+		RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error)
+
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an
 		// object already exists at the target location or api.ErrObjectNotFound
