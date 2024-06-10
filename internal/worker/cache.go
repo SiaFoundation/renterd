@@ -155,26 +155,43 @@ func (c *cache) GougingParams(ctx context.Context) (gp api.GougingParams, err er
 	return value.(api.GougingParams), nil
 }
 
-func (c *cache) HandleEvent(event webhooks.Event) error {
+func (c *cache) HandleEvent(event webhooks.Event) (err error) {
+	log := c.logger.With("module", event.Module, "event", event.Event)
+
+	// parse the event
 	parsed, err := api.ParseEvent(event)
 	if err != nil {
+		log.Errorw("failed to parse event", "error", err)
 		return err
 	}
 
+	// handle the event
 	switch e := parsed.(type) {
 	case api.EventConsensusUpdate:
-		return c.handleConsensusUpdate(e)
+		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
+		err = c.handleConsensusUpdate(e)
 	case api.EventContractArchive:
-		return c.handleContractArchive(e)
+		log = log.With("fcid", e.ContractID, "ts", e.Timestamp)
+		err = c.handleContractArchive(e)
 	case api.EventContractRenew:
-		return c.handleContractRenew(e)
+		log = log.With("fcid", e.Renewal.ID, "renewedFrom", e.Renewal.RenewedFrom, "ts", e.Timestamp)
+		err = c.handleContractRenew(e)
 	case api.EventSettingUpdate:
-		return c.handleSettingUpdate(e)
+		log = log.With("key", e.Key, "ts", e.Timestamp)
+		err = c.handleSettingUpdate(e)
 	case api.EventSettingDelete:
-		return c.handleSettingDelete(e)
+		log = log.With("key", e.Key, "ts", e.Timestamp)
+		err = c.handleSettingDelete(e)
 	default:
 	}
-	return nil
+
+	// log the outcome
+	if err != nil {
+		log.Errorw("failed to handle event", "error", err)
+	} else {
+		log.Info("handled event")
+	}
+	return
 }
 
 func (c *cache) Initialize(ctx context.Context) error {
