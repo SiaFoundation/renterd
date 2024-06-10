@@ -38,6 +38,13 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
+		// Autopilot returns the autopilot with the given ID. Returns
+		// api.ErrAutopilotNotFound if the autopilot doesn't exist.
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+
+		// Autopilots returns all autopilots.
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)

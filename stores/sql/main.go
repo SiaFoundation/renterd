@@ -83,6 +83,35 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
+func Autopilot(ctx context.Context, tx sql.Tx, id string) (api.Autopilot, error) {
+	row := tx.QueryRow(ctx, "SELECT identifier, config, current_period FROM autopilots WHERE identifier = ?", id)
+	ap, err := scanAutopilot(row)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Autopilot{}, api.ErrAutopilotNotFound
+	} else if err != nil {
+		return api.Autopilot{}, fmt.Errorf("failed to fetch autopilot: %w", err)
+	}
+	return ap, nil
+}
+
+func Autopilots(ctx context.Context, tx sql.Tx) ([]api.Autopilot, error) {
+	rows, err := tx.Query(ctx, "SELECT identifier, config, current_period FROM autopilots")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch autopilots: %w", err)
+	}
+	defer rows.Close()
+
+	var autopilots []api.Autopilot
+	for rows.Next() {
+		ap, err := scanAutopilot(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan autopilot: %w", err)
+		}
+		autopilots = append(autopilots, ap)
+	}
+	return autopilots, nil
+}
+
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
 	if err != nil {
@@ -1053,6 +1082,15 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 		)`)
 	return err
 }
+
+func scanAutopilot(s scanner) (api.Autopilot, error) {
+	var a api.Autopilot
+	if err := s.Scan(&a.ID, (*AutopilotConfig)(&a.Config), &a.CurrentPeriod); err != nil {
+		return api.Autopilot{}, err
+	}
+	return a, nil
+}
+
 func scanBucket(s scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string

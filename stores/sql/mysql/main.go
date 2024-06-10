@@ -134,6 +134,14 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
+func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+	return ssql.Autopilot(ctx, tx, id)
+}
+
+func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
+	return ssql.Autopilots(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
