@@ -31,6 +31,9 @@ type (
 		// the database.
 		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error
 
+		// Accounts returns all accounts from the db.
+		Accounts(ctx context.Context) ([]api.Account, error)
+
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 

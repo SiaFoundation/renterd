@@ -56,6 +56,23 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
+func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
+	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM accounts")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
+	}
+	defer rows.Close()
+
+	var accounts []api.Account
+	for rows.Next() {
+		var a api.Account
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*types.PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+			return nil, fmt.Errorf("failed to scan account: %w", err)
+		}
+	}
+	return accounts, nil
+}
+
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,

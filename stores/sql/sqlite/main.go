@@ -81,6 +81,10 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
+func (tx *MainDatabaseTx) Accounts(ctx context.Context) ([]api.Account, error) {
+	return ssql.Accounts(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
 	// fetch contract set
 	var csID int64

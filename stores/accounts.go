@@ -2,11 +2,9 @@ package stores
 
 import (
 	"context"
-	"math/big"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm/clause"
 )
 
@@ -41,28 +39,13 @@ func (dbAccount) TableName() string {
 	return "ephemeral_accounts"
 }
 
-func (a dbAccount) convert() api.Account {
-	return api.Account{
-		ID:            rhpv3.Account(a.AccountID),
-		CleanShutdown: a.CleanShutdown,
-		HostKey:       types.PublicKey(a.Host),
-		Balance:       (*big.Int)(a.Balance),
-		Drift:         (*big.Int)(a.Drift),
-		RequiresSync:  a.RequiresSync,
-	}
-}
-
 // Accounts returns all accounts from the db.
-func (s *SQLStore) Accounts(ctx context.Context) ([]api.Account, error) {
-	var dbAccounts []dbAccount
-	if err := s.db.WithContext(ctx).Find(&dbAccounts).Error; err != nil {
-		return nil, err
-	}
-	accounts := make([]api.Account, len(dbAccounts))
-	for i, acc := range dbAccounts {
-		accounts[i] = acc.convert()
-	}
-	return accounts, nil
+func (s *SQLStore) Accounts(ctx context.Context) (accounts []api.Account, _ error) {
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		accounts, err = tx.Accounts(ctx)
+		return
+	})
+	return accounts, err
 }
 
 // SetCleanShutdown sets the clean shutdown flag on the accounts to 'false' and

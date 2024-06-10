@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
@@ -19,6 +20,7 @@ const (
 )
 
 type (
+	BigInt         big.Int
 	Currency       types.Currency
 	FileContractID types.FileContractID
 	Hash256        types.Hash256
@@ -36,6 +38,28 @@ var (
 	_ sql.Scanner = &PublicKey{}
 	_ sql.Scanner = &SecretKey{}
 )
+
+// Scan scan value into balance, implements sql.Scanner interface.
+func (hs *BigInt) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal BigInt value: %v %t", value, value)
+	}
+	if _, success := (*big.Int)(hs).SetString(s, 10); !success {
+		return errors.New(fmt.Sprint("failed to scan BigInt value", value))
+	}
+	return nil
+}
+
+// Value returns a BigInt value, implements driver.Valuer interface.
+func (hs BigInt) Value() (driver.Value, error) {
+	return (*big.Int)(&hs).String(), nil
+}
 
 // Scan scan value into Currency, implements sql.Scanner interface.
 func (c *Currency) Scan(value interface{}) error {
