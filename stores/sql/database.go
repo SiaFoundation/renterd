@@ -34,6 +34,10 @@ type (
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
+		// ArchiveContract moves a contract from the regular contracts to the
+		// archived ones.
+		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
@@ -64,6 +68,10 @@ type (
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+
+		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
+		// are associated with any of the provided contracts.
+		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
 		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
 		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
@@ -107,6 +115,11 @@ type (
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
+
+		// RemoveOfflineHosts removes all hosts that have been offline for
+		// longer than maxDownTime and been scanned at least minRecentFailures
+		// times. The contracts of those hosts are also removed.
+		RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error)
 
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an
