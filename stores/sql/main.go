@@ -830,22 +830,6 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	return res.RowsAffected()
 }
 
-func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
-	policy, err := json.Marshal(bp)
-	if err != nil {
-		return err
-	}
-	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
-	if err != nil {
-		return fmt.Errorf("failed to update bucket policy: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	} else if n == 0 {
-		return api.ErrBucketNotFound
-	}
-	return nil
-}
-
 func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -1063,6 +1047,22 @@ func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 		return fmt.Errorf("failed to set unclean shutdown: %w", err)
 	}
 	return err
+}
+
+func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
+	policy, err := json.Marshal(bp)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to update bucket policy: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return api.ErrBucketNotFound
+	}
+	return nil
 }
 
 func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {

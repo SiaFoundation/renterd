@@ -140,6 +140,10 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// SaveAccounts saves the given accounts in the db, overwriting any
+		// existing ones and setting the clean shutdown flag.
+		SaveAccounts(ctx context.Context, accounts []api.Account) error
+
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
 

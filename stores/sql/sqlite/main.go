@@ -520,6 +520,37 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
+func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
+	// clean_shutdown = 1 after save
+	stmt, err := tx.Prepare(ctx, `
+		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync)
+		VAlUES (?, ?, 1, ?, ?, ?, ?)
+		ON CONFLICT(account_id) DO UPDATE SET
+		account_id = EXCLUDED.account_id,
+		clean_shutdown = 1,
+		host = EXCLUDED.host,
+		balance = EXCLUDED.balance,
+		drift = EXCLUDED.drift,
+		requires_sync = EXCLUDED.requires_sync
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, acc := range accounts {
+		res, err := stmt.Exec(ctx, time.Now(), acc.ID, acc.HostKey, acc.Balance, acc.Drift, acc.RequiresSync)
+		if err != nil {
+			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n != 1 {
+			return fmt.Errorf("expected 1 row affected, got %v", n)
+		}
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
 }
