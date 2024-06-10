@@ -57,6 +57,33 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
+func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
+			proof_height, revision_height, revision_number, size, start_height, window_start, window_end,
+			upload_spending, download_spending, fund_account_spending, delete_spending, list_spending, renewed_to,
+			host, reason)
+		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
+			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
+			delete_spending, list_spending, NULL, h.public_key, ?
+		FROM contracts c
+		INNER JOIN hosts h ON h.id = c.host_id
+		WHERE fcid = ?
+	`, time.Now(), reason, FileContractID(fcid))
+	if err != nil {
+		return fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
+	}
+	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", FileContractID(fcid))
+	if err != nil {
+		return fmt.Errorf("failed to delete contract from contracts: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to fetch rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("expected to delete 1 row, deleted %d", n)
+	}
+	return nil
+}
+
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
 	if err != nil {
@@ -749,6 +776,44 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
+	// fetch contracts
+	rows, err := tx.Query(ctx, `
+		SELECT fcid
+		FROM contracts
+		INNER JOIN hosts h ON h.id = contracts.host_id
+		WHERE recent_downtime >= ? AND recent_scan_failures >= ?
+	`, maxDownTime, minRecentFailures)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch contracts: %w", err)
+	}
+	defer rows.Close()
+
+	var fcids []types.FileContractID
+	for rows.Next() {
+		var fcid FileContractID
+		if err := rows.Scan(&fcid); err != nil {
+			return 0, fmt.Errorf("failed to scan contract: %w", err)
+		}
+		fcids = append(fcids, types.FileContractID(fcid))
+	}
+
+	// archive contracts
+	for _, fcid := range fcids {
+		if err := ArchiveContract(ctx, tx, fcid, api.ContractArchivalReasonHostPruned); err != nil {
+			return 0, fmt.Errorf("failed to archive contract %v: %w", fcid, err)
+		}
+	}
+
+	// delete hosts
+	res, err := tx.Exec(ctx, "DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?",
+		maxDownTime, minRecentFailures)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete hosts: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 func ResetChainState(ctx context.Context, tx sql.Tx) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM consensus_infos"); err != nil {
 		return err
@@ -788,7 +853,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		}
 	}
 
-	// filter alowlist/blocklist
+	// filter allowlist/blocklist
 	switch filterMode {
 	case api.HostFilterModeAllowed:
 		if hasAllowlist {

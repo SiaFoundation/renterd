@@ -1936,7 +1936,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
+	err = ss.invalidateSlabHealthByFCID(context.Background(), []types.FileContractID{(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
