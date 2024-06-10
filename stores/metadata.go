@@ -1501,7 +1501,7 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 	batchSizeIdx := 0
 	for {
 		start := time.Now()
-		done := false
+		var done bool
 		var duration time.Duration
 		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 			deleted, err := tx.DeleteObjects(ctx, bucket, prefix, objectDeleteBatchSizes[batchSizeIdx])
