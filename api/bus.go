@@ -1,7 +1,13 @@
 package api
 
 import (
+	"errors"
+
 	"go.sia.tech/core/types"
+)
+
+var (
+	ErrMaxFundAmountExceeded = errors.New("renewal exceeds max fund amount")
 )
 
 type (

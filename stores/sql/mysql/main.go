@@ -126,6 +126,14 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
 }
 
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+}
+
+func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
+	return ssql.ArchiveContract(ctx, tx, fcid, reason)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
@@ -176,7 +184,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create/update metadata
-	if err := ssql.InsertMetadata(ctx, tx, objID, opts.Metadata); err != nil {
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, opts.Metadata); err != nil {
 		return "", fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	_, err = tx.Exec(ctx, "UPDATE object_user_metadata SET db_multipart_upload_id = NULL, db_object_id = ? WHERE db_multipart_upload_id = ?",
@@ -195,6 +203,10 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return ssql.Contracts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
+	return ssql.ContractSize(ctx, tx, id)
 }
 
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
@@ -216,6 +228,10 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 		return api.ErrBucketExists
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
@@ -291,10 +307,41 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert metadata
-	if err := ssql.InsertMetadata(ctx, tx, objID, md); err != nil {
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
 		return fmt.Errorf("failed to insert object metadata: %w", err)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error) {
+	if len(fcids) == 0 {
+		return 0, nil
+	}
+	// prepare args
+	var args []any
+	for _, fcid := range fcids {
+		args = append(args, ssql.FileContractID(fcid))
+	}
+	args = append(args, time.Now().Unix())
+	args = append(args, limit)
+	res, err := tx.Exec(ctx, fmt.Sprintf(`
+		UPDATE slabs SET health_valid_until = 0 WHERE id in (
+			SELECT *
+			FROM (
+				SELECT slabs.id
+				FROM slabs
+				INNER JOIN sectors se ON se.db_slab_id = slabs.id
+				INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
+				INNER JOIN contracts c ON c.id = cs.db_contract_id
+				WHERE c.fcid IN (%s) AND slabs.health_valid_until >= ?
+				LIMIT ?
+			) slab_ids
+		)
+	`, strings.Repeat("?, ", len(fcids)-1)+"?"), args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
@@ -335,6 +382,22 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 		}
 	}
 	return dirID, nil
+}
+
+func (tx *MainDatabaseTx) MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error) {
+	return ssql.MultipartUpload(ctx, tx, uploadID)
+}
+
+func (tx *MainDatabaseTx) MultipartUploadParts(ctx context.Context, bucket, key, uploadID string, marker int, limit int64) (api.MultipartListPartsResponse, error) {
+	return ssql.MultipartUploadParts(ctx, tx, bucket, key, uploadID, marker, limit)
+}
+
+func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
+	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
+}
+
+func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
+	return ssql.ObjectsStats(ctx, tx, opts)
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
@@ -380,6 +443,10 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
+	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
 
 func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error {
@@ -451,8 +518,16 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
+func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
+	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+}
+
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
+}
+
+func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
+	return ssql.UpdateObjectHealth(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
@@ -568,6 +643,18 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 	}
 
 	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
+	now := time.Now()
+	healthQuery, args := ssql.HealthQuery(limit, now)
+	durationArgs := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
+	args = append(args, durationArgs...)
+	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs sla INNER JOIN (%s) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", healthQuery), args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {
@@ -751,7 +838,7 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 	}
 	defer insertSectorStmt.Close()
 
-	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = last_insert_id()")
+	querySectorSlabIDStmt, err := tx.Prepare(ctx, "SELECT db_slab_id FROM sectors WHERE id = ?")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to query slab id: %w", err)
 	}
@@ -771,7 +858,7 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 			return nil, fmt.Errorf("failed to insert sector: %w", err)
 		} else if sectorID, err = res.LastInsertId(); err != nil {
 			return nil, fmt.Errorf("failed to fetch sector id: %w", err)
-		} else if err := querySectorSlabIDStmt.QueryRow(ctx).Scan(&slabID); err != nil {
+		} else if err := querySectorSlabIDStmt.QueryRow(ctx, sectorID).Scan(&slabID); err != nil {
 			return nil, fmt.Errorf("failed to fetch slab id: %w", err)
 		} else if slabID != s.slabID {
 			return nil, fmt.Errorf("failed to insert sector for slab %v: already exists for slab %v", s.slabID, slabID)
