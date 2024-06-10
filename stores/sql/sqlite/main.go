@@ -539,7 +539,7 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 	defer stmt.Close()
 
 	for _, acc := range accounts {
-		res, err := stmt.Exec(ctx, time.Now(), acc.ID, acc.HostKey, acc.Balance, acc.Drift, acc.RequiresSync)
+		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync)
 		if err != nil {
 			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
 		} else if n, err := res.RowsAffected(); err != nil {
