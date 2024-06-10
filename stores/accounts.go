@@ -53,15 +53,9 @@ func (s *SQLStore) Accounts(ctx context.Context) (accounts []api.Account, _ erro
 // all accounts after an unclean shutdown and the bus will know not to apply
 // drift.
 func (s *SQLStore) SetUncleanShutdown(ctx context.Context) error {
-	return s.db.
-		WithContext(ctx).
-		Model(&dbAccount{}).
-		Where("TRUE").
-		Updates(map[string]interface{}{
-			"clean_shutdown": false,
-			"requires_sync":  true,
-		}).
-		Error
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.SetUncleanShutdown(ctx)
+	})
 }
 
 // SaveAccounts saves the given accounts in the db, overwriting any existing

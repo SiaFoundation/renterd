@@ -57,7 +57,7 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 }
 
 func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
-	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM accounts")
+	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
 	}
@@ -1055,6 +1055,14 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
 	}
 	return hosts, nil
+}
+
+func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
+	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
+	if err != nil {
+		return fmt.Errorf("failed to set unclean shutdown: %w", err)
+	}
+	return err
 }
 
 func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {

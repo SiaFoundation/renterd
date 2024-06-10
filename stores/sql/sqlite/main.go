@@ -524,6 +524,10 @@ func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMo
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
 }
 
+func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
+	return ssql.SetUncleanShutdown(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, policy)
 }
