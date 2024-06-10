@@ -2,7 +2,7 @@ module go.sia.tech/renterd
 
 go 1.21.8
 
-toolchain go1.22.2
+toolchain go1.22.3
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.4
@@ -12,8 +12,8 @@ require (
 	github.com/minio/minio-go/v7 v7.0.71
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.6-0.20240607161152-c89664ecca5d
-	go.sia.tech/coreutils v0.0.5-0.20240607172528-49d00a4d179a
+	go.sia.tech/core v0.2.6
+	go.sia.tech/coreutils v0.0.5
 	go.sia.tech/gofakes3 v0.0.3
 	go.sia.tech/hostd v1.1.0
 	go.sia.tech/jape v0.11.2-0.20240306154058-9832414a5385
