@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -65,10 +66,11 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 
 	var accounts []api.Account
 	for rows.Next() {
-		var a api.Account
-		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*types.PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+		a := api.Account{Balance: new(big.Int), Drift: new(big.Int)} // init big.Int
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
+		accounts = append(accounts, a)
 	}
 	return accounts, nil
 }
