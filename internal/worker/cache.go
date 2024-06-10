@@ -97,10 +97,10 @@ type cache struct {
 	ready bool
 }
 
-func NewCache(b Bus, workerAddr string, logger *zap.Logger) WorkerCache {
+func NewCache(b Bus, eventsURL string, logger *zap.Logger) WorkerCache {
 	return &cache{
 		b:         b,
-		eventsURL: workerAddr,
+		eventsURL: eventsURL,
 
 		cache:  newMemoryCache(),
 		logger: logger.Sugar().Named("workercache"),
@@ -159,7 +159,7 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	log := c.logger.With("module", event.Module, "event", event.Event)
 
 	// parse the event
-	parsed, err := api.ParseEvent(event)
+	parsed, err := api.ParseEventWebhook(event)
 	if err != nil {
 		log.Errorw("failed to parse event", "error", err)
 		return err
@@ -169,20 +169,22 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	switch e := parsed.(type) {
 	case api.EventConsensusUpdate:
 		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
-		err = c.handleConsensusUpdate(e)
+		c.handleConsensusUpdate(e)
 	case api.EventContractArchive:
 		log = log.With("fcid", e.ContractID, "ts", e.Timestamp)
-		err = c.handleContractArchive(e)
+		c.handleContractArchive(e)
 	case api.EventContractRenew:
 		log = log.With("fcid", e.Renewal.ID, "renewedFrom", e.Renewal.RenewedFrom, "ts", e.Timestamp)
-		err = c.handleContractRenew(e)
+		c.handleContractRenew(e)
 	case api.EventSettingUpdate:
 		log = log.With("key", e.Key, "ts", e.Timestamp)
 		err = c.handleSettingUpdate(e)
 	case api.EventSettingDelete:
 		log = log.With("key", e.Key, "ts", e.Timestamp)
-		err = c.handleSettingDelete(e)
+		c.handleSettingDelete(e)
 	default:
+		log.Info("unhandled event", e)
+		return
 	}
 
 	// log the outcome
@@ -217,11 +219,11 @@ func (c *cache) isReady() bool {
 	return c.ready
 }
 
-func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) error {
+func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
 	// return early if the doesn't have gouging params to update
 	value, found, _ := c.cache.Get(cacheKeyGougingParams)
 	if !found {
-		return nil
+		return
 	}
 
 	// update gouging params
@@ -229,14 +231,13 @@ func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) error {
 	gp.ConsensusState = event.ConsensusState
 	gp.TransactionFee = event.TransactionFee
 	c.cache.Set(cacheKeyGougingParams, gp)
-	return nil
 }
 
-func (c *cache) handleContractArchive(event api.EventContractArchive) error {
+func (c *cache) handleContractArchive(event api.EventContractArchive) {
 	// return early if the cache doesn't have contracts
 	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
 	if !found {
-		return nil
+		return
 	}
 	contracts := value.([]api.ContractMetadata)
 
@@ -248,14 +249,13 @@ func (c *cache) handleContractArchive(event api.EventContractArchive) error {
 		}
 	}
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
-	return nil
 }
 
-func (c *cache) handleContractRenew(event api.EventContractRenew) error {
+func (c *cache) handleContractRenew(event api.EventContractRenew) {
 	// return early if the cache doesn't have contracts
 	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
 	if !found {
-		return nil
+		return
 	}
 	contracts := value.([]api.ContractMetadata)
 
@@ -268,14 +268,12 @@ func (c *cache) handleContractRenew(event api.EventContractRenew) error {
 	}
 
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
-	return nil
 }
 
-func (c *cache) handleSettingDelete(e api.EventSettingDelete) (err error) {
+func (c *cache) handleSettingDelete(e api.EventSettingDelete) {
 	if e.Key == api.SettingGouging || e.Key == api.SettingRedundancy {
 		c.cache.Invalidate(cacheKeyGougingParams)
 	}
-	return nil
 }
 
 func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {

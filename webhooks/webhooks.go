@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	nurl "net/url"
 	"sync"
 	"time"
 
@@ -57,12 +58,12 @@ type (
 		Payload interface{} `json:"payload,omitempty"`
 	}
 
-	WebhookEvent interface {
+	EventWebhook interface {
 		Event() Event
 	}
 )
 
-func NewEventWebhook(url string, e WebhookEvent) Webhook {
+func NewEventWebhook(url string, e EventWebhook) Webhook {
 	return Webhook{
 		Module: e.Event().Module,
 		Event:  e.Event().Event,
@@ -253,10 +254,21 @@ func sendEvent(ctx context.Context, url string, action Event) error {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	parsedURL, err := nurl.Parse(url)
 	if err != nil {
 		return err
 	}
+
+	// extract username and password from the URL
+	username := parsedURL.User.Username()
+	password, _ := parsedURL.User.Password()
+	parsedURL.User = nil // clear user info
+
+	req, err := http.NewRequestWithContext(ctx, "POST", parsedURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(username, password)
 	defer io.ReadAll(req.Body) // always drain body
 
 	resp, err := http.DefaultClient.Do(req)

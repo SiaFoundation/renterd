@@ -142,6 +142,25 @@ func TestWorkerCache(t *testing.T) {
 	} else if lines := observedLogs.TakeAll(); !strings.Contains(lines[0].Message, errCacheOutdated.Error()) || !strings.Contains(lines[0].Message, cacheKeyGougingParams) {
 		t.Fatal("expected error message to contain 'cache is outdated', got", lines[0].Message)
 	}
+
+	// assert the worker cache handles every event
+	_ = observedLogs.TakeAll() // clear logs
+	for _, event := range []webhooks.EventWebhook{
+		api.EventConsensusUpdate{},
+		api.EventContractArchive{},
+		api.EventContractRenew{},
+		api.EventSettingUpdate{},
+		api.EventSettingDelete{},
+	} {
+		if err := c.HandleEvent(event.Event()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, entry := range observedLogs.TakeAll() {
+		if strings.Contains(entry.Message, "unhandled event") {
+			t.Fatal("expected no unhandled event, got", entry)
+		}
+	}
 }
 
 func newTestCache(logger *zap.Logger) (WorkerCache, *mockBus, *memoryCache) {

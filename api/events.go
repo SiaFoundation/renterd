@@ -110,20 +110,21 @@ func (e EventSettingDelete) Event() webhooks.Event {
 	}
 }
 
-func ParseEvent(event webhooks.Event) (interface{}, error) {
+func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 	bytes, err := json.Marshal(event.Payload)
 	if err != nil {
 		return nil, err
 	}
 	switch event.Module {
 	case ModuleContract:
-		if event.Event == EventArchive {
+		switch event.Event {
+		case EventArchive:
 			var e EventContractArchive
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}
 			return e, nil
-		} else if event.Event == EventRenew {
+		case EventRenew:
 			var e EventContractRenew
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
@@ -147,13 +148,14 @@ func ParseEvent(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		}
 	case ModuleSetting:
-		if event.Event == EventUpdate {
+		switch event.Event {
+		case EventUpdate:
 			var e EventSettingUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}
 			return e, nil
-		} else if event.Event == EventDelete {
+		case EventDelete:
 			var e EventSettingDelete
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err

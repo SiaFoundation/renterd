@@ -522,12 +522,12 @@ func main() {
 	setupWorkerFn := node.NoopFn
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			workerAddr := cfg.HTTP.Address + "/api/worker"
+			authAPIBaseURL := fmt.Sprintf("http://:%s@%s/api/worker", cfg.HTTP.Password, l.Addr().String())
 			var shutdownFn node.ShutdownFn
 			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, seed, workerAddr, logger)
+			}, bc, seed, authAPIBaseURL, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
@@ -538,6 +538,7 @@ func main() {
 			})
 
 			mux.Sub["/api/worker"] = utils.TreeMux{Handler: iworker.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			workerAddr := cfg.HTTP.Address + "/api/worker"
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
