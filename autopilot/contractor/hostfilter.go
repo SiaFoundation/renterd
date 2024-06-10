@@ -102,7 +102,7 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, inSet bool, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
 	contract, s, pt := ci.contract, ci.settings, ci.priceTable
 
 	usable = true
@@ -121,14 +121,14 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.Redundancy
 	} else {
 		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
-			usable = false
-			recoverable = true
+			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
+			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			usable = usable && c.shouldForgiveFailedRefresh(contract.ID)
+			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
 			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false

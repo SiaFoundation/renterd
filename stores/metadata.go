@@ -784,28 +784,12 @@ SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as secto
 	return sizes, nil
 }
 
-func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
-	var size struct {
-		Size     uint64 `json:"size"`
-		Prunable uint64 `json:"prunable"`
-	}
-
-	if err := s.db.
-		WithContext(ctx).
-		Raw(`
-SELECT contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
-SELECT MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c LEFT JOIN contract_sectors cs ON cs.db_contract_id = c.id WHERE c.fcid = ?
-) i
-`, rhpv2.SectorSize, fileContractID(id)).
-		Take(&size).
-		Error; err != nil {
-		return api.ContractSize{}, err
-	}
-
-	return api.ContractSize{
-		Size:     size.Size,
-		Prunable: size.Prunable,
-	}, nil
+func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (cs api.ContractSize, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		cs, err = tx.ContractSize(ctx, id)
+		return
+	})
+	return cs, err
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
@@ -1553,59 +1537,25 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 		return nil // nothing to do
 	}
 
-	// Update slab health in batches.
-	now := time.Now()
-
-	// build health query
-	healthQuery := s.db.Raw(`
-SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
-THEN
-    CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
-    THEN -1
-    ELSE 1
-    END
-ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-END AS health
-FROM slabs
-INNER JOIN sectors s ON s.db_slab_id = slabs.id
-LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
-LEFT JOIN contracts c ON se.db_contract_id = c.id
-LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
-LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-WHERE slabs.health_valid_until <= ?
-GROUP BY slabs.id
-LIMIT ?
-`, now.Unix(), refreshHealthBatchSize)
-
 	for {
+		// update slabs
 		var rowsAffected int64
-		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			var res *gorm.DB
-			if isSQLite(s.db) {
-				res = tx.Exec("UPDATE slabs SET health = inner.health, health_valid_until = (?) FROM (?) AS inner WHERE slabs.id=inner.id", sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity), healthQuery)
-			} else {
-				res = tx.Exec("UPDATE slabs sla INNER JOIN (?) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (?)", healthQuery, sqlRandomTimestamp(s.db, now, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity))
-			}
-			if res.Error != nil {
-				return res.Error
-			}
-			rowsAffected = res.RowsAffected
-
-			// Update the health of objects with outdated health.
-			return tx.Exec(`
-UPDATE objects SET health = (
-	SELECT MIN(slabs.health)
-	FROM slabs
-	INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-) WHERE health != (
-	SELECT MIN(slabs.health)
-	FROM slabs
-	INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-)`).Error
+		err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+			rowsAffected, err = tx.UpdateSlabHealth(ctx, refreshHealthBatchSize, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity)
+			return
 		})
 		if err != nil {
-			return err
-		} else if rowsAffected < refreshHealthBatchSize {
+			return fmt.Errorf("failed to update slab health: %w", err)
+		}
+		// update objects
+		err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+			return tx.UpdateObjectHealth(ctx)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to update object health: %w", err)
+		}
+		// check if done
+		if rowsAffected < refreshHealthBatchSize {
 			return nil // done
 		}
 		select {
@@ -2292,13 +2242,6 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []fileC
 	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return invalidateSlabHealthByFCID(tx, fcids)
 	})
-}
-
-func sqlRandomTimestamp(db *gorm.DB, now time.Time, minDuration, maxDuration time.Duration) clause.Expr {
-	if isSQLite(db) {
-		return gorm.Expr("ABS(RANDOM()) % (? - ?) + ?", int(maxDuration.Seconds()), int(minDuration.Seconds()), now.Add(minDuration).Unix())
-	}
-	return gorm.Expr("FLOOR(? + RAND() * (? - ?))", now.Add(minDuration).Unix(), int(maxDuration.Seconds()), int(minDuration.Seconds()))
 }
 
 // nolint:unparam

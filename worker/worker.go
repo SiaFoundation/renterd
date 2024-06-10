@@ -34,8 +34,8 @@ import (
 )
 
 const (
-	batchSizeDeleteSectors = uint64(500000) // ~16MiB of roots
-	batchSizeFetchSectors  = uint64(130000) // ~4MiB of roots
+	batchSizeDeleteSectors = uint64(1000)  // 4GiB of contract data
+	batchSizeFetchSectors  = uint64(25600) // 100GiB of contract data
 
 	defaultLockTimeout          = time.Minute
 	defaultRevisionFetchTimeout = 30 * time.Second

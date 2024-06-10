@@ -9,7 +9,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.1
-	github.com/minio/minio-go/v7 v7.0.70
+	github.com/minio/minio-go/v7 v7.0.71
 	github.com/montanaflynn/stats v0.7.1
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.6-0.20240607161152-c89664ecca5d

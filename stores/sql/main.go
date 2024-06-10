@@ -320,6 +320,32 @@ func InsertMetadata(ctx context.Context, tx sql.Tx, objID, muID *int64, md api.O
 	return nil
 }
 
+func ContractSize(ctx context.Context, tx sql.Tx, id types.FileContractID) (api.ContractSize, error) {
+	var contractID, size uint64
+	if err := tx.QueryRow(ctx, "SELECT id, size FROM contracts WHERE fcid = ?", FileContractID(id)).
+		Scan(&contractID, &size); errors.Is(err, dsql.ErrNoRows) {
+		return api.ContractSize{}, api.ErrContractNotFound
+	} else if err != nil {
+		return api.ContractSize{}, err
+	}
+
+	var nSectors uint64
+	if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contract_sectors WHERE db_contract_id = ?", contractID).
+		Scan(&nSectors); err != nil {
+		return api.ContractSize{}, err
+	}
+	sectorsSize := nSectors * rhpv2.SectorSize
+
+	var prunable uint64
+	if size > sectorsSize {
+		prunable = size - sectorsSize
+	}
+	return api.ContractSize{
+		Size:     size,
+		Prunable: prunable,
+	}, nil
+}
+
 func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 	var id int64
 	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE name = ?", bucket).Scan(&id)
@@ -399,6 +425,26 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 		}
 	}
 	return usedContracts, nil
+}
+
+func HealthQuery(limit int64, now time.Time) (string, []any) {
+	return `SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
+	THEN
+		CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+		THEN -1
+		ELSE 1
+		END
+	ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+	END AS health
+	FROM slabs
+	INNER JOIN sectors s ON s.db_slab_id = slabs.id
+	LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+	LEFT JOIN contracts c ON se.db_contract_id = c.id
+	LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
+	LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+	WHERE slabs.health_valid_until <= ?
+	GROUP BY slabs.id
+	LIMIT ?`, []any{now.Unix(), limit}
 }
 
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
@@ -559,7 +605,10 @@ type multipartUploadPart struct {
 func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, parts []api.MultipartCompletedPart) (multipartUpload, []multipartUploadPart, int64, string, error) {
 	// fetch upload
 	var mpu multipartUpload
-	err := tx.QueryRow(ctx, "SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id").
+	err := tx.QueryRow(ctx, `
+		SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id
+		FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id
+		WHERE mu.upload_id = ?`, uploadID).
 		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
 	if err != nil {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch upload: %w", err)
@@ -711,7 +760,7 @@ func ResetChainState(ctx context.Context, tx sql.Tx) error {
 	return nil
 }
 
-func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
+func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -728,13 +777,18 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	var whereExprs []string
 	var args []any
 
-	// filter autopilot
-	if autopilotID != "" {
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h.id = h2.id INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id WHERE ap.identifier = ?)")
-		args = append(args, autopilotID)
+	// fetch autopilot id
+	var autopilotID int64
+	if autopilot != "" {
+		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", autopilot).
+			Scan(&autopilotID); errors.Is(err, dsql.ErrNoRows) {
+			return nil, api.ErrAutopilotNotFound
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
+		}
 	}
 
-	// filter allowlist/blocklist
+	// filter alowlist/blocklist
 	switch filterMode {
 	case api.HostFilterModeAllowed:
 		if hasAllowlist {
@@ -775,11 +829,17 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	}
 
 	// filter usability
+	whereApExpr := ""
+	if autopilot != "" {
+		whereApExpr = "AND hc.db_autopilot_id = ?"
+	}
 	switch usabilityMode {
 	case api.UsabilityFilterModeUsable:
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0)")
+		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
+		args = append(args, autopilotID)
 	case api.UsabilityFilterModeUnusable:
-		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1)")
+		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
+		args = append(args, autopilotID)
 	}
 
 	// offset + limit
@@ -860,9 +920,9 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 
 	// query host checks
 	var apExpr string
-	if autopilotID != "" {
+	if autopilot != "" {
 		apExpr = "WHERE ap.identifier = ?"
-		args = append(args, autopilotID)
+		args = append(args, autopilot)
 	}
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
@@ -938,6 +998,20 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 		return api.ErrBucketNotFound
 	}
 	return nil
+}
+
+func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE objects SET health = (
+			SELECT MIN(slabs.health)
+			FROM slabs
+			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
+		) WHERE health != (
+			SELECT MIN(slabs.health)
+			FROM slabs
+			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
+		)`)
+	return err
 }
 
 func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {

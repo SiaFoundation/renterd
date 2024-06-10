@@ -348,7 +348,7 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 2 {
+	} else if len(his) != 3 {
 		t.Fatal("unexpected", len(his))
 	}
 
@@ -370,7 +370,7 @@ func TestSearchHosts(t *testing.T) {
 	his, err = ss.SearchHosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 2 {
+	} else if len(his) != 1 {
 		t.Fatal("unexpected", len(his))
 	}
 

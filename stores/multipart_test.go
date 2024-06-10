@@ -266,3 +266,44 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal("expected 3 iterations")
 	}
 }
+
+func TestMultipartUploadEmptyObjects(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create 2 multipart parts
+	resp1, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo1", object.NoOpKey, testMimeType, testMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", object.NoOpKey, testMimeType, testMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// complete uploads in reverse order
+	cmu1, err := ss.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", resp2.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmu2, err := ss.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "/foo1", resp1.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foo1, err := ss.ObjectMetadata(context.Background(), api.DefaultBucketName, "/foo1")
+	if err != nil {
+		t.Fatal(err)
+	} else if foo1.ETag != cmu1.ETag {
+		t.Fatal("unexpected etag")
+	}
+	foo2, err := ss.ObjectMetadata(context.Background(), api.DefaultBucketName, "/foo2")
+	if err != nil {
+		t.Fatal(err)
+	} else if foo2.ETag != cmu2.ETag {
+		t.Fatal("unexpected etag")
+	}
+}

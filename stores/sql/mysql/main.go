@@ -203,6 +203,10 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 	return ssql.Contracts(ctx, tx, opts)
 }
 
+func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
+	return ssql.ContractSize(ctx, tx, id)
+}
+
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
 }
@@ -505,6 +509,10 @@ func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string,
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
 }
 
+func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
+	return ssql.UpdateObjectHealth(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
 	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
@@ -618,6 +626,18 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 	}
 
 	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
+	now := time.Now()
+	healthQuery, args := ssql.HealthQuery(limit, now)
+	durationArgs := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
+	args = append(args, durationArgs...)
+	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs sla INNER JOIN (%s) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", healthQuery), args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
