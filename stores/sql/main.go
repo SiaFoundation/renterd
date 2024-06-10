@@ -15,6 +15,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
@@ -436,7 +437,7 @@ func MultipartUploadParts(ctx context.Context, tx sql.Tx, bucket, key, uploadID 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT mp.part_number, mp.created_at, mp.etag, mp.size
 		FROM multipart_parts mp
-		INNER JOIN multipart_uploads mus ON mus.id = mp.db_multipart_upload_id 
+		INNER JOIN multipart_uploads mus ON mus.id = mp.db_multipart_upload_id
 		INNER JOIN buckets b ON b.id = mus.db_bucket_id
 		WHERE mus.object_id = ? AND b.name = ? AND mus.upload_id = ? AND part_number > ?
 		ORDER BY part_number ASC
@@ -669,7 +670,7 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 			AND EXISTS (
 				SELECT 1 FROM slices sli
 				INNER JOIN objects o ON o.id = sli.db_object_id AND o.db_bucket_id = ?
-				WHERE sli.db_slab_id = sla.id 
+				WHERE sli.db_slab_id = sla.id
 			)
 		`
 		whereArgs = append(whereArgs, bucketID)
@@ -699,18 +700,13 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
-func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
-	policy, err := json.Marshal(bp)
-	if err != nil {
+func ResetChainState(ctx context.Context, tx sql.Tx) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM consensus_infos"); err != nil {
 		return err
-	}
-	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
-	if err != nil {
-		return fmt.Errorf("failed to update bucket policy: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	} else if n == 0 {
-		return api.ErrBucketNotFound
+	} else if _, err := tx.Exec(ctx, "DELETE FROM wallet_events"); err != nil {
+		return err
+	} else if _, err := tx.Exec(ctx, "DELETE FROM wallet_outputs"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -915,6 +911,82 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilotID, filterMode, usabil
 	return hosts, nil
 }
 
+func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
+	var id Hash256
+	var height uint64
+	if err := tx.QueryRow(ctx, "SELECT height, block_id FROM consensus_infos WHERE id = ?", sql.ConsensusInfoID).
+		Scan(&id, &height); err != nil {
+		return types.ChainIndex{}, err
+	}
+	return types.ChainIndex{
+		ID:     types.BlockID(id),
+		Height: height,
+	}, nil
+}
+
+func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
+	policy, err := json.Marshal(bp)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to update bucket policy: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return api.ErrBucketNotFound
+	}
+	return nil
+}
+
+func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {
+	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof, address, value, maturity_height FROM wallet_outputs")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch wallet events: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		element, err := scanSiacoinElement(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan wallet event: %w", err)
+		}
+		elements = append(elements, element)
+	}
+	return
+}
+
+func WalletEvents(ctx context.Context, tx sql.Tx, offset, limit int) (events []wallet.Event, _ error) {
+	if limit == 0 || limit == -1 {
+		limit = math.MaxInt64
+	}
+
+	rows, err := tx.Query(ctx, "SELECT event_id, block_id, height, inflow, outflow, type, data, maturity_height, timestamp FROM wallet_events ORDER BY timestamp DESC LIMIT ? OFFSET ?", limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch wallet events: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		event, err := scanWalletEvent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan wallet event: %w", err)
+		}
+		events = append(events, event)
+	}
+	return
+}
+
+func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) {
+	var n int64
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM wallet_events").Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count wallet events: %w", err)
+	}
+	return uint64(n), nil
+}
+
 func scanBucket(s scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string
@@ -946,4 +1018,82 @@ func scanMultipartUpload(s scanner) (resp api.MultipartUpload, _ error) {
 		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal encryption key: %w", err)
 	}
 	return
+}
+
+func scanWalletEvent(s scanner) (wallet.Event, error) {
+	var blockID, eventID Hash256
+	var height, maturityHeight uint64
+	var inflow, outflow Currency
+	var edata []byte
+	var etype string
+	var ts UnixTimeNS
+	if err := s.Scan(
+		&eventID,
+		&blockID,
+		&height,
+		&inflow,
+		&outflow,
+		&etype,
+		&edata,
+		&maturityHeight,
+		&ts,
+	); err != nil {
+		return wallet.Event{}, err
+	}
+
+	data, err := UnmarshalEventData(edata, etype)
+	if err != nil {
+		return wallet.Event{}, err
+	}
+	return wallet.Event{
+		ID: types.Hash256(eventID),
+		Index: types.ChainIndex{
+			ID:     types.BlockID(blockID),
+			Height: height,
+		},
+		Inflow:         types.Currency(inflow),
+		Outflow:        types.Currency(outflow),
+		Type:           etype,
+		Data:           data,
+		MaturityHeight: maturityHeight,
+		Timestamp:      time.Time(ts),
+	}, nil
+}
+
+func scanSiacoinElement(s scanner) (el types.SiacoinElement, err error) {
+	var id Hash256
+	var leafIndex, maturityHeight uint64
+	var merkleProof MerkleProof
+	var address Hash256
+	var value Currency
+	err = s.Scan(&id, &leafIndex, &merkleProof, &address, &value, &maturityHeight)
+	if err != nil {
+		return types.SiacoinElement{}, err
+	}
+	return types.SiacoinElement{
+		StateElement: types.StateElement{
+			ID:          types.Hash256(id),
+			LeafIndex:   leafIndex,
+			MerkleProof: merkleProof.Hashes,
+		},
+		SiacoinOutput: types.SiacoinOutput{
+			Address: types.Address(address),
+			Value:   types.Currency(value),
+		},
+		MaturityHeight: maturityHeight,
+	}, nil
+}
+
+func scanStateElement(s scanner) (types.StateElement, error) {
+	var id Hash256
+	var leafIndex uint64
+	var merkleProof MerkleProof
+	if err := s.Scan(&id, &leafIndex, &merkleProof); err != nil {
+		return types.StateElement{}, err
+	}
+	return types.StateElement{
+		ID:          types.Hash256(id),
+		LeafIndex:   leafIndex,
+		MerkleProof: merkleProof.Hashes,
+	}, nil
 }

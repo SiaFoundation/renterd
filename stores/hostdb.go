@@ -864,35 +864,3 @@ func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) 
 
 	return allowlist, blocklist, nil
 }
-
-func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
-	// fetch the host
-	var host dbHost
-	if err := tx.
-		Model(&dbHost{}).
-		Where("public_key = ?", publicKey(hk)).
-		First(&host).
-		Error; err != nil {
-		return err
-	}
-
-	// update host allowlist
-	var dbAllowlist []dbAllowlistEntry
-	for _, entry := range allowlist {
-		if entry.Entry == host.PublicKey {
-			dbAllowlist = append(dbAllowlist, entry)
-		}
-	}
-	if err := tx.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
-		return err
-	}
-
-	// update host blocklist
-	var dbBlocklist []dbBlocklistEntry
-	for _, entry := range blocklist {
-		if entry.blocks(host) {
-			dbBlocklist = append(dbBlocklist, entry)
-		}
-	}
-	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
-}

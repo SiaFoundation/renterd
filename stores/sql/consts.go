@@ -16,6 +16,23 @@ const (
 	contractStateFailed
 )
 
+func ContractStateFromString(state string) ContractState {
+	switch strings.ToLower(state) {
+	case api.ContractStateInvalid:
+		return contractStateInvalid
+	case api.ContractStatePending:
+		return contractStatePending
+	case api.ContractStateActive:
+		return contractStateActive
+	case api.ContractStateComplete:
+		return contractStateComplete
+	case api.ContractStateFailed:
+		return contractStateFailed
+	default:
+		return contractStateInvalid
+	}
+}
+
 func (s *ContractState) LoadString(state string) error {
 	switch strings.ToLower(state) {
 	case api.ContractStateInvalid:

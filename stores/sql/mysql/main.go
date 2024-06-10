@@ -12,7 +12,9 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"lukechampine.com/frand"
@@ -361,6 +363,14 @@ func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStat
 	return ssql.ObjectsStats(ctx, tx, opts)
 }
 
+func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn chain.ApplyChainUpdateFn) error {
+	return fn(&ChainUpdateTx{
+		ctx: ctx,
+		tx:  tx,
+		l:   tx.log.Named("ProcessChainUpdate"),
+	})
+}
+
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
@@ -475,8 +485,20 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
+func (tx *MainDatabaseTx) ResetChainState(ctx context.Context) error {
+	return ssql.ResetChainState(ctx, tx.Tx)
+}
+
 func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+}
+
+func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
+	return ssql.Tip(ctx, tx.Tx)
+}
+
+func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {
+	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
@@ -596,6 +618,14 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 	}
 
 	return nil
+}
+
+func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
+	return ssql.WalletEvents(ctx, tx.Tx, offset, limit)
+}
+
+func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, err error) {
+	return ssql.WalletEventCount(ctx, tx.Tx)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {

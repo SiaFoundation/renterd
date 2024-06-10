@@ -5,7 +5,9 @@ import (
 	"io"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 )
 
@@ -96,6 +98,9 @@ type (
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 
+		// ProcessChainUpdate applies the given chain update to the database.
+		ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 
@@ -119,8 +124,17 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// ResetChainState deletes all chain data in the database.
+		ResetChainState(ctx context.Context) error
+
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
+
+		// Tip returns the sync height.
+		Tip(ctx context.Context) (types.ChainIndex, error)
+
+		// UnspentSiacoinElements returns all wallet outputs in the database.
+		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
 
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
@@ -133,6 +147,12 @@ type (
 		// The operation is not allowed to update the number of shards
 		// associated with a slab or the root/slabIndex of any shard.
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
+
+		// WalletEvents returns all wallet events in the database.
+		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
+
+		// WalletEventCount returns the total number of events in the database.
+		WalletEventCount(ctx context.Context) (uint64, error)
 	}
 
 	MetricsDatabase interface {

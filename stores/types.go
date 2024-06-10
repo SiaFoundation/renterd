@@ -1,7 +1,6 @@
 package stores
 
 import (
-	"bytes"
 	"database/sql/driver"
 	"encoding/binary"
 	"encoding/json"
@@ -15,7 +14,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 )
 
 const (
@@ -39,94 +37,11 @@ type (
 	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
 	setting        string
-	eventData      string
 
 	// NOTE: we have to wrap the proof here because Gorm can't scan bytes into
 	// multiple slices, all bytes are scanned into the first row
 	merkleProof struct{ proof []types.Hash256 }
 )
-
-func toEventData(d wallet.EventData) (eventData, error) {
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(d); err != nil {
-		return "", err
-	}
-	return eventData(buf.String()), nil
-}
-
-// GormDataType implements gorm.GormDataTypeInterface.
-func (eventData) GormDataType() string {
-	return "string"
-}
-
-// Scan scans value into the setting
-func (d *eventData) Scan(value interface{}) error {
-	switch value := value.(type) {
-	case string:
-		*d = eventData(value)
-	case []byte:
-		*d = eventData(value)
-	default:
-		return fmt.Errorf("failed to unmarshal setting value from type %t", value)
-	}
-	return nil
-}
-
-// Value returns a setting value, implements driver.Valuer interface.
-func (d eventData) Value() (driver.Value, error) {
-	var out interface{}
-	err := json.Unmarshal([]byte(d), &out)
-	if err != nil {
-		return nil, err
-	}
-
-	return string(d), nil
-}
-
-// decodeToType tries to decode the event data into the given event data type
-func (d eventData) decodeToType(t string) (wallet.EventData, error) {
-	dec := json.NewDecoder(strings.NewReader(string(d)))
-	switch t {
-	case wallet.EventTypeMinerPayout:
-		var payout wallet.EventMinerPayout
-		if err := dec.Decode(&payout); err != nil {
-			return nil, err
-		}
-		return payout, nil
-	case wallet.EventTypeFoundationSubsidy:
-		var subsidy wallet.EventFoundationSubsidy
-		if err := dec.Decode(&subsidy); err != nil {
-			return nil, err
-		}
-		return subsidy, nil
-	case wallet.EventTypeV1Contract:
-		var v1c wallet.EventV1ContractPayout
-		if err := dec.Decode(&v1c); err != nil {
-			return nil, err
-		}
-		return v1c, nil
-	case wallet.EventTypeV1Transaction:
-		var v1txn wallet.EventV1Transaction
-		if err := dec.Decode(&v1txn); err != nil {
-			return nil, err
-		}
-		return v1txn, nil
-	case wallet.EventTypeV2Contract:
-		var v2c wallet.EventV2ContractPayout
-		if err := dec.Decode(&v2c); err != nil {
-			return nil, err
-		}
-		return v2c, nil
-	case wallet.EventTypeV2Transaction:
-		var v2txn wallet.EventV2Transaction
-		if err := dec.Decode(&v2txn); err != nil {
-			return nil, err
-		}
-		return v2txn, nil
-	default:
-		return nil, fmt.Errorf("unknown event type %v", t)
-	}
-}
 
 // GormDataType implements gorm.GormDataTypeInterface.
 func (setting) GormDataType() string {

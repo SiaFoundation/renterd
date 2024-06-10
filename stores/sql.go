@@ -331,22 +331,6 @@ func (s *SQLStore) Close() error {
 	return nil
 }
 
-// ChainIndex returns the last stored chain index.
-func (ss *SQLStore) ChainIndex(ctx context.Context) (types.ChainIndex, error) {
-	var ci dbConsensusInfo
-	if err := ss.db.
-		WithContext(ctx).
-		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
-		FirstOrCreate(&ci).
-		Error; err != nil {
-		return types.ChainIndex{}, err
-	}
-	return types.ChainIndex{
-		Height: ci.Height,
-		ID:     types.BlockID(ci.BlockID),
-	}, nil
-}
-
 func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
 	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, s.retryAbortFn)
 }

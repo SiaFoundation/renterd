@@ -3,7 +3,6 @@ package stores
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -30,16 +29,14 @@ func TestProcessChainUpdate(t *testing.T) {
 	fcid := fcids[0]
 
 	// assert contract state returns the correct state
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
-		if state, err := tx.ContractState(fcid); err != nil {
-			return err
-		} else if state != api.ContractStatePending {
-			return fmt.Errorf("unexpected state '%v'", state)
-		} else {
-			return nil
-		}
+	var state api.ContractState
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) (err error) {
+		state, err = tx.ContractState(fcid)
+		return
 	}); err != nil {
 		t.Fatal("unexpected error", err)
+	} else if state != api.ContractStatePending {
+		t.Fatalf("unexpected state '%v'", state)
 	}
 
 	// check current index
@@ -120,6 +117,22 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	} else if c.State.String() != api.ContractStateFailed {
 		t.Fatal("unexpected state", c.State)
+	}
+
+	// renew the contract
+	_, err = ss.addTestRenewedContract(types.FileContractID{2}, fcid, hks[0], 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we can fetch the state of the archived contract
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) (err error) {
+		state, err = tx.ContractState(fcid)
+		return
+	}); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if state != api.ContractStateFailed {
+		t.Fatalf("unexpected state '%v'", state)
 	}
 
 	// assert update host is successful

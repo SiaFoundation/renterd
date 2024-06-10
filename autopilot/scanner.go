@@ -268,6 +268,7 @@ func (s *scanner) launchHostScans() chan scanReq {
 				break
 			}
 			if len(hosts) == 0 {
+				s.logger.Debug("no hosts to scan")
 				break
 			}
 			if len(hosts) < int(s.scanBatchSize) {
