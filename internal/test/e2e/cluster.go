@@ -910,8 +910,7 @@ func testBusCfg() node.BusConfig {
 			IgnoreRecordNotFoundError: true,
 			SlowThreshold:             100 * time.Millisecond,
 		},
-		Network:             testNetwork(),
-		SlabPruningInterval: time.Second,
+		Network: testNetwork(),
 	}
 }
 

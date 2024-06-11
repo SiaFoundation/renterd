@@ -81,9 +81,8 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 		DatabaseLog: config.DatabaseLog{
 			SlowThreshold: 100 * time.Millisecond,
 		},
-		Miner:               node.NewMiner(client),
-		SlabPruningInterval: time.Minute,
-		Logger:              zap.NewNop(),
+		Miner:  node.NewMiner(client),
+		Logger: zap.NewNop(),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err
