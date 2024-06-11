@@ -41,9 +41,14 @@ var (
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
 func (cfg *AutopilotConfig) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal AutopilotConfig value:", value))
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
+		return fmt.Errorf("failed to unmarshal AutopilotConfig value: %v %T", value, value)
 	}
 	return json.Unmarshal(bytes, cfg)
 }
