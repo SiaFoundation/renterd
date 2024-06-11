@@ -31,6 +31,9 @@ type (
 		// the database.
 		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error
 
+		// Accounts returns all accounts from the db.
+		Accounts(ctx context.Context) ([]api.Account, error)
+
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
@@ -144,8 +147,16 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// SaveAccounts saves the given accounts in the db, overwriting any
+		// existing ones and setting the clean shutdown flag.
+		SaveAccounts(ctx context.Context, accounts []api.Account) error
+
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
+
+		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
+		// 'false' and also marks them as requiring a resync.
+		SetUncleanShutdown(ctx context.Context) error
 
 		// UpdateAutopilot updates the autopilot with the provided one or
 		// creates a new one if it doesn't exist yet.
