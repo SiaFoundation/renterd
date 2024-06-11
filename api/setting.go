@@ -12,7 +12,7 @@ import (
 const (
 	SettingContractSet      = "contractset"
 	SettingGouging          = "gouging"
-	SettingPricePin         = "pricepin"
+	SettingPricePinning     = "pricepinning"
 	SettingRedundancy       = "redundancy"
 	SettingS3Authentication = "s3authentication"
 	SettingUploadPacking    = "uploadpacking"
@@ -140,6 +140,11 @@ type (
 // IsPinned returns true if the pin is enabled and the value is greater than 0.
 func (p Pin) IsPinned() bool {
 	return p.Pinned && p.Value > 0
+}
+
+// Validate returns an error if the price pin settings are not considered valid.
+func (pss PricePinSettings) Validate() error {
+	return nil
 }
 
 // Validate returns an error if the gouging settings are not considered valid.

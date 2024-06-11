@@ -81,6 +81,13 @@ type (
 		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
 	}
 
+	// A PinManager manages the bus 's price pinning settings
+	PinManager interface {
+		Close(context.Context) error
+		Run()
+		TriggerUpdate()
+	}
+
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
 		Address() types.Address
@@ -216,8 +223,8 @@ type (
 type bus struct {
 	startTime time.Time
 
-	pm ibus.PinManager
 	cm ChainManager
+	pm PinManager
 	s  Syncer
 	tp TransactionPool
 
@@ -1683,6 +1690,16 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+	case api.SettingPricePinning:
+		var pps api.PricePinSettings
+		if err := json.Unmarshal(data, &pps); err != nil {
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := pps.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, error: %v", err), http.StatusBadRequest)
+			return
+		}
+		b.pm.TriggerUpdate()
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
@@ -2412,10 +2429,13 @@ func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
 
 // New returns a new Bus.
 func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+	pms := ibus.NewPinManagerStore(as, ss)
+	pm := ibus.NewPinManager(erp, pms, l)
+
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
-		pm:               ibus.NewPinManager(erp, ibus.NewPinManagerStore(as, ss), l),
+		pm:               pm,
 		events:           ibus.NewEventBroadcaster(hm, l.Named("events").Sugar()),
 		hooks:            hm,
 		s:                s,
@@ -2520,8 +2540,5 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	if err := cm.Subscribe(b, modules.ConsensusChangeRecent, nil); err != nil {
 		return nil, fmt.Errorf("failed to subscribe to consensus changes: %w", err)
 	}
-
-	// start the price manager
-	go b.pm.Run()
 	return b, nil
 }

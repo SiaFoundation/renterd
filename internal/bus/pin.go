@@ -22,13 +22,6 @@ type (
 		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
 	}
 
-	// A PinManager manages the bus 's price pin settings
-	PinManager interface {
-		Close(context.Context) error
-		Run()
-		TriggerUpdate()
-	}
-
 	// A PinManagerStore allows setting and retrieving dynamic price settings
 	PinManagerStore interface {
 		AutopilotStore
@@ -49,7 +42,7 @@ type (
 )
 
 type (
-	pinManager struct {
+	PinManager struct {
 		exchange ExchangeRateProvider
 		store    PinManagerStore
 
@@ -73,8 +66,8 @@ type (
 	}
 )
 
-func NewPinManager(erp ExchangeRateProvider, pms PinManagerStore, l *zap.Logger) PinManager {
-	return &pinManager{
+func NewPinManager(erp ExchangeRateProvider, pms PinManagerStore, l *zap.Logger) *PinManager {
+	return &PinManager{
 		exchange: erp,
 		store:    pms,
 
@@ -111,7 +104,7 @@ func (pms *pinManagerStore) UpdateSetting(ctx context.Context, key, value string
 	return pms.ss.UpdateSetting(ctx, key, value)
 }
 
-func (pm *pinManager) Close(ctx context.Context) error {
+func (pm *PinManager) Close(ctx context.Context) error {
 	close(pm.closedChan)
 
 	doneChan := make(chan struct{})
@@ -128,7 +121,7 @@ func (pm *pinManager) Close(ctx context.Context) error {
 	}
 }
 
-func (pm *pinManager) Run() {
+func (pm *PinManager) Run() {
 	t := time.NewTicker(pm.updateInterval)
 	defer t.Stop()
 
@@ -150,14 +143,14 @@ func (pm *pinManager) Run() {
 	}
 }
 
-func (pm *pinManager) TriggerUpdate() {
+func (pm *PinManager) TriggerUpdate() {
 	select {
 	case pm.triggerChan <- struct{}{}:
 	default:
 	}
 }
 
-func (pm *pinManager) averageRate() decimal.Decimal {
+func (pm *PinManager) averageRate() decimal.Decimal {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -165,9 +158,9 @@ func (pm *pinManager) averageRate() decimal.Decimal {
 	return decimal.NewFromFloat(median)
 }
 
-func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings, error) {
+func (pm *PinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings, error) {
 	var ps api.PricePinSettings
-	if pss, err := pm.store.Setting(ctx, api.SettingPricePin); err != nil {
+	if pss, err := pm.store.Setting(ctx, api.SettingPricePinning); err != nil {
 		return api.PricePinSettings{}, err
 	} else if err := json.Unmarshal([]byte(pss), &ps); err != nil {
 		pm.logger.Panicf("failed to unmarshal pinned settings '%s': %v", pss, err)
@@ -175,7 +168,7 @@ func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings,
 	return ps, nil
 }
 
-func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
+func (pm *PinManager) rateExceedsThreshold(threshold float64) bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -196,7 +189,7 @@ func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
 	return delta.GreaterThan(cur.Mul(pct))
 }
 
-func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {
+func (pm *PinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {
 	ap, err := pm.store.Autopilot(ctx, autopilotID)
 	if err != nil {
 		return err
@@ -228,7 +221,7 @@ func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID s
 	return pm.store.UpdateAutopilot(ctx, ap)
 }
 
-func (pm *pinManager) updateExchangeRates(currency string, rate float64) error {
+func (pm *PinManager) updateExchangeRates(currency string, rate float64) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -247,7 +240,7 @@ func (pm *pinManager) updateExchangeRates(currency string, rate float64) error {
 	return nil
 }
 
-func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.GougingSettingsPins, rate decimal.Decimal) error {
+func (pm *PinManager) updateGougingSettings(ctx context.Context, pins api.GougingSettingsPins, rate decimal.Decimal) error {
 	// fetch gouging settings
 	var gs api.GougingSettings
 	if gss, err := pm.store.Setting(ctx, api.SettingGouging); err != nil {
@@ -314,7 +307,7 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	return pm.store.UpdateSetting(ctx, api.SettingGouging, string(bytes))
 }
 
-func (pm *pinManager) updatePrices(forced bool) error {
+func (pm *PinManager) updatePrices(forced bool) error {
 	pm.logger.Debugw("updating prices", zap.Bool("forced", forced))
 
 	// apply a sane timeout
