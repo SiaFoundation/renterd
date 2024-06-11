@@ -528,6 +528,24 @@ func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMo
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
 }
 
+func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
+	res, err := tx.Exec(ctx, `
+		INSERT INTO autopilots (created_at, identifier, config, current_period)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(identifier) DO UPDATE SET
+		config = EXCLUDED.config,
+		current_period = EXCLUDED.current_period
+	`, time.Now(), ap.ID, (*ssql.AutopilotConfig)(&ap.Config), ap.CurrentPeriod)
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return fmt.Errorf("expected 1 row affected, got %v", n)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, policy)
 }
