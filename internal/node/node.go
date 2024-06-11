@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -34,15 +35,22 @@ import (
 	"moul.io/zapgorm2"
 )
 
-type Bus interface {
-	worker.Bus
-	s3.Bus
-}
+type (
+	Bus interface {
+		worker.Bus
+		s3.Bus
+	}
+
+	Explorer interface {
+		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
+	}
+)
 
 type BusConfig struct {
 	config.Bus
 	Database            config.Database
 	DatabaseLog         config.DatabaseLog
+	Explorer            config.Explorer
 	Network             *consensus.Network
 	Logger              *zap.Logger
 	Miner               *Miner
@@ -202,7 +210,15 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		return nil, nil, err
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	var e ibus.Explorer
+	if !cfg.Explorer.Disable && cfg.Explorer.URL != "" {
+		e, err = ibus.NewExplorer(cfg.Explorer.URL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create explorer: %w", err)
+		}
+	}
+
+	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, e, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}

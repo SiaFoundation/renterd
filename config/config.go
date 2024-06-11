@@ -23,6 +23,13 @@ type (
 		Autopilot Autopilot `yaml:"autopilot,omitempty"`
 
 		Database Database `yaml:"database,omitempty"`
+		Explorer Explorer `yaml:"explorer,omitempty"`
+	}
+
+	// Explorer contains the configuration for using an external explorer.
+	Explorer struct {
+		Disable bool   `yaml:"disable,omitempty"`
+		URL     string `yaml:"url,omitempty"`
 	}
 
 	// HTTP contains the configuration for the HTTP server.

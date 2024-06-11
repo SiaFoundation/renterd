@@ -12,6 +12,7 @@ import (
 const (
 	SettingContractSet      = "contractset"
 	SettingGouging          = "gouging"
+	SettingPricePin         = "pricepin"
 	SettingRedundancy       = "redundancy"
 	SettingS3Authentication = "s3authentication"
 	SettingUploadPacking    = "uploadpacking"
@@ -80,6 +81,44 @@ type (
 		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
+	// PricePinSettings contains the settings that can be optionally
+	// pinned to an external currency. This uses an external explorer
+	// to retrieve the current exchange rate.
+	PricePinSettings struct {
+		// Currency is the external three letter currency code. If empty,
+		// pinning is disabled. If the explorer does not support the
+		// currency an error is returned.
+		Currency string `json:"currency"`
+
+		// Threshold is a percentage from 0 to 1 that determines when the pinned
+		// settings are updated based on the current exchange rate.
+		Threshold float64 `json:"threshold"`
+
+		// GougingSettingsPins contains the pinned settings for the gouging settings.
+		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins,omitempty"`
+
+		// Autopilots contains the pinned settings for every autopilot.
+		Autopilots map[string]AutopilotPins `json:"autopilots,omitempty"`
+	}
+
+	// AutopilotPins contains the pinned settings for an autopilot.
+	AutopilotPins struct {
+		Allowance Pin `json:"allowance"`
+	}
+
+	// GougingSettingsPins contains the pinned settings for the gouging settings.
+	GougingSettingsPins struct {
+		MaxStorage  Pin `json:"maxStorage"`
+		MaxDownload Pin `json:"maxDownload"`
+		MaxUpload   Pin `json:"maxUpload"`
+	}
+
+	// A Pin is a pinned price in an external currency.
+	Pin struct {
+		Pinned bool    `json:"pinned"`
+		Value  float64 `json:"value"`
+	}
+
 	// RedundancySettings contain settings that dictate an object's redundancy.
 	RedundancySettings struct {
 		MinShards   int `json:"minShards"`
@@ -97,6 +136,11 @@ type (
 		SlabBufferMaxSizeSoft int64 `json:"slabBufferMaxSizeSoft"`
 	}
 )
+
+// IsPinned returns true if the pin is enabled and the value is greater than 0.
+func (p Pin) IsPinned() bool {
+	return p.Pinned && p.Value > 0
+}
 
 // Validate returns an error if the gouging settings are not considered valid.
 func (gs GougingSettings) Validate() error {

@@ -76,6 +76,11 @@ type (
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
+	// An ExchangeRateProvider can provide exchange rates for currencies.
+	ExchangeRateProvider interface {
+		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
+	}
+
 	// A Wallet can spend and receive siacoins.
 	Wallet interface {
 		Address() types.Address
@@ -211,6 +216,7 @@ type (
 type bus struct {
 	startTime time.Time
 
+	pm ibus.PinManager
 	cm ChainManager
 	s  Syncer
 	tp TransactionPool
@@ -386,7 +392,11 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	} else {
 		b.logger.Infof("successfully saved %v accounts", len(accounts))
 	}
-	return err
+
+	return errors.Join(
+		err,
+		b.pm.Close(ctx),
+	)
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
@@ -1654,6 +1664,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+		b.pm.TriggerUpdate()
 	case api.SettingRedundancy:
 		var rs api.RedundancySettings
 		if err := json.Unmarshal(data, &rs); err != nil {
@@ -2013,7 +2024,9 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
+	if jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
+		b.pm.TriggerUpdate()
+	}
 }
 
 func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
@@ -2398,10 +2411,11 @@ func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
+		pm:               ibus.NewPinManager(erp, ibus.NewPinManagerStore(as, ss), l),
 		events:           ibus.NewEventBroadcaster(hm, l.Named("events").Sugar()),
 		hooks:            hm,
 		s:                s,
@@ -2506,5 +2520,8 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	if err := cm.Subscribe(b, modules.ConsensusChangeRecent, nil); err != nil {
 		return nil, fmt.Errorf("failed to subscribe to consensus changes: %w", err)
 	}
+
+	// start the price manager
+	go b.pm.Run()
 	return b, nil
 }
