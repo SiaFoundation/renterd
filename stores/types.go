@@ -247,7 +247,7 @@ func (datetime) GormDataType() string {
 	return "string"
 }
 
-// Scan scan value into balance, implements sql.Scanner interface.
+// Scan scan value into datetime, implements sql.Scanner interface.
 func (dt *datetime) Scan(value interface{}) error {
 	var s string
 	switch value := value.(type) {
@@ -290,7 +290,7 @@ func (unixTimeMS) GormDataType() string {
 	return "BIGINT"
 }
 
-// Scan scan value into balance, implements sql.Scanner interface.
+// Scan scan value into unixTimeMS, implements sql.Scanner interface.
 func (u *unixTimeMS) Scan(value interface{}) error {
 	var msec int64
 	var err error
@@ -321,7 +321,7 @@ func (unsigned64) GormDataType() string {
 	return "BIGINT"
 }
 
-// Scan scan value into balance, implements sql.Scanner interface.
+// Scan scan value into unsigned64, implements sql.Scanner interface.
 func (u *unsigned64) Scan(value interface{}) error {
 	var n int64
 	var err error

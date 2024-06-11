@@ -147,7 +147,7 @@ type (
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
 
-		// SetCleanShutdown sets the clean shutdown flag on the accounts to
+		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 

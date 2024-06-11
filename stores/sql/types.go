@@ -39,8 +39,8 @@ var (
 	_ sql.Scanner = &SecretKey{}
 )
 
-// Scan scan value into balance, implements sql.Scanner interface.
-func (hs *BigInt) Scan(value interface{}) error {
+// Scan scan value into BigInt, implements sql.Scanner interface.
+func (b *BigInt) Scan(value interface{}) error {
 	var s string
 	switch value := value.(type) {
 	case string:
@@ -50,15 +50,15 @@ func (hs *BigInt) Scan(value interface{}) error {
 	default:
 		return fmt.Errorf("failed to unmarshal BigInt value: %v %t", value, value)
 	}
-	if _, success := (*big.Int)(hs).SetString(s, 10); !success {
+	if _, success := (*big.Int)(b).SetString(s, 10); !success {
 		return errors.New(fmt.Sprint("failed to scan BigInt value", value))
 	}
 	return nil
 }
 
 // Value returns a BigInt value, implements driver.Valuer interface.
-func (hs BigInt) Value() (driver.Value, error) {
-	return (*big.Int)(&hs).String(), nil
+func (b BigInt) Value() (driver.Value, error) {
+	return (*big.Int)(&b).String(), nil
 }
 
 // Scan scan value into Currency, implements sql.Scanner interface.
