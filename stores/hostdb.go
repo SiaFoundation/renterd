@@ -74,10 +74,6 @@ type (
 
 		LastAnnouncement time.Time
 		NetAddress       string `gorm:"index"`
-
-		Allowlist []dbAllowlistEntry `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
-		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
-		Checks    []dbHostCheck      `gorm:"foreignKey:DBHostID;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbHostCheck contains information about a host that is collected and used
