@@ -353,8 +353,11 @@ func (pm *pinManager) updatePrices(forced bool) error {
 
 	// fetch pinned settings
 	settings, err := pm.pinnedSettings(ctx)
-	if err != nil {
-		return err
+	if errors.Is(err, api.ErrSettingNotFound) {
+		pm.logger.Debug("price pinning not configured, skipping price update")
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch pinned settings: %w", err)
 	} else if settings.Disabled {
 		pm.logger.Debug("price pinning is disabled, skipping price update")
 		return nil

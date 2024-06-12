@@ -152,6 +152,12 @@ func (p Pin) IsPinned() bool {
 
 // Validate returns an error if the price pin settings are not considered valid.
 func (pss PricePinSettings) Validate() error {
+	if !pss.Disabled && pss.Currency == "" {
+		return fmt.Errorf("price pin settings must have a currency")
+	}
+	if pss.Threshold == 1 {
+		return fmt.Errorf("price pin settings must have a threshold less than 1")
+	}
 	return nil
 }
 

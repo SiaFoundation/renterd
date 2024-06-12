@@ -228,10 +228,10 @@ type (
 type bus struct {
 	startTime time.Time
 
-	cm ChainManager
-	pm PinManager
-	s  Syncer
-	tp TransactionPool
+	cm   ChainManager
+	pins PinManager
+	s    Syncer
+	tp   TransactionPool
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
@@ -407,7 +407,7 @@ func (b *bus) Shutdown(ctx context.Context) error {
 
 	return errors.Join(
 		err,
-		b.pm.Close(ctx),
+		b.pins.Close(ctx),
 	)
 }
 
@@ -1676,7 +1676,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
-		b.pm.TriggerUpdate()
+		b.pins.TriggerUpdate()
 	case api.SettingRedundancy:
 		var rs api.RedundancySettings
 		if err := json.Unmarshal(data, &rs); err != nil {
@@ -1704,7 +1704,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
-		b.pm.TriggerUpdate()
+		b.pins.TriggerUpdate()
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
@@ -2047,7 +2047,7 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	}
 
 	if jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
-		b.pm.TriggerUpdate()
+		b.pins.TriggerUpdate()
 	}
 }
 
@@ -2437,7 +2437,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, pm
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
-		pm:               pm,
+		pins:             pm,
 		events:           eb,
 		hooks:            hm,
 		s:                s,
