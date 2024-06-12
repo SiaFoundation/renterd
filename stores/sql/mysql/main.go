@@ -581,7 +581,7 @@ func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, r
 	}
 
 	if len(add) > 0 {
-		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATES id = last_insert_id(id)")
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 		if err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
@@ -592,7 +592,7 @@ func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, r
 			SELECT id
 			FROM hosts
 			WHERE public_key = ?
-		)`)
+		) AS _`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare join statement: %w", err)
 		}
@@ -633,7 +633,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 	}
 
 	if len(add) > 0 {
-		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATES id = last_insert_id(id)")
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 		if err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
@@ -644,10 +644,10 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 			SELECT id
 			FROM hosts
 			WHERE net_address=? OR
-			SUBSTRING_INDEX(net_address,':',1)=? OR
+			SUBSTRING_INDEX(net_address,':',1) = ? OR
 			SUBSTRING_INDEX(net_address,':',1) LIKE ?
-			) AS _
-		)`)
+		) AS _
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare join statement: %w", err)
 		}
