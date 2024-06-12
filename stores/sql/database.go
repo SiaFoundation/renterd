@@ -123,6 +123,14 @@ type (
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
 
+		// RecordHostScans records the results of host scans in the database
+		// such as recording the settings and price table of a host in case of
+		// success and updating the uptime and downtime of a host.
+		// NOTE: The price table is only updated if the known price table is
+		// expired since price tables from scans are not paid for and are
+		// therefore only useful for gouging checks.
+		RecordHostScans(ctx context.Context, scans []api.HostScan) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.

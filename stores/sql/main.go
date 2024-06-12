@@ -819,6 +819,58 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
+	if len(scans) == 0 {
+		return nil
+	}
+	stmt, err := tx.Prepare(ctx, `
+		UPDATE hosts SET
+		scanned = scanned OR ?,
+		total_scans = total_scans + 1,
+		last_scan_success = ?,
+		second_to_last_scan_success = last_scan_success,
+		recent_downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN recent_downtime + ? - last_scan ELSE CASE WHEN ? THEN 0 ELSE recent_downtime END END, 
+		recent_scan_failures = CASE WHEN ? THEN 0 ELSE recent_scan_failures + 1 END,
+		downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN downtime + ? - last_scan ELSE downtime END,
+		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
+		last_scan = ?,
+		settings = CASE WHEN ? THEN ? ELSE settings END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND price_table_expiry NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update host with scan: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for _, scan := range scans {
+		scanTime := scan.Timestamp.UnixNano()
+		_, err = stmt.Exec(ctx,
+			scan.Success,                                    // scanned
+			scan.Success,                                    // last_scan_success
+			!scan.Success, scanTime, scanTime, scan.Success, // recent_downtime
+			scan.Success,                      // recent_scan_failures
+			!scan.Success, scanTime, scanTime, // downtime
+			scan.Success, scanTime, scanTime, // uptime
+			scanTime,                              // last_scan
+			scan.Success, Settings(scan.Settings), // settings
+			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, now, // price_table_expiry
+			scan.Success,  // successful_interactions
+			!scan.Success, // failed_interactions
+			PublicKey(scan.HostKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update host with scan: %w", err)
+		}
+	}
+	return nil
+}
+
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts
 	rows, err := tx.Query(ctx, `
