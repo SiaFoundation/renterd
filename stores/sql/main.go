@@ -276,6 +276,31 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	} else if limit == -1 {
+		limit = math.MaxInt64
+	}
+
+	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
+		maxLastScan.UnixNano(), limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.HostAddress
+	for rows.Next() {
+		var ha api.HostAddress
+		if err := rows.Scan((*PublicKey)(&ha.PublicKey), &ha.NetAddress); err != nil {
+			return nil, fmt.Errorf("failed to scan host row: %w", err)
+		}
+		hosts = append(hosts, ha)
+	}
+	return hosts, nil
+}
+
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	// fetch bucket id
 	var bucketID int64

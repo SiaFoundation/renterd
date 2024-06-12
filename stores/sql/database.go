@@ -92,6 +92,10 @@ type (
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
+		// HostsForScanning returns a list of hosts to scan which haven't been
+		// scanned since at least maxLastScan.
+		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
+
 		// ListBuckets returns a list of all buckets in the database.
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 

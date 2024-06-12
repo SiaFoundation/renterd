@@ -28,11 +28,6 @@ const (
 	// consensusInfoID defines the primary key of the entry in the consensusInfo
 	// table.
 	consensusInfoID = 1
-
-	// hostRetrievalBatchSize is the number of hosts we fetch from the
-	// database per batch. Empirically tested to verify that this is a value
-	// that performs reasonably well.
-	hostRetrievalBatchSize = 10000
 )
 
 var (
@@ -397,38 +392,12 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 }
 
 // HostsForScanning returns the address of hosts for scanning.
-func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
-	if offset < 0 {
-		return nil, sql.ErrNegativeOffset
-	}
-
-	var hosts []struct {
-		PublicKey  publicKey `gorm:"unique;index;NOT NULL"`
-		NetAddress string
-	}
-	var hostAddresses []api.HostAddress
-
-	err := ss.db.
-		WithContext(ctx).
-		Model(&dbHost{}).
-		Where("last_scan < ?", maxLastScan.UnixNano()).
-		Offset(offset).
-		Limit(limit).
-		Order("last_scan ASC").
-		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
-			for _, h := range hosts {
-				hostAddresses = append(hostAddresses, api.HostAddress{
-					PublicKey:  types.PublicKey(h.PublicKey),
-					NetAddress: h.NetAddress,
-				})
-			}
-			return nil
-		}).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	return hostAddresses, err
+func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []api.HostAddress, err error) {
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		hosts, err = tx.HostsForScanning(ctx, maxLastScan, offset, limit)
+		return err
+	})
+	return
 }
 
 func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
