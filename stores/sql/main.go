@@ -827,8 +827,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		UPDATE hosts SET
 		scanned = scanned OR ?,
 		total_scans = total_scans + 1,
-		last_scan_success = ?,
 		second_to_last_scan_success = last_scan_success,
+		last_scan_success = ?,
 		recent_downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN recent_downtime + ? - last_scan ELSE CASE WHEN ? THEN 0 ELSE recent_downtime END END, 
 		recent_scan_failures = CASE WHEN ? THEN 0 ELSE recent_scan_failures + 1 END,
 		downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN downtime + ? - last_scan ELSE downtime END,
@@ -836,7 +836,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
 		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry = CASE WHEN ? AND price_table_expiry NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
 		WHERE public_key = ?
