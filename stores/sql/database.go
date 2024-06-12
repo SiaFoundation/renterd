@@ -89,6 +89,13 @@ type (
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
+		// HostAllowlist returns the list of public keys of hosts on the
+		// allowlist.
+		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
+
+		// HostBlocklist returns the list of host addresses on the blocklist.
+		HostBlocklist(ctx context.Context) ([]string, error)
+
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 

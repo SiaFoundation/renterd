@@ -276,6 +276,42 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
+	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host allowlist: %w", err)
+	}
+	defer rows.Close()
+
+	var allowlist []types.PublicKey
+	for rows.Next() {
+		var pk PublicKey
+		if err := rows.Scan(&pk); err != nil {
+			return nil, fmt.Errorf("failed to scan public key: %w", err)
+		}
+		allowlist = append(allowlist, types.PublicKey(pk))
+	}
+	return allowlist, nil
+}
+
+func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT entry FROM host_blocklist_entries")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host blocklist: %w", err)
+	}
+	defer rows.Close()
+
+	var blocklist []string
+	for rows.Next() {
+		var entry string
+		if err := rows.Scan(&entry); err != nil {
+			return nil, fmt.Errorf("failed to scan blocklist entry: %w", err)
+		}
+		blocklist = append(blocklist, entry)
+	}
+	return blocklist, nil
+}
+
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	// fetch bucket id
 	var bucketID int64
@@ -1087,6 +1123,7 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 		)`)
 	return err
 }
+
 func scanBucket(s scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string

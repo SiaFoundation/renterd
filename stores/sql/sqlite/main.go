@@ -274,6 +274,14 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
+func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey, error) {
+	return ssql.HostAllowlist(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
+	return ssql.HostBlocklist(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// get bucket id
 	var bucketID int64

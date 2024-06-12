@@ -475,25 +475,18 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 }
 
 func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
-	var pubkeys []publicKey
-	err = ss.db.
-		WithContext(ctx).
-		Model(&dbAllowlistEntry{}).
-		Pluck("entry", &pubkeys).
-		Error
-
-	for _, pubkey := range pubkeys {
-		allowlist = append(allowlist, types.PublicKey(pubkey))
-	}
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		allowlist, err = tx.HostAllowlist(ctx)
+		return err
+	})
 	return
 }
 
 func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
-	err = ss.db.
-		WithContext(ctx).
-		Model(&dbBlocklistEntry{}).
-		Pluck("entry", &blocklist).
-		Error
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		blocklist, err = tx.HostBlocklist(ctx)
+		return err
+	})
 	return
 }
 
