@@ -3,12 +3,12 @@ package webhooks
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	nurl "net/url"
 	"sync"
 	"time"
 
@@ -30,6 +30,14 @@ type (
 	}
 )
 
+type HeaderOption func(headers map[string]string)
+
+func WithBasicAuth(username, password string) HeaderOption {
+	return func(headers map[string]string) {
+		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	}
+}
+
 type NoopBroadcaster struct{}
 
 func (NoopBroadcaster) BroadcastAction(_ context.Context, _ Event) error { return nil }
@@ -41,9 +49,10 @@ const (
 
 type (
 	Webhook struct {
-		Module string `json:"module"`
-		Event  string `json:"event"`
-		URL    string `json:"url"`
+		Module  string            `json:"module"`
+		Event   string            `json:"event"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers,omitempty"`
 	}
 
 	WebhookQueueInfo struct {
@@ -85,9 +94,10 @@ type Manager struct {
 }
 
 type eventQueue struct {
-	ctx    context.Context
-	logger *zap.SugaredLogger
-	url    string
+	ctx     context.Context
+	logger  *zap.SugaredLogger
+	headers map[string]string
+	url     string
 
 	mu           sync.Mutex
 	isDequeueing bool
@@ -106,9 +116,10 @@ func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
 		queue, exists := m.queues[hook.URL]
 		if !exists {
 			queue = &eventQueue{
-				ctx:    m.shutdownCtx,
-				logger: m.logger,
-				url:    hook.URL,
+				ctx:     m.shutdownCtx,
+				logger:  m.logger,
+				headers: hook.Headers,
+				url:     hook.URL,
 			}
 			m.queues[hook.URL] = queue
 		}
@@ -175,7 +186,7 @@ func (m *Manager) Register(ctx context.Context, wh Webhook) error {
 	defer cancel()
 
 	// Test URL.
-	err := sendEvent(ctx, wh.URL, Event{
+	err := sendEvent(ctx, wh.URL, wh.Headers, Event{
 		Event: WebhookEventPing,
 	})
 	if err != nil {
@@ -208,7 +219,7 @@ func (q *eventQueue) dequeue() {
 		q.events = q.events[1:]
 		q.mu.Unlock()
 
-		err := sendEvent(q.ctx, q.url, next)
+		err := sendEvent(q.ctx, q.url, q.headers, next)
 		if err != nil {
 			q.logger.Errorf("failed to send Webhook event %v to %v: %v", next.String(), q.url, err)
 		}
@@ -248,27 +259,19 @@ func NewManager(logger *zap.SugaredLogger, store WebhookStore) (*Manager, error)
 	return m, nil
 }
 
-func sendEvent(ctx context.Context, url string, action Event) error {
+func sendEvent(ctx context.Context, url string, headers map[string]string, action Event) error {
 	body, err := json.Marshal(action)
 	if err != nil {
 		return err
 	}
 
-	parsedURL, err := nurl.Parse(url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-
-	// extract username and password from the URL
-	username := parsedURL.User.Username()
-	password, _ := parsedURL.User.Password()
-	parsedURL.User = nil // clear user info
-
-	req, err := http.NewRequestWithContext(ctx, "POST", parsedURL.String(), bytes.NewReader(body))
-	if err != nil {
-		return err
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
-	req.SetBasicAuth(username, password)
 	defer io.ReadAll(req.Body) // always drain body
 
 	resp, err := http.DefaultClient.Do(req)

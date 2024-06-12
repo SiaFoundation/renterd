@@ -2110,7 +2110,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 
 func (b *bus) webhookHandlerGet(jc jape.Context) {
 	webhooks, queueInfos := b.hooks.Info()
-	jc.Encode(api.WebHookResponse{
+	jc.Encode(api.WebhookResponse{
 		Queues:   queueInfos,
 		Webhooks: webhooks,
 	})
@@ -2121,10 +2121,12 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
+
 	err := b.hooks.Register(jc.Request.Context(), webhooks.Webhook{
-		Event:  req.Event,
-		Module: req.Module,
-		URL:    req.URL,
+		Event:   req.Event,
+		Module:  req.Module,
+		URL:     req.URL,
+		Headers: req.Headers,
 	})
 	if err != nil {
 		jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)

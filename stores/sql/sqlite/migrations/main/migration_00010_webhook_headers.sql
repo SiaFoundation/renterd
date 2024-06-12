@@ -1,0 +1,1 @@
+ALTER TABLE `webhooks` ADD COLUMN `headers` text DEFAULT '{}';

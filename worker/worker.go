@@ -158,7 +158,7 @@ type (
 	}
 
 	WebhookStore interface {
-		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
+		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook, opts ...webhooks.HeaderOption) error
 	}
 
 	ConsensusState interface {
@@ -1281,7 +1281,7 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, authAPIBaseURL string, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, workerAPIPassword, workerAPIURL string, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1301,13 +1301,17 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
+	eventsURL := fmt.Sprintf("%s/events", workerAPIURL)
+	webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", workerAPIPassword)}
+	cache := iworker.NewCache(b, eventsURL, webhookOpts, l)
+
 	l = l.Named("worker").Named(id)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
-		cache:                   iworker.NewCache(b, authAPIBaseURL+"/events", l),
+		cache:                   cache,
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,

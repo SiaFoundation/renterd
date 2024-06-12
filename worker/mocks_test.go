@@ -694,6 +694,6 @@ var _ WebhookStore = (*webhookStoreMock)(nil)
 
 type webhookStoreMock struct{}
 
-func (*webhookStoreMock) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
+func (*webhookStoreMock) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook, opts ...webhooks.HeaderOption) error {
 	return nil
 }

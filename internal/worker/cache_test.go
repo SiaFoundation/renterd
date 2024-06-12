@@ -26,7 +26,7 @@ func (m *mockBus) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.
 func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) {
 	return m.gougingParams, nil
 }
-func (m *mockBus) RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error {
+func (m *mockBus) RegisterWebhook(ctx context.Context, wh webhooks.Webhook, opts ...webhooks.HeaderOption) error {
 	return nil
 }
 

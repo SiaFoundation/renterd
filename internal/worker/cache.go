@@ -75,7 +75,7 @@ type (
 	Bus interface {
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
-		RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error
+		RegisterWebhook(ctx context.Context, wh webhooks.Webhook, opts ...webhooks.HeaderOption) error
 	}
 
 	WorkerCache interface {
@@ -87,8 +87,9 @@ type (
 )
 
 type cache struct {
-	b         Bus
-	eventsURL string
+	b           Bus
+	eventsURL   string
+	webhookOpts []webhooks.HeaderOption
 
 	cache  *memoryCache
 	logger *zap.SugaredLogger
@@ -97,10 +98,11 @@ type cache struct {
 	ready bool
 }
 
-func NewCache(b Bus, eventsURL string, logger *zap.Logger) WorkerCache {
+func NewCache(b Bus, eventsURL string, webhookOpts []webhooks.HeaderOption, logger *zap.Logger) WorkerCache {
 	return &cache{
-		b:         b,
-		eventsURL: eventsURL,
+		b:           b,
+		eventsURL:   eventsURL,
+		webhookOpts: webhookOpts,
 
 		cache:  newMemoryCache(),
 		logger: logger.Sugar().Named("workercache"),
@@ -203,7 +205,7 @@ func (c *cache) Initialize(ctx context.Context) error {
 		webhooks.NewEventWebhook(c.eventsURL, api.EventContractRenew{}),
 		webhooks.NewEventWebhook(c.eventsURL, api.EventSettingUpdate{}),
 	} {
-		if err := c.b.RegisterWebhook(ctx, wh); err != nil {
+		if err := c.b.RegisterWebhook(ctx, wh, c.webhookOpts...); err != nil {
 			return fmt.Errorf("failed to register webhook '%s', err: %v", wh, err)
 		}
 	}
