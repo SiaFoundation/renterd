@@ -434,7 +434,7 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	var hosts []api.Host
 	err := ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, ss.hasAllowlist(), ss.hasBlocklist())
+		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 		return
 	})
 	return hosts, err
@@ -465,35 +465,8 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 	}
 	defer ss.updateHasAllowlist(&err)
 
-	// clear allowlist
-	if clear {
-		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Where("TRUE").Delete(&dbAllowlistEntry{}).Error
-		})
-	}
-
-	var toInsert []dbAllowlistEntry
-	for _, entry := range add {
-		toInsert = append(toInsert, dbAllowlistEntry{Entry: publicKey(entry)})
-	}
-
-	toDelete := make([]publicKey, len(remove))
-	for i, entry := range remove {
-		toDelete[i] = publicKey(entry)
-	}
-
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if len(toInsert) > 0 {
-			if err := tx.Create(&toInsert).Error; err != nil {
-				return err
-			}
-		}
-		if len(toDelete) > 0 {
-			if err := tx.Delete(&dbAllowlistEntry{}, "entry IN ?", toDelete).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostAllowlistEntries(ctx, add, remove, clear)
 	})
 }
 
@@ -504,30 +477,8 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 	}
 	defer ss.updateHasBlocklist(&err)
 
-	// clear blocklist
-	if clear {
-		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Where("TRUE").Delete(&dbBlocklistEntry{}).Error
-		})
-	}
-
-	var toInsert []dbBlocklistEntry
-	for _, entry := range add {
-		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
-	}
-
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if len(toInsert) > 0 {
-			if err := tx.Create(&toInsert).Error; err != nil {
-				return err
-			}
-		}
-		if len(remove) > 0 {
-			if err := tx.Delete(&dbBlocklistEntry{}, "entry IN ?", remove).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostBlocklistEntries(ctx, add, remove, clear)
 	})
 }
 

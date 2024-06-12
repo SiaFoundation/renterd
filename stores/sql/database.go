@@ -145,7 +145,7 @@ type (
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
 		// SearchHosts returns a list of hosts that match the provided filters
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
+		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
@@ -154,6 +154,12 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateHostAllowlistEntries updates the allowlist in the database
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
+
+		// UpdateHostBlocklistEntries updates the blocklist in the database
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
 		// UpdateObjectHealth updates the health of all objects to the lowest
 		// health of all its slabs.
