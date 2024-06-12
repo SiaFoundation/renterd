@@ -823,6 +823,9 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 	if len(scans) == 0 {
 		return nil
 	}
+	// NOTE: The order of the assignments in the UPDATE statement is important
+	// for MySQL compatibility. e.g. second_to_last_scan_success must be set
+	// before last_scan_success.
 	stmt, err := tx.Prepare(ctx, `
 		UPDATE hosts SET
 		scanned = scanned OR ?,
