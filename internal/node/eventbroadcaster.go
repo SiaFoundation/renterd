@@ -1,4 +1,4 @@
-package bus
+package node
 
 import (
 	"context"
@@ -15,10 +15,10 @@ type (
 	}
 )
 
-func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.SugaredLogger) EventBroadcaster {
+func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.Logger) EventBroadcaster {
 	return EventBroadcaster{
 		broadcaster: b,
-		logger:      l,
+		logger:      l.Sugar().Named("events"),
 	}
 }
 

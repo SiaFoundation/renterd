@@ -81,13 +81,18 @@ type (
 		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
-	// PricePinSettings contains the settings that can be optionally
-	// pinned to an external currency. This uses an external explorer
-	// to retrieve the current exchange rate.
+	// PricePinSettings contains the pinning settings used to pin certain
+	// settings to an underlying currency (e.g. USD). This uses an external
+	// explorer to retrieve the current exchange rate, allow users to configure
+	// certain prices in USD rather than SC.
 	PricePinSettings struct {
-		// Currency is the external three letter currency code. If empty,
-		// pinning is disabled. If the explorer does not support the
-		// currency an error is returned.
+		// Disabled should be set to true to disable price pinning. If enabled
+		// however, the currency must be set for the settings to be considered
+		// valid.
+		Disabled bool `json:"disabled"`
+
+		// Currency is the external three letter currency code. If the explorer
+		// does not support the currency an error is returned.
 		Currency string `json:"currency"`
 
 		// Threshold is a percentage from 0 to 1 that determines when the pinned
@@ -108,9 +113,12 @@ type (
 
 	// GougingSettingsPins contains the pinned settings for the gouging settings.
 	GougingSettingsPins struct {
-		MaxStorage  Pin `json:"maxStorage"`
-		MaxDownload Pin `json:"maxDownload"`
-		MaxUpload   Pin `json:"maxUpload"`
+		MaxContractPrice       Pin `json:"maxContractPrice"`
+		MaxDownload            Pin `json:"maxDownload"`
+		MaxRPCPrice            Pin `json:"maxRPCPrice"`
+		MaxStorage             Pin `json:"maxStorage"`
+		MaxUpload              Pin `json:"maxUpload"`
+		MinMaxEphemeralAccount Pin `json:"minMaxEphemeralAccountBalance"`
 	}
 
 	// A Pin is a pinned price in an external currency.

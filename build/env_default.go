@@ -34,6 +34,13 @@ var (
 		MigrationSurchargeMultiplier:  10,                                                  // 10x
 	}
 
+	// DefaultPricePinSettings define the default price pin settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultPricePinSettings = api.PricePinSettings{
+		Disabled: true,
+	}
+
 	// DefaultUploadPackingSettings define the default upload packing settings
 	// the bus is configured with on startup.
 	DefaultUploadPackingSettings = api.UploadPackingSettings{

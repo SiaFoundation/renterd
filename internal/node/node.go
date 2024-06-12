@@ -212,7 +212,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		}
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, e, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	pm := NewPinManager(e, sqlStore, sqlStore, 5*time.Minute, 6*time.Hour, l)
+	if err := pm.Run(); err != nil {
+		return nil, nil, err
+	}
+
+	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, pm, NewTransactionPool(tp), w, e, NewEventBroadcaster(hooksMgr, l), sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}

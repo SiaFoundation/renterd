@@ -1,4 +1,4 @@
-package bus
+package node
 
 import (
 	"context"
@@ -22,19 +22,13 @@ type (
 		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
 	}
 
-	// A PinManagerStore allows setting and retrieving dynamic price settings
-	PinManagerStore interface {
-		AutopilotStore
-		SettingStore
-	}
-
-	// A AutopilotStore allows setting and retrieving autopilot settings
+	// An AutopilotStore stores autopilots.
 	AutopilotStore interface {
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
-	// A SettingStore allows setting and retrieving price pin settings
+	// A SettingStore stores settings.
 	SettingStore interface {
 		Setting(ctx context.Context, key string) (string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
@@ -42,9 +36,10 @@ type (
 )
 
 type (
-	PinManager struct {
-		exchange ExchangeRateProvider
-		store    PinManagerStore
+	pinManager struct {
+		erp ExchangeRateProvider
+		as  AutopilotStore
+		ss  SettingStore
 
 		updateInterval time.Duration
 		rateWindow     time.Duration
@@ -59,52 +54,25 @@ type (
 		rates         []float64
 		ratesCurrency string
 	}
-
-	pinManagerStore struct {
-		as AutopilotStore
-		ss SettingStore
-	}
 )
 
-func NewPinManager(erp ExchangeRateProvider, pms PinManagerStore, l *zap.Logger) *PinManager {
-	return &PinManager{
-		exchange: erp,
-		store:    pms,
+func NewPinManager(erp ExchangeRateProvider, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+	return &pinManager{
+		erp: erp,
+		as:  as,
+		ss:  ss,
 
 		logger: l.Sugar().Named("priceManager"),
 
-		updateInterval: 5 * time.Minute,
-		rateWindow:     6 * time.Hour,
+		updateInterval: updateInterval,
+		rateWindow:     rateWindow,
 
 		triggerChan: make(chan struct{}, 1),
 		closedChan:  make(chan struct{}),
 	}
 }
 
-func NewPinManagerStore(ap AutopilotStore, ss SettingStore) PinManagerStore {
-	return &pinManagerStore{
-		as: ap,
-		ss: ss,
-	}
-}
-
-func (pms *pinManagerStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
-	return pms.as.Autopilot(ctx, id)
-}
-
-func (pms *pinManagerStore) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
-	return pms.as.UpdateAutopilot(ctx, ap)
-}
-
-func (pms *pinManagerStore) Setting(ctx context.Context, key string) (string, error) {
-	return pms.ss.Setting(ctx, key)
-}
-
-func (pms *pinManagerStore) UpdateSetting(ctx context.Context, key, value string) error {
-	return pms.ss.UpdateSetting(ctx, key, value)
-}
-
-func (pm *PinManager) Close(ctx context.Context) error {
+func (pm *pinManager) Close(ctx context.Context) error {
 	close(pm.closedChan)
 
 	doneChan := make(chan struct{})
@@ -121,36 +89,49 @@ func (pm *PinManager) Close(ctx context.Context) error {
 	}
 }
 
-func (pm *PinManager) Run() {
-	t := time.NewTicker(pm.updateInterval)
-	defer t.Stop()
-
-	var forced bool
-	for {
-		err := pm.updatePrices(forced)
-		if err != nil {
-			pm.logger.Warn("failed to update prices", zap.Error(err))
-		}
-
-		forced = false
-		select {
-		case <-pm.closedChan:
-			return
-		case <-pm.triggerChan:
-			forced = true
-		case <-t.C:
-		}
+func (pm *pinManager) Run() error {
+	// try to update prices
+	if err := pm.updatePrices(true); err != nil {
+		return err
 	}
+
+	// start the update loop
+	pm.wg.Add(1)
+	go func() {
+		defer pm.wg.Done()
+
+		t := time.NewTicker(pm.updateInterval)
+		defer t.Stop()
+
+		var forced bool
+		for {
+			err := pm.updatePrices(forced)
+			if err != nil {
+				pm.logger.Warn("failed to update prices", zap.Error(err))
+			}
+
+			forced = false
+			select {
+			case <-pm.closedChan:
+				return
+			case <-pm.triggerChan:
+				forced = true
+			case <-t.C:
+			}
+		}
+	}()
+
+	return nil
 }
 
-func (pm *PinManager) TriggerUpdate() {
+func (pm *pinManager) TriggerUpdate() {
 	select {
 	case pm.triggerChan <- struct{}{}:
 	default:
 	}
 }
 
-func (pm *PinManager) averageRate() decimal.Decimal {
+func (pm *pinManager) averageRate() decimal.Decimal {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -158,9 +139,9 @@ func (pm *PinManager) averageRate() decimal.Decimal {
 	return decimal.NewFromFloat(median)
 }
 
-func (pm *PinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings, error) {
+func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings, error) {
 	var ps api.PricePinSettings
-	if pss, err := pm.store.Setting(ctx, api.SettingPricePinning); err != nil {
+	if pss, err := pm.ss.Setting(ctx, api.SettingPricePinning); err != nil {
 		return api.PricePinSettings{}, err
 	} else if err := json.Unmarshal([]byte(pss), &ps); err != nil {
 		pm.logger.Panicf("failed to unmarshal pinned settings '%s': %v", pss, err)
@@ -168,29 +149,40 @@ func (pm *PinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings,
 	return ps, nil
 }
 
-func (pm *PinManager) rateExceedsThreshold(threshold float64) bool {
+func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	// calculate median
-	median, err := stats.Median(pm.rates)
+	// calculate mean
+	mean, err := stats.Mean(pm.rates)
 	if err != nil {
 		pm.logger.Warnw("failed to calculate average rate", zap.Error(err))
 		return false
 	}
 
 	// convert to decimals
-	avg := decimal.NewFromFloat(median)
+	avg := decimal.NewFromFloat(mean)
 	pct := decimal.NewFromFloat(threshold)
 	cur := decimal.NewFromFloat(pm.rates[len(pm.rates)-1])
 
 	// calculate whether the current rate exceeds the given threshold
 	delta := cur.Sub(avg).Abs()
-	return delta.GreaterThan(cur.Mul(pct))
+	exceeded := delta.GreaterThan(cur.Mul(pct))
+
+	// log the result
+	pm.logger.Debugw("rate exceeds threshold",
+		"last", cur,
+		"average", avg,
+		"percentage", threshold,
+		"delta", delta,
+		"threshold", cur.Mul(pct),
+		"exceeded", exceeded,
+	)
+	return exceeded
 }
 
-func (pm *PinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {
-	ap, err := pm.store.Autopilot(ctx, autopilotID)
+func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {
+	ap, err := pm.as.Autopilot(ctx, autopilotID)
 	if err != nil {
 		return err
 	}
@@ -218,10 +210,10 @@ func (pm *PinManager) updateAutopilotSettings(ctx context.Context, autopilotID s
 	}
 
 	// update autopilto
-	return pm.store.UpdateAutopilot(ctx, ap)
+	return pm.as.UpdateAutopilot(ctx, ap)
 }
 
-func (pm *PinManager) updateExchangeRates(currency string, rate float64) error {
+func (pm *pinManager) updateExchangeRates(currency string, rate float64) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -240,14 +232,29 @@ func (pm *PinManager) updateExchangeRates(currency string, rate float64) error {
 	return nil
 }
 
-func (pm *PinManager) updateGougingSettings(ctx context.Context, pins api.GougingSettingsPins, rate decimal.Decimal) error {
+func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.GougingSettingsPins, rate decimal.Decimal) error {
 	// fetch gouging settings
 	var gs api.GougingSettings
-	if gss, err := pm.store.Setting(ctx, api.SettingGouging); err != nil {
+	if gss, err := pm.ss.Setting(ctx, api.SettingGouging); err != nil {
 		return err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
 		pm.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 		return err
+	}
+
+	// update max contract price
+	if pins.MaxContractPrice.IsPinned() {
+		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxContractPrice.Value), rate)
+		if err != nil {
+			pm.logger.Warnw("failed to convert max contract price to currency", zap.Error(err))
+		} else {
+			bkp := gs.MaxContractPrice
+			gs.MaxContractPrice = update
+			if err := gs.Validate(); err != nil {
+				pm.logger.Warnw("failed to update gouging setting, new contract price makes the setting invalid", zap.Error(err))
+				gs.MaxContractPrice = bkp
+			}
+		}
 	}
 
 	// update max download price
@@ -265,17 +272,17 @@ func (pm *PinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		}
 	}
 
-	// update max upload price
-	if pins.MaxUpload.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxUpload.Value), rate)
+	// update max RPC price
+	if pins.MaxRPCPrice.IsPinned() {
+		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxRPCPrice.Value), rate)
 		if err != nil {
-			pm.logger.Warnw("failed to convert max upload price to currency", zap.Error(err))
+			pm.logger.Warnw("failed to convert max RPC price to currency", zap.Error(err))
 		} else {
-			bkp := gs.MaxUploadPrice
-			gs.MaxUploadPrice = update
+			bkp := gs.MaxRPCPrice
+			gs.MaxRPCPrice = update
 			if err := gs.Validate(); err != nil {
-				pm.logger.Warnw("failed to update gouging setting, new upload price makes the setting invalid", zap.Error(err))
-				gs.MaxUploadPrice = bkp
+				pm.logger.Warnw("failed to update gouging setting, new RPC price makes the setting invalid", zap.Error(err))
+				gs.MaxRPCPrice = bkp
 			}
 		}
 	}
@@ -295,6 +302,36 @@ func (pm *PinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		}
 	}
 
+	// update max upload price
+	if pins.MaxUpload.IsPinned() {
+		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxUpload.Value), rate)
+		if err != nil {
+			pm.logger.Warnw("failed to convert max upload price to currency", zap.Error(err))
+		} else {
+			bkp := gs.MaxUploadPrice
+			gs.MaxUploadPrice = update
+			if err := gs.Validate(); err != nil {
+				pm.logger.Warnw("failed to update gouging setting, new upload price makes the setting invalid", zap.Error(err))
+				gs.MaxUploadPrice = bkp
+			}
+		}
+	}
+
+	// update min max ephemeral account balance
+	if pins.MinMaxEphemeralAccount.IsPinned() {
+		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MinMaxEphemeralAccount.Value), rate)
+		if err != nil {
+			pm.logger.Warnw("failed to convert min max ephemeral account balance to currency", zap.Error(err))
+		} else {
+			bkp := gs.MinMaxEphemeralAccountBalance
+			gs.MinMaxEphemeralAccountBalance = update
+			if err := gs.Validate(); err != nil {
+				pm.logger.Warnw("failed to update gouging setting, new min max ephemeral account balance makes the setting invalid", zap.Error(err))
+				gs.MinMaxEphemeralAccountBalance = bkp
+			}
+		}
+	}
+
 	// validate settings
 	err := gs.Validate()
 	if err != nil {
@@ -304,31 +341,27 @@ func (pm *PinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 
 	// update settings
 	bytes, _ := json.Marshal(gs)
-	return pm.store.UpdateSetting(ctx, api.SettingGouging, string(bytes))
+	return pm.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes))
 }
 
-func (pm *PinManager) updatePrices(forced bool) error {
+func (pm *pinManager) updatePrices(forced bool) error {
 	pm.logger.Debugw("updating prices", zap.Bool("forced", forced))
 
 	// apply a sane timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	// handle waitgroup
-	pm.wg.Add(1)
-	defer pm.wg.Done()
-
 	// fetch pinned settings
 	settings, err := pm.pinnedSettings(ctx)
 	if err != nil {
 		return err
-	} else if settings.Currency == "" {
-		pm.logger.Debug("no currency set, skipping price update")
+	} else if settings.Disabled {
+		pm.logger.Debug("price pinning is disabled, skipping price update")
 		return nil
 	}
 
 	// fetch exchange rate
-	rate, err := pm.exchange.SiacoinExchangeRate(ctx, settings.Currency)
+	rate, err := pm.erp.SiacoinExchangeRate(ctx, settings.Currency)
 	if err != nil {
 		return fmt.Errorf("failed to fetch exchange rate for '%s': %w", settings.Currency, err)
 	} else if rate <= 0 {

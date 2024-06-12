@@ -23,7 +23,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -58,6 +57,24 @@ type (
 		TipState() consensus.State
 	}
 
+	// An EventBroadcaster broadcasts events to webhooks.
+	EventBroadcaster interface {
+		BroadcastEvent(e webhooks.WebhookEvent)
+	}
+
+	// An ExchangeRateProvider allows retrieving the current exchange rate for
+	// siacoin against an external currency.
+	ExchangeRateProvider interface {
+		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
+	}
+
+	// A PinManager manages the bus 's price pinning settings
+	PinManager interface {
+		Close(context.Context) error
+		Run() error
+		TriggerUpdate()
+	}
+
 	// A Syncer can connect to other peers and synchronize the blockchain.
 	Syncer interface {
 		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
@@ -74,18 +91,6 @@ type (
 		Subscribe(subscriber modules.TransactionPoolSubscriber)
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
-	}
-
-	// An ExchangeRateProvider can provide exchange rates for currencies.
-	ExchangeRateProvider interface {
-		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
-	}
-
-	// A PinManager manages the bus 's price pinning settings
-	PinManager interface {
-		Close(context.Context) error
-		Run()
-		TriggerUpdate()
 	}
 
 	// A Wallet can spend and receive siacoins.
@@ -242,7 +247,7 @@ type bus struct {
 
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
-	events   ibus.EventBroadcaster
+	events   EventBroadcaster
 	hooks    *webhooks.Manager
 	logger   *zap.SugaredLogger
 }
@@ -2428,15 +2433,12 @@ func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
-	pms := ibus.NewPinManagerStore(as, ss)
-	pm := ibus.NewPinManager(erp, pms, l)
-
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, pm PinManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, eb EventBroadcaster, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		pm:               pm,
-		events:           ibus.NewEventBroadcaster(hm, l.Named("events").Sugar()),
+		events:           eb,
 		hooks:            hm,
 		s:                s,
 		cm:               cm,
@@ -2462,6 +2464,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	// load default settings if the setting is not already set
 	for key, value := range map[string]interface{}{
 		api.SettingGouging:       build.DefaultGougingSettings,
+		api.SettingPricePinning:  build.DefaultPricePinSettings,
 		api.SettingRedundancy:    build.DefaultRedundancySettings,
 		api.SettingUploadPacking: build.DefaultUploadPackingSettings,
 	} {
