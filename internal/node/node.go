@@ -47,8 +47,6 @@ type BusConfig struct {
 	Network     *consensus.Network
 	Logger      *zap.Logger
 	Miner       *Miner
-
-	SlabPruningInterval time.Duration
 }
 
 type AutopilotConfig struct {
