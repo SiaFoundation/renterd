@@ -463,8 +463,6 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	defer ss.updateHasAllowlist(&err)
-
 	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateHostAllowlistEntries(ctx, add, remove, clear)
 	})
@@ -475,8 +473,6 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	defer ss.updateHasBlocklist(&err)
-
 	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateHostBlocklistEntries(ctx, add, remove, clear)
 	})
