@@ -76,10 +76,10 @@ overview of all settings configurable through the CLI.
 | `Worker.BusFlushInterval`            | Interval for flushing data to bus                    | `5s`                              | `--worker.busFlushInterval`      | -                                              | `worker.busFlushInterval`           |
 | `Worker.ContractLockTimeout`         | Timeout for locking contracts                        | `30s`                             | -                               | -                                              | `worker.contractLockTimeout`        |
 | `Worker.DownloadMaxOverdrive`        | Max overdrive workers for downloads                  | `5`                               | `--worker.downloadMaxOverdrive`  | -                                              | `worker.downloadMaxOverdrive`       |
-| `Worker.DownloadMaxMemory`           | Max memory for downloads                             | `1GiB`                            | -                               | -                                              | `worker.downloadMaxMemory`          |
+| `Worker.DownloadMaxMemory`           | Max memory for downloads                             | `1GiB`                            | `--worker.downloadMaxMemory`     | `RENTERD_WORKER_DOWNLOAD_MAX_MEMORY`           | `worker.downloadMaxMemory`          |
 | `Worker.ID`                          | Unique ID for worker                                 | `worker`                          | `--worker.id`                    | `RENTERD_WORKER_ID`                            | `worker.id`                         |
 | `Worker.DownloadOverdriveTimeout`    | Timeout for overdriving slab downloads               | `3s`                              | `--worker.downloadOverdriveTimeout` | -                                            | `worker.downloadOverdriveTimeout`   |
-| `Worker.UploadMaxMemory`             | Max amount of RAM the worker allocates for slabs when uploading | `1GiB`                            | `--worker.uploadMaxMemory`      | `RENTERD_WORKER_UPLOAD_MAX_MEMORY`             | `worker.uploadMaxMemory`            |
+| `Worker.UploadMaxMemory`             | Max amount of RAM the worker allocates for slabs when uploading | `1GiB`                 | `--worker.uploadMaxMemory`      | `RENTERD_WORKER_UPLOAD_MAX_MEMORY`             | `worker.uploadMaxMemory`            |
 | `Worker.UploadMaxOverdrive`          | Max overdrive workers for uploads                    | `5`                               | `--worker.uploadMaxOverdrive`    | -                                              | `worker.uploadMaxOverdrive`         |
 | `Worker.UploadOverdriveTimeout`      | Timeout for overdriving slab uploads                 | `3s`                              | `--worker.uploadOverdriveTimeout` | -                                              | `worker.uploadOverdriveTimeout`     |
 | `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
@@ -97,6 +97,48 @@ overview of all settings configurable through the CLI.
 | `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
 | `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
 | `S3.KeypairsV4 (DEPRECATED)`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
+
+## Tweaking Performance
+
+Depending on hardware specs, you can change the [configuration](#configuration)
+to better utilize it and gain more performance out of `renterd`. This section
+highlights some of the more obvious tweaks one can apply.
+
+### Increase/Decrease memory
+
+By default, `renterd` uses reasonable limits for RAM consumed by uploads and
+downloads. Especially when downloading or uploading single large files, more RAM
+can make a difference since it allows for processing the download/upload in
+parallel. To change the max RAM `renterd` is going to use update the
+`Worker.DownloadMaxMemory` and `Worker.UploadMaxMemory` settings.
+
+### Overdrive
+
+Both uploads and downloads have a setting we call "overdrive". Since `renterd`
+operates in a trustless environment, we can't rely on all of our hosts being
+reliable and of high quality. So when uploading `n` shards of some data to the
+network (or downloading from it), the process is bottlenecked by the slowest
+host. That is where the overdrive comes in.
+
+`Worker.UploadMaxOverdrive` and `Worker.DownloadMaxOverdrive` can be used to
+configure how many additional hosts to the number we need to upload/download we
+use to reduce the chance of getting hung up on a slow one. The default is `3`
+which means up to 3 hosts can get stuck with the upload/download remaining
+mostly unaffected. `Worker.UploadOverdriveTimeout` and
+`Worker.DownloadOverdriveTimeout` specify the time that needs to pass before we
+launch the overdrive uploads/downloads.
+
+Two conditions need to be met before the overdrive launches:
+1. When uploading/downloading to/from `n` hosts (without overdrive), `n - overdriveHosts` pieces need to finish.
+2. Once condition 1. is met, the configured overdrive timeout needs to pass
+
+What this means is that there is a tradeoff between using/paying for more
+bandwidth and the ability to compensate for slow/stuck hosts. If you handpick
+hosts you trust to be reliable, you can set the max overdrive to 0 for more max
+efficiency while you can also increase the overdrive to 30 hosts after 100ms for
+faster uploads at the cost of uploading more data than necessary and overpaying.
+Regardless, we recommend that you perform your own benchmarking to see what
+works best for your set of hosts, budget and use-case.
 
 
 ## Backups

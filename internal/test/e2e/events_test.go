@@ -20,7 +20,7 @@ import (
 // providing an event webhook was registered.
 func TestEvents(t *testing.T) {
 	// list all events
-	allEvents := []webhooks.WebhookEvent{
+	allEvents := []webhooks.EventWebhook{
 		api.EventConsensusUpdate{},
 		api.EventContractArchive{},
 		api.EventContractRenew{},
@@ -132,11 +132,11 @@ func TestEvents(t *testing.T) {
 
 	// assert the events we received contain the expected information
 	for _, r := range received {
-		event, err := parseEvent(r)
+		event, err := api.ParseEventWebhook(r)
 		tt.OK(err)
 		switch e := event.(type) {
 		case api.EventContractRenew:
-			if e.ContractID != renewed.ID || e.RenewedFromID != c.ID || e.Timestamp.IsZero() {
+			if e.Renewal.ID != renewed.ID || e.Renewal.RenewedFrom != c.ID || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventContractArchive:
@@ -167,58 +167,4 @@ func TestEvents(t *testing.T) {
 			}
 		}
 	}
-}
-
-func parseEvent(event webhooks.Event) (interface{}, error) {
-	bytes, err := json.Marshal(event.Payload)
-	if err != nil {
-		return nil, err
-	}
-	switch event.Module {
-	case api.ModuleContract:
-		if event.Event == api.EventArchive {
-			var e api.EventContractArchive
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		} else if event.Event == api.EventRenew {
-			var e api.EventContractRenew
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-	case api.ModuleContractSet:
-		if event.Event == api.EventUpdate {
-			var e api.EventContractSetUpdate
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-	case api.ModuleConsensus:
-		if event.Event == api.EventUpdate {
-			var e api.EventConsensusUpdate
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-	case api.ModuleSetting:
-		if event.Event == api.EventUpdate {
-			var e api.EventSettingUpdate
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		} else if event.Event == api.EventDelete {
-			var e api.EventSettingDelete
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-	}
-	return nil, fmt.Errorf("unexpected event %+v", event)
 }

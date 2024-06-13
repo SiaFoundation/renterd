@@ -41,6 +41,13 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
+		// Autopilot returns the autopilot with the given ID. Returns
+		// api.ErrAutopilotNotFound if the autopilot doesn't exist.
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+
+		// Autopilots returns all autopilots.
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
@@ -89,8 +96,19 @@ type (
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
+		// HostAllowlist returns the list of public keys of hosts on the
+		// allowlist.
+		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
+
+		// HostBlocklist returns the list of host addresses on the blocklist.
+		HostBlocklist(ctx context.Context) ([]string, error)
+
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
+
+		// HostsForScanning returns a list of hosts to scan which haven't been
+		// scanned since at least maxLastScan.
+		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 
 		// ListBuckets returns a list of all buckets in the database.
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
@@ -119,6 +137,14 @@ type (
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
 
+		// RecordHostScans records the results of host scans in the database
+		// such as recording the settings and price table of a host in case of
+		// success and updating the uptime and downtime of a host.
+		// NOTE: The price table is only updated if the known price table is
+		// expired since price tables from scans are not paid for and are
+		// therefore only useful for gouging checks.
+		RecordHostScans(ctx context.Context, scans []api.HostScan) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
@@ -145,15 +171,25 @@ type (
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
 		// SearchHosts returns a list of hosts that match the provided filters
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
+		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 
+		// UpdateAutopilot updates the autopilot with the provided one or
+		// creates a new one if it doesn't exist yet.
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateHostAllowlistEntries updates the allowlist in the database
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
+
+		// UpdateHostBlocklistEntries updates the blocklist in the database
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
 		// UpdateObjectHealth updates the health of all objects to the lowest
 		// health of all its slabs.

@@ -10,7 +10,7 @@ import (
 
 type (
 	EventBroadcaster interface {
-		BroadcastEvent(e webhooks.WebhookEvent)
+		BroadcastEvent(e webhooks.EventWebhook)
 	}
 
 	eventBroadcaster struct {
@@ -26,7 +26,7 @@ func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.Logger) EventBroadcaster
 	}
 }
 
-func (eb *eventBroadcaster) BroadcastEvent(e webhooks.WebhookEvent) {
+func (eb *eventBroadcaster) BroadcastEvent(e webhooks.EventWebhook) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	if err := eb.broadcaster.BroadcastAction(ctx, e.Event()); err != nil {
 		eb.logger.Errorw("failed to broadcast event", "event", e, "error", err)

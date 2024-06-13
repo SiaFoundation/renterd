@@ -138,6 +138,14 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
+func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+	return ssql.Autopilot(ctx, tx, id)
+}
+
+func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
+	return ssql.Autopilots(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
@@ -283,6 +291,18 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	} else {
 		return n != 0, nil
 	}
+}
+
+func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey, error) {
+	return ssql.HostAllowlist(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
+	return ssql.HostBlocklist(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
 
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
@@ -449,6 +469,10 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
+	return ssql.RecordHostScans(ctx, tx, scans)
+}
+
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
@@ -488,7 +512,7 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 			FROM (
 				SELECT CONCAT(?, SUBSTR(object_id, ?))
 				FROM objects
-				WHERE object_id LIKE ? 
+				WHERE object_id LIKE ?
 				AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
 			) as i
 		)`,
@@ -504,7 +528,7 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		UPDATE objects
 		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
 		db_directory_id = ?
-		WHERE object_id LIKE ? 
+		WHERE object_id LIKE ?
 		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
 		prefixNew, utf8.RuneCountInString(prefixOld)+1,
 		dirID,
@@ -553,16 +577,141 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 	return nil
 }
 
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
+	res, err := tx.Exec(ctx, `
+		INSERT INTO autopilots (created_at, identifier, config, current_period)
+		VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+		config = VALUES(config),
+		current_period = VALUES(current_period)
+	`, time.Now(), ap.ID, (*ssql.AutopilotConfig)(&ap.Config), ap.CurrentPeriod)
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 && n != 2 { // 1 if inserted, 2 if updated
+		return fmt.Errorf("expected 1 row affected, got %v", n)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
+}
+
+func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {
+	if clear {
+		if _, err := tx.Exec(ctx, "DELETE FROM host_allowlist_entries"); err != nil {
+			return fmt.Errorf("failed to clear host allowlist entries: %w", err)
+		}
+	}
+
+	if len(add) > 0 {
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer insertStmt.Close()
+		joinStmt, err := tx.Prepare(ctx, `
+			INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+			SELECT ?, id FROM (
+			SELECT id
+			FROM hosts
+			WHERE public_key = ?
+		) AS _`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer joinStmt.Close()
+
+		for _, pk := range add {
+			if res, err := insertStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to insert host allowlist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch host allowlist entry id: %w", err)
+			} else if _, err := joinStmt.Exec(ctx, entryID, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to join host allowlist entry: %w", err)
+			}
+		}
+	}
+
+	if !clear && len(remove) > 0 {
+		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_allowlist_entries WHERE entry = ?")
+		if err != nil {
+			return fmt.Errorf("failed to prepare delete statement: %w", err)
+		}
+		defer deleteStmt.Close()
+
+		for _, pk := range remove {
+			if _, err := deleteStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to delete host allowlist entry: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error {
+	if clear {
+		if _, err := tx.Exec(ctx, "DELETE FROM host_blocklist_entries"); err != nil {
+			return fmt.Errorf("failed to clear host blocklist entries: %w", err)
+		}
+	}
+
+	if len(add) > 0 {
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer insertStmt.Close()
+		joinStmt, err := tx.Prepare(ctx, `
+		INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		SELECT ?, id FROM (
+			SELECT id
+			FROM hosts
+			WHERE net_address=? OR
+			SUBSTRING_INDEX(net_address,':',1) = ? OR
+			SUBSTRING_INDEX(net_address,':',1) LIKE ?
+		) AS _
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer joinStmt.Close()
+
+		for _, entry := range add {
+			if res, err := insertStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
+			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+				return fmt.Errorf("failed to join host blocklist entry: %w", err)
+			}
+		}
+	}
+
+	if !clear && len(remove) > 0 {
+		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_blocklist_entries WHERE entry = ?")
+		if err != nil {
+			return fmt.Errorf("failed to prepare delete statement: %w", err)
+		}
+		defer deleteStmt.Close()
+
+		for _, entry := range remove {
+			if _, err := deleteStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to delete host blocklist entry: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {

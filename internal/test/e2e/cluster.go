@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
+	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -332,12 +333,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bStopFn)
 
 	// Create worker.
-	w, s3Handler, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
+	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
-
-	workerAuth := jape.BasicAuth(workerPassword)
 	workerServer := http.Server{
-		Handler: workerAuth(w),
+		Handler: iworker.Auth(workerPassword, false)(w),
 	}
 
 	var workerShutdownFns []func(context.Context) error
@@ -440,6 +439,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Enabled:               enableUploadPacking,
 		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
 	}))
+
+	// Register the worker
+	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
+		tt.Fatalf("failed to register worker, err: %v", err)
+	}
 
 	// Fund the bus.
 	if funding {

@@ -102,6 +102,35 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
+func Autopilot(ctx context.Context, tx sql.Tx, id string) (api.Autopilot, error) {
+	row := tx.QueryRow(ctx, "SELECT identifier, config, current_period FROM autopilots WHERE identifier = ?", id)
+	ap, err := scanAutopilot(row)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Autopilot{}, api.ErrAutopilotNotFound
+	} else if err != nil {
+		return api.Autopilot{}, fmt.Errorf("failed to fetch autopilot: %w", err)
+	}
+	return ap, nil
+}
+
+func Autopilots(ctx context.Context, tx sql.Tx) ([]api.Autopilot, error) {
+	rows, err := tx.Query(ctx, "SELECT identifier, config, current_period FROM autopilots")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch autopilots: %w", err)
+	}
+	defer rows.Close()
+
+	var autopilots []api.Autopilot
+	for rows.Next() {
+		ap, err := scanAutopilot(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan autopilot: %w", err)
+		}
+		autopilots = append(autopilots, ap)
+	}
+	return autopilots, nil
+}
+
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	b, err := scanBucket(tx.QueryRow(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets WHERE name = ?", bucket))
 	if err != nil {
@@ -274,6 +303,67 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 
 	// fetch copied object
 	return fetchMetadata(dstObjID)
+}
+
+func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
+	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host allowlist: %w", err)
+	}
+	defer rows.Close()
+
+	var allowlist []types.PublicKey
+	for rows.Next() {
+		var pk PublicKey
+		if err := rows.Scan(&pk); err != nil {
+			return nil, fmt.Errorf("failed to scan public key: %w", err)
+		}
+		allowlist = append(allowlist, types.PublicKey(pk))
+	}
+	return allowlist, nil
+}
+
+func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT entry FROM host_blocklist_entries")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host blocklist: %w", err)
+	}
+	defer rows.Close()
+
+	var blocklist []string
+	for rows.Next() {
+		var entry string
+		if err := rows.Scan(&entry); err != nil {
+			return nil, fmt.Errorf("failed to scan blocklist entry: %w", err)
+		}
+		blocklist = append(blocklist, entry)
+	}
+	return blocklist, nil
+}
+
+func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	} else if limit == -1 {
+		limit = math.MaxInt64
+	}
+
+	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
+		maxLastScan.UnixNano(), limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.HostAddress
+	for rows.Next() {
+		var ha api.HostAddress
+		if err := rows.Scan((*PublicKey)(&ha.PublicKey), &ha.NetAddress); err != nil {
+			return nil, fmt.Errorf("failed to scan host row: %w", err)
+		}
+		hosts = append(hosts, ha)
+	}
+	return hosts, nil
 }
 
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
@@ -794,6 +884,61 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
+	if len(scans) == 0 {
+		return nil
+	}
+	// NOTE: The order of the assignments in the UPDATE statement is important
+	// for MySQL compatibility. e.g. second_to_last_scan_success must be set
+	// before last_scan_success.
+	stmt, err := tx.Prepare(ctx, `
+		UPDATE hosts SET
+		scanned = scanned OR ?,
+		total_scans = total_scans + 1,
+		second_to_last_scan_success = last_scan_success,
+		last_scan_success = ?,
+		recent_downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN recent_downtime + ? - last_scan ELSE CASE WHEN ? THEN 0 ELSE recent_downtime END END,
+		recent_scan_failures = CASE WHEN ? THEN 0 ELSE recent_scan_failures + 1 END,
+		downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN downtime + ? - last_scan ELSE downtime END,
+		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
+		last_scan = ?,
+		settings = CASE WHEN ? THEN ? ELSE settings END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update host with scan: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for _, scan := range scans {
+		scanTime := scan.Timestamp.UnixNano()
+		_, err = stmt.Exec(ctx,
+			scan.Success,                                    // scanned
+			scan.Success,                                    // last_scan_success
+			!scan.Success, scanTime, scanTime, scan.Success, // recent_downtime
+			scan.Success,                      // recent_scan_failures
+			!scan.Success, scanTime, scanTime, // downtime
+			scan.Success, scanTime, scanTime, // uptime
+			scanTime,                              // last_scan
+			scan.Success, Settings(scan.Settings), // settings
+			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, now, // price_table_expiry
+			scan.Success,  // successful_interactions
+			!scan.Success, // failed_interactions
+			PublicKey(scan.HostKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update host with scan: %w", err)
+		}
+	}
+	return nil
+}
+
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts
 	rows, err := tx.Query(ctx, `
@@ -832,9 +977,16 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	return res.RowsAffected()
 }
 
-func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
+func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
+	}
+
+	var hasAllowlist, hasBlocklist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
+		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
+	} else if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
+		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
 	}
 
 	// validate filterMode
@@ -1080,6 +1232,15 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 		)`)
 	return err
 }
+
+func scanAutopilot(s scanner) (api.Autopilot, error) {
+	var a api.Autopilot
+	if err := s.Scan(&a.ID, (*AutopilotConfig)(&a.Config), &a.CurrentPeriod); err != nil {
+		return api.Autopilot{}, err
+	}
+	return a, nil
+}
+
 func scanBucket(s scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string
