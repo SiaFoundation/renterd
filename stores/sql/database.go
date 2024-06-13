@@ -140,6 +140,9 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// ResetLostSectors resets the lost sector count for the given host.
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones and setting the clean shutdown flag.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
@@ -154,6 +157,9 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
 		// UpdateObjectHealth updates the health of all objects to the lowest
 		// health of all its slabs.
