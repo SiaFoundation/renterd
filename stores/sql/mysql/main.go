@@ -293,6 +293,10 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
+func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
+}
+
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// get bucket id
 	var bucketID int64
@@ -455,6 +459,10 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
+	return ssql.RecordHostScans(ctx, tx, scans)
 }
 
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {

@@ -305,6 +305,31 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	} else if limit == -1 {
+		limit = math.MaxInt64
+	}
+
+	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
+		maxLastScan.UnixNano(), limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.HostAddress
+	for rows.Next() {
+		var ha api.HostAddress
+		if err := rows.Scan((*PublicKey)(&ha.PublicKey), &ha.NetAddress); err != nil {
+			return nil, fmt.Errorf("failed to scan host row: %w", err)
+		}
+		hosts = append(hosts, ha)
+	}
+	return hosts, nil
+}
+
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	// fetch bucket id
 	var bucketID int64
@@ -821,6 +846,61 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
 		TotalUploadedSize:          totalUploaded,
 	}, nil
+}
+
+func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
+	if len(scans) == 0 {
+		return nil
+	}
+	// NOTE: The order of the assignments in the UPDATE statement is important
+	// for MySQL compatibility. e.g. second_to_last_scan_success must be set
+	// before last_scan_success.
+	stmt, err := tx.Prepare(ctx, `
+		UPDATE hosts SET
+		scanned = scanned OR ?,
+		total_scans = total_scans + 1,
+		second_to_last_scan_success = last_scan_success,
+		last_scan_success = ?,
+		recent_downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN recent_downtime + ? - last_scan ELSE CASE WHEN ? THEN 0 ELSE recent_downtime END END, 
+		recent_scan_failures = CASE WHEN ? THEN 0 ELSE recent_scan_failures + 1 END,
+		downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN downtime + ? - last_scan ELSE downtime END,
+		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
+		last_scan = ?,
+		settings = CASE WHEN ? THEN ? ELSE settings END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update host with scan: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for _, scan := range scans {
+		scanTime := scan.Timestamp.UnixNano()
+		_, err = stmt.Exec(ctx,
+			scan.Success,                                    // scanned
+			scan.Success,                                    // last_scan_success
+			!scan.Success, scanTime, scanTime, scan.Success, // recent_downtime
+			scan.Success,                      // recent_scan_failures
+			!scan.Success, scanTime, scanTime, // downtime
+			scan.Success, scanTime, scanTime, // uptime
+			scanTime,                              // last_scan
+			scan.Success, Settings(scan.Settings), // settings
+			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, now, // price_table_expiry
+			scan.Success,  // successful_interactions
+			!scan.Success, // failed_interactions
+			PublicKey(scan.HostKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update host with scan: %w", err)
+		}
+	}
+	return nil
 }
 
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
