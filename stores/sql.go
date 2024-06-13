@@ -101,8 +101,6 @@ type (
 
 		wg           sync.WaitGroup
 		mu           sync.Mutex
-		allowListCnt uint64
-		blockListCnt uint64
 		lastPrunedAt time.Time
 		closed       bool
 
@@ -230,16 +228,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		return nil, modules.ConsensusChangeID{}, err
 	}
 
-	// Check allowlist and blocklist counts
-	allowlistCnt, err := tableCount(db, &dbAllowlistEntry{})
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
-	}
-	blocklistCnt, err := tableCount(db, &dbBlocklistEntry{})
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, err
-	}
-
 	// Fetch contract ids.
 	var activeFCIDs, archivedFCIDs []fileContractID
 	if err := db.Model(&dbContract{}).
@@ -269,8 +257,6 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
 		persistInterval:        cfg.PersistInterval,
-		allowListCnt:           uint64(allowlistCnt),
-		blockListCnt:           uint64(blocklistCnt),
 		settings:               make(map[string]string),
 		slabPruneSigChan:       make(chan struct{}, 1),
 		unappliedContractState: make(map[types.FileContractID]contractState),
@@ -314,12 +300,6 @@ func isSQLite(db *gorm.DB) bool {
 	}
 }
 
-func (ss *SQLStore) hasAllowlist() bool {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	return ss.allowListCnt > 0
-}
-
 func (s *SQLStore) initSlabPruning() error {
 	// start pruning loop
 	s.wg.Add(1)
@@ -333,49 +313,6 @@ func (s *SQLStore) initSlabPruning() error {
 		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
 		return err
 	})
-}
-
-func (ss *SQLStore) updateHasAllowlist(err *error) {
-	if *err != nil {
-		return
-	}
-
-	cnt, cErr := tableCount(ss.db, &dbAllowlistEntry{})
-	if cErr != nil {
-		*err = cErr
-		return
-	}
-
-	ss.mu.Lock()
-	ss.allowListCnt = uint64(cnt)
-	ss.mu.Unlock()
-}
-
-func (ss *SQLStore) hasBlocklist() bool {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	return ss.blockListCnt > 0
-}
-
-func (ss *SQLStore) updateHasBlocklist(err *error) {
-	if *err != nil {
-		return
-	}
-
-	cnt, cErr := tableCount(ss.db, &dbBlocklistEntry{})
-	if cErr != nil {
-		*err = cErr
-		return
-	}
-
-	ss.mu.Lock()
-	ss.blockListCnt = uint64(cnt)
-	ss.mu.Unlock()
-}
-
-func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
-	err = db.Model(model).Count(&cnt).Error
-	return
 }
 
 // Close closes the underlying database connection of the store.

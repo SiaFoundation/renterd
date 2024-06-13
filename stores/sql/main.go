@@ -305,6 +305,42 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
+	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host allowlist: %w", err)
+	}
+	defer rows.Close()
+
+	var allowlist []types.PublicKey
+	for rows.Next() {
+		var pk PublicKey
+		if err := rows.Scan(&pk); err != nil {
+			return nil, fmt.Errorf("failed to scan public key: %w", err)
+		}
+		allowlist = append(allowlist, types.PublicKey(pk))
+	}
+	return allowlist, nil
+}
+
+func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT entry FROM host_blocklist_entries")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host blocklist: %w", err)
+	}
+	defer rows.Close()
+
+	var blocklist []string
+	for rows.Next() {
+		var entry string
+		if err := rows.Scan(&entry); err != nil {
+			return nil, fmt.Errorf("failed to scan blocklist entry: %w", err)
+		}
+		blocklist = append(blocklist, entry)
+	}
+	return blocklist, nil
+}
+
 func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -978,9 +1014,16 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	return res.RowsAffected()
 }
 
-func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
+func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
+	}
+
+	var hasAllowlist, hasBlocklist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
+		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
+	} else if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
+		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
 	}
 
 	// validate filterMode
