@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -57,6 +58,24 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
+func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
+	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
+	}
+	defer rows.Close()
+
+	var accounts []api.Account
+	for rows.Next() {
+		a := api.Account{Balance: new(big.Int), Drift: new(big.Int)} // init big.Int
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+			return nil, fmt.Errorf("failed to scan account: %w", err)
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, nil
+}
+
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
@@ -82,6 +101,35 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 		return fmt.Errorf("expected to delete 1 row, deleted %d", n)
 	}
 	return nil
+}
+
+func Autopilot(ctx context.Context, tx sql.Tx, id string) (api.Autopilot, error) {
+	row := tx.QueryRow(ctx, "SELECT identifier, config, current_period FROM autopilots WHERE identifier = ?", id)
+	ap, err := scanAutopilot(row)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Autopilot{}, api.ErrAutopilotNotFound
+	} else if err != nil {
+		return api.Autopilot{}, fmt.Errorf("failed to fetch autopilot: %w", err)
+	}
+	return ap, nil
+}
+
+func Autopilots(ctx context.Context, tx sql.Tx) ([]api.Autopilot, error) {
+	rows, err := tx.Query(ctx, "SELECT identifier, config, current_period FROM autopilots")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch autopilots: %w", err)
+	}
+	defer rows.Close()
+
+	var autopilots []api.Autopilot
+	for rows.Next() {
+		ap, err := scanAutopilot(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan autopilot: %w", err)
+		}
+		autopilots = append(autopilots, ap)
+	}
+	return autopilots, nil
 }
 
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
@@ -256,6 +304,31 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 
 	// fetch copied object
 	return fetchMetadata(dstObjID)
+}
+
+func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	} else if limit == -1 {
+		limit = math.MaxInt64
+	}
+
+	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
+		maxLastScan.UnixNano(), limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.HostAddress
+	for rows.Next() {
+		var ha api.HostAddress
+		if err := rows.Scan((*PublicKey)(&ha.PublicKey), &ha.NetAddress); err != nil {
+			return nil, fmt.Errorf("failed to scan host row: %w", err)
+		}
+		hosts = append(hosts, ha)
+	}
+	return hosts, nil
 }
 
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
@@ -776,6 +849,61 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
+	if len(scans) == 0 {
+		return nil
+	}
+	// NOTE: The order of the assignments in the UPDATE statement is important
+	// for MySQL compatibility. e.g. second_to_last_scan_success must be set
+	// before last_scan_success.
+	stmt, err := tx.Prepare(ctx, `
+		UPDATE hosts SET
+		scanned = scanned OR ?,
+		total_scans = total_scans + 1,
+		second_to_last_scan_success = last_scan_success,
+		last_scan_success = ?,
+		recent_downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN recent_downtime + ? - last_scan ELSE CASE WHEN ? THEN 0 ELSE recent_downtime END END,
+		recent_scan_failures = CASE WHEN ? THEN 0 ELSE recent_scan_failures + 1 END,
+		downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN downtime + ? - last_scan ELSE downtime END,
+		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
+		last_scan = ?,
+		settings = CASE WHEN ? THEN ? ELSE settings END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update host with scan: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for _, scan := range scans {
+		scanTime := scan.Timestamp.UnixNano()
+		_, err = stmt.Exec(ctx,
+			scan.Success,                                    // scanned
+			scan.Success,                                    // last_scan_success
+			!scan.Success, scanTime, scanTime, scan.Success, // recent_downtime
+			scan.Success,                      // recent_scan_failures
+			!scan.Success, scanTime, scanTime, // downtime
+			scan.Success, scanTime, scanTime, // uptime
+			scanTime,                              // last_scan
+			scan.Success, Settings(scan.Settings), // settings
+			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, now, // price_table_expiry
+			scan.Success,  // successful_interactions
+			!scan.Success, // failed_interactions
+			PublicKey(scan.HostKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update host with scan: %w", err)
+		}
+	}
+	return nil
+}
+
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts
 	rows, err := tx.Query(ctx, `
@@ -1036,6 +1164,14 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 	return hosts, nil
 }
 
+func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
+	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
+	if err != nil {
+		return fmt.Errorf("failed to set unclean shutdown: %w", err)
+	}
+	return err
+}
+
 func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	var id Hash256
 	var height uint64
@@ -1124,6 +1260,14 @@ func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) 
 		return 0, fmt.Errorf("failed to count wallet events: %w", err)
 	}
 	return uint64(n), nil
+}
+
+func scanAutopilot(s scanner) (api.Autopilot, error) {
+	var a api.Autopilot
+	if err := s.Scan(&a.ID, (*AutopilotConfig)(&a.Config), &a.CurrentPeriod); err != nil {
+		return api.Autopilot{}, err
+	}
+	return a, nil
 }
 
 func scanBucket(s scanner) (api.Bucket, error) {

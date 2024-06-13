@@ -898,7 +898,6 @@ func testBusCfg() node.BusConfig {
 		},
 		Network:                     network,
 		Genesis:                     genesis,
-		SlabPruningInterval:         time.Second,
 		SyncerSyncInterval:          100 * time.Millisecond,
 		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
 		RetryTxIntervals: []time.Duration{

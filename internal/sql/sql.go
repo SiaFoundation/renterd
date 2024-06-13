@@ -95,10 +95,10 @@ func (s *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 func (s *DB) Prepare(ctx context.Context, query string) (*LoggedStmt, error) {
 	start := time.Now()
 	stmt, err := s.db.PrepareContext(ctx, query)
-	if dur := time.Since(start); dur > s.longQueryDuration {
-		s.log.Debug("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
-	} else if err != nil {
+	if err != nil {
 		return nil, err
+	} else if dur := time.Since(start); dur > s.longQueryDuration {
+		s.log.Debug("slow prepare", zap.String("query", query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
 	return &LoggedStmt{
 		Stmt:              stmt,

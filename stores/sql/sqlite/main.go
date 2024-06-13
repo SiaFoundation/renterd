@@ -83,6 +83,10 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
+func (tx *MainDatabaseTx) Accounts(ctx context.Context) ([]api.Account, error) {
+	return ssql.Accounts(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
 	// fetch contract set
 	var csID int64
@@ -133,6 +137,14 @@ func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path
 
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
+}
+
+func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+	return ssql.Autopilot(ctx, tx, id)
+}
+
+func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
+	return ssql.Autopilots(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
@@ -270,6 +282,10 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	} else {
 		return n != 0, nil
 	}
+}
+
+func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
 
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
@@ -452,6 +468,10 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
+	return ssql.RecordHostScans(ctx, tx, scans)
+}
+
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
@@ -530,8 +550,43 @@ func (tx *MainDatabaseTx) ResetChainState(ctx context.Context) error {
 	return ssql.ResetChainState(ctx, tx.Tx)
 }
 
+func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
+	// clean_shutdown = 1 after save
+	stmt, err := tx.Prepare(ctx, `
+		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync)
+		VAlUES (?, ?, 1, ?, ?, ?, ?)
+		ON CONFLICT(account_id) DO UPDATE SET
+		account_id = EXCLUDED.account_id,
+		clean_shutdown = 1,
+		host = EXCLUDED.host,
+		balance = EXCLUDED.balance,
+		drift = EXCLUDED.drift,
+		requires_sync = EXCLUDED.requires_sync
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, acc := range accounts {
+		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync)
+		if err != nil {
+			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n != 1 {
+			return fmt.Errorf("expected 1 row affected, got %v", n)
+		}
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+}
+
+func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
+	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
@@ -540,6 +595,24 @@ func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
 
 func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {
 	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
+}
+
+func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
+	res, err := tx.Exec(ctx, `
+		INSERT INTO autopilots (created_at, identifier, config, current_period)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(identifier) DO UPDATE SET
+		config = EXCLUDED.config,
+		current_period = EXCLUDED.current_period
+	`, time.Now(), ap.ID, (*ssql.AutopilotConfig)(&ap.Config), ap.CurrentPeriod)
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return fmt.Errorf("expected 1 row affected, got %v", n)
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {

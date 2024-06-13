@@ -50,7 +50,6 @@ type BusConfig struct {
 	Logger                      *zap.Logger
 	Network                     *consensus.Network
 	RetryTxIntervals            []time.Duration
-	SlabPruningInterval         time.Duration
 	SyncerSyncInterval          time.Duration
 	SyncerPeerDiscoveryInterval time.Duration
 }

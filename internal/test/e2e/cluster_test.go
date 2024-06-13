@@ -1070,6 +1070,8 @@ func TestEphemeralAccounts(t *testing.T) {
 			t.Fatal("account balance wasn't loaded")
 		} else if acc.Drift.Cmp(big.NewInt(0)) == 0 {
 			t.Fatal("account drift wasn't loaded")
+		} else if !acc.CleanShutdown {
+			t.Fatal("account should indicate a clean shutdown")
 		}
 	}
 

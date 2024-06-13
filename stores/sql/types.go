@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/api"
 )
 
 const (
@@ -21,16 +23,18 @@ const (
 )
 
 type (
-	Currency       types.Currency
-	FileContractID types.FileContractID
-	Hash256        types.Hash256
-	MerkleProof    struct{ Hashes []types.Hash256 }
-	Settings       rhpv2.HostSettings
-	PriceTable     rhpv3.HostPriceTable
-	PublicKey      types.PublicKey
-	SecretKey      []byte
-	UnixTimeNS     time.Time
-	Uint64         uint64
+	AutopilotConfig api.AutopilotConfig
+	BigInt          big.Int
+	Currency        types.Currency
+	FileContractID  types.FileContractID
+	Hash256         types.Hash256
+	MerkleProof     struct{ Hashes []types.Hash256 }
+	Settings        rhpv2.HostSettings
+	PriceTable      rhpv3.HostPriceTable
+	PublicKey       types.PublicKey
+	SecretKey       []byte
+	UnixTimeNS      time.Time
+	Uint64          uint64
 )
 
 var (
@@ -41,6 +45,47 @@ var (
 	_ sql.Scanner = &PublicKey{}
 	_ sql.Scanner = &SecretKey{}
 )
+
+// Scan scan value into AutopilotConfig, implements sql.Scanner interface.
+func (cfg *AutopilotConfig) Scan(value interface{}) error {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
+		return fmt.Errorf("failed to unmarshal AutopilotConfig value: %v %T", value, value)
+	}
+	return json.Unmarshal(bytes, cfg)
+}
+
+// Value returns a AutopilotConfig value, implements driver.Valuer interface.
+func (cfg AutopilotConfig) Value() (driver.Value, error) {
+	return json.Marshal(cfg)
+}
+
+// Scan scan value into BigInt, implements sql.Scanner interface.
+func (b *BigInt) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal BigInt value: %v %t", value, value)
+	}
+	if _, success := (*big.Int)(b).SetString(s, 10); !success {
+		return errors.New(fmt.Sprint("failed to scan BigInt value", value))
+	}
+	return nil
+}
+
+// Value returns a BigInt value, implements driver.Valuer interface.
+func (b BigInt) Value() (driver.Value, error) {
+	return (*big.Int)(&b).String(), nil
+}
 
 // Scan scan value into Currency, implements sql.Scanner interface.
 func (c *Currency) Scan(value interface{}) error {

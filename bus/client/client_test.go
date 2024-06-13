@@ -83,8 +83,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 		DatabaseLog: config.DatabaseLog{
 			SlowThreshold: 100 * time.Millisecond,
 		},
-		SlabPruningInterval: time.Minute,
-		Logger:              zap.NewNop(),
+		Logger: zap.NewNop(),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err
