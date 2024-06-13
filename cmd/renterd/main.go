@@ -286,6 +286,7 @@ func main() {
 	// worker
 	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "Allows hosts with private IPs")
 	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
+	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
 	flag.StringVar(&cfg.Worker.ID, "worker.id", cfg.Worker.ID, "Unique ID for worker (overrides with RENTERD_WORKER_ID)")
 	flag.DurationVar(&cfg.Worker.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", cfg.Worker.DownloadOverdriveTimeout, "Timeout for overdriving slab downloads")
@@ -362,6 +363,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
+	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
 	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)

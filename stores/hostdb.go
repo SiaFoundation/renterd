@@ -28,11 +28,6 @@ const (
 	// consensusInfoID defines the primary key of the entry in the consensusInfo
 	// table.
 	consensusInfoID = 1
-
-	// hostRetrievalBatchSize is the number of hosts we fetch from the
-	// database per batch. Empirically tested to verify that this is a value
-	// that performs reasonably well.
-	hostRetrievalBatchSize = 10000
 )
 
 var (
@@ -86,7 +81,6 @@ type (
 		Model
 
 		DBAutopilotID uint
-		DBAutopilot   dbAutopilot
 
 		DBHostID uint
 		DBHost   dbHost
@@ -335,7 +329,7 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 		// fetch ap id
 		var apID uint
 		if err := tx.
-			Model(&dbAutopilot{}).
+			Table("autopilots").
 			Where("identifier = ?", autopilotID).
 			Select("id").
 			Take(&apID).
@@ -397,44 +391,18 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 }
 
 // HostsForScanning returns the address of hosts for scanning.
-func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
-	if offset < 0 {
-		return nil, sql.ErrNegativeOffset
-	}
-
-	var hosts []struct {
-		PublicKey  publicKey `gorm:"unique;index;NOT NULL"`
-		NetAddress string
-	}
-	var hostAddresses []api.HostAddress
-
-	err := ss.db.
-		WithContext(ctx).
-		Model(&dbHost{}).
-		Where("last_scan < ?", maxLastScan.UnixNano()).
-		Offset(offset).
-		Limit(limit).
-		Order("last_scan ASC").
-		FindInBatches(&hosts, hostRetrievalBatchSize, func(tx *gorm.DB, batch int) error {
-			for _, h := range hosts {
-				hostAddresses = append(hostAddresses, api.HostAddress{
-					PublicKey:  types.PublicKey(h.PublicKey),
-					NetAddress: h.NetAddress,
-				})
-			}
-			return nil
-		}).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	return hostAddresses, err
+func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []api.HostAddress, err error) {
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		hosts, err = tx.HostsForScanning(ctx, maxLastScan, offset, limit)
+		return err
+	})
+	return
 }
 
 func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	var hosts []api.Host
 	err := ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, ss.hasAllowlist(), ss.hasBlocklist())
+		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 		return
 	})
 	return hosts, err
@@ -463,37 +431,8 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	defer ss.updateHasAllowlist(&err)
-
-	// clear allowlist
-	if clear {
-		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Where("TRUE").Delete(&dbAllowlistEntry{}).Error
-		})
-	}
-
-	var toInsert []dbAllowlistEntry
-	for _, entry := range add {
-		toInsert = append(toInsert, dbAllowlistEntry{Entry: publicKey(entry)})
-	}
-
-	toDelete := make([]publicKey, len(remove))
-	for i, entry := range remove {
-		toDelete[i] = publicKey(entry)
-	}
-
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if len(toInsert) > 0 {
-			if err := tx.Create(&toInsert).Error; err != nil {
-				return err
-			}
-		}
-		if len(toDelete) > 0 {
-			if err := tx.Delete(&dbAllowlistEntry{}, "entry IN ?", toDelete).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostAllowlistEntries(ctx, add, remove, clear)
 	})
 }
 
@@ -502,176 +441,30 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	defer ss.updateHasBlocklist(&err)
-
-	// clear blocklist
-	if clear {
-		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Where("TRUE").Delete(&dbBlocklistEntry{}).Error
-		})
-	}
-
-	var toInsert []dbBlocklistEntry
-	for _, entry := range add {
-		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
-	}
-
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if len(toInsert) > 0 {
-			if err := tx.Create(&toInsert).Error; err != nil {
-				return err
-			}
-		}
-		if len(remove) > 0 {
-			if err := tx.Delete(&dbBlocklistEntry{}, "entry IN ?", remove).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostBlocklistEntries(ctx, add, remove, clear)
 	})
 }
 
 func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
-	var pubkeys []publicKey
-	err = ss.db.
-		WithContext(ctx).
-		Model(&dbAllowlistEntry{}).
-		Pluck("entry", &pubkeys).
-		Error
-
-	for _, pubkey := range pubkeys {
-		allowlist = append(allowlist, types.PublicKey(pubkey))
-	}
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		allowlist, err = tx.HostAllowlist(ctx)
+		return err
+	})
 	return
 }
 
 func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
-	err = ss.db.
-		WithContext(ctx).
-		Model(&dbBlocklistEntry{}).
-		Pluck("entry", &blocklist).
-		Error
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		blocklist, err = tx.HostBlocklist(ctx)
+		return err
+	})
 	return
 }
 
 func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
-	if len(scans) == 0 {
-		return nil // nothing to do
-	}
-
-	// Get keys from input.
-	keyMap := make(map[publicKey]struct{})
-	var hks []publicKey
-	for _, scan := range scans {
-		if _, exists := keyMap[publicKey(scan.HostKey)]; !exists {
-			hks = append(hks, publicKey(scan.HostKey))
-			keyMap[publicKey(scan.HostKey)] = struct{}{}
-		}
-	}
-
-	// Fetch hosts for which to add scans. This can be done outsisde the
-	// transaction to reduce the time we spend in the transaction since we don't
-	// need it to be perfectly consistent.
-	var hosts []dbHost
-	for i := 0; i < len(hks); i += maxSQLVars {
-		end := i + maxSQLVars
-		if end > len(hks) {
-			end = len(hks)
-		}
-		var batchHosts []dbHost
-		if err := ss.db.WithContext(ctx).Where("public_key IN (?)", hks[i:end]).
-			Find(&batchHosts).Error; err != nil {
-			return err
-		}
-		hosts = append(hosts, batchHosts...)
-	}
-	hostMap := make(map[publicKey]dbHost)
-	for _, h := range hosts {
-		hostMap[h.PublicKey] = h
-	}
-
-	// Write the interactions and update to the hosts atomically within a single
-	// transaction.
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Handle scans
-		for _, scan := range scans {
-			host, exists := hostMap[publicKey(scan.HostKey)]
-			if !exists {
-				continue // host doesn't exist
-			}
-			lastScan := time.Unix(0, host.LastScan)
-
-			if scan.Success {
-				// Handle successful scan.
-				host.SuccessfulInteractions++
-				if host.LastScan > 0 && lastScan.Before(scan.Timestamp) {
-					host.Uptime += scan.Timestamp.Sub(lastScan)
-				}
-				host.RecentDowntime = 0
-				host.RecentScanFailures = 0
-
-				// overwrite the NetAddress in the settings with the one we
-				// received through the host announcement
-				scan.Settings.NetAddress = host.NetAddress
-				host.Settings = hostSettings(scan.Settings)
-
-				// scans can only update the price table if the current
-				// pricetable is expired anyway, ensuring scans never
-				// overwrite a valid price table since the price table from
-				// scans are not paid for and thus not useful for anything
-				// aside from gouging checks
-				if time.Now().After(host.PriceTableExpiry.Time) {
-					host.PriceTable = convertHostPriceTable(scan.PriceTable)
-					host.PriceTableExpiry = dsql.NullTime{
-						Time:  time.Now(),
-						Valid: true,
-					}
-				}
-			} else {
-				// Handle failed scan.
-				host.FailedInteractions++
-				host.RecentScanFailures++
-				if host.LastScan > 0 && lastScan.Before(scan.Timestamp) {
-					host.Downtime += scan.Timestamp.Sub(lastScan)
-					host.RecentDowntime += scan.Timestamp.Sub(lastScan)
-				}
-			}
-
-			host.TotalScans++
-			host.Scanned = host.Scanned || scan.Success
-			host.SecondToLastScanSuccess = host.LastScanSuccess
-			host.LastScanSuccess = scan.Success
-			host.LastScan = scan.Timestamp.UnixNano()
-
-			// Save to map again.
-			hostMap[host.PublicKey] = host
-		}
-
-		// Persist.
-		for _, h := range hostMap {
-			err := tx.Model(&dbHost{}).
-				Where("public_key", h.PublicKey).
-				Updates(map[string]interface{}{
-					"scanned":                     h.Scanned,
-					"total_scans":                 h.TotalScans,
-					"second_to_last_scan_success": h.SecondToLastScanSuccess,
-					"last_scan_success":           h.LastScanSuccess,
-					"recent_downtime":             h.RecentDowntime,
-					"recent_scan_failures":        h.RecentScanFailures,
-					"downtime":                    h.Downtime,
-					"uptime":                      h.Uptime,
-					"last_scan":                   h.LastScan,
-					"settings":                    h.Settings,
-					"price_table":                 h.PriceTable,
-					"price_table_expiry":          h.PriceTableExpiry,
-					"successful_interactions":     h.SuccessfulInteractions,
-					"failed_interactions":         h.FailedInteractions,
-				}).Error
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.RecordHostScans(ctx, scans)
 	})
 }
 

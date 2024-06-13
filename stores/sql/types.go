@@ -13,6 +13,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 )
 
 const (
@@ -20,15 +21,16 @@ const (
 )
 
 type (
-	BigInt         big.Int
-	Currency       types.Currency
-	FileContractID types.FileContractID
-	Hash256        types.Hash256
-	Settings       rhpv2.HostSettings
-	PriceTable     rhpv3.HostPriceTable
-	PublicKey      types.PublicKey
-	SecretKey      []byte
-	UnixTimeNS     time.Time
+	AutopilotConfig api.AutopilotConfig
+	BigInt          big.Int
+	Currency        types.Currency
+	FileContractID  types.FileContractID
+	Hash256         types.Hash256
+	Settings        rhpv2.HostSettings
+	PriceTable      rhpv3.HostPriceTable
+	PublicKey       types.PublicKey
+	SecretKey       []byte
+	UnixTimeNS      time.Time
 )
 
 var (
@@ -38,6 +40,25 @@ var (
 	_ sql.Scanner = &PublicKey{}
 	_ sql.Scanner = &SecretKey{}
 )
+
+// Scan scan value into AutopilotConfig, implements sql.Scanner interface.
+func (cfg *AutopilotConfig) Scan(value interface{}) error {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
+		return fmt.Errorf("failed to unmarshal AutopilotConfig value: %v %T", value, value)
+	}
+	return json.Unmarshal(bytes, cfg)
+}
+
+// Value returns a AutopilotConfig value, implements driver.Valuer interface.
+func (cfg AutopilotConfig) Value() (driver.Value, error) {
+	return json.Marshal(cfg)
+}
 
 // Scan scan value into BigInt, implements sql.Scanner interface.
 func (b *BigInt) Scan(value interface{}) error {
