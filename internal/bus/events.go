@@ -22,7 +22,7 @@ func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.SugaredLogger) EventBroa
 	}
 }
 
-func (b EventBroadcaster) BroadcastEvent(e webhooks.WebhookEvent) {
+func (b EventBroadcaster) BroadcastEvent(e webhooks.EventWebhook) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	if err := b.broadcaster.BroadcastAction(ctx, e.Event()); err != nil {
 		b.logger.Errorw("failed to broadcast event", "event", e, "error", err)

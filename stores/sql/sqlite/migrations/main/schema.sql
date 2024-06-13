@@ -147,7 +147,7 @@ CREATE INDEX `idx_ephemeral_accounts_requires_sync` ON `ephemeral_accounts`(`req
 CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`identifier` text NOT NULL UNIQUE,`config` text,`current_period` integer DEFAULT 0);
 
 -- dbWebhook
-CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL);
+CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL,`headers` text DEFAULT ('{}'));
 CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`);
 
 -- dbObjectUserMetadata

@@ -1173,9 +1173,8 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
 	b.events.BroadcastEvent(api.EventContractRenew{
-		ContractID:    req.Contract.ID(),
-		RenewedFromID: req.RenewedFrom,
-		Timestamp:     time.Now().UTC(),
+		Renewal:   r,
+		Timestamp: time.Now().UTC(),
 	})
 
 	jc.Encode(r)
@@ -2111,7 +2110,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 
 func (b *bus) webhookHandlerGet(jc jape.Context) {
 	webhooks, queueInfos := b.hooks.Info()
-	jc.Encode(api.WebHookResponse{
+	jc.Encode(api.WebhookResponse{
 		Queues:   queueInfos,
 		Webhooks: webhooks,
 	})
@@ -2122,10 +2121,12 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
+
 	err := b.hooks.Register(jc.Request.Context(), webhooks.Webhook{
-		Event:  req.Event,
-		Module: req.Module,
-		URL:    req.URL,
+		Event:   req.Event,
+		Module:  req.Module,
+		URL:     req.URL,
+		Headers: req.Headers,
 	})
 	if err != nil {
 		jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)

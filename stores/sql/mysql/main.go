@@ -512,7 +512,7 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 			FROM (
 				SELECT CONCAT(?, SUBSTR(object_id, ?))
 				FROM objects
-				WHERE object_id LIKE ? 
+				WHERE object_id LIKE ?
 				AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
 			) as i
 		)`,
@@ -528,7 +528,7 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		UPDATE objects
 		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
 		db_directory_id = ?
-		WHERE object_id LIKE ? 
+		WHERE object_id LIKE ?
 		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
 		prefixNew, utf8.RuneCountInString(prefixOld)+1,
 		dirID,

@@ -419,6 +419,7 @@ CREATE TABLE `webhooks` (
   `module` varchar(255) NOT NULL,
   `event` varchar(255) NOT NULL,
   `url` varchar(255) NOT NULL,
+  `headers` JSON DEFAULT ('{}'),
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_module_event_url` (`module`,`event`,`url`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

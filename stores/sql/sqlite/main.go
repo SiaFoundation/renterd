@@ -524,8 +524,8 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		UPDATE objects
 		SET object_id = ? || SUBSTR(object_id, ?),
 		db_directory_id = ?
-		WHERE object_id LIKE ? 
-		AND SUBSTR(object_id, 1, ?) = ? 
+		WHERE object_id LIKE ?
+		AND SUBSTR(object_id, 1, ?) = ?
 		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
 		prefixNew, utf8.RuneCountInString(prefixOld)+1,
 		dirID,

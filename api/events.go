@@ -1,6 +1,9 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -8,15 +11,19 @@ import (
 )
 
 const (
-	ModuleContractSet = "contract_set"
 	ModuleConsensus   = "consensus"
 	ModuleContract    = "contract"
+	ModuleContractSet = "contract_set"
 	ModuleSetting     = "setting"
 
 	EventUpdate  = "update"
 	EventDelete  = "delete"
 	EventArchive = "archive"
 	EventRenew   = "renew"
+)
+
+var (
+	ErrUnknownEvent = errors.New("unknown event")
 )
 
 type (
@@ -33,9 +40,8 @@ type (
 	}
 
 	EventContractRenew struct {
-		ContractID    types.FileContractID `json:"contractID"`
-		RenewedFromID types.FileContractID `json:"renewedFromID"`
-		Timestamp     time.Time            `json:"timestamp"`
+		Renewal   ContractMetadata `json:"renewal"`
+		Timestamp time.Time        `json:"timestamp"`
 	}
 
 	EventContractSetUpdate struct {
@@ -102,4 +108,60 @@ func (e EventSettingDelete) Event() webhooks.Event {
 		Event:   EventDelete,
 		Payload: e,
 	}
+}
+
+func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
+	bytes, err := json.Marshal(event.Payload)
+	if err != nil {
+		return nil, err
+	}
+	switch event.Module {
+	case ModuleContract:
+		switch event.Event {
+		case EventArchive:
+			var e EventContractArchive
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		case EventRenew:
+			var e EventContractRenew
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case ModuleContractSet:
+		if event.Event == EventUpdate {
+			var e EventContractSetUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case ModuleConsensus:
+		if event.Event == EventUpdate {
+			var e EventConsensusUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case ModuleSetting:
+		switch event.Event {
+		case EventUpdate:
+			var e EventSettingUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		case EventDelete:
+			var e EventSettingDelete
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: module %s event %s", ErrUnknownEvent, event.Module, event.Event)
 }
