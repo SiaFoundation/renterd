@@ -716,27 +716,15 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 }
 
 func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {
-	// fetch autopilot and host ids
-	var autopilotID, hostID int64
-	err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", autopilot).Scan(&autopilotID)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ErrAutopilotNotFound
-	} else if err != nil {
-		return fmt.Errorf("failed to fetch autopilot id: %w", err)
-	}
-	err = tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = ?", ssql.PublicKey(hk)).Scan(&hostID)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ErrHostNotFound
-	} else if err != nil {
-		return fmt.Errorf("failed to fetch host id: %w", err)
-	}
-
-	_, err = tx.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 	    INSERT INTO host_checks (created_at, db_autopilot_id, db_host_id, usability_blocked, usability_offline, usability_low_score,
 	        usability_redundant_ip, usability_gouging, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
 	        score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
 	        gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
-	    VALUES (?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	    VALUES (?,
+			(SELECT id FROM autopilots WHERE identifier = ?),
+			(SELECT id FROM hosts WHERE public_key = ?),
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	    ON CONFLICT (db_autopilot_id, db_host_id) DO UPDATE SET
 	        created_at = EXCLUDED.created_at, db_autopilot_id = EXCLUDED.db_autopilot_id, db_host_id = EXCLUDED.db_host_id,
 	        usability_blocked = EXCLUDED.usability_blocked, usability_offline = EXCLUDED.usability_offline, usability_low_score = EXCLUDED.usability_low_score,
@@ -746,7 +734,7 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	        score_storage_remaining = EXCLUDED.score_storage_remaining, score_uptime = EXCLUDED.score_uptime, score_version = EXCLUDED.score_version,
 	        score_prices = EXCLUDED.score_prices, gouging_contract_err = EXCLUDED.gouging_contract_err, gouging_download_err = EXCLUDED.gouging_download_err,
 	        gouging_gouging_err = EXCLUDED.gouging_gouging_err, gouging_prune_err = EXCLUDED.gouging_prune_err, gouging_upload_err = EXCLUDED.gouging_upload_err
-	    `, time.Now(), autopilotID, hostID, hc.Usability.Blocked, hc.Usability.Offline, hc.Usability.LowScore,
+	    `, time.Now(), autopilot, ssql.PublicKey(hk), hc.Usability.Blocked, hc.Usability.Offline, hc.Usability.LowScore,
 		hc.Usability.RedundantIP, hc.Usability.Gouging, hc.Usability.NotAcceptingContracts, hc.Usability.NotAnnounced, hc.Usability.NotCompletingScan,
 		hc.Score.Age, hc.Score.Collateral, hc.Score.Interactions, hc.Score.StorageRemaining, hc.Score.Uptime, hc.Score.Version, hc.Score.Prices,
 		hc.Gouging.ContractErr, hc.Gouging.DownloadErr, hc.Gouging.GougingErr, hc.Gouging.PruneErr, hc.Gouging.UploadErr,
