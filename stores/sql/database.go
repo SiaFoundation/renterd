@@ -138,6 +138,10 @@ type (
 		// therefore only useful for gouging checks.
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 
+		// RecordPriceTables records price tables for hosts in the database
+		// increasing the successful/failed interactions accordingly.
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
