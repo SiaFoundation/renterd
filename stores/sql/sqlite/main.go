@@ -282,6 +282,14 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
+func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey, error) {
+	return ssql.HostAllowlist(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
+	return ssql.HostBlocklist(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
@@ -571,8 +579,8 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 	return nil
 }
 
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
@@ -599,6 +607,112 @@ func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot)
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, policy)
+}
+
+func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {
+	if clear {
+		if _, err := tx.Exec(ctx, "DELETE FROM host_allowlist_entries"); err != nil {
+			return fmt.Errorf("failed to clear host allowlist entries: %w", err)
+		}
+	}
+
+	if len(add) > 0 {
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (entry) VALUES (?) ON CONFLICT(entry) DO UPDATE SET id = id RETURNING id")
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer insertStmt.Close()
+		joinStmt, err := tx.Prepare(ctx, `
+			INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+			SELECT ?, id FROM (
+			SELECT id
+			FROM hosts
+			WHERE public_key = ?
+		)`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer joinStmt.Close()
+
+		for _, pk := range add {
+			if res, err := insertStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to insert host allowlist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch host allowlist entry id: %w", err)
+			} else if _, err := joinStmt.Exec(ctx, entryID, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to join host allowlist entry: %w", err)
+			}
+		}
+	}
+
+	if !clear && len(remove) > 0 {
+		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_allowlist_entries WHERE entry = ?")
+		if err != nil {
+			return fmt.Errorf("failed to prepare delete statement: %w", err)
+		}
+		defer deleteStmt.Close()
+
+		for _, pk := range remove {
+			if _, err := deleteStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to delete host allowlist entry: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error {
+	if clear {
+		if _, err := tx.Exec(ctx, "DELETE FROM host_blocklist_entries"); err != nil {
+			return fmt.Errorf("failed to clear host blocklist entries: %w", err)
+		}
+	}
+
+	if len(add) > 0 {
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (entry) VALUES (?) ON CONFLICT(entry) DO UPDATE SET id = id RETURNING id")
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer insertStmt.Close()
+		joinStmt, err := tx.Prepare(ctx, `
+		INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		SELECT ?, id FROM (
+			SELECT id
+			FROM hosts
+			WHERE net_address == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE ?
+		)`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer joinStmt.Close()
+
+		for _, entry := range add {
+			if res, err := insertStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
+			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+				return fmt.Errorf("failed to join host blocklist entry: %w", err)
+			}
+		}
+	}
+
+	if !clear && len(remove) > 0 {
+		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_blocklist_entries WHERE entry = ?")
+		if err != nil {
+			return fmt.Errorf("failed to prepare delete statement: %w", err)
+		}
+		defer deleteStmt.Close()
+
+		for _, entry := range remove {
+			if _, err := deleteStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to delete host blocklist entry: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {

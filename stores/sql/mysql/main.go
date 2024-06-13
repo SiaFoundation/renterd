@@ -293,6 +293,14 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
+func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey, error) {
+	return ssql.HostAllowlist(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
+	return ssql.HostBlocklist(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
@@ -573,8 +581,8 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 	return nil
 }
 
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
@@ -603,6 +611,113 @@ func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string,
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
 }
 
+func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {
+	if clear {
+		if _, err := tx.Exec(ctx, "DELETE FROM host_allowlist_entries"); err != nil {
+			return fmt.Errorf("failed to clear host allowlist entries: %w", err)
+		}
+	}
+
+	if len(add) > 0 {
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer insertStmt.Close()
+		joinStmt, err := tx.Prepare(ctx, `
+			INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
+			SELECT ?, id FROM (
+			SELECT id
+			FROM hosts
+			WHERE public_key = ?
+		) AS _`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer joinStmt.Close()
+
+		for _, pk := range add {
+			if res, err := insertStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to insert host allowlist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch host allowlist entry id: %w", err)
+			} else if _, err := joinStmt.Exec(ctx, entryID, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to join host allowlist entry: %w", err)
+			}
+		}
+	}
+
+	if !clear && len(remove) > 0 {
+		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_allowlist_entries WHERE entry = ?")
+		if err != nil {
+			return fmt.Errorf("failed to prepare delete statement: %w", err)
+		}
+		defer deleteStmt.Close()
+
+		for _, pk := range remove {
+			if _, err := deleteStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+				return fmt.Errorf("failed to delete host allowlist entry: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error {
+	if clear {
+		if _, err := tx.Exec(ctx, "DELETE FROM host_blocklist_entries"); err != nil {
+			return fmt.Errorf("failed to clear host blocklist entries: %w", err)
+		}
+	}
+
+	if len(add) > 0 {
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (entry) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer insertStmt.Close()
+		joinStmt, err := tx.Prepare(ctx, `
+		INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		SELECT ?, id FROM (
+			SELECT id
+			FROM hosts
+			WHERE net_address=? OR
+			SUBSTRING_INDEX(net_address,':',1) = ? OR
+			SUBSTRING_INDEX(net_address,':',1) LIKE ?
+		) AS _
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer joinStmt.Close()
+
+		for _, entry := range add {
+			if res, err := insertStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
+			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+				return fmt.Errorf("failed to join host blocklist entry: %w", err)
+			}
+		}
+	}
+
+	if !clear && len(remove) > 0 {
+		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_blocklist_entries WHERE entry = ?")
+		if err != nil {
+			return fmt.Errorf("failed to prepare delete statement: %w", err)
+		}
+		defer deleteStmt.Close()
+
+		for _, entry := range remove {
+			if _, err := deleteStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to delete host blocklist entry: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {
 	// fetch autopilot and host ids
 	var autopilotID, hostID int64
@@ -625,7 +740,7 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 			score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
 			gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
 		VALUES (?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE SET
+		ON DUPLICATE KEY UPDATE
 			created_at = VALUES(created_at), db_autopilot_id = VALUES(db_autopilot_id), db_host_id = VALUES(db_host_id),
 			usability_blocked = VALUES(usability_blocked), usability_offline = VALUES(usability_offline), usability_low_score = VALUES(usability_low_score),
 			usability_redundant_ip = VALUES(usability_redundant_ip), usability_gouging = VALUES(usability_gouging), usability_not_accepting_contracts = VALUES(usability_not_accepting_contracts),
