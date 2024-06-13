@@ -101,12 +101,12 @@ overview of all settings configurable through the CLI.
 ## Tweaking Performance
 
 Depending on hardware specs, you can change the [configuration](#configuration)
-to better utilise it and gain more performance out of `renterd`. This section
+to better utilize it and gain more performance out of `renterd`. This section
 highlights some of the more obvious tweaks one can apply.
 
 ### Increase/Decrease memory
 
-By default `renterd` uses reasonable limits for RAM consumed by uploads and
+By default, `renterd` uses reasonable limits for RAM consumed by uploads and
 downloads. Especially when downloading or uploading single large files, more RAM
 can make a difference since it allows for processing the download/upload in
 parallel. To change the max RAM `renterd` is going to use update the
@@ -128,7 +128,7 @@ mostly unaffected. `Worker.UploadOverdriveTimeout` and
 `Worker.DownloadOverdriveTimeout` specify the time that needs to pass before we
 launch the overdrive uploads/downloads.
 
-2 conditions need to be met before the overdrive launches:
+Two conditions need to be met before the overdrive launches:
 1. When uploading/downloading to/from `n` hosts (without overdrive), `n - overdriveHosts` pieces need to finish.
 2. Once condition 1. is met, the configured overdrive timeout needs to pass
 
