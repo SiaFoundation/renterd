@@ -86,7 +86,6 @@ type (
 		Model
 
 		DBAutopilotID uint
-		DBAutopilot   dbAutopilot
 
 		DBHostID uint
 		DBHost   dbHost
@@ -335,7 +334,7 @@ func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk 
 		// fetch ap id
 		var apID uint
 		if err := tx.
-			Model(&dbAutopilot{}).
+			Table("autopilots").
 			Where("identifier = ?", autopilotID).
 			Select("id").
 			Take(&apID).

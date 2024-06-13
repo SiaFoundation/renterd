@@ -138,6 +138,14 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
+func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+	return ssql.Autopilot(ctx, tx, id)
+}
+
+func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
+	return ssql.Autopilots(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
 }
@@ -559,6 +567,24 @@ func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMo
 
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
+	res, err := tx.Exec(ctx, `
+		INSERT INTO autopilots (created_at, identifier, config, current_period)
+		VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+		config = VALUES(config),
+		current_period = VALUES(current_period)
+	`, time.Now(), ap.ID, (*ssql.AutopilotConfig)(&ap.Config), ap.CurrentPeriod)
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 && n != 2 { // 1 if inserted, 2 if updated
+		return fmt.Errorf("expected 1 row affected, got %v", n)
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {

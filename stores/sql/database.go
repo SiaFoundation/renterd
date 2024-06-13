@@ -41,6 +41,13 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
+		// Autopilot returns the autopilot with the given ID. Returns
+		// api.ErrAutopilotNotFound if the autopilot doesn't exist.
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+
+		// Autopilots returns all autopilots.
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
@@ -150,6 +157,10 @@ type (
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
+
+		// UpdateAutopilot updates the autopilot with the provided one or
+		// creates a new one if it doesn't exist yet.
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
