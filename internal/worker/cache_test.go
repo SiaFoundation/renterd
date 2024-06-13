@@ -90,6 +90,10 @@ func TestWorkerCache(t *testing.T) {
 	}
 
 	// fetch contracts & gouging params so they're cached
+	contracts, err = c.DownloadContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	gp, err = c.GougingParams(context.Background())
 	if err != nil {
 		t.Fatal(err)
