@@ -526,11 +526,13 @@ func main() {
 			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, seed, cfg.HTTP.Password, workerAddr, logger)
+			}, bc, seed, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			setupWorkerFn = setupFn
+			setupWorkerFn = func(ctx context.Context) error {
+				return setupFn(ctx, workerAddr, cfg.HTTP.Password)
+			}
 			shutdownFns = append(shutdownFns, shutdownFnEntry{
 				name: "Worker",
 				fn:   shutdownFn,

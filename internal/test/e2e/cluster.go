@@ -333,7 +333,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bStopFn)
 
 	// Create worker.
-	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, workerPassword, workerAddr, logger)
+	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
 	workerServer := http.Server{
 		Handler: iworker.Auth(workerPassword, false)(w),
@@ -440,7 +440,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}))
 
 	// Register the worker
-	if err := wSetupFn(ctx); err != nil {
+	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
 		tt.Fatalf("failed to register worker, err: %v", err)
 	}
 

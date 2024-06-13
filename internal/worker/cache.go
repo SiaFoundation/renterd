@@ -82,14 +82,12 @@ type (
 		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 		HandleEvent(event webhooks.Event) error
-		Initialize(ctx context.Context) error
+		Initialize(ctx context.Context, workerAPI string, opts ...webhooks.HeaderOption) error
 	}
 )
 
 type cache struct {
-	b           Bus
-	eventsURL   string
-	webhookOpts []webhooks.HeaderOption
+	b Bus
 
 	cache  *memoryCache
 	logger *zap.SugaredLogger
@@ -98,11 +96,9 @@ type cache struct {
 	ready bool
 }
 
-func NewCache(b Bus, eventsURL string, webhookOpts []webhooks.HeaderOption, logger *zap.Logger) WorkerCache {
+func NewCache(b Bus, logger *zap.Logger) WorkerCache {
 	return &cache{
-		b:           b,
-		eventsURL:   eventsURL,
-		webhookOpts: webhookOpts,
+		b: b,
 
 		cache:  newMemoryCache(),
 		logger: logger.Sugar().Named("workercache"),
@@ -198,14 +194,15 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	return
 }
 
-func (c *cache) Initialize(ctx context.Context) error {
+func (c *cache) Initialize(ctx context.Context, workerAPI string, webhookOpts ...webhooks.HeaderOption) error {
+	eventsURL := fmt.Sprintf("%s/events", workerAPI)
 	for _, wh := range []webhooks.Webhook{
-		webhooks.NewEventWebhook(c.eventsURL, api.EventConsensusUpdate{}),
-		webhooks.NewEventWebhook(c.eventsURL, api.EventContractArchive{}),
-		webhooks.NewEventWebhook(c.eventsURL, api.EventContractRenew{}),
-		webhooks.NewEventWebhook(c.eventsURL, api.EventSettingUpdate{}),
+		webhooks.NewEventWebhook(eventsURL, api.EventConsensusUpdate{}),
+		webhooks.NewEventWebhook(eventsURL, api.EventContractArchive{}),
+		webhooks.NewEventWebhook(eventsURL, api.EventContractRenew{}),
+		webhooks.NewEventWebhook(eventsURL, api.EventSettingUpdate{}),
 	} {
-		if err := c.b.RegisterWebhook(ctx, wh, c.webhookOpts...); err != nil {
+		if err := c.b.RegisterWebhook(ctx, wh, webhookOpts...); err != nil {
 			return fmt.Errorf("failed to register webhook '%s', err: %v", wh, err)
 		}
 	}

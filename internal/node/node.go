@@ -55,7 +55,7 @@ type AutopilotConfig struct {
 
 type (
 	RunFn      = func() error
-	SetupFn    = func(context.Context) error
+	SetupFn    = func(context.Context, string, string) error
 	ShutdownFn = func(context.Context) error
 )
 
@@ -222,9 +222,9 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	return b.Handler(), shutdownFn, nil
 }
 
-func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, workerAPIPassword, workerAPIURL string, l *zap.Logger) (http.Handler, http.Handler, SetupFn, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, SetupFn, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, workerAPIPassword, workerAPIURL, l)
+	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, l)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

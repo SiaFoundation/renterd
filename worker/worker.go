@@ -1281,7 +1281,7 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, workerAPIPassword, workerAPIURL string, l *zap.Logger) (*worker, error) {
+func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
 	if contractLockingDuration == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
@@ -1301,9 +1301,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
-	eventsURL := fmt.Sprintf("%s/events", workerAPIURL)
-	webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", workerAPIPassword)}
-	cache := iworker.NewCache(b, eventsURL, webhookOpts, l)
+	cache := iworker.NewCache(b, l)
 
 	l = l.Named("worker").Named(id)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -1370,8 +1368,9 @@ func (w *worker) Handler() http.Handler {
 }
 
 // Setup initializes the worker cache.
-func (w *worker) Setup(ctx context.Context) error {
-	return w.cache.Initialize(ctx)
+func (w *worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
+	webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
+	return w.cache.Initialize(ctx, apiURL, webhookOpts...)
 }
 
 // Shutdown shuts down the worker.
