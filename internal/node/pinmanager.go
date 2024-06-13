@@ -37,9 +37,10 @@ type (
 
 type (
 	pinManager struct {
-		erp ExchangeRateProvider
-		as  AutopilotStore
-		ss  SettingStore
+		erp    ExchangeRateProvider
+		events EventBroadcaster
+		as     AutopilotStore
+		ss     SettingStore
 
 		updateInterval time.Duration
 		rateWindow     time.Duration
@@ -56,11 +57,12 @@ type (
 	}
 )
 
-func NewPinManager(erp ExchangeRateProvider, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(erp ExchangeRateProvider, events EventBroadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	return &pinManager{
-		erp: erp,
-		as:  as,
-		ss:  ss,
+		erp:    erp,
+		events: events,
+		as:     as,
+		ss:     ss,
 
 		logger: l.Sugar().Named("priceManager"),
 
@@ -341,7 +343,16 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 
 	// update settings
 	bytes, _ := json.Marshal(gs)
-	return pm.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes))
+	err = pm.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes))
+
+	// broadcast event
+	pm.events.BroadcastEvent(api.EventSettingUpdate{
+		Key:       api.SettingGouging,
+		Update:    string(bytes),
+		Timestamp: time.Now().UTC(),
+	})
+
+	return err
 }
 
 func (pm *pinManager) updatePrices(forced bool) error {

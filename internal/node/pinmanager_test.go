@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/hostd/host/settings/pin"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -35,6 +36,10 @@ func (erp *mockERP) updateRate(value float64) {
 	erp.value = value
 	time.Sleep(2 * testUpdateInterval)
 }
+
+type mockEventsBroadcaster struct{}
+
+func (meb *mockEventsBroadcaster) BroadcastEvent(e webhooks.WebhookEvent) {}
 
 func newTestExchangeRateProvider() *mockERP {
 	return &mockERP{currency: "usd", value: 1}
@@ -129,9 +134,10 @@ func TestPinManager(t *testing.T) {
 	// mock dependencies
 	ms := newTestStore()
 	erp := newTestExchangeRateProvider()
+	eb := &mockEventsBroadcaster{}
 
 	// start a pinmanager
-	pm := NewPinManager(erp, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
+	pm := NewPinManager(erp, eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
 	if err := pm.Run(); err != nil {
 		t.Fatal(err)
 	}

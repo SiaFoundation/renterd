@@ -9,23 +9,27 @@ import (
 )
 
 type (
-	EventBroadcaster struct {
+	EventBroadcaster interface {
+		BroadcastEvent(e webhooks.WebhookEvent)
+	}
+
+	eventBroadcaster struct {
 		broadcaster webhooks.Broadcaster
 		logger      *zap.SugaredLogger
 	}
 )
 
 func NewEventBroadcaster(b webhooks.Broadcaster, l *zap.Logger) EventBroadcaster {
-	return EventBroadcaster{
+	return &eventBroadcaster{
 		broadcaster: b,
 		logger:      l.Sugar().Named("events"),
 	}
 }
 
-func (b EventBroadcaster) BroadcastEvent(e webhooks.WebhookEvent) {
+func (eb *eventBroadcaster) BroadcastEvent(e webhooks.WebhookEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	if err := b.broadcaster.BroadcastAction(ctx, e.Event()); err != nil {
-		b.logger.Errorw("failed to broadcast event", "event", e, "error", err)
+	if err := eb.broadcaster.BroadcastAction(ctx, e.Event()); err != nil {
+		eb.logger.Errorw("failed to broadcast event", "event", e, "error", err)
 	}
 	cancel()
 }
