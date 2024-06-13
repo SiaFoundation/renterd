@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -54,6 +55,24 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 		return fmt.Errorf("bucket name mismatch: %v != %v: %w", bucketName, bucket, api.ErrBucketNotFound)
 	}
 	return errors.New("failed to delete multipart upload for unknown reason")
+}
+
+func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
+	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
+	}
+	defer rows.Close()
+
+	var accounts []api.Account
+	for rows.Next() {
+		a := api.Account{Balance: new(big.Int), Drift: new(big.Int)} // init big.Int
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+			return nil, fmt.Errorf("failed to scan account: %w", err)
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, nil
 }
 
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
@@ -813,22 +832,6 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	return res.RowsAffected()
 }
 
-func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
-	policy, err := json.Marshal(bp)
-	if err != nil {
-		return err
-	}
-	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
-	if err != nil {
-		return fmt.Errorf("failed to update bucket policy: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	} else if n == 0 {
-		return api.ErrBucketNotFound
-	}
-	return nil
-}
-
 func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowlist, hasBlocklist bool) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -1038,6 +1041,30 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
 	}
 	return hosts, nil
+}
+
+func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
+	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
+	if err != nil {
+		return fmt.Errorf("failed to set unclean shutdown: %w", err)
+	}
+	return err
+}
+
+func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
+	policy, err := json.Marshal(bp)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(ctx, "UPDATE buckets SET policy = ? WHERE name = ?", policy, bucket)
+	if err != nil {
+		return fmt.Errorf("failed to update bucket policy: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return api.ErrBucketNotFound
+	}
+	return nil
 }
 
 func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {

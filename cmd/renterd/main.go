@@ -447,12 +447,11 @@ func main() {
 
 	network, _ := build.Network()
 	busCfg := node.BusConfig{
-		Bus:                 cfg.Bus,
-		Database:            cfg.Database,
-		DatabaseLog:         cfg.Log.Database,
-		Logger:              logger,
-		Network:             network,
-		SlabPruningInterval: time.Hour,
+		Bus:         cfg.Bus,
+		Database:    cfg.Database,
+		DatabaseLog: cfg.Log.Database,
+		Logger:      logger,
+		Network:     network,
 	}
 
 	type shutdownFnEntry struct {

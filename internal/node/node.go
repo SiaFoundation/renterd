@@ -41,12 +41,11 @@ type Bus interface {
 
 type BusConfig struct {
 	config.Bus
-	Database            config.Database
-	DatabaseLog         config.DatabaseLog
-	Network             *consensus.Network
-	Logger              *zap.Logger
-	Miner               *Miner
-	SlabPruningInterval time.Duration
+	Database    config.Database
+	DatabaseLog config.DatabaseLog
+	Network     *consensus.Network
+	Logger      *zap.Logger
+	Miner       *Miner
 }
 
 type AutopilotConfig struct {
