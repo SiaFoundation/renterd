@@ -527,7 +527,7 @@ func main() {
 			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, seed, workerAddr, cfg.HTTP.Password, logger)
+			}, bc, seed, cfg.HTTP.Password, workerAddr, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
