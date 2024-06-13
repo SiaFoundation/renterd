@@ -41,6 +41,13 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
+		// Autopilot returns the autopilot with the given ID. Returns
+		// api.ErrAutopilotNotFound if the autopilot doesn't exist.
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+
+		// Autopilots returns all autopilots.
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
@@ -99,6 +106,10 @@ type (
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
+		// HostsForScanning returns a list of hosts to scan which haven't been
+		// scanned since at least maxLastScan.
+		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
+
 		// ListBuckets returns a list of all buckets in the database.
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
@@ -125,6 +136,14 @@ type (
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
+
+		// RecordHostScans records the results of host scans in the database
+		// such as recording the settings and price table of a host in case of
+		// success and updating the uptime and downtime of a host.
+		// NOTE: The price table is only updated if the known price table is
+		// expired since price tables from scans are not paid for and are
+		// therefore only useful for gouging checks.
+		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
@@ -157,6 +176,10 @@ type (
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
+
+		// UpdateAutopilot updates the autopilot with the provided one or
+		// creates a new one if it doesn't exist yet.
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
