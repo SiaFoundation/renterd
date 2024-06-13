@@ -53,8 +53,8 @@ func TestScoredHostsRandSelectByScore(t *testing.T) {
 	}
 
 	// assert select is random on equal inputs, we calculate the chi-square
-	// statistic and assert it's less than critical value of 6.635 (1 degree of
-	// freedom, using alpha of .01)
+	// statistic and assert it's less than critical value of 10.828 (1 degree of
+	// freedom, using alpha of 0.001)
 	var counts [2]int
 	hosts = scoredHosts{
 		{score: .1, host: api.Host{PublicKey: types.PublicKey{1}}},
@@ -72,7 +72,7 @@ func TestScoredHostsRandSelectByScore(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		chi2 += math.Pow(float64(counts[i])-nRuns/2, 2) / (nRuns / 2)
 	}
-	if chi2 > 6.635 {
+	if chi2 > 10.828 {
 		t.Fatal("unexpected", counts[0], counts[1], chi2)
 	}
 }
