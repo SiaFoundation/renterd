@@ -1340,76 +1340,12 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
-func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
-	var deletedSectors int
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Fetch contract_sectors to delete.
-		var sectors []dbContractSector
-		err := tx.Raw(`
-			SELECT contract_sectors.*
-			FROM contract_sectors
-			INNER JOIN sectors s ON s.id = contract_sectors.db_sector_id
-			INNER JOIN contracts c ON c.id = contract_sectors.db_contract_id
-			INNER JOIN hosts h ON h.id = c.host_id
-			WHERE s.root = ? AND h.public_key = ?
-			`, root[:], publicKey(hk)).
-			Scan(&sectors).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch contract sectors for deletion: %w", err)
-		}
-
-		if len(sectors) > 0 {
-			// Update the affected slabs.
-			var sectorIDs []uint
-			uniqueIDs := make(map[uint]struct{})
-			for _, s := range sectors {
-				if _, exists := uniqueIDs[s.DBSectorID]; !exists {
-					uniqueIDs[s.DBSectorID] = struct{}{}
-					sectorIDs = append(sectorIDs, s.DBSectorID)
-				}
-			}
-			err = tx.Exec("UPDATE slabs SET health_valid_until = ? WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", time.Now().Unix(), sectorIDs).Error
-			if err != nil {
-				return fmt.Errorf("failed to invalidate slab health: %w", err)
-			}
-
-			// Delete contract_sectors.
-			res := tx.Delete(&sectors)
-			if err := res.Error; err != nil {
-				return fmt.Errorf("failed to delete contract sectors: %w", err)
-			} else if res.RowsAffected != int64(len(sectors)) {
-				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
-			}
-			deletedSectors = len(sectors)
-
-			// Increment the host's lostSectors by the number of lost sectors.
-			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
-				return fmt.Errorf("failed to increment lost sectors: %w", err)
-			}
-		}
-
-		// Fetch the sector and update the latest_host field if the host for
-		// which we remove the sector is the latest_host.
-		var sector dbSector
-		err = tx.Where("root", root[:]).
-			Preload("Contracts.Host").
-			Find(&sector).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch sectors: %w", err)
-		}
-		if sector.LatestHost == publicKey(hk) {
-			if len(sector.Contracts) == 0 {
-				sector.LatestHost = publicKey{} // no more hosts
-			} else {
-				sector.LatestHost = sector.Contracts[len(sector.Contracts)-1].Host.PublicKey // most recent contract
-			}
-			return tx.Save(sector).Error
-		}
-		return nil
+func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (deletedSectors int, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		deletedSectors, err = tx.DeleteHostSector(ctx, hk, root)
+		return err
 	})
-	return deletedSectors, err
+	return
 }
 
 func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {

@@ -75,6 +75,12 @@ type (
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
+		// DeleteHostSector deletes all contract sector links that a host has
+		// with the given root incrementing the lost sector count in the
+		// process. If another contract with a different host exists that
+		// contains the root, latest_host is updated to that host.
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
