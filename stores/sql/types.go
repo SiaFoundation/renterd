@@ -30,7 +30,9 @@ type (
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
 	SecretKey       []byte
+	UnixTimeMS      time.Time
 	UnixTimeNS      time.Time
+	Unsigned64      uint64
 )
 
 var (
@@ -206,6 +208,32 @@ func (k *SecretKey) Scan(value interface{}) error {
 	return nil
 }
 
+// Scan scan value into unixTimeMS, implements sql.Scanner interface.
+func (u *UnixTimeMS) Scan(value interface{}) error {
+	var msec int64
+	var err error
+	switch value := value.(type) {
+	case int64:
+		msec = value
+	case []uint8:
+		msec, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+		}
+	default:
+		return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
+	}
+
+	*u = UnixTimeMS(time.UnixMilli(msec))
+	return nil
+}
+
+// Value returns a int64 value representing a unix timestamp in milliseconds,
+// implements driver.Valuer interface.
+func (u UnixTimeMS) Value() (driver.Value, error) {
+	return time.Time(u).UnixMilli(), nil
+}
+
 // Scan scan value into UnixTimeNS, implements sql.Scanner interface.
 func (u *UnixTimeNS) Scan(value interface{}) error {
 	var nsec int64
@@ -234,4 +262,29 @@ func (u *UnixTimeNS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u UnixTimeNS) Value() (driver.Value, error) {
 	return time.Time(u).UnixNano(), nil
+}
+
+// Scan scan value into Unsigned64, implements sql.Scanner interface.
+func (u *Unsigned64) Scan(value interface{}) error {
+	var n int64
+	var err error
+	switch value := value.(type) {
+	case int64:
+		n = value
+	case []uint8:
+		n, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal Unsigned64 value: %v %T", value, value)
+		}
+	default:
+		return fmt.Errorf("failed to unmarshal Unsigned64 value: %v %T", value, value)
+	}
+
+	*u = Unsigned64(n)
+	return nil
+}
+
+// Value returns an Unsigned64 value, implements driver.Valuer interface.
+func (u Unsigned64) Value() (driver.Value, error) {
+	return int64(u), nil
 }
