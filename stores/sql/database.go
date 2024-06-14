@@ -197,10 +197,6 @@ type (
 		// UpdateHostBlocklistEntries updates the blocklist in the database
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
-		// UpdateObjectHealth updates the health of all objects to the lowest
-		// health of all its slabs.
-		UpdateObjectHealth(ctx context.Context) error
-
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%
 		// - Invalidate health_valid_until

@@ -715,10 +715,6 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
-	return ssql.UpdateObjectHealth(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
 	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
@@ -829,12 +825,18 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
 	now := time.Now()
-	args := []any{maxDuration.Seconds(), minDuration.Seconds(), now.Add(minDuration).Unix()}
-	healthQuery, healthArgs := ssql.HealthQuery(limit, now)
-	args = append(args, healthArgs...)
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) %% (? - ?) + ?) FROM (%s) AS inner WHERE slabs.id=inner.id", healthQuery), args...)
+	cleanup, err := ssql.PrepareSlabHealth(ctx, tx, limit, now)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to compute slab health: %w", err)
+	}
+	defer cleanup()
+
+	args := []any{maxDuration.Seconds(), minDuration.Seconds(), now.Add(minDuration).Unix()}
+	res, err := tx.Exec(ctx, "UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) % (? - ?) + ?) FROM slabs_health AS inner WHERE slabs.id=inner.id", args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update slab health: %w", err)
+	} else if err := ssql.UpdateObjectHealth(ctx, tx); err != nil {
+		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
 }

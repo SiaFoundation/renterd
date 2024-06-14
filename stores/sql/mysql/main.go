@@ -718,10 +718,6 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
-	return ssql.UpdateObjectHealth(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
 	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
@@ -839,12 +835,18 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
 	now := time.Now()
-	healthQuery, args := ssql.HealthQuery(limit, now)
-	durationArgs := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
-	args = append(args, durationArgs...)
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs sla INNER JOIN (%s) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", healthQuery), args...)
+	cleanup, err := ssql.PrepareSlabHealth(ctx, tx, limit, now)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to compute slab health: %w", err)
+	}
+	defer cleanup()
+
+	args := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
+	res, err := tx.Exec(ctx, "UPDATE slabs sla INNER JOIN slabs_health h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update slab health: %w", err)
+	} else if err := ssql.UpdateObjectHealth(ctx, tx); err != nil {
+		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
 }
