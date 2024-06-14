@@ -10,10 +10,6 @@ import (
 	"go.sia.tech/renterd/internal/sql"
 )
 
-const (
-	tableContractPruneMetric = "contract_prunes"
-)
-
 func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) (metrics []api.ContractPruneMetric, _ error) {
 	rows, err := queryPeriods(ctx, tx, start, n, interval, opts)
 	if err != nil {
@@ -37,7 +33,7 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 }
 
 func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractPruneMetric) error {
-	insertStmt, err := tx.Prepare(ctx, fmt.Sprintf("INSERT INTO %s (created_at, timestamp, fcid, host, host_version, pruned, remaining, duration) VALUES (?, ?,?, ?, ?, ?, ?, ?)", tableContractPruneMetric))
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_prunes (created_at, timestamp, fcid, host, host_version, pruned, remaining, duration) VALUES (?, ?,?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract prune metric: %w", err)
 	}
@@ -87,27 +83,27 @@ func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, int
 	}
 
 	return tx.Query(ctx, fmt.Sprintf(`
-	WITH RECURSIVE periods AS (
-		SELECT ? AS period_start
-		UNION ALL
-		SELECT period_start + ?
-		FROM periods
-		WHERE period_start < ? - ?
-	)
-	SELECT %s.* FROM %s
-	INNER JOIN (
-	SELECT
-		p.period_start as Period,
-		MIN(obj.id) AS id
-	FROM
-		periods p
-	INNER JOIN
-		%s obj ON obj.timestamp >= p.period_start AND obj.timestamp < p.period_start + ?
-	WHERE %s
-	GROUP BY
-		p.period_start
-	) i ON %s.id = i.id ORDER BY Period ASC
-`, where.table, where.table, where.table, where.query, where.table), params...)
+		WITH RECURSIVE periods AS (
+			SELECT ? AS period_start
+			UNION ALL
+			SELECT period_start + ?
+			FROM periods
+			WHERE period_start < ? - ?
+		)
+		SELECT %s.* FROM %s
+		INNER JOIN (
+		SELECT
+			p.period_start as Period,
+			MIN(obj.id) AS id
+		FROM
+			periods p
+		INNER JOIN
+			%s obj ON obj.timestamp >= p.period_start AND obj.timestamp < p.period_start + ?
+		WHERE %s
+		GROUP BY
+			p.period_start
+		) i ON %s.id = i.id ORDER BY Period ASC
+	`, where.table, where.table, where.table, where.query, where.table), params...)
 }
 
 type whereClause struct {
@@ -121,7 +117,7 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 
 	switch opts := opts.(type) {
 	case api.ContractPruneMetricsQueryOpts:
-		where.table = tableContractPruneMetric
+		where.table = "contract_prunes"
 		if opts.ContractID != (types.FileContractID{}) {
 			where.query += " AND fcid = ?"
 			where.params = append(where.params, FileContractID(opts.ContractID))
