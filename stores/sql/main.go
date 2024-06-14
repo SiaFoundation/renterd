@@ -310,13 +310,15 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	_, err := tx.Exec(ctx, `
 		UPDATE sectors
 		SET latest_host = (
-			SELECT h.public_key
-			FROM hosts h
-			INNER JOIN contracts c ON c.host_id = h.id
-			INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-			INNER JOIN sectors s ON s.id = cs.db_sector_id
-			WHERE s.root = ? AND h.public_key != ?
-			LIMIT 1
+			SELECT * FROM (
+				SELECT h.public_key
+				FROM hosts h
+				INNER JOIN contracts c ON c.host_id = h.id
+				INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+				INNER JOIN sectors s ON s.id = cs.db_sector_id
+				WHERE s.root = ? AND h.public_key != ?
+				LIMIT 1
+			) AS _
 		)
 		WHERE root = ? AND latest_host = ?
 	`, Hash256(root), PublicKey(hk), Hash256(root), PublicKey(hk))
