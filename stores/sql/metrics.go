@@ -15,12 +15,7 @@ const (
 )
 
 func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) (metrics []api.ContractPruneMetric, _ error) {
-	where, err := whereClauseFromQueryOpts(opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build where clause: %w", err)
-	}
-
-	rows, err := queryPeriods(ctx, tx, tableContractPruneMetric, start, n, interval, where)
+	rows, err := queryPeriods(ctx, tx, start, n, interval, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 	}
@@ -71,9 +66,24 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 	return nil
 }
 
-func queryPeriods(ctx context.Context, tx sql.Tx, table string, start time.Time, n uint64, interval time.Duration, where whereClause) (*sql.LoggedRows, error) {
+func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts interface{}) (*sql.LoggedRows, error) {
 	if n > api.MetricMaxIntervals {
 		return nil, api.ErrMaxIntervalsExceeded
+	}
+
+	params := []interface{}{
+		UnixTimeMS(start),
+		interval.Milliseconds(),
+		UnixTimeMS(start.Add(time.Duration(n) * interval)),
+		interval.Milliseconds(),
+		interval.Milliseconds(),
+	}
+
+	where, err := whereClauseFromQueryOpts(opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build where clause: %w", err)
+	} else if len(where.params) > 0 {
+		params = append(params, where.params...)
 	}
 
 	return tx.Query(ctx, fmt.Sprintf(`
@@ -97,16 +107,11 @@ func queryPeriods(ctx context.Context, tx sql.Tx, table string, start time.Time,
 	GROUP BY
 		p.period_start
 	) i ON %s.id = i.id ORDER BY Period ASC
-`, table, table, table, where.query, table), append([]interface{}{
-		UnixTimeMS(start),
-		interval.Milliseconds(),
-		UnixTimeMS(start.Add(time.Duration(n) * interval)),
-		interval.Milliseconds(),
-		interval.Milliseconds(),
-	}, where.params...))
+`, where.table, where.table, where.table, where.query, where.table), params...)
 }
 
 type whereClause struct {
+	table  string
 	query  string
 	params []interface{}
 }
@@ -116,6 +121,7 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 
 	switch opts := opts.(type) {
 	case api.ContractPruneMetricsQueryOpts:
+		where.table = tableContractPruneMetric
 		if opts.ContractID != (types.FileContractID{}) {
 			where.query += " AND fcid = ?"
 			where.params = append(where.params, FileContractID(opts.ContractID))
