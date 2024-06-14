@@ -228,8 +228,15 @@ type (
 		// time range and options.
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
 
+		// ContractSetMetrics returns the contract set metrics for the given
+		// time range and options.
+		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
+
 		// RecordContractPruneMetric records a contract prune metric.
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
+
+		// RecordContractSetMetric records a contract set metric.
+		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
 	}
 
 	UsedContract struct {
