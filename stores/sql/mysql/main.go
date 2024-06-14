@@ -835,11 +835,9 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
 	now := time.Now()
-	cleanup, err := ssql.PrepareSlabHealth(ctx, tx, limit, now)
-	if err != nil {
+	if err := ssql.PrepareSlabHealth(ctx, tx, limit, now); err != nil {
 		return 0, fmt.Errorf("failed to compute slab health: %w", err)
 	}
-	defer cleanup()
 
 	args := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
 	res, err := tx.Exec(ctx, "UPDATE slabs sla INNER JOIN slabs_health h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", args...)

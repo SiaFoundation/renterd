@@ -633,8 +633,9 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	return usedContracts, nil
 }
 
-func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Time) (func() error, error) {
+func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Time) error {
 	_, err := tx.Exec(ctx, `
+		DROP TABLE IF EXISTS slabs_health;
 		CREATE TEMPORARY TABLE slabs_health AS
 			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 			THEN
@@ -654,10 +655,7 @@ func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Tim
 			GROUP BY slabs.id
 			LIMIT ?
 	`, now.Unix(), limit)
-	return func() error {
-		_, err := tx.Exec(ctx, "DROP TABE slabs_health")
-		return err
-	}, err
+	return err
 }
 
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
