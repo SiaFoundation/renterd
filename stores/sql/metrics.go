@@ -187,6 +187,29 @@ func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint6
 	return
 }
 
+func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []api.WalletMetric, err error) {
+	var placeHolder int64
+	var placeHolderTime time.Time
+	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
+		var wm api.WalletMetric
+		var timestamp UnixTimeMS
+		if err := rows.Scan(
+			&placeHolder,
+			&placeHolderTime,
+			&timestamp,
+			(*Unsigned64)(&wm.Confirmed.Lo), (*Unsigned64)(&wm.Confirmed.Hi),
+			(*Unsigned64)(&wm.Spendable.Lo), (*Unsigned64)(&wm.Spendable.Hi),
+			(*Unsigned64)(&wm.Unconfirmed.Lo), (*Unsigned64)(&wm.Unconfirmed.Hi),
+		); err != nil {
+			return fmt.Errorf("failed to scan contract set metric: %w", err)
+		}
+		wm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		metrics = append(metrics, wm)
+		return nil
+	})
+	return
+}
+
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
 	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, download_spending_lo, download_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, list_spending_lo, list_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
@@ -350,6 +373,36 @@ func RecordPerformanceMetric(ctx context.Context, tx sql.Tx, metrics ...api.Perf
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert performance metric: no rows affected")
+		}
+	}
+
+	return nil
+}
+
+func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMetric) error {
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO wallets (created_at, timestamp, confirmed_lo, confirmed_hi, spendable_lo, spendable_hi, unconfirmed_lo, unconfirmed_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert wallet metric: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, metric := range metrics {
+		res, err := insertStmt.Exec(ctx,
+			time.Now().UTC(),
+			UnixTimeMS(metric.Timestamp),
+			Unsigned64(metric.Confirmed.Lo),
+			Unsigned64(metric.Confirmed.Hi),
+			Unsigned64(metric.Spendable.Lo),
+			Unsigned64(metric.Spendable.Hi),
+			Unsigned64(metric.Unconfirmed.Lo),
+			Unsigned64(metric.Unconfirmed.Hi),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert wallet metric: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert wallet metric: no rows affected")
 		}
 	}
 
@@ -531,6 +584,8 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 			where.query += " AND origin = ?"
 			where.params = append(where.params, opts.Origin)
 		}
+	case api.WalletMetricsQueryOpts:
+		where.table = "wallets"
 	default:
 		return whereClause{}, fmt.Errorf("unknown query opts type: %T", opts)
 	}
