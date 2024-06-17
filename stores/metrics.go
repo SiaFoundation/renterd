@@ -180,20 +180,15 @@ func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, start time.Time,
 	return resp, nil
 }
 
-func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
-	metrics, err := s.contractSetMetrics(ctx, start, n, interval, opts)
+func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, _ error) {
+	err := s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (err error) {
+		metrics, err = tx.ContractSetMetrics(ctx, start, n, interval, opts)
+		return
+	})
 	if err != nil {
 		return nil, err
 	}
-	resp := make([]api.ContractSetMetric, len(metrics))
-	for i := range resp {
-		resp[i] = api.ContractSetMetric{
-			Contracts: metrics[i].Contracts,
-			Name:      metrics[i].Name,
-			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
-		}
-	}
-	return resp, nil
+	return
 }
 
 func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
@@ -281,16 +276,8 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...
 }
 
 func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
-	dbMetrics := make([]dbContractSetMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbContractSetMetric{
-			Contracts: metric.Contracts,
-			Name:      metric.Name,
-			Timestamp: unixTimeMS(metric.Timestamp),
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&dbMetrics).Error
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordContractSetMetric(ctx, metrics...)
 	})
 }
 
@@ -455,23 +442,6 @@ func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time,
 	err := s.findPeriods(ctx, dbContractSetChurnMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
-	}
-	for i, m := range metrics {
-		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
-	}
-	return metrics, nil
-}
-
-func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
-	whereExpr := gorm.Expr("TRUE")
-	if opts.Name != "" {
-		whereExpr = gorm.Expr("name = ?", opts.Name)
-	}
-
-	var metrics []dbContractSetMetric
-	err := s.findPeriods(ctx, dbContractSetMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
 	for i, m := range metrics {
 		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)

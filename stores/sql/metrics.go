@@ -13,7 +13,7 @@ import (
 func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) (metrics []api.ContractPruneMetric, _ error) {
 	rows, err := queryPeriods(ctx, tx, start, n, interval, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
+		return nil, fmt.Errorf("failed to fetch contract prune metrics: %w", err)
 	}
 	defer rows.Close()
 
@@ -27,6 +27,29 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 		}
 		cpm.Timestamp = api.TimeRFC3339(timestamp)
 		metrics = append(metrics, cpm)
+	}
+
+	return metrics, nil
+}
+
+func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, _ error) {
+	rows, err := queryPeriods(ctx, tx, start, n, interval, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var csm api.ContractSetMetric
+		var placeHolder int64
+		var placeHolderTime time.Time
+		var timestamp UnixTimeMS
+		if err := rows.Scan(&placeHolder, &placeHolderTime, &timestamp, &csm.Name, &csm.Contracts); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set metric: %w", err)
+		}
+
+		csm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		metrics = append(metrics, csm)
 	}
 
 	return metrics, nil
@@ -56,6 +79,32 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert contract prune metric: no rows affected")
+		}
+	}
+
+	return nil
+}
+
+func RecordContractSetMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractSetMetric) error {
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sets (created_at, timestamp, name, contracts) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract set metric: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, metric := range metrics {
+		res, err := insertStmt.Exec(ctx,
+			time.Now().UTC(),
+			UnixTimeMS(metric.Timestamp),
+			metric.Name,
+			metric.Contracts,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert contract set metric: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert contract set metric: no rows affected")
 		}
 	}
 
@@ -130,9 +179,26 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 			where.query += " AND host_version = ?"
 			where.params = append(where.params, opts.HostVersion)
 		}
+	case api.ContractSetMetricsQueryOpts:
+		where.table = "contract_sets"
+		if opts.Name != "" {
+			where.query += " AND name = ?"
+			where.params = append(where.params, opts.Name)
+		}
 	default:
 		return whereClause{}, fmt.Errorf("unknown query opts type: %T", opts)
 	}
 
 	return
+}
+
+func normaliseTimestamp(start time.Time, interval time.Duration, t UnixTimeMS) UnixTimeMS {
+	startMS := start.UnixMilli()
+	toNormaliseMS := time.Time(t).UnixMilli()
+	intervalMS := interval.Milliseconds()
+	if startMS > toNormaliseMS {
+		return UnixTimeMS(start)
+	}
+	normalizedMS := (toNormaliseMS-startMS)/intervalMS*intervalMS + start.UnixMilli()
+	return UnixTimeMS(time.UnixMilli(normalizedMS))
 }
