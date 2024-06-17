@@ -664,24 +664,28 @@ func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID,
 }
 
 func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error {
-	// fetch ids
-	var ids []types.FileContractID
-	for id := range toArchive {
-		ids = append(ids, id)
-	}
+	// archive contracts one-by-one to avoid overwhelming the database due to
+	// the cascade deletion of contract-sectors.
+	var errs []string
+	for fcid, reason := range toArchive {
+		// invalidate health of related sectors before archiving the contract
+		// NOTE: even if this is not done in the same transaction it won't have any
+		// lasting negative effects.
+		if err := s.invalidateSlabHealthByFCID(ctx, []types.FileContractID{fcid}); err != nil {
+			return fmt.Errorf("ArchiveContracts: failed to invalidate slab health: %w", err)
+		}
 
-	// invalidate health of related sectors before archiving the contracts
-	// NOTE: even if this is not done in the same transaction it won't have any
-	// lasting negative effects.
-	if err := s.invalidateSlabHealthByFCID(ctx, ids); err != nil {
-		return fmt.Errorf("ArchiveContracts: failed to invalidate slab health: %w", err)
+		// archive the contract but don't interrupt the process if one contract
+		// fails
+		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			return tx.ArchiveContract(ctx, fcid, reason)
+		}); err != nil {
+			errs = append(errs, fmt.Sprintf("%v: %v", fcid, err))
+			continue
+		}
 	}
-
-	// archive them
-	if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return archiveContracts(ctx, tx, toArchive)
-	}); err != nil {
-		return fmt.Errorf("ArchiveContracts: failed to archive contracts: %w", err)
+	if len(errs) > 0 {
+		return fmt.Errorf("ArchiveContracts: failed to archive at least one contract: %v", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -2045,19 +2049,6 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, contractPrice, totalCost
 	// Populate host.
 	contract.Host = host
 	return contract, nil
-}
-
-// archiveContracts archives the given contracts and uses the given reason as
-// archival reason
-//
-// NOTE: this function archives the contracts without setting a renewed ID
-func archiveContracts(ctx context.Context, tx sql.DatabaseTx, toArchive map[types.FileContractID]string) error {
-	for fcid, reason := range toArchive {
-		if err := tx.ArchiveContract(ctx, fcid, reason); err != nil {
-			return fmt.Errorf("failed to archive contract %v: %w", fcid, err)
-		}
-	}
-	return nil
 }
 
 func (s *SQLStore) pruneSlabsLoop() {
