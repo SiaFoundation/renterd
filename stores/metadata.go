@@ -664,16 +664,19 @@ func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID,
 }
 
 func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error {
+	// archive contracts one-by-one to avoid overwhelming the database due to
+	// the cascade deletion of contract-sectors.
 	var errs []string
 	for fcid, reason := range toArchive {
-		// invalidate health of related sectors before archiving the contracts
+		// invalidate health of related sectors before archiving the contract
 		// NOTE: even if this is not done in the same transaction it won't have any
 		// lasting negative effects.
 		if err := s.invalidateSlabHealthByFCID(ctx, []types.FileContractID{fcid}); err != nil {
 			return fmt.Errorf("ArchiveContracts: failed to invalidate slab health: %w", err)
 		}
 
-		// archive them
+		// archive the contract but don't interrupt the process if one contract
+		// fails
 		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 			return tx.ArchiveContract(ctx, fcid, reason)
 		}); err != nil {
