@@ -240,6 +240,9 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
+		// PerformanceMetrics returns performance metrics for the given time range
+		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
+
 		// RecordContractMetric records contract metrics.
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
@@ -251,6 +254,9 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
+
+		// RecordPerformanceMetric records performance metrics.
+		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
 	}
 
 	UsedContract struct {

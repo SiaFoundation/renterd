@@ -163,6 +163,30 @@ func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint6
 	return
 }
 
+func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) (metrics []api.PerformanceMetric, err error) {
+	var placeHolder int64
+	var placeHolderTime time.Time
+	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
+		var pm api.PerformanceMetric
+		var timestamp UnixTimeMS
+		if err := rows.Scan(
+			&placeHolder,
+			&placeHolderTime,
+			&timestamp,
+			&pm.Action,
+			(*PublicKey)(&pm.HostKey),
+			&pm.Origin,
+			&pm.Duration,
+		); err != nil {
+			return fmt.Errorf("failed to scan contract set metric: %w", err)
+		}
+		pm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		metrics = append(metrics, pm)
+		return nil
+	})
+	return
+}
+
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
 	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, download_spending_lo, download_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, list_spending_lo, list_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
@@ -298,6 +322,34 @@ func RecordContractSetMetric(ctx context.Context, tx sql.Tx, metrics ...api.Cont
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert contract set metric: no rows affected")
+		}
+	}
+
+	return nil
+}
+
+func RecordPerformanceMetric(ctx context.Context, tx sql.Tx, metrics ...api.PerformanceMetric) error {
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO performance (created_at, timestamp, action, host, origin, duration) VALUES (?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert performance metric: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, metric := range metrics {
+		res, err := insertStmt.Exec(ctx,
+			time.Now().UTC(),
+			UnixTimeMS(metric.Timestamp),
+			metric.Action,
+			PublicKey(metric.HostKey),
+			metric.Origin,
+			metric.Duration,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert performance metric: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert performance metric: no rows affected")
 		}
 	}
 
@@ -464,6 +516,20 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 		if opts.Name != "" {
 			where.query += " AND name = ?"
 			where.params = append(where.params, opts.Name)
+		}
+	case api.PerformanceMetricsQueryOpts:
+		where.table = "performance"
+		if opts.Action != "" {
+			where.query += " AND action = ?"
+			where.params = append(where.params, opts.Action)
+		}
+		if opts.HostKey != (types.PublicKey{}) {
+			where.query += " AND host = ?"
+			where.params = append(where.params, PublicKey(opts.HostKey))
+		}
+		if opts.Origin != "" {
+			where.query += " AND origin = ?"
+			where.params = append(where.params, opts.Origin)
 		}
 	default:
 		return whereClause{}, fmt.Errorf("unknown query opts type: %T", opts)
