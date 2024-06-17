@@ -115,6 +115,7 @@ func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, int
 	if n > api.MetricMaxIntervals {
 		return nil, api.ErrMaxIntervalsExceeded
 	}
+
 	params := []interface{}{
 		UnixTimeMS(start),
 		interval.Milliseconds(),
