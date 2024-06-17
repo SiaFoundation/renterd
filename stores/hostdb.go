@@ -286,69 +286,9 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 }
 
 func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
-	err = ss.retryTransaction(ctx, (func(tx *gorm.DB) error {
-		// fetch ap id
-		var apID uint
-		if err := tx.
-			Table("autopilots").
-			Where("identifier = ?", autopilotID).
-			Select("id").
-			Take(&apID).
-			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrAutopilotNotFound
-		} else if err != nil {
-			return err
-		}
-
-		// fetch host id
-		var hID uint
-		if err := tx.
-			Model(&dbHost{}).
-			Where("public_key = ?", publicKey(hk)).
-			Select("id").
-			Take(&hID).
-			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrHostNotFound
-		} else if err != nil {
-			return err
-		}
-
-		// update host info
-		return tx.
-			Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "db_autopilot_id"}, {Name: "db_host_id"}},
-				UpdateAll: true,
-			}).
-			Create(&dbHostCheck{
-				DBAutopilotID: apID,
-				DBHostID:      hID,
-
-				UsabilityBlocked:               hc.Usability.Blocked,
-				UsabilityOffline:               hc.Usability.Offline,
-				UsabilityLowScore:              hc.Usability.LowScore,
-				UsabilityRedundantIP:           hc.Usability.RedundantIP,
-				UsabilityGouging:               hc.Usability.Gouging,
-				UsabilityNotAcceptingContracts: hc.Usability.NotAcceptingContracts,
-				UsabilityNotAnnounced:          hc.Usability.NotAnnounced,
-				UsabilityNotCompletingScan:     hc.Usability.NotCompletingScan,
-
-				ScoreAge:              hc.Score.Age,
-				ScoreCollateral:       hc.Score.Collateral,
-				ScoreInteractions:     hc.Score.Interactions,
-				ScoreStorageRemaining: hc.Score.StorageRemaining,
-				ScoreUptime:           hc.Score.Uptime,
-				ScoreVersion:          hc.Score.Version,
-				ScorePrices:           hc.Score.Prices,
-
-				GougingContractErr: hc.Gouging.ContractErr,
-				GougingDownloadErr: hc.Gouging.DownloadErr,
-				GougingGougingErr:  hc.Gouging.GougingErr,
-				GougingPruneErr:    hc.Gouging.PruneErr,
-				GougingUploadErr:   hc.Gouging.UploadErr,
-			}).
-			Error
-	}))
-	return
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostCheck(ctx, autopilotID, hk, hc)
+	})
 }
 
 // HostsForScanning returns the address of hosts for scanning.
@@ -571,10 +511,7 @@ func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEnt
 }
 
 func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Model(&dbHost{}).
-			Where("public_key", publicKey(hk)).
-			Update("lost_sectors", 0).
-			Error
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.ResetLostSectors(ctx, hk)
 	})
 }

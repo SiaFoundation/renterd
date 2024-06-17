@@ -1014,6 +1014,14 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	return res.RowsAffected()
 }
 
+func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
+	_, err := tx.Exec(ctx, "UPDATE hosts SET lost_sectors = 0 WHERE public_key = ?", PublicKey(hk))
+	if err != nil {
+		return fmt.Errorf("failed to reset lost sectors: %w", err)
+	}
+	return nil
+}
+
 func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	if offset < 0 {
 		return nil, ErrNegativeOffset
