@@ -833,7 +833,21 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 	res, err := tx.Exec(ctx, "UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) % (? - ?) + ?) FROM slabs_health AS inner WHERE slabs.id=inner.id", args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to update slab health: %w", err)
-	} else if err := ssql.UpdateObjectHealth(ctx, tx); err != nil {
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE objects SET health = (
+			SELECT MIN(h.health)
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
+		) WHERE EXISTS (
+			SELECT 1
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
+		)`)
+	if err != nil {
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()

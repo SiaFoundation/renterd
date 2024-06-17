@@ -1298,22 +1298,6 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 	return nil
 }
 
-func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, `
-		UPDATE objects SET health = (
-			SELECT MIN(h.health)
-			FROM slabs_health h
-			INNER JOIN slices ON slices.db_slab_id = h.id
-			WHERE slices.db_object_id = objects.id
-		) WHERE EXISTS (
-			SELECT 1
-			FROM slabs_health h
-			INNER JOIN slices ON slices.db_slab_id = h.id
-			WHERE slices.db_object_id = objects.id
-		)`)
-	return err
-}
-
 func scanAutopilot(s scanner) (api.Autopilot, error) {
 	var a api.Autopilot
 	if err := s.Scan(&a.ID, (*AutopilotConfig)(&a.Config), &a.CurrentPeriod); err != nil {
