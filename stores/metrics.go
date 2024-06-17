@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"math/bits"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -13,10 +11,6 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-)
-
-const (
-	contractMetricGranularity = 5 * time.Minute
 )
 
 type (
@@ -124,31 +118,12 @@ func (dbContractSetChurnMetric) TableName() string { return "contract_sets_churn
 func (dbPerformanceMetric) TableName() string      { return "performance" }
 func (dbWalletMetric) TableName() string           { return "wallets" }
 
-func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
-	metrics, err := s.contractMetrics(ctx, start, n, interval, opts)
-	if err != nil {
-		return nil, err
-	}
-	resp := make([]api.ContractMetric, len(metrics))
-	toCurr := func(lo, hi unsigned64) types.Currency {
-		return types.NewCurrency(uint64(lo), uint64(hi))
-	}
-	for i := range resp {
-		resp[i] = api.ContractMetric{
-			Timestamp:           api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
-			ContractID:          types.FileContractID(metrics[i].FCID),
-			HostKey:             types.PublicKey(metrics[i].Host),
-			RemainingCollateral: toCurr(metrics[i].RemainingCollateralLo, metrics[i].RemainingCollateralHi),
-			RemainingFunds:      toCurr(metrics[i].RemainingFundsLo, metrics[i].RemainingFundsHi),
-			RevisionNumber:      uint64(metrics[i].RevisionNumber),
-			UploadSpending:      toCurr(metrics[i].UploadSpendingLo, metrics[i].UploadSpendingHi),
-			DownloadSpending:    toCurr(metrics[i].DownloadSpendingLo, metrics[i].DownloadSpendingHi),
-			FundAccountSpending: toCurr(metrics[i].FundAccountSpendingLo, metrics[i].FundAccountSpendingHi),
-			DeleteSpending:      toCurr(metrics[i].DeleteSpendingLo, metrics[i].DeleteSpendingHi),
-			ListSpending:        toCurr(metrics[i].ListSpendingLo, metrics[i].ListSpendingHi),
-		}
-	}
-	return resp, nil
+func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) (metrics []api.ContractMetric, err error) {
+	err = s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
+		metrics, txErr = tx.ContractMetrics(ctx, start, n, interval, opts)
+		return
+	})
+	return
 }
 
 func (s *SQLStore) ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) (metrics []api.ContractPruneMetric, err error) {
@@ -194,46 +169,8 @@ func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n ui
 }
 
 func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
-	dbMetrics := make([]dbContractMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbContractMetric{
-			Timestamp:             unixTimeMS(metric.Timestamp),
-			FCID:                  fileContractID(metric.ContractID),
-			Host:                  publicKey(metric.HostKey),
-			RemainingCollateralLo: unsigned64(metric.RemainingCollateral.Lo),
-			RemainingCollateralHi: unsigned64(metric.RemainingCollateral.Hi),
-			RemainingFundsLo:      unsigned64(metric.RemainingFunds.Lo),
-			RemainingFundsHi:      unsigned64(metric.RemainingFunds.Hi),
-			RevisionNumber:        unsigned64(metric.RevisionNumber),
-			UploadSpendingLo:      unsigned64(metric.UploadSpending.Lo),
-			UploadSpendingHi:      unsigned64(metric.UploadSpending.Hi),
-			DownloadSpendingLo:    unsigned64(metric.DownloadSpending.Lo),
-			DownloadSpendingHi:    unsigned64(metric.DownloadSpending.Hi),
-			FundAccountSpendingLo: unsigned64(metric.FundAccountSpending.Lo),
-			FundAccountSpendingHi: unsigned64(metric.FundAccountSpending.Hi),
-			DeleteSpendingLo:      unsigned64(metric.DeleteSpending.Lo),
-			DeleteSpendingHi:      unsigned64(metric.DeleteSpending.Hi),
-			ListSpendingLo:        unsigned64(metric.ListSpending.Lo),
-			ListSpendingHi:        unsigned64(metric.ListSpending.Hi),
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		// delete any existing metric for the same contract that has happened
-		// within the same 5' window by diving the timestamp by 5' and use integer division.
-		for _, metric := range metrics {
-			intervalStart := metric.Timestamp.Std().Truncate(contractMetricGranularity)
-			intervalEnd := intervalStart.Add(contractMetricGranularity)
-			err := tx.
-				Where("timestamp >= ?", unixTimeMS(intervalStart)).
-				Where("timestamp < ?", unixTimeMS(intervalEnd)).
-				Where("fcid", fileContractID(metric.ContractID)).
-				Delete(&dbContractMetric{}).
-				Error
-			if err != nil {
-				return err
-			}
-		}
-		return tx.Create(&dbMetrics).Error
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordContractMetric(ctx, metrics...)
 	})
 }
 
@@ -309,40 +246,6 @@ func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64,
 	return resp, nil
 }
 
-func (m dbContractMetric) Aggregate(o dbContractMetric) (out dbContractMetric) {
-	out = m
-	remainingCollateralLo, carry := bits.Add64(uint64(m.RemainingCollateralLo), uint64(o.RemainingCollateralLo), 0)
-	remainingCollateralHi, _ := bits.Add64(uint64(m.RemainingCollateralHi), uint64(o.RemainingCollateralHi), carry)
-	remainingFundsLo, carry := bits.Add64(uint64(m.RemainingFundsLo), uint64(o.RemainingFundsLo), 0)
-	remainingFundsHi, _ := bits.Add64(uint64(m.RemainingFundsHi), uint64(o.RemainingFundsHi), carry)
-	uploadSpendingLo, carry := bits.Add64(uint64(m.UploadSpendingLo), uint64(o.UploadSpendingLo), 0)
-	uploadSpendingHi, _ := bits.Add64(uint64(m.UploadSpendingHi), uint64(o.UploadSpendingHi), carry)
-	downloadSpendingLo, carry := bits.Add64(uint64(m.DownloadSpendingLo), uint64(o.DownloadSpendingLo), 0)
-	downloadSpendingHi, _ := bits.Add64(uint64(m.DownloadSpendingHi), uint64(o.DownloadSpendingHi), carry)
-	fundAccountSpendingLo, carry := bits.Add64(uint64(m.FundAccountSpendingLo), uint64(o.FundAccountSpendingLo), 0)
-	fundAccountSpendingHi, _ := bits.Add64(uint64(m.FundAccountSpendingHi), uint64(o.FundAccountSpendingHi), carry)
-	deleteSpendingLo, carry := bits.Add64(uint64(m.DeleteSpendingLo), uint64(o.DeleteSpendingLo), 0)
-	deleteSpendingHi, _ := bits.Add64(uint64(m.DeleteSpendingHi), uint64(o.DeleteSpendingHi), carry)
-	listSpendingLo, carry := bits.Add64(uint64(m.ListSpendingLo), uint64(o.ListSpendingLo), 0)
-	listSpendingHi, _ := bits.Add64(uint64(m.ListSpendingHi), uint64(o.ListSpendingHi), carry)
-
-	out.RemainingCollateralLo = unsigned64(remainingCollateralLo)
-	out.RemainingCollateralHi = unsigned64(remainingCollateralHi)
-	out.RemainingFundsLo = unsigned64(remainingFundsLo)
-	out.RemainingFundsHi = unsigned64(remainingFundsHi)
-	out.UploadSpendingLo = unsigned64(uploadSpendingLo)
-	out.UploadSpendingHi = unsigned64(uploadSpendingHi)
-	out.DownloadSpendingLo = unsigned64(downloadSpendingLo)
-	out.DownloadSpendingHi = unsigned64(downloadSpendingHi)
-	out.FundAccountSpendingLo = unsigned64(fundAccountSpendingLo)
-	out.FundAccountSpendingHi = unsigned64(fundAccountSpendingHi)
-	out.DeleteSpendingLo = unsigned64(deleteSpendingLo)
-	out.DeleteSpendingHi = unsigned64(deleteSpendingHi)
-	out.ListSpendingLo = unsigned64(listSpendingLo)
-	out.ListSpendingHi = unsigned64(listSpendingHi)
-	return
-}
-
 func (s *SQLStore) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
 	if metric == "" {
 		return errors.New("metric must be set")
@@ -372,35 +275,6 @@ func (s *SQLStore) PruneMetrics(ctx context.Context, metric string, cutoff time.
 		Error
 }
 
-func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]dbContractMetric, error) {
-	whereExpr := gorm.Expr("TRUE")
-	if opts.ContractID != (types.FileContractID{}) {
-		whereExpr = gorm.Expr("? AND fcid = ?", whereExpr, fileContractID(opts.ContractID))
-	}
-	if opts.HostKey != (types.PublicKey{}) {
-		whereExpr = gorm.Expr("? AND host = ?", whereExpr, publicKey(opts.HostKey))
-	}
-
-	var metrics []dbContractMetric
-	var err error
-	if opts.ContractID == (types.FileContractID{}) && opts.HostKey == (types.PublicKey{}) {
-		// if neither contract nor host filters were set, we return the
-		// aggregate spending for each period
-		metrics, err = s.findAggregatedContractPeriods(ctx, start, n, interval)
-	} else {
-		// otherwise we return the first metric for each period like we usually
-		// do
-		err = s.findPeriods(ctx, dbContractMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
-	}
-	for i, m := range metrics {
-		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
-	}
-	return metrics, nil
-}
-
 func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) unixTimeMS {
 	startMS := start.UnixMilli()
 	toNormaliseMS := time.Time(t).UnixMilli()
@@ -410,69 +284,6 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 	}
 	normalizedMS := (toNormaliseMS-startMS)/intervalMS*intervalMS + start.UnixMilli()
 	return unixTimeMS(time.UnixMilli(normalizedMS))
-}
-
-func (s *SQLStore) findAggregatedContractPeriods(ctx context.Context, start time.Time, n uint64, interval time.Duration) ([]dbContractMetric, error) {
-	if n > api.MetricMaxIntervals {
-		return nil, api.ErrMaxIntervalsExceeded
-	}
-	end := start.Add(time.Duration(n) * interval)
-
-	type metricWithPeriod struct {
-		Metric dbContractMetric `gorm:"embedded"`
-		Period int64
-	}
-	var metricsWithPeriod []metricWithPeriod
-
-	err := s.dbMetrics.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var fcids []fileContractID
-		if err := tx.Raw("SELECT DISTINCT fcid FROM contracts WHERE contracts.timestamp >= ? AND contracts.timestamp < ?", unixTimeMS(start), unixTimeMS(end)).
-			Scan(&fcids).Error; err != nil {
-			return fmt.Errorf("failed to fetch distinct contract ids: %w", err)
-		}
-
-		var indexHint string
-		if !isSQLite(tx) {
-			indexHint = "USE INDEX (idx_contracts_fcid_timestamp)"
-		}
-
-		for intervalStart := start; intervalStart.Before(end); intervalStart = intervalStart.Add(interval) {
-			intervalEnd := intervalStart.Add(interval)
-			for _, fcid := range fcids {
-				var metrics []dbContractMetric
-				err := tx.Raw(fmt.Sprintf("SELECT * FROM contracts %s WHERE contracts.timestamp >= ? AND contracts.timestamp < ? AND contracts.fcid = ? LIMIT 1", indexHint), unixTimeMS(intervalStart), unixTimeMS(intervalEnd), fileContractID(fcid)).
-					Scan(&metrics).Error
-				if err != nil {
-					return fmt.Errorf("failed to fetch contract metrics: %w", err)
-				} else if len(metrics) == 0 {
-					continue
-				}
-				metricsWithPeriod = append(metricsWithPeriod, metricWithPeriod{
-					Metric: metrics[0],
-					Period: intervalStart.UnixMilli(),
-				})
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	currentPeriod := int64(math.MinInt64)
-	var metrics []dbContractMetric
-	for _, m := range metricsWithPeriod {
-		m.Metric.FCID = fileContractID{}
-		m.Metric.Host = publicKey{}
-		m.Metric.RevisionNumber = 0
-		if m.Period != currentPeriod {
-			metrics = append(metrics, m.Metric)
-			currentPeriod = m.Period
-		} else {
-			metrics[len(metrics)-1] = metrics[len(metrics)-1].Aggregate(m.Metric)
-		}
-	}
-	return metrics, nil
 }
 
 // findPeriods is the core of all methods retrieving metrics. By using integer

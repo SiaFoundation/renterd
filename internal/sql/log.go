@@ -102,6 +102,11 @@ func (lt *loggedTxn) Exec(ctx context.Context, query string, args ...any) (sql.R
 	return result, err
 }
 
+// LoggedRows wraps a *sql.Rows with a logger and a long query duration.
+func (lt *loggedTxn) LoggedRows(rows *sql.Rows) *LoggedRows {
+	return &LoggedRows{rows, lt.log.Named("rows"), lt.longQueryDuration}
+}
+
 // Prepare creates a prepared statement for later queries or executions.
 // Multiple queries or executions may be run concurrently from the
 // returned statement. The caller must call the statement's Close method

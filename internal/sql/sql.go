@@ -46,6 +46,8 @@ type (
 		// Exec executes a query without returning any rows. The args are for
 		// any placeholder parameters in the query.
 		Exec(ctx context.Context, query string, args ...any) (sql.Result, error)
+		// LoggedRows wraps a *sql.Rows with a logger and a long query duration.
+		LoggedRows(rows *sql.Rows) *LoggedRows
 		// Prepare creates a prepared statement for later queries or executions.
 		// Multiple queries or executions may be run concurrently from the
 		// returned statement. The caller must call the statement's Close method

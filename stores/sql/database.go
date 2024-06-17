@@ -224,6 +224,10 @@ type (
 	}
 
 	MetricsDatabaseTx interface {
+		// ContractMetrics returns contract metrics  for the given time range
+		// and options.
+		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+
 		// ContractPruneMetrics returns the contract prune metrics for the given
 		// time range and options.
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
@@ -236,13 +240,16 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// RecordContractPruneMetric records a contract prune metric.
+		// RecordContractMetric records contract metrics.
+		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
+
+		// RecordContractPruneMetric records contract prune metrics.
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
-		// RecordContractSetChurnMetric records a contract set churn metric.
+		// RecordContractSetChurnMetric records contract set churn metrics.
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 
-		// RecordContractSetMetric records a contract set metric.
+		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
 	}
 
