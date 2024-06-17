@@ -473,6 +473,10 @@ func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostS
 	return ssql.RecordHostScans(ctx, tx, scans)
 }
 
+func (tx *MainDatabaseTx) RecordPriceTables(ctx context.Context, priceTableUpdates []api.HostPriceTableUpdate) error {
+	return ssql.RecordPriceTables(ctx, tx, priceTableUpdates)
+}
+
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
