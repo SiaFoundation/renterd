@@ -176,6 +176,9 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// ResetLostSectors resets the lost sector count for the given host.
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones and setting the clean shutdown flag.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
@@ -200,6 +203,9 @@ type (
 
 		// UpdateHostBlocklistEntries updates the blocklist in the database
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
+
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%

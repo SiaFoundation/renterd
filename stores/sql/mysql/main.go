@@ -554,6 +554,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
+func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return ssql.ResetLostSectors(ctx, tx, hk)
+}
+
 func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
 	// clean_shutdown = 1 after save
 	stmt, err := tx.Prepare(ctx, `
@@ -718,6 +722,36 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to delete host blocklist entry: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO host_checks (created_at, db_autopilot_id, db_host_id, usability_blocked, usability_offline, usability_low_score,
+			usability_redundant_ip, usability_gouging, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
+			score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
+			gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
+	    VALUES (?,
+			(SELECT id FROM autopilots WHERE identifier = ?),
+			(SELECT id FROM hosts WHERE public_key = ?),
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			created_at = VALUES(created_at), db_autopilot_id = VALUES(db_autopilot_id), db_host_id = VALUES(db_host_id),
+			usability_blocked = VALUES(usability_blocked), usability_offline = VALUES(usability_offline), usability_low_score = VALUES(usability_low_score),
+			usability_redundant_ip = VALUES(usability_redundant_ip), usability_gouging = VALUES(usability_gouging), usability_not_accepting_contracts = VALUES(usability_not_accepting_contracts),
+			usability_not_announced = VALUES(usability_not_announced), usability_not_completing_scan = VALUES(usability_not_completing_scan),
+			score_age = VALUES(score_age), score_collateral = VALUES(score_collateral), score_interactions = VALUES(score_interactions),
+			score_storage_remaining = VALUES(score_storage_remaining), score_uptime = VALUES(score_uptime), score_version = VALUES(score_version),
+			score_prices = VALUES(score_prices), gouging_contract_err = VALUES(gouging_contract_err), gouging_download_err = VALUES(gouging_download_err),
+			gouging_gouging_err = VALUES(gouging_gouging_err), gouging_prune_err = VALUES(gouging_prune_err), gouging_upload_err = VALUES(gouging_upload_err)
+	`, time.Now(), autopilot, ssql.PublicKey(hk), hc.Usability.Blocked, hc.Usability.Offline, hc.Usability.LowScore,
+		hc.Usability.RedundantIP, hc.Usability.Gouging, hc.Usability.NotAcceptingContracts, hc.Usability.NotAnnounced, hc.Usability.NotCompletingScan,
+		hc.Score.Age, hc.Score.Collateral, hc.Score.Interactions, hc.Score.StorageRemaining, hc.Score.Uptime, hc.Score.Version, hc.Score.Prices,
+		hc.Gouging.ContractErr, hc.Gouging.DownloadErr, hc.Gouging.GougingErr, hc.Gouging.PruneErr, hc.Gouging.UploadErr,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert host check: %w", err)
 	}
 	return nil
 }
