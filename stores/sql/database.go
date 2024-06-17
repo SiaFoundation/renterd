@@ -16,11 +16,11 @@ type (
 	Database interface {
 		io.Closer
 
-		// Transaction starts a new transaction.
-		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
-
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
+
+		// Transaction starts a new transaction.
+		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
 
 		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
@@ -212,8 +212,24 @@ type (
 
 	MetricsDatabase interface {
 		io.Closer
+
+		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
+
+		// Transaction starts a new transaction.
+		Transaction(ctx context.Context, fn func(MetricsDatabaseTx) error) error
+
+		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
+	}
+
+	MetricsDatabaseTx interface {
+		// ContractPruneMetrics returns the contract prune metrics for the given
+		// time range and options.
+		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
+
+		// RecordContractPruneMetric records a contract prune metric.
+		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 	}
 
 	UsedContract struct {
