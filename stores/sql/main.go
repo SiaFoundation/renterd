@@ -1010,6 +1010,43 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 	return nil
 }
 
+func RecordPriceTables(ctx context.Context, tx sql.Tx, priceTableUpdates []api.HostPriceTableUpdate) error {
+	if len(priceTableUpdates) == 0 {
+		return nil
+	}
+
+	stmt, err := tx.Prepare(ctx, `
+		UPDATE hosts SET
+		recent_downtime = CASE WHEN ? THEN recent_downtime = 0 ELSE recent_downtime END,
+		recent_scan_failures = CASE WHEN ? THEN recent_scan_failures = 0 ELSE recent_scan_failures END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry =  CASE WHEN ? THEN ? ELSE price_table_expiry END,
+		successful_interactions =  CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update host with price table: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, ptu := range priceTableUpdates {
+		_, err := stmt.Exec(ctx,
+			ptu.Success,                                            // recent_downtime
+			ptu.Success,                                            // recent_scan_failures
+			ptu.Success, PriceTable(ptu.PriceTable.HostPriceTable), // price_table
+			ptu.Success, ptu.PriceTable.Expiry, // price_table_expiry
+			ptu.Success,  // successful_interactions
+			!ptu.Success, // failed_interactions
+			PublicKey(ptu.HostKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update host with price table: %w", err)
+		}
+	}
+	return nil
+}
+
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts
 	rows, err := tx.Query(ctx, `
@@ -1046,6 +1083,14 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
+	_, err := tx.Exec(ctx, "UPDATE hosts SET lost_sectors = 0 WHERE public_key = ?", PublicKey(hk))
+	if err != nil {
+		return fmt.Errorf("failed to reset lost sectors: %w", err)
+	}
+	return nil
 }
 
 func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {

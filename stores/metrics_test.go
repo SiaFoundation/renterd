@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
@@ -92,8 +93,8 @@ func TestContractPruneMetrics(t *testing.T) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
 		for _, m := range metrics {
-			if !cmp.Equal(m, fcid2Metric[m.ContractID], cmp.Comparer(api.CompareTimeRFC3339)) {
-				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
+			if !cmp.Equal(m, fcid2Metric[m.ContractID], cmpopts.IgnoreUnexported(api.ContractPruneMetric{}), cmp.Comparer(api.CompareTimeRFC3339)) {
+				t.Fatal("unexpected metric", m, fcid2Metric[m.ContractID])
 			}
 			cmpFn(m)
 		}

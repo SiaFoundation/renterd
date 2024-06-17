@@ -474,6 +474,10 @@ func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostS
 	return ssql.RecordHostScans(ctx, tx, scans)
 }
 
+func (tx *MainDatabaseTx) RecordPriceTables(ctx context.Context, priceTableUpdates []api.HostPriceTableUpdate) error {
+	return ssql.RecordPriceTables(ctx, tx, priceTableUpdates)
+}
+
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
@@ -546,6 +550,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return ssql.ResetLostSectors(ctx, tx, hk)
 }
 
 func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
@@ -711,6 +719,36 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to delete host blocklist entry: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {
+	_, err := tx.Exec(ctx, `
+	    INSERT INTO host_checks (created_at, db_autopilot_id, db_host_id, usability_blocked, usability_offline, usability_low_score,
+	        usability_redundant_ip, usability_gouging, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
+	        score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
+	        gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
+	    VALUES (?,
+			(SELECT id FROM autopilots WHERE identifier = ?),
+			(SELECT id FROM hosts WHERE public_key = ?),
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	    ON CONFLICT (db_autopilot_id, db_host_id) DO UPDATE SET
+	        created_at = EXCLUDED.created_at, db_autopilot_id = EXCLUDED.db_autopilot_id, db_host_id = EXCLUDED.db_host_id,
+	        usability_blocked = EXCLUDED.usability_blocked, usability_offline = EXCLUDED.usability_offline, usability_low_score = EXCLUDED.usability_low_score,
+	        usability_redundant_ip = EXCLUDED.usability_redundant_ip, usability_gouging = EXCLUDED.usability_gouging, usability_not_accepting_contracts = EXCLUDED.usability_not_accepting_contracts,
+	        usability_not_announced = EXCLUDED.usability_not_announced, usability_not_completing_scan = EXCLUDED.usability_not_completing_scan,
+	        score_age = EXCLUDED.score_age, score_collateral = EXCLUDED.score_collateral, score_interactions = EXCLUDED.score_interactions,
+	        score_storage_remaining = EXCLUDED.score_storage_remaining, score_uptime = EXCLUDED.score_uptime, score_version = EXCLUDED.score_version,
+	        score_prices = EXCLUDED.score_prices, gouging_contract_err = EXCLUDED.gouging_contract_err, gouging_download_err = EXCLUDED.gouging_download_err,
+	        gouging_gouging_err = EXCLUDED.gouging_gouging_err, gouging_prune_err = EXCLUDED.gouging_prune_err, gouging_upload_err = EXCLUDED.gouging_upload_err
+	    `, time.Now(), autopilot, ssql.PublicKey(hk), hc.Usability.Blocked, hc.Usability.Offline, hc.Usability.LowScore,
+		hc.Usability.RedundantIP, hc.Usability.Gouging, hc.Usability.NotAcceptingContracts, hc.Usability.NotAnnounced, hc.Usability.NotCompletingScan,
+		hc.Score.Age, hc.Score.Collateral, hc.Score.Interactions, hc.Score.StorageRemaining, hc.Score.Uptime, hc.Score.Version, hc.Score.Prices,
+		hc.Gouging.ContractErr, hc.Gouging.DownloadErr, hc.Gouging.GougingErr, hc.Gouging.PruneErr, hc.Gouging.UploadErr,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert host check: %w", err)
 	}
 	return nil
 }

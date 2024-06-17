@@ -16,11 +16,11 @@ type (
 	Database interface {
 		io.Closer
 
-		// Transaction starts a new transaction.
-		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
-
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
+
+		// Transaction starts a new transaction.
+		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
 
 		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
@@ -151,6 +151,10 @@ type (
 		// therefore only useful for gouging checks.
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 
+		// RecordPriceTables records price tables for hosts in the database
+		// increasing the successful/failed interactions accordingly.
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
@@ -172,6 +176,9 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// ResetLostSectors resets the lost sector count for the given host.
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones and setting the clean shutdown flag.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
@@ -190,6 +197,9 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
@@ -218,8 +228,24 @@ type (
 
 	MetricsDatabase interface {
 		io.Closer
+
+		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
+
+		// Transaction starts a new transaction.
+		Transaction(ctx context.Context, fn func(MetricsDatabaseTx) error) error
+
+		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
+	}
+
+	MetricsDatabaseTx interface {
+		// ContractPruneMetrics returns the contract prune metrics for the given
+		// time range and options.
+		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
+
+		// RecordContractPruneMetric records a contract prune metric.
+		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 	}
 
 	UsedContract struct {
