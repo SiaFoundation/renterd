@@ -1301,6 +1301,7 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 			SELECT MIN(h.health)
 			FROM slabs_health h
 			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
 		) WHERE EXISTS (
 		SELECT 1
 		FROM slabs_health h
