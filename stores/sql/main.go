@@ -1303,11 +1303,10 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 			INNER JOIN slices ON slices.db_slab_id = h.id
 			WHERE slices.db_object_id = objects.id
 		) WHERE EXISTS (
-		SELECT 1
-		FROM slabs_health h
-		INNER JOIN slices ON slices.db_slab_id = h.id
-		INNER JOIN objects ON objects.id = slices.db_object_id
-		WHERE objects.id = slices.db_object_id
+			SELECT 1
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
 		)`)
 	return err
 }
