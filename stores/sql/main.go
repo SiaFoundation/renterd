@@ -634,8 +634,11 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 }
 
 func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Time) error {
-	_, err := tx.Exec(ctx, `
-		DROP TABLE IF EXISTS slabs_health;
+	_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS slabs_health")
+	if err != nil {
+		return fmt.Errorf("failed to drop temporary table: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
 		CREATE TEMPORARY TABLE slabs_health AS
 			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 			THEN
