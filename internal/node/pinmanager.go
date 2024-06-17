@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +39,7 @@ type (
 type (
 	pinManager struct {
 		erp    ExchangeRateProvider
-		events EventBroadcaster
+		events webhooks.Broadcaster
 		as     AutopilotStore
 		ss     SettingStore
 
@@ -57,7 +58,7 @@ type (
 	}
 )
 
-func NewPinManager(erp ExchangeRateProvider, events EventBroadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(erp ExchangeRateProvider, events webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	return &pinManager{
 		erp:    erp,
 		events: events,
@@ -346,10 +347,14 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	err = pm.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes))
 
 	// broadcast event
-	pm.events.BroadcastEvent(api.EventSettingUpdate{
-		Key:       api.SettingGouging,
-		Update:    string(bytes),
-		Timestamp: time.Now().UTC(),
+	pm.events.BroadcastAction(context.Background(), webhooks.Event{
+		Module: api.ModuleSetting,
+		Event:  api.EventUpdate,
+		Payload: api.EventSettingUpdate{
+			Key:       api.SettingGouging,
+			Update:    string(bytes),
+			Timestamp: time.Now().UTC(),
+		},
 	})
 
 	return err

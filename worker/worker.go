@@ -158,7 +158,7 @@ type (
 	}
 
 	WebhookStore interface {
-		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook, opts ...webhooks.HeaderOption) error
+		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
 
 	ConsensusState interface {

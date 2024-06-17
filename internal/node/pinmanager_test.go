@@ -39,7 +39,9 @@ func (erp *mockERP) updateRate(value float64) {
 
 type mockEventsBroadcaster struct{}
 
-func (meb *mockEventsBroadcaster) BroadcastEvent(e webhooks.EventWebhook) {}
+func (meb *mockEventsBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Event) error {
+	return nil
+}
 
 func newTestExchangeRateProvider() *mockERP {
 	return &mockERP{currency: "usd", value: 1}

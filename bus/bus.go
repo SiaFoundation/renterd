@@ -57,11 +57,6 @@ type (
 		TipState() consensus.State
 	}
 
-	// An EventBroadcaster broadcasts events to webhooks.
-	EventBroadcaster interface {
-		BroadcastEvent(e webhooks.EventWebhook)
-	}
-
 	// An ExchangeRateProvider allows retrieving the current exchange rate for
 	// siacoin against an external currency.
 	ExchangeRateProvider interface {
@@ -247,7 +242,6 @@ type bus struct {
 
 	alerts   alerts.Alerter
 	alertMgr *alerts.Manager
-	events   EventBroadcaster
 	hooks    *webhooks.Manager
 	logger   *zap.SugaredLogger
 }
@@ -978,10 +972,14 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 
 	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
 		for fcid, reason := range toArchive {
-			b.events.BroadcastEvent(api.EventContractArchive{
-				ContractID: fcid,
-				Reason:     reason,
-				Timestamp:  time.Now().UTC(),
+			b.broadcastAction(webhooks.Event{
+				Module: api.ModuleContract,
+				Event:  api.EventArchive,
+				Payload: api.EventContractArchive{
+					ContractID: fcid,
+					Reason:     reason,
+					Timestamp:  time.Now().UTC(),
+				},
 			})
 		}
 	}
@@ -1004,10 +1002,14 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
 		return
 	} else {
-		b.events.BroadcastEvent(api.EventContractSetUpdate{
-			Name:        set,
-			ContractIDs: contractIds,
-			Timestamp:   time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleContractSet,
+			Event:  api.EventUpdate,
+			Payload: api.EventContractSetUpdate{
+				Name:        set,
+				ContractIDs: contractIds,
+				Timestamp:   time.Now().UTC(),
+			},
 		})
 	}
 }
@@ -1194,9 +1196,13 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	}
 
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	b.events.BroadcastEvent(api.EventContractRenew{
-		Renewal:   r,
-		Timestamp: time.Now().UTC(),
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventRenew,
+		Payload: api.EventContractRenew{
+			Renewal:   r,
+			Timestamp: time.Now().UTC(),
+		},
 	})
 
 	jc.Encode(r)
@@ -1707,10 +1713,14 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
-		b.events.BroadcastEvent(api.EventSettingUpdate{
-			Key:       key,
-			Update:    value,
-			Timestamp: time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventUpdate,
+			Payload: api.EventSettingUpdate{
+				Key:       key,
+				Update:    value,
+				Timestamp: time.Now().UTC(),
+			},
 		})
 	}
 }
@@ -1723,9 +1733,13 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	}
 
 	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
-		b.events.BroadcastEvent(api.EventSettingDelete{
-			Key:       key,
-			Timestamp: time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventDelete,
+			Payload: api.EventSettingDelete{
+				Key:       key,
+				Timestamp: time.Now().UTC(),
+			},
 		})
 	}
 }
@@ -2073,6 +2087,16 @@ func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 	}
 }
 
+func (b *bus) broadcastAction(e webhooks.Event) {
+	log := b.logger.With("event", e.Event).With("module", e.Module)
+	err := b.hooks.BroadcastAction(context.Background(), e)
+	if err != nil {
+		log.With(zap.Error(err)).Error("failed to broadcast action")
+	} else {
+		log.Debug("successfully broadcast action")
+	}
+}
+
 func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
@@ -2126,7 +2150,7 @@ func (b *bus) webhookActionHandlerPost(jc jape.Context) {
 	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
 		return
 	}
-	b.hooks.BroadcastAction(jc.Request.Context(), action)
+	b.broadcastAction(action)
 }
 
 func (b *bus) webhookHandlerDelete(jc jape.Context) {
@@ -2426,20 +2450,23 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	b.events.BroadcastEvent(api.EventConsensusUpdate{
-		ConsensusState: b.consensusState(),
-		TransactionFee: b.tp.RecommendedFee(),
-		Timestamp:      time.Now().UTC(),
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleConsensus,
+		Event:  api.EventUpdate,
+		Payload: api.EventConsensusUpdate{
+			ConsensusState: b.consensusState(),
+			TransactionFee: b.tp.RecommendedFee(),
+			Timestamp:      time.Now().UTC(),
+		},
 	})
 }
 
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, pm PinManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, eb EventBroadcaster, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, pm PinManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		alerts:           alerts.WithOrigin(am, "bus"),
 		alertMgr:         am,
 		pins:             pm,
-		events:           eb,
 		hooks:            hm,
 		s:                s,
 		cm:               cm,
