@@ -155,8 +155,8 @@ func (pss PricePinSettings) Validate() error {
 	if !pss.Disabled && pss.Currency == "" {
 		return fmt.Errorf("price pin settings must have a currency")
 	}
-	if pss.Threshold == 1 {
-		return fmt.Errorf("price pin settings must have a threshold less than 1")
+	if pss.Threshold <= 0 || pss.Threshold >= 1 {
+		return fmt.Errorf("price pin settings must have a threshold between 0 and 1")
 	}
 	return nil
 }
