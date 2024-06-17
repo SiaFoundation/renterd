@@ -243,6 +243,10 @@ type (
 		// PerformanceMetrics returns performance metrics for the given time range
 		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
 
+		// PruneMetrics deletes metrics of a certain type older than the given
+		// cutoff time.
+		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
+
 		// WalletMetrics returns wallet metrics for the given time range
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 

@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -187,27 +188,32 @@ func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint6
 	return
 }
 
-func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []api.WalletMetric, err error) {
-	var placeHolder int64
-	var placeHolderTime time.Time
-	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
-		var wm api.WalletMetric
-		var timestamp UnixTimeMS
-		if err := rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			(*Unsigned64)(&wm.Confirmed.Lo), (*Unsigned64)(&wm.Confirmed.Hi),
-			(*Unsigned64)(&wm.Spendable.Lo), (*Unsigned64)(&wm.Spendable.Hi),
-			(*Unsigned64)(&wm.Unconfirmed.Lo), (*Unsigned64)(&wm.Unconfirmed.Hi),
-		); err != nil {
-			return fmt.Errorf("failed to scan contract set metric: %w", err)
-		}
-		wm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		metrics = append(metrics, wm)
-		return nil
-	})
-	return
+func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Time) error {
+	if metric == "" {
+		return errors.New("metric must be set")
+	} else if cutoff.IsZero() {
+		return errors.New("cutoff time must be set")
+	}
+
+	var table string
+	switch metric {
+	case api.MetricContractPrune:
+		table = "contract_prunes"
+	case api.MetricContractSet:
+		table = "contract_sets"
+	case api.MetricContractSetChurn:
+		table = "contract_sets_churn"
+	case api.MetricContract:
+		table = "contracts"
+	case api.MetricPerformance:
+		table = "performance"
+	case api.MetricWallet:
+		table = "wallets"
+	default:
+		return fmt.Errorf("unknown metric '%s'", metric)
+	}
+	_, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE timestamp < ?", table), UnixTimeMS(cutoff))
+	return err
 }
 
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
@@ -409,6 +415,29 @@ func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMet
 	return nil
 }
 
+func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []api.WalletMetric, err error) {
+	var placeHolder int64
+	var placeHolderTime time.Time
+	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
+		var wm api.WalletMetric
+		var timestamp UnixTimeMS
+		if err := rows.Scan(
+			&placeHolder,
+			&placeHolderTime,
+			&timestamp,
+			(*Unsigned64)(&wm.Confirmed.Lo), (*Unsigned64)(&wm.Confirmed.Hi),
+			(*Unsigned64)(&wm.Spendable.Lo), (*Unsigned64)(&wm.Spendable.Hi),
+			(*Unsigned64)(&wm.Unconfirmed.Lo), (*Unsigned64)(&wm.Unconfirmed.Hi),
+		); err != nil {
+			return fmt.Errorf("failed to scan contract set metric: %w", err)
+		}
+		wm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		metrics = append(metrics, wm)
+		return nil
+	})
+	return
+}
+
 func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts interface{}, scanRowFn func(*sql.LoggedRows) error) error {
 	if n > api.MetricMaxIntervals {
 		return api.ErrMaxIntervalsExceeded
@@ -421,11 +450,71 @@ func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, int
 		interval.Milliseconds(),
 	}
 
-	where, err := whereClauseFromQueryOpts(opts)
-	if err != nil {
-		return fmt.Errorf("failed to build where clause: %w", err)
-	} else if len(where.params) > 0 {
-		params = append(params, where.params...)
+	query := "1=1"
+	var table string
+	switch opts := opts.(type) {
+	case api.ContractMetricsQueryOpts:
+		table = "contracts"
+		if opts.ContractID != (types.FileContractID{}) {
+			query += " AND fcid = ?"
+			params = append(params, FileContractID(opts.ContractID))
+		}
+		if opts.HostKey != (types.PublicKey{}) {
+			query += " AND host = ?"
+			params = append(params, PublicKey(opts.HostKey))
+		}
+	case api.ContractPruneMetricsQueryOpts:
+		table = "contract_prunes"
+		if opts.ContractID != (types.FileContractID{}) {
+			query += " AND fcid = ?"
+			params = append(params, FileContractID(opts.ContractID))
+		}
+		if opts.HostKey != (types.PublicKey{}) {
+			query += " AND host = ?"
+			params = append(params, PublicKey(opts.HostKey))
+		}
+		if opts.HostVersion != "" {
+			query += " AND host_version = ?"
+			params = append(params, opts.HostVersion)
+		}
+	case api.ContractSetChurnMetricsQueryOpts:
+		table = "contract_sets_churn"
+		if opts.Name != "" {
+			query += " AND name = ?"
+			params = append(params, opts.Name)
+		}
+		if opts.Direction != "" {
+			query += " AND direction = ?"
+			params = append(params, opts.Direction)
+		}
+		if opts.Reason != "" {
+			query += " AND reason = ?"
+			params = append(params, opts.Reason)
+		}
+	case api.ContractSetMetricsQueryOpts:
+		table = "contract_sets"
+		if opts.Name != "" {
+			query += " AND name = ?"
+			params = append(params, opts.Name)
+		}
+	case api.PerformanceMetricsQueryOpts:
+		table = "performance"
+		if opts.Action != "" {
+			query += " AND action = ?"
+			params = append(params, opts.Action)
+		}
+		if opts.HostKey != (types.PublicKey{}) {
+			query += " AND host = ?"
+			params = append(params, PublicKey(opts.HostKey))
+		}
+		if opts.Origin != "" {
+			query += " AND origin = ?"
+			params = append(params, opts.Origin)
+		}
+	case api.WalletMetricsQueryOpts:
+		table = "wallets"
+	default:
+		return fmt.Errorf("unknown query opts type: %T", opts)
 	}
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
@@ -449,7 +538,7 @@ func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, int
 		GROUP BY
 			p.period_start
 		) i ON %s.id = i.id ORDER BY Period ASC
-	`, where.table, where.table, where.table, where.query, where.table), params...)
+	`, table, table, table, query, table), params...)
 	if err != nil {
 		return fmt.Errorf("failed to query periods: %w", err)
 	}
@@ -514,83 +603,6 @@ func queryAggregatedPeriods(ctx context.Context, tx sql.Tx, start time.Time, n u
 	}
 
 	return nil
-}
-
-type whereClause struct {
-	table  string
-	query  string
-	params []interface{}
-}
-
-func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
-	where.query = "1=1"
-
-	switch opts := opts.(type) {
-	case api.ContractMetricsQueryOpts:
-		where.table = "contracts"
-		if opts.ContractID != (types.FileContractID{}) {
-			where.query += " AND fcid = ?"
-			where.params = append(where.params, FileContractID(opts.ContractID))
-		}
-		if opts.HostKey != (types.PublicKey{}) {
-			where.query += " AND host = ?"
-			where.params = append(where.params, PublicKey(opts.HostKey))
-		}
-	case api.ContractPruneMetricsQueryOpts:
-		where.table = "contract_prunes"
-		if opts.ContractID != (types.FileContractID{}) {
-			where.query += " AND fcid = ?"
-			where.params = append(where.params, FileContractID(opts.ContractID))
-		}
-		if opts.HostKey != (types.PublicKey{}) {
-			where.query += " AND host = ?"
-			where.params = append(where.params, PublicKey(opts.HostKey))
-		}
-		if opts.HostVersion != "" {
-			where.query += " AND host_version = ?"
-			where.params = append(where.params, opts.HostVersion)
-		}
-	case api.ContractSetChurnMetricsQueryOpts:
-		where.table = "contract_sets_churn"
-		if opts.Name != "" {
-			where.query += " AND name = ?"
-			where.params = append(where.params, opts.Name)
-		}
-		if opts.Direction != "" {
-			where.query += " AND direction = ?"
-			where.params = append(where.params, opts.Direction)
-		}
-		if opts.Reason != "" {
-			where.query += " AND reason = ?"
-			where.params = append(where.params, opts.Reason)
-		}
-	case api.ContractSetMetricsQueryOpts:
-		where.table = "contract_sets"
-		if opts.Name != "" {
-			where.query += " AND name = ?"
-			where.params = append(where.params, opts.Name)
-		}
-	case api.PerformanceMetricsQueryOpts:
-		where.table = "performance"
-		if opts.Action != "" {
-			where.query += " AND action = ?"
-			where.params = append(where.params, opts.Action)
-		}
-		if opts.HostKey != (types.PublicKey{}) {
-			where.query += " AND host = ?"
-			where.params = append(where.params, PublicKey(opts.HostKey))
-		}
-		if opts.Origin != "" {
-			where.query += " AND origin = ?"
-			where.params = append(where.params, opts.Origin)
-		}
-	case api.WalletMetricsQueryOpts:
-		where.table = "wallets"
-	default:
-		return whereClause{}, fmt.Errorf("unknown query opts type: %T", opts)
-	}
-
-	return
 }
 
 func aggregateMetrics(x, y api.ContractMetric) (out api.ContractMetric) {
