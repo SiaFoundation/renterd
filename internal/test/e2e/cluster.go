@@ -313,7 +313,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busCfg.Miner = node.NewMiner(busClient)
 
 	// Create bus.
-	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bSetupFn, bShutdownFn, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -330,7 +330,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	var busShutdownFns []func(context.Context) error
 	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
-	busShutdownFns = append(busShutdownFns, bStopFn)
+	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
 	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
@@ -415,6 +415,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}()
 	}
 
+	// Finish bus setup.
+	if err := bSetupFn(ctx); err != nil {
+		tt.Fatalf("failed to setup bus, err: %v", err)
+	}
+
+	// Finish worker setup.
+	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
+		tt.Fatalf("failed to setup worker, err: %v", err)
+	}
+
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
 	tt.OK(busClient.SetContractSet(ctx, test.ContractSet, []types.FileContractID{}))
@@ -439,11 +449,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Enabled:               enableUploadPacking,
 		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
 	}))
-
-	// Register the worker
-	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
-		tt.Fatalf("failed to register worker, err: %v", err)
-	}
 
 	// Fund the bus.
 	if funding {

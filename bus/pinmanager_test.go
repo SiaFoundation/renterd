@@ -173,8 +173,8 @@ func TestPinManager(t *testing.T) {
 	defer forex.Close()
 
 	// start a pinmanager
-	pm := NewPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
-	if err := pm.Run(); err != nil {
+	pm := newPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
+	if err := pm.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {

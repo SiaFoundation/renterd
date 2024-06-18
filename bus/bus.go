@@ -23,7 +23,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
-	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -374,6 +373,11 @@ func (b *bus) Handler() http.Handler {
 		"POST   /webhooks/action": b.webhookActionHandlerPost,
 		"POST   /webhook/delete":  b.webhookHandlerDelete,
 	})
+}
+
+// Setup starts the pin manager.
+func (b *bus) Setup(ctx context.Context) error {
+	return b.pinMgr.Run(ctx)
 }
 
 // Shutdown shuts down the bus.
@@ -1693,11 +1697,8 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		if err := json.Unmarshal(data, &pps); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid request body"), http.StatusBadRequest)
 			return
-		} else if err := pps.Validate(); err != nil {
+		} else if err := pps.Validate(jc.Request.Context()); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
-			return
-		} else if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
-			jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
 			return
 		}
 		b.pinMgr.TriggerUpdate()
@@ -2453,7 +2454,7 @@ func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, pm PinManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:                s,
 		cm:               cm,
@@ -2470,7 +2471,7 @@ func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, p
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
-		pinMgr:      pm,
+		pinMgr:      newPinManager(whm, as, ss, 5*time.Minute, 6*time.Hour, l),
 		webhooksMgr: whm,
 		logger:      l.Sugar().Named("bus"),
 

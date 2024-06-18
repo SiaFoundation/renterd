@@ -21,7 +21,7 @@ type (
 	// PinManager is a service that manages price pinning.
 	PinManager interface {
 		Close(context.Context) error
-		Run() error
+		Run(context.Context) error
 		TriggerUpdate()
 	}
 )
@@ -47,7 +47,7 @@ type (
 	}
 )
 
-func NewPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func newPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	return &pinManager{
 		as:          as,
 		ss:          ss,
@@ -80,9 +80,9 @@ func (pm *pinManager) Close(ctx context.Context) error {
 	}
 }
 
-func (pm *pinManager) Run() error {
+func (pm *pinManager) Run(ctx context.Context) error {
 	// try to update prices
-	if err := pm.updatePrices(true); err != nil {
+	if err := pm.updatePrices(ctx, true); err != nil {
 		return err
 	}
 
@@ -96,10 +96,12 @@ func (pm *pinManager) Run() error {
 
 		var forced bool
 		for {
-			err := pm.updatePrices(forced)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			err := pm.updatePrices(ctx, forced)
 			if err != nil {
 				pm.logger.Warn("failed to update prices", zap.Error(err))
 			}
+			cancel()
 
 			forced = false
 			select {
@@ -318,12 +320,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	return err
 }
 
-func (pm *pinManager) updatePrices(forced bool) error {
+func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	pm.logger.Debugw("updating prices", zap.Bool("forced", forced))
-
-	// apply a sane timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
 
 	// fetch pinned settings
 	settings, err := pm.pinnedSettings(ctx)
