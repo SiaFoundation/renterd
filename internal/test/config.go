@@ -53,7 +53,7 @@ var (
 	}
 
 	PricePinSettings = api.PricePinSettings{
-		Disabled: true,
+		Enabled: false,
 	}
 
 	RedundancySettings = api.RedundancySettings{

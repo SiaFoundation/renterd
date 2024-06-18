@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
@@ -55,19 +56,6 @@ type (
 		Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error
 		Synced() bool
 		TipState() consensus.State
-	}
-
-	// An ExchangeRateProvider allows retrieving the current exchange rate for
-	// siacoin against an external currency.
-	ExchangeRateProvider interface {
-		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
-	}
-
-	// A PinManager manages the bus 's price pinning settings
-	PinManager interface {
-		Close(context.Context) error
-		Run() error
-		TriggerUpdate()
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -223,10 +211,9 @@ type (
 type bus struct {
 	startTime time.Time
 
-	cm   ChainManager
-	pins PinManager
-	s    Syncer
-	tp   TransactionPool
+	cm ChainManager
+	s  Syncer
+	tp TransactionPool
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
@@ -240,10 +227,11 @@ type bus struct {
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
-	alerts   alerts.Alerter
-	alertMgr *alerts.Manager
-	hooks    *webhooks.Manager
-	logger   *zap.SugaredLogger
+	alerts      alerts.Alerter
+	alertMgr    *alerts.Manager
+	pinMgr      PinManager
+	webhooksMgr *webhooks.Manager
+	logger      *zap.SugaredLogger
 }
 
 // Handler returns an HTTP handler that serves the bus API.
@@ -390,7 +378,7 @@ func (b *bus) Handler() http.Handler {
 
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
-	b.hooks.Close()
+	b.webhooksMgr.Close()
 	accounts := b.accounts.ToPersist()
 	err := b.eas.SaveAccounts(ctx, accounts)
 	if err != nil {
@@ -401,7 +389,7 @@ func (b *bus) Shutdown(ctx context.Context) error {
 
 	return errors.Join(
 		err,
-		b.pins.Close(ctx),
+		b.pinMgr.Close(ctx),
 	)
 }
 
@@ -1681,7 +1669,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
-		b.pins.TriggerUpdate()
+		b.pinMgr.TriggerUpdate()
 	case api.SettingRedundancy:
 		var rs api.RedundancySettings
 		if err := json.Unmarshal(data, &rs); err != nil {
@@ -1706,10 +1694,13 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid request body"), http.StatusBadRequest)
 			return
 		} else if err := pps.Validate(); err != nil {
-			jc.Error(fmt.Errorf("couldn't update price pinning settings, error: %v", err), http.StatusBadRequest)
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
+			return
+		} else if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
 			return
 		}
-		b.pins.TriggerUpdate()
+		b.pinMgr.TriggerUpdate()
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
@@ -2060,7 +2051,7 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	}
 
 	if jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
-		b.pins.TriggerUpdate()
+		b.pinMgr.TriggerUpdate()
 	}
 }
 
@@ -2089,7 +2080,7 @@ func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 
 func (b *bus) broadcastAction(e webhooks.Event) {
 	log := b.logger.With("event", e.Event).With("module", e.Module)
-	err := b.hooks.BroadcastAction(context.Background(), e)
+	err := b.webhooksMgr.BroadcastAction(context.Background(), e)
 	if err != nil {
 		log.With(zap.Error(err)).Error("failed to broadcast action")
 	} else {
@@ -2158,7 +2149,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	if jc.Decode(&wh) != nil {
 		return
 	}
-	err := b.hooks.Delete(jc.Request.Context(), wh)
+	err := b.webhooksMgr.Delete(jc.Request.Context(), wh)
 	if errors.Is(err, webhooks.ErrWebhookNotFound) {
 		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
 		return
@@ -2168,7 +2159,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 }
 
 func (b *bus) webhookHandlerGet(jc jape.Context) {
-	webhooks, queueInfos := b.hooks.Info()
+	webhooks, queueInfos := b.webhooksMgr.Info()
 	jc.Encode(api.WebhookResponse{
 		Queues:   queueInfos,
 		Webhooks: webhooks,
@@ -2181,7 +2172,7 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 		return
 	}
 
-	err := b.hooks.Register(jc.Request.Context(), webhooks.Webhook{
+	err := b.webhooksMgr.Register(jc.Request.Context(), webhooks.Webhook{
 		Event:   req.Event,
 		Module:  req.Module,
 		URL:     req.URL,
@@ -2462,12 +2453,8 @@ func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
 }
 
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, pm PinManager, tp TransactionPool, w Wallet, erp ExchangeRateProvider, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, pm PinManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:           alerts.WithOrigin(am, "bus"),
-		alertMgr:         am,
-		pins:             pm,
-		hooks:            hm,
 		s:                s,
 		cm:               cm,
 		tp:               tp,
@@ -2480,7 +2467,12 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, pm
 		eas:              eas,
 		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
-		logger:           l.Sugar().Named("bus"),
+
+		alerts:      alerts.WithOrigin(am, "bus"),
+		alertMgr:    am,
+		pinMgr:      pm,
+		webhooksMgr: whm,
+		logger:      l.Sugar().Named("bus"),
 
 		startTime: time.Now(),
 	}

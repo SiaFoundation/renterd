@@ -89,9 +89,6 @@ var (
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
-		Explorer: config.Explorer{
-			URL: "https://api.siascan.com",
-		},
 		Log: config.Log{
 			Path:  "", // deprecated. included for compatibility.
 			Level: "",
@@ -278,10 +275,6 @@ func main() {
 	flag.StringVar(&cfg.Database.MySQL.Database, "db.name", cfg.Database.MySQL.Database, "Database name for the bus (overrides with RENTERD_DB_NAME)")
 	flag.StringVar(&cfg.Database.MySQL.MetricsDatabase, "db.metricsName", cfg.Database.MySQL.MetricsDatabase, "Database for metrics (overrides with RENTERD_DB_METRICS_NAME)")
 
-	// explorer
-	flag.BoolVar(&cfg.Explorer.Disable, "explorer.disable", cfg.Explorer.Disable, "Disables the explorer (overrides with RENTERD_EXPLORER_DISABLE)")
-	flag.StringVar(&cfg.Explorer.URL, "explorer.url", cfg.Explorer.URL, "URL of the explorer (overrides with RENTERD_EXPLORER_URL)")
-
 	// bus
 	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
 	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "Bootstraps gateway and consensus modules")
@@ -459,7 +452,6 @@ func main() {
 		Bus:         cfg.Bus,
 		Database:    cfg.Database,
 		DatabaseLog: cfg.Log.Database,
-		Explorer:    cfg.Explorer,
 		Logger:      logger,
 		Network:     network,
 	}

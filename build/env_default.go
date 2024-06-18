@@ -38,7 +38,7 @@ var (
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
 	DefaultPricePinSettings = api.PricePinSettings{
-		Disabled: true,
+		Enabled: false,
 	}
 
 	// DefaultUploadPackingSettings define the default upload packing settings

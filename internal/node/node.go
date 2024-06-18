@@ -43,7 +43,6 @@ type BusConfig struct {
 	config.Bus
 	Database    config.Database
 	DatabaseLog config.DatabaseLog
-	Explorer    config.Explorer
 	Network     *consensus.Network
 	Logger      *zap.Logger
 	Miner       *Miner
@@ -205,20 +204,12 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		return nil, nil, err
 	}
 
-	var e Explorer
-	if !cfg.Explorer.Disable && cfg.Explorer.URL != "" {
-		e, err = NewExplorer(cfg.Explorer.URL)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create explorer: %w", err)
-		}
-	}
-
-	pm := NewPinManager(e, hooksMgr, sqlStore, sqlStore, 5*time.Minute, 6*time.Hour, l)
+	pm := bus.NewPinManager(hooksMgr, sqlStore, sqlStore, 5*time.Minute, 6*time.Hour, l)
 	if err := pm.Run(); err != nil {
 		return nil, nil, err
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, pm, NewTransactionPool(tp), w, e, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, pm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
 		return nil, nil, err
 	}

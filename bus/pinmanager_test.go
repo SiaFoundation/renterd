@@ -1,11 +1,12 @@
-package node
+package bus
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,37 +25,40 @@ const (
 	testUpdateInterval = 100 * time.Millisecond
 )
 
-type mockERP struct {
-	mu       sync.Mutex
-	value    float64
-	currency string
+type mockBroadcaster struct {
+	events []webhooks.Event
 }
 
-func (erp *mockERP) updateRate(value float64) {
-	erp.mu.Lock()
-	defer erp.mu.Unlock()
-	erp.value = value
-	time.Sleep(2 * testUpdateInterval)
-}
-
-type mockEventsBroadcaster struct{}
-
-func (meb *mockEventsBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Event) error {
+func (meb *mockBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Event) error {
+	meb.events = append(meb.events, e)
 	return nil
 }
 
-func newTestExchangeRateProvider() *mockERP {
-	return &mockERP{currency: "usd", value: 1}
+type mockForexAPI struct {
+	s *httptest.Server
+
+	mu   sync.Mutex
+	rate float64
 }
 
-func (erp *mockERP) SiacoinExchangeRate(_ context.Context, currency string) (float64, error) {
-	erp.mu.Lock()
-	defer erp.mu.Unlock()
+func newTestForexAPI() *mockForexAPI {
+	api := &mockForexAPI{rate: 1}
+	api.s = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		json.NewEncoder(w).Encode(api.rate)
+	}))
+	return api
+}
 
-	if !strings.EqualFold(currency, erp.currency) {
-		return 0, errors.New("currency not found")
-	}
-	return erp.value, nil
+func (api *mockForexAPI) Close() {
+	api.s.Close()
+}
+
+func (api *mockForexAPI) updateRate(rate float64) {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	api.rate = rate
 }
 
 type mockStore struct {
@@ -119,10 +123,37 @@ func (ms *mockStore) UpdateSetting(ctx context.Context, key, value string) error
 	return nil
 }
 
+func (ms *mockStore) DeleteSetting(ctx context.Context, key string) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	delete(ms.settings, key)
+	return nil
+}
+
+func (ms *mockStore) Settings(ctx context.Context) ([]string, error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	var keys []string
+	for k := range ms.settings {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
 func (ms *mockStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.autopilots[id], nil
+}
+
+func (ms *mockStore) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	var autopilots []api.Autopilot
+	for _, ap := range ms.autopilots {
+		autopilots = append(autopilots, ap)
+	}
+	return autopilots, nil
 }
 
 func (ms *mockStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
@@ -135,11 +166,14 @@ func (ms *mockStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilo
 func TestPinManager(t *testing.T) {
 	// mock dependencies
 	ms := newTestStore()
-	erp := newTestExchangeRateProvider()
-	eb := &mockEventsBroadcaster{}
+	eb := &mockBroadcaster{}
+
+	// mock forex api
+	forex := newTestForexAPI()
+	defer forex.Close()
 
 	// start a pinmanager
-	pm := NewPinManager(erp, eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
+	pm := NewPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
 	if err := pm.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -164,9 +198,10 @@ func TestPinManager(t *testing.T) {
 
 	// enable price pinning
 	pps := build.DefaultPricePinSettings
-	pps.Disabled = false
+	pps.Enabled = true
 	pps.Currency = "usd"
 	pps.Threshold = 0.5
+	pps.ForexEndpointURL = forex.s.URL
 	ms.updatPinnedSettings(pps)
 
 	// assert price manager is running now
@@ -175,16 +210,14 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// update exchange rate and fetch current gouging settings
-	erp.updateRate(2.5)
+	forex.updateRate(2.5)
 	gs := ms.gougingSettings()
 
 	// configure all pins but disable them for now
-	pps.GougingSettingsPins.MaxContractPrice = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxRPCPrice = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MinMaxEphemeralAccount = api.Pin{Value: 3, Pinned: false}
 	ms.updatPinnedSettings(pps)
 
 	// assert gouging settings are unchanged
@@ -192,8 +225,8 @@ func TestPinManager(t *testing.T) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
-	// enable the max contractprice pin, with the threshold at 0.5 it should remain unchanged
-	pps.GougingSettingsPins.MaxContractPrice.Pinned = true
+	// enable the max download pin, with the threshold at 0.5 it should remain unchanged
+	pps.GougingSettingsPins.MaxDownload.Pinned = true
 	ms.updatPinnedSettings(pps)
 	if gss := ms.gougingSettings(); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
@@ -202,8 +235,8 @@ func TestPinManager(t *testing.T) {
 	// lower the threshold, gouging settings should be updated
 	pps.Threshold = 0.05
 	ms.updatPinnedSettings(pps)
-	if gss := ms.gougingSettings(); gss.MaxContractPrice.Equals(gs.MaxContractPrice) {
-		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxContractPrice, gs.MaxContractPrice)
+	if gss := ms.gougingSettings(); gss.MaxContractPrice.Equals(gs.MaxDownloadPrice) {
+		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
 
 	// enable the rest of the pins
@@ -211,20 +244,18 @@ func TestPinManager(t *testing.T) {
 	pps.GougingSettingsPins.MaxRPCPrice.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
-	pps.GougingSettingsPins.MinMaxEphemeralAccount.Pinned = true
 	ms.updatPinnedSettings(pps)
 
 	// assert they're all updated
 	if gss := ms.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
 		gss.MaxRPCPrice.Equals(gs.MaxRPCPrice) ||
 		gss.MaxStoragePrice.Equals(gs.MaxStoragePrice) ||
-		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) ||
-		gss.MinMaxEphemeralAccountBalance.Equals(gs.MinMaxEphemeralAccountBalance) {
+		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss, gs)
 	}
 
 	// increase rate so average isn't catching up to us
-	erp.updateRate(3)
+	forex.updateRate(3)
 
 	// fetch autopilot
 	ap, _ := ms.Autopilot(context.Background(), testAutopilotID)

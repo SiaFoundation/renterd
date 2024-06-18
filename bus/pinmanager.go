@@ -1,4 +1,4 @@
-package node
+package bus
 
 import (
 	"context"
@@ -12,36 +12,25 @@ import (
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
 type (
-	// An ExchangeRateProvider allows retrieving the current exchange rate for
-	// siacoin against an external currency.
-	ExchangeRateProvider interface {
-		SiacoinExchangeRate(ctx context.Context, currency string) (float64, error)
-	}
-
-	// An AutopilotStore stores autopilots.
-	AutopilotStore interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
-	}
-
-	// A SettingStore stores settings.
-	SettingStore interface {
-		Setting(ctx context.Context, key string) (string, error)
-		UpdateSetting(ctx context.Context, key, value string) error
+	// PinManager is a service that manages price pinning.
+	PinManager interface {
+		Close(context.Context) error
+		Run() error
+		TriggerUpdate()
 	}
 )
 
 type (
 	pinManager struct {
-		erp    ExchangeRateProvider
-		events webhooks.Broadcaster
-		as     AutopilotStore
-		ss     SettingStore
+		as          AutopilotStore
+		ss          SettingStore
+		broadcaster webhooks.Broadcaster
 
 		updateInterval time.Duration
 		rateWindow     time.Duration
@@ -58,12 +47,11 @@ type (
 	}
 )
 
-func NewPinManager(erp ExchangeRateProvider, events webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	return &pinManager{
-		erp:    erp,
-		events: events,
-		as:     as,
-		ss:     ss,
+		as:          as,
+		ss:          ss,
+		broadcaster: broadcaster,
 
 		logger: l.Sugar().Named("priceManager"),
 
@@ -245,21 +233,6 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		return err
 	}
 
-	// update max contract price
-	if pins.MaxContractPrice.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxContractPrice.Value), rate)
-		if err != nil {
-			pm.logger.Warnw("failed to convert max contract price to currency", zap.Error(err))
-		} else {
-			bkp := gs.MaxContractPrice
-			gs.MaxContractPrice = update
-			if err := gs.Validate(); err != nil {
-				pm.logger.Warnw("failed to update gouging setting, new contract price makes the setting invalid", zap.Error(err))
-				gs.MaxContractPrice = bkp
-			}
-		}
-	}
-
 	// update max download price
 	if pins.MaxDownload.IsPinned() {
 		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxDownload.Value), rate)
@@ -320,21 +293,6 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		}
 	}
 
-	// update min max ephemeral account balance
-	if pins.MinMaxEphemeralAccount.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MinMaxEphemeralAccount.Value), rate)
-		if err != nil {
-			pm.logger.Warnw("failed to convert min max ephemeral account balance to currency", zap.Error(err))
-		} else {
-			bkp := gs.MinMaxEphemeralAccountBalance
-			gs.MinMaxEphemeralAccountBalance = update
-			if err := gs.Validate(); err != nil {
-				pm.logger.Warnw("failed to update gouging setting, new min max ephemeral account balance makes the setting invalid", zap.Error(err))
-				gs.MinMaxEphemeralAccountBalance = bkp
-			}
-		}
-	}
-
 	// validate settings
 	err := gs.Validate()
 	if err != nil {
@@ -347,7 +305,7 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	err = pm.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes))
 
 	// broadcast event
-	pm.events.BroadcastAction(context.Background(), webhooks.Event{
+	pm.broadcaster.BroadcastAction(ctx, webhooks.Event{
 		Module: api.ModuleSetting,
 		Event:  api.EventUpdate,
 		Payload: api.EventSettingUpdate{
@@ -374,13 +332,13 @@ func (pm *pinManager) updatePrices(forced bool) error {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("failed to fetch pinned settings: %w", err)
-	} else if settings.Disabled {
+	} else if !settings.Enabled {
 		pm.logger.Debug("price pinning is disabled, skipping price update")
 		return nil
 	}
 
 	// fetch exchange rate
-	rate, err := pm.erp.SiacoinExchangeRate(ctx, settings.Currency)
+	rate, err := ibus.NewForexClient(settings.ForexEndpointURL).SiacoinExchangeRate(ctx, settings.Currency)
 	if err != nil {
 		return fmt.Errorf("failed to fetch exchange rate for '%s': %w", settings.Currency, err)
 	} else if rate <= 0 {
