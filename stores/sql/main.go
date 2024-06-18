@@ -437,6 +437,32 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 	return hosts, nil
 }
 
+func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	// insert buffered slab
+	res, err := tx.Exec(ctx, `INSERT INTO buffered_slabs (created_at, filename) VALUES (?, ?)`,
+		time.Now(), fileName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert buffered slab: %w", err)
+	}
+	bufferedSlabID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch buffered slab id: %w", err)
+	}
+
+	key, err := ec.MarshalBinary()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO slabs (created_at, db_contract_set_id, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		time.Now(), contractSetID, bufferedSlabID, SecretKey(key), minShards, totalShards)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert slab: %w", err)
+	}
+	return bufferedSlabID, nil
+}
+
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	// fetch bucket id
 	var bucketID int64
@@ -1317,6 +1343,30 @@ func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 		return fmt.Errorf("failed to set unclean shutdown: %w", err)
 	}
 	return err
+}
+
+func SlabBuffers(ctx context.Context, tx sql.Tx) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT buffered_slabs.filename, cs.name
+		FROM buffered_slabs
+		INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
+		INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets")
+	}
+	defer rows.Close()
+
+	fileNameToContractSet := make(map[string]string)
+	for rows.Next() {
+		var fileName string
+		var contractSetName string
+		if err := rows.Scan(&fileName, &contractSetName); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		fileNameToContractSet[fileName] = contractSetName
+	}
+	return fileNameToContractSet, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
