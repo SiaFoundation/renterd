@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"lukechampine.com/frand"
@@ -92,8 +93,8 @@ func TestContractPruneMetrics(t *testing.T) {
 			t.Fatal("expected metrics to be sorted by time")
 		}
 		for _, m := range metrics {
-			if !cmp.Equal(m, fcid2Metric[m.ContractID], cmp.Comparer(api.CompareTimeRFC3339)) {
-				t.Fatal("unexpected metric", cmp.Diff(m, fcid2Metric[m.ContractID]))
+			if !cmp.Equal(m, fcid2Metric[m.ContractID], cmpopts.IgnoreUnexported(api.ContractPruneMetric{}), cmp.Comparer(api.CompareTimeRFC3339)) {
+				t.Fatal("unexpected metric", m, fcid2Metric[m.ContractID])
 			}
 			cmpFn(m)
 		}
@@ -148,7 +149,7 @@ func TestContractSetMetrics(t *testing.T) {
 	} else if m := metrics[0]; m.Contracts != 0 {
 		t.Fatalf("expected 0 contracts, got %v", m.Contracts)
 	} else if ti := time.Time(m.Timestamp); !ti.Equal(testStart) {
-		t.Fatal("expected time to match start time")
+		t.Fatalf("expected time to match start time, %v != %v", ti, testStart)
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected name to be %v, got %v", testContractSet, m.Name)
 	}

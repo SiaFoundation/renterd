@@ -2442,15 +2442,17 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleConsensus,
-		Event:  api.EventUpdate,
-		Payload: api.EventConsensusUpdate{
-			ConsensusState: b.consensusState(),
-			TransactionFee: b.tp.RecommendedFee(),
-			Timestamp:      time.Now().UTC(),
-		},
-	})
+	if cc.Synced {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleConsensus,
+			Event:  api.EventUpdate,
+			Payload: api.EventConsensusUpdate{
+				ConsensusState: b.consensusState(),
+				TransactionFee: b.tp.RecommendedFee(),
+				Timestamp:      time.Now().UTC(),
+			},
+		})
+	}
 }
 
 // New returns a new Bus.

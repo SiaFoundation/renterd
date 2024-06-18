@@ -305,6 +305,77 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root types.Hash256) (int, error) {
+	// update the latest_host field of the sector
+	_, err := tx.Exec(ctx, `
+		UPDATE sectors
+		SET latest_host = COALESCE((
+			SELECT * FROM (
+				SELECT h.public_key
+				FROM hosts h
+				INNER JOIN contracts c ON c.host_id = h.id
+				INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+				INNER JOIN sectors s ON s.id = cs.db_sector_id
+				WHERE s.root = ? AND h.public_key != ?
+				LIMIT 1
+			) AS _
+		), ?)
+		WHERE root = ? AND latest_host = ?
+	`, Hash256(root), PublicKey(hk), PublicKey{}, Hash256(root), PublicKey(hk))
+	if err != nil {
+		return 0, fmt.Errorf("failed to update sector: %w", err)
+	}
+
+	// remove potential links between the host's contracts and the sector
+	res, err := tx.Exec(ctx, `
+		DELETE FROM contract_sectors
+		WHERE db_sector_id = (
+			SELECT s.id
+			FROM sectors s
+			WHERE root = ?
+		) AND db_contract_id IN (
+			SELECT c.id
+			FROM contracts c
+			INNER JOIN hosts h ON h.id = c.host_id
+			WHERE h.public_key = ?
+		)
+	`, Hash256(root), PublicKey(hk))
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete contract sectors: %w", err)
+	}
+	deletedSectors, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to check number of deleted contract sectors: %w", err)
+	} else if deletedSectors == 0 {
+		return 0, nil // nothing to do
+	}
+
+	// invalidate the health of related slabs
+	_, err = tx.Exec(ctx, `
+		UPDATE slabs
+		SET health_valid_until = 0
+		WHERE id IN (
+			SELECT db_slab_id
+			FROM sectors
+			WHERE root = ?
+		)
+	`, Hash256(root))
+	if err != nil {
+		return 0, fmt.Errorf("failed to invalidate slab health: %w", err)
+	}
+
+	// increment host's lost sector count
+	_, err = tx.Exec(ctx, `
+		UPDATE hosts
+		SET lost_sectors = lost_sectors + ?
+		WHERE public_key = ?
+	`, deletedSectors, PublicKey(hk))
+	if err != nil {
+		return 0, fmt.Errorf("failed to update lost sectors: %w", err)
+	}
+	return int(deletedSectors), nil
+}
+
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
 	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
 	if err != nil {
@@ -939,6 +1010,43 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 	return nil
 }
 
+func RecordPriceTables(ctx context.Context, tx sql.Tx, priceTableUpdates []api.HostPriceTableUpdate) error {
+	if len(priceTableUpdates) == 0 {
+		return nil
+	}
+
+	stmt, err := tx.Prepare(ctx, `
+		UPDATE hosts SET
+		recent_downtime = CASE WHEN ? THEN recent_downtime = 0 ELSE recent_downtime END,
+		recent_scan_failures = CASE WHEN ? THEN recent_scan_failures = 0 ELSE recent_scan_failures END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry =  CASE WHEN ? THEN ? ELSE price_table_expiry END,
+		successful_interactions =  CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update host with price table: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, ptu := range priceTableUpdates {
+		_, err := stmt.Exec(ctx,
+			ptu.Success,                                            // recent_downtime
+			ptu.Success,                                            // recent_scan_failures
+			ptu.Success, PriceTable(ptu.PriceTable.HostPriceTable), // price_table
+			ptu.Success, ptu.PriceTable.Expiry, // price_table_expiry
+			ptu.Success,  // successful_interactions
+			!ptu.Success, // failed_interactions
+			PublicKey(ptu.HostKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update host with price table: %w", err)
+		}
+	}
+	return nil
+}
+
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts
 	rows, err := tx.Query(ctx, `
@@ -975,6 +1083,14 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
+	_, err := tx.Exec(ctx, "UPDATE hosts SET lost_sectors = 0 WHERE public_key = ?", PublicKey(hk))
+	if err != nil {
+		return fmt.Errorf("failed to reset lost sectors: %w", err)
+	}
+	return nil
 }
 
 func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
