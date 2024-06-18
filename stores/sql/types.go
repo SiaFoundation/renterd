@@ -35,32 +35,24 @@ type (
 	Unsigned64      uint64
 )
 
-var (
-	_ driver.Valuer = (*AutopilotConfig)(nil)
-	_ driver.Valuer = (*BigInt)(nil)
-	_ driver.Valuer = (*Currency)(nil)
-	_ driver.Valuer = (*FileContractID)(nil)
-	_ driver.Valuer = (*Hash256)(nil)
-	_ driver.Valuer = (*Settings)(nil)
-	_ driver.Valuer = (*PriceTable)(nil)
-	_ driver.Valuer = (*PublicKey)(nil)
-	_ driver.Valuer = (*SecretKey)(nil)
-	_ driver.Valuer = (*UnixTimeMS)(nil)
-	_ driver.Valuer = (*UnixTimeNS)(nil)
-	_ driver.Valuer = (*Unsigned64)(nil)
+type scannerValuer interface {
+	driver.Valuer
+	sql.Scanner
+}
 
-	_ sql.Scanner = (*AutopilotConfig)(nil)
-	_ sql.Scanner = (*BigInt)(nil)
-	_ sql.Scanner = (*Currency)(nil)
-	_ sql.Scanner = (*FileContractID)(nil)
-	_ sql.Scanner = (*Hash256)(nil)
-	_ sql.Scanner = (*Settings)(nil)
-	_ sql.Scanner = (*PriceTable)(nil)
-	_ sql.Scanner = (*PublicKey)(nil)
-	_ sql.Scanner = (*SecretKey)(nil)
-	_ sql.Scanner = (*UnixTimeMS)(nil)
-	_ sql.Scanner = (*UnixTimeNS)(nil)
-	_ sql.Scanner = (*Unsigned64)(nil)
+var (
+	_ scannerValuer = (*AutopilotConfig)(nil)
+	_ scannerValuer = (*BigInt)(nil)
+	_ scannerValuer = (*Currency)(nil)
+	_ scannerValuer = (*FileContractID)(nil)
+	_ scannerValuer = (*Hash256)(nil)
+	_ scannerValuer = (*Settings)(nil)
+	_ scannerValuer = (*PriceTable)(nil)
+	_ scannerValuer = (*PublicKey)(nil)
+	_ scannerValuer = (*SecretKey)(nil)
+	_ scannerValuer = (*UnixTimeMS)(nil)
+	_ scannerValuer = (*UnixTimeNS)(nil)
+	_ scannerValuer = (*Unsigned64)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
