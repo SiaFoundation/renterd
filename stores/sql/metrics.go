@@ -25,8 +25,31 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 		if err := rows.Scan(&placeHolder, &placeHolderTime, &timestamp, (*FileContractID)(&cpm.ContractID), (*PublicKey)(&cpm.HostKey), &cpm.HostVersion, (*Unsigned64)(&cpm.Pruned), (*Unsigned64)(&cpm.Remaining), &cpm.Duration); err != nil {
 			return nil, fmt.Errorf("failed to scan contract prune metric: %w", err)
 		}
-		cpm.Timestamp = api.TimeRFC3339(timestamp)
+		cpm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
 		metrics = append(metrics, cpm)
+	}
+
+	return metrics, nil
+}
+
+func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) (metrics []api.ContractSetChurnMetric, _ error) {
+	rows, err := queryPeriods(ctx, tx, start, n, interval, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cscm api.ContractSetChurnMetric
+		var placeHolder int64
+		var placeHolderTime time.Time
+		var timestamp UnixTimeMS
+		if err := rows.Scan(&placeHolder, &placeHolderTime, &timestamp, &cscm.Name, (*FileContractID)(&cscm.ContractID), &cscm.Direction, &cscm.Reason); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set churn metric: %w", err)
+		}
+
+		cscm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		metrics = append(metrics, cscm)
 	}
 
 	return metrics, nil
@@ -79,6 +102,34 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert contract prune metric: no rows affected")
+		}
+	}
+
+	return nil
+}
+
+func RecordContractSetChurnMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractSetChurnMetric) error {
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sets_churn (created_at, timestamp, name, fc_id, direction, reason) VALUES (?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract set churn metric: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, metric := range metrics {
+		res, err := insertStmt.Exec(ctx,
+			time.Now().UTC(),
+			UnixTimeMS(metric.Timestamp),
+			metric.Name,
+			FileContractID(metric.ContractID),
+			metric.Direction,
+			metric.Reason,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert contract set churn metric: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert contract set churn metric: no rows affected")
 		}
 	}
 
@@ -178,6 +229,20 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 		if opts.HostVersion != "" {
 			where.query += " AND host_version = ?"
 			where.params = append(where.params, opts.HostVersion)
+		}
+	case api.ContractSetChurnMetricsQueryOpts:
+		where.table = "contract_sets_churn"
+		if opts.Name != "" {
+			where.query += " AND name = ?"
+			where.params = append(where.params, opts.Name)
+		}
+		if opts.Direction != "" {
+			where.query += " AND direction = ?"
+			where.params = append(where.params, opts.Direction)
+		}
+		if opts.Reason != "" {
+			where.query += " AND reason = ?"
+			where.params = append(where.params, opts.Reason)
 		}
 	case api.ContractSetMetricsQueryOpts:
 		where.table = "contract_sets"
