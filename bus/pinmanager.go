@@ -175,6 +175,8 @@ func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
 }
 
 func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {
+	var updated bool
+
 	ap, err := pm.as.Autopilot(ctx, autopilotID)
 	if err != nil {
 		return err
@@ -191,8 +193,17 @@ func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID s
 			if err := ap.Config.Validate(); err != nil {
 				pm.logger.Warnw("failed to update autopilot setting, new allowance makes the setting invalid", zap.Error(err))
 				ap.Config.Contracts.Allowance = bkp
+			} else {
+				pm.logger.Infow("updating autopilot allowance", "old", bkp, "new", ap.Config.Contracts.Allowance, "rate", rate, "autopilot", autopilotID)
+				updated = true
 			}
 		}
+	}
+
+	// return early if no updates took place
+	if !updated {
+		pm.logger.Infow("autopilots did not require price update", "rate", rate)
+		return nil
 	}
 
 	// validate config
@@ -226,6 +237,8 @@ func (pm *pinManager) updateExchangeRates(currency string, rate float64) error {
 }
 
 func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.GougingSettingsPins, rate decimal.Decimal) error {
+	var updated bool
+
 	// fetch gouging settings
 	var gs api.GougingSettings
 	if gss, err := pm.ss.Setting(ctx, api.SettingGouging); err != nil {
@@ -247,7 +260,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 				pm.logger.Warn("failed to update gouging setting, new download price makes the setting invalid", zap.Error(err))
 				gs.MaxDownloadPrice = bkp
 			} else {
-				pm.logger.Infow("updating max download price", "old", bkp, "new", gs.MaxDownloadPrice, "rate", rate, "pair")
+				pm.logger.Infow("updating max download price", "old", bkp, "new", gs.MaxDownloadPrice, "rate", rate)
+				updated = true
 			}
 		}
 	}
@@ -264,7 +278,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 				pm.logger.Warnw("failed to update gouging setting, new RPC price makes the setting invalid", zap.Error(err))
 				gs.MaxRPCPrice = bkp
 			} else {
-				pm.logger.Infow("updating max RPC price", "old", bkp, "new", gs.MaxRPCPrice, "rate", rate, "pair")
+				pm.logger.Infow("updating max RPC price", "old", bkp, "new", gs.MaxRPCPrice, "rate", rate)
+				updated = true
 			}
 		}
 	}
@@ -281,7 +296,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 				pm.logger.Warnw("failed to update gouging setting, new storage price makes the setting invalid", zap.Error(err))
 				gs.MaxStoragePrice = bkp
 			} else {
-				pm.logger.Infow("updating max storage price", "old", bkp, "new", gs.MaxStoragePrice, "rate", rate, "pair")
+				pm.logger.Infow("updating max storage price", "old", bkp, "new", gs.MaxStoragePrice, "rate", rate)
+				updated = true
 			}
 		}
 	}
@@ -298,9 +314,16 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 				pm.logger.Warnw("failed to update gouging setting, new upload price makes the setting invalid", zap.Error(err))
 				gs.MaxUploadPrice = bkp
 			} else {
-				pm.logger.Infow("updating max upload price", "old", bkp, "new", gs.MaxUploadPrice, "rate", rate, "pair")
+				pm.logger.Infow("updating max upload price", "old", bkp, "new", gs.MaxUploadPrice, "rate", rate)
+				updated = true
 			}
 		}
+	}
+
+	// return early if no updates took place
+	if !updated {
+		pm.logger.Infow("gouging prices did not require price update", "rate", rate)
+		return nil
 	}
 
 	// validate settings
