@@ -36,11 +36,31 @@ type (
 )
 
 var (
-	_ sql.Scanner = &Currency{}
-	_ sql.Scanner = &FileContractID{}
-	_ sql.Scanner = &Hash256{}
-	_ sql.Scanner = &PublicKey{}
-	_ sql.Scanner = &SecretKey{}
+	_ driver.Valuer = (*AutopilotConfig)(nil)
+	_ driver.Valuer = (*BigInt)(nil)
+	_ driver.Valuer = (*Currency)(nil)
+	_ driver.Valuer = (*FileContractID)(nil)
+	_ driver.Valuer = (*Hash256)(nil)
+	_ driver.Valuer = (*Settings)(nil)
+	_ driver.Valuer = (*PriceTable)(nil)
+	_ driver.Valuer = (*PublicKey)(nil)
+	_ driver.Valuer = (*SecretKey)(nil)
+	_ driver.Valuer = (*UnixTimeMS)(nil)
+	_ driver.Valuer = (*UnixTimeNS)(nil)
+	_ driver.Valuer = (*Unsigned64)(nil)
+
+	_ sql.Scanner = (*AutopilotConfig)(nil)
+	_ sql.Scanner = (*BigInt)(nil)
+	_ sql.Scanner = (*Currency)(nil)
+	_ sql.Scanner = (*FileContractID)(nil)
+	_ sql.Scanner = (*Hash256)(nil)
+	_ sql.Scanner = (*Settings)(nil)
+	_ sql.Scanner = (*PriceTable)(nil)
+	_ sql.Scanner = (*PublicKey)(nil)
+	_ sql.Scanner = (*SecretKey)(nil)
+	_ sql.Scanner = (*UnixTimeMS)(nil)
+	_ sql.Scanner = (*UnixTimeNS)(nil)
+	_ sql.Scanner = (*Unsigned64)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
@@ -206,6 +226,11 @@ func (k *SecretKey) Scan(value interface{}) error {
 	}
 	*k = append(SecretKey{}, SecretKey(bytes)...)
 	return nil
+}
+
+// Value returns an key value, implements driver.Valuer interface.
+func (k SecretKey) Value() (driver.Value, error) {
+	return []byte(k), nil
 }
 
 // Scan scan value into unixTimeMS, implements sql.Scanner interface.
