@@ -2473,12 +2473,13 @@ func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, t
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
-		pinMgr:      newPinManager(whm, as, ss, 5*time.Minute, 6*time.Hour, l),
 		webhooksMgr: whm,
 		logger:      l.Sugar().Named("bus"),
 
 		startTime: time.Now(),
 	}
+
+	b.pinMgr = newPinManager(whm, as, ss, 5*time.Minute, 6*time.Hour, b.logger.Desugar())
 
 	// ensure we don't hang indefinitely
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

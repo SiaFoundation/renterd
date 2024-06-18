@@ -53,7 +53,7 @@ func newPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss Setti
 		ss:          ss,
 		broadcaster: broadcaster,
 
-		logger: l.Sugar().Named("priceManager"),
+		logger: l.Sugar().Named("pricemanager"),
 
 		updateInterval: updateInterval,
 		rateWindow:     rateWindow,
