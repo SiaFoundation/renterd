@@ -242,6 +242,10 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 	return nil
 }
 
+func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
+	return ssql.DeleteHostSector(ctx, tx, hk, root)
+}
+
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }

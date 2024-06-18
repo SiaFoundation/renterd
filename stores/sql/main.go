@@ -305,6 +305,77 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	return fetchMetadata(dstObjID)
 }
 
+func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root types.Hash256) (int, error) {
+	// update the latest_host field of the sector
+	_, err := tx.Exec(ctx, `
+		UPDATE sectors
+		SET latest_host = (
+			SELECT * FROM (
+				SELECT h.public_key
+				FROM hosts h
+				INNER JOIN contracts c ON c.host_id = h.id
+				INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+				INNER JOIN sectors s ON s.id = cs.db_sector_id
+				WHERE s.root = ? AND h.public_key != ?
+				LIMIT 1
+			) AS _
+		)
+		WHERE root = ? AND latest_host = ?
+	`, Hash256(root), PublicKey(hk), Hash256(root), PublicKey(hk))
+	if err != nil {
+		return 0, fmt.Errorf("failed to update sector: %w", err)
+	}
+
+	// remove potential links between the host's contracts and the sector
+	res, err := tx.Exec(ctx, `
+		DELETE FROM contract_sectors
+		WHERE db_sector_id = (
+			SELECT s.id
+			FROM sectors s
+			WHERE root = ?
+		) AND db_contract_id IN (
+			SELECT c.id
+			FROM contracts c
+			INNER JOIN hosts h ON h.id = c.host_id
+			WHERE h.public_key = ?
+		)
+	`, Hash256(root), PublicKey(hk))
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete contract sectors: %w", err)
+	}
+	deletedSectors, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to check number of deleted contract sectors: %w", err)
+	} else if deletedSectors == 0 {
+		return 0, nil // nothing to do
+	}
+
+	// invalidate the health of related slabs
+	_, err = tx.Exec(ctx, `
+		UPDATE slabs
+		SET health_valid_until = 0
+		WHERE id IN (
+			SELECT db_slab_id
+			FROM sectors
+			WHERE root = ?
+		)
+	`, Hash256(root))
+	if err != nil {
+		return 0, fmt.Errorf("failed to invalidate slab health: %w", err)
+	}
+
+	// increment host's lost sector count
+	_, err = tx.Exec(ctx, `
+		UPDATE hosts
+		SET lost_sectors = lost_sectors + ?
+		WHERE public_key = ?
+	`, deletedSectors, PublicKey(hk))
+	if err != nil {
+		return 0, fmt.Errorf("failed to update lost sectors: %w", err)
+	}
+	return int(deletedSectors), nil
+}
+
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
 	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
 	if err != nil {
