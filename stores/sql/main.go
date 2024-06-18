@@ -309,7 +309,7 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	// update the latest_host field of the sector
 	_, err := tx.Exec(ctx, `
 		UPDATE sectors
-		SET latest_host = (
+		SET latest_host = COALESCE((
 			SELECT * FROM (
 				SELECT h.public_key
 				FROM hosts h
@@ -319,9 +319,9 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 				WHERE s.root = ? AND h.public_key != ?
 				LIMIT 1
 			) AS _
-		)
+		), ?)
 		WHERE root = ? AND latest_host = ?
-	`, Hash256(root), PublicKey(hk), Hash256(root), PublicKey(hk))
+	`, Hash256(root), PublicKey(hk), PublicKey{}, Hash256(root), PublicKey(hk))
 	if err != nil {
 		return 0, fmt.Errorf("failed to update sector: %w", err)
 	}
