@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 
 	"go.uber.org/zap"
@@ -133,6 +134,23 @@ func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path
 	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
 }
 
+func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	headers := "{}"
+	if len(wh.Headers) > 0 {
+		h, err := json.Marshal(wh.Headers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal headers: %w", err)
+		}
+		headers = string(h)
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) ON CONFLICT DO SET headers = EXCLUDED.headers",
+		time.Now(), wh.Module, wh.Event, headers)
+	if err != nil {
+		return fmt.Errorf("failed to insert webhook: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
@@ -248,6 +266,10 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 
 func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
+}
+
+func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
@@ -875,6 +897,10 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
+	return ssql.Webhooks(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {

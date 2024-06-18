@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 )
 
@@ -374,6 +375,18 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 		return 0, fmt.Errorf("failed to update lost sectors: %w", err)
 	}
 	return int(deletedSectors), nil
+}
+
+func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
+	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
+	if err != nil {
+		return fmt.Errorf("failed to delete webhook: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return webhooks.ErrWebhookNotFound
+	}
+	return nil
 }
 
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
@@ -1347,6 +1360,24 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
 		)`)
 	return err
+}
+
+func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
+	rows, err := tx.Query(ctx, "SELECT module, event, url FROM webhooks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	var whs []webhooks.Webhook
+	for rows.Next() {
+		var webhook webhooks.Webhook
+		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL); err != nil {
+			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		}
+		whs = append(whs, webhook)
+	}
+	return whs, nil
 }
 
 func scanAutopilot(s scanner) (api.Autopilot, error) {
