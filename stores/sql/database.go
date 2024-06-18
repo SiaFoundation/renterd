@@ -75,6 +75,12 @@ type (
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
+		// DeleteHostSector deletes all contract sector links that a host has
+		// with the given root incrementing the lost sector count in the
+		// process. If another contract with a different host exists that
+		// contains the root, latest_host is updated to that host.
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
@@ -145,6 +151,10 @@ type (
 		// therefore only useful for gouging checks.
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 
+		// RecordPriceTables records price tables for hosts in the database
+		// increasing the successful/failed interactions accordingly.
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
@@ -166,6 +176,9 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// ResetLostSectors resets the lost sector count for the given host.
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones and setting the clean shutdown flag.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
@@ -184,6 +197,9 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
