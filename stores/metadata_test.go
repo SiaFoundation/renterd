@@ -3735,6 +3735,29 @@ func TestDeleteHostSector(t *testing.T) {
 	} else if hi.Interactions.LostSectors != 0 {
 		t.Fatalf("expected 0 lost sector, got %v", hi.Interactions.LostSectors)
 	}
+
+	// Prune the sector from hk2.
+	if n, err := ss.DeleteHostSector(context.Background(), hk2, root); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal("no sectors were pruned", n)
+	}
+
+	hi, err = ss.Host(context.Background(), hk2)
+	if err != nil {
+		t.Fatal(err)
+	} else if hi.Interactions.LostSectors != 2 {
+		t.Fatalf("expected 0 lost sector, got %v", hi.Interactions.LostSectors)
+	}
+
+	// Fetch the sector and check the public key has the default value
+	if err := ss.db.Model(&dbSector{}).Find(&sectors).Error; err != nil {
+		t.Fatal(err)
+	} else if len(sectors) != 1 {
+		t.Fatal("expected 1 sector", len(sectors))
+	} else if sector := sectors[0]; sector.LatestHost != [32]byte{} {
+		t.Fatal("expected latest host to be empty", sector.LatestHost)
+	}
 }
 func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) []object.Sector {
 	return []object.Sector{

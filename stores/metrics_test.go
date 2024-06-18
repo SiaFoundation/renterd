@@ -149,7 +149,7 @@ func TestContractSetMetrics(t *testing.T) {
 	} else if m := metrics[0]; m.Contracts != 0 {
 		t.Fatalf("expected 0 contracts, got %v", m.Contracts)
 	} else if ti := time.Time(m.Timestamp); !ti.Equal(testStart) {
-		t.Fatal("expected time to match start time")
+		t.Fatalf("expected time to match start time, %v != %v", ti, testStart)
 	} else if m.Name != testContractSet {
 		t.Fatalf("expected name to be %v, got %v", testContractSet, m.Name)
 	}
