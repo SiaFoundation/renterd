@@ -1224,7 +1224,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
-	log := c.logger.With("fcid", ci.contract.ID, "hk", ci.contract.HostKey)
+	log := c.logger.With("to_renew", ci.contract.ID, "hk", ci.contract.HostKey, "hostVersion", ci.settings.Version, "hostRelease", ci.settings.Release)
 
 	// convenience variables
 	contract := ci.contract
@@ -1289,6 +1289,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	log.Infow(
 		"renewal succeeded",
+		"fcid", renewedContract.ID,
 		"renewedFrom", fcid,
 		"renterFunds", renterFunds.String(),
 		"newCollateral", newCollateral.String(),
@@ -1300,6 +1301,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 	if ci.contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
 	}
+	log := c.logger.With("to_renew", ci.contract.ID, "hk", ci.contract.HostKey, "hostVersion", ci.settings.Version, "hostRelease", ci.settings.Release)
 
 	// convenience variables
 	contract := ci.contract
@@ -1324,7 +1326,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Warnw("insufficient budget for refresh", "hk", hk, "fcid", fcid, "budget", budget, "needed", renterFunds)
+		log.Warnw("insufficient budget for refresh", "hk", hk, "fcid", fcid, "budget", budget, "needed", renterFunds)
 		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
 	}
 
@@ -1342,7 +1344,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
 	if err != nil {
 		if strings.Contains(err.Error(), "new collateral is too low") {
-			c.logger.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
+			log.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
 				"hk", hk,
 				"fcid", fcid,
 				"unallocatedCollateral", unallocatedCollateral.String(),
@@ -1350,7 +1352,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 			)
 			return api.ContractMetadata{}, true, err
 		}
-		c.logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
+		log.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
@@ -1363,13 +1365,13 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 	// persist the contract
 	refreshedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
 	if err != nil {
-		c.logger.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
+		log.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
 		return api.ContractMetadata{}, false, err
 	}
 
 	// add to renewed set
 	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
-	c.logger.Infow("refresh succeeded",
+	log.Infow("refresh succeeded",
 		"fcid", refreshedContract.ID,
 		"renewedFrom", contract.ID,
 		"renterFunds", renterFunds.String(),
@@ -1380,13 +1382,15 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 }
 
 func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+	log := c.logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+
 	// convenience variables
 	hk := host.PublicKey
 
 	// fetch host settings
 	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
 	if err != nil {
-		c.logger.Infow(err.Error(), "hk", hk)
+		log.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
 	}
 
@@ -1400,7 +1404,7 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
 	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
 	if budget.Cmp(renterFunds) < 0 {
-		c.logger.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
+		log.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
 		return api.ContractMetadata{}, false, errors.New("insufficient budget")
 	}
 
@@ -1413,7 +1417,7 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, ctx.state.Address, renterFunds, hostCollateral)
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
-		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
+		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
 			return api.ContractMetadata{}, false, err
 		}
@@ -1427,12 +1431,11 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
 	formedContract, err := c.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight, api.ContractStatePending)
 	if err != nil {
-		c.logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
+		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, true, err
 	}
 
-	c.logger.Infow("formation succeeded",
-		"hk", hk,
+	log.Infow("formation succeeded",
 		"fcid", formedContract.ID,
 		"renterFunds", renterFunds.String(),
 		"collateral", hostCollateral.String(),

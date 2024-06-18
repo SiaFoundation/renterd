@@ -24,13 +24,6 @@ import (
 	glogger "gorm.io/gorm/logger"
 )
 
-const (
-	// maxSQLVars is the maximum number of variables in an sql query. This
-	// number matches the sqlite default of 32766 rounded down to the nearest
-	// 1000. This is also lower than the mysql default of 65535.
-	maxSQLVars = 32000
-)
-
 var (
 	exprTRUE = gorm.Expr("TRUE")
 )
@@ -92,8 +85,6 @@ type (
 		wg               sync.WaitGroup
 
 		mu           sync.Mutex
-		hasAllowlist bool
-		hasBlocklist bool
 		lastPrunedAt time.Time
 		closed       bool
 	}
@@ -202,16 +193,6 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		}
 	}
 
-	// Check allowlist and blocklist counts
-	allowlistCnt, err := tableCount(db, &dbAllowlistEntry{})
-	if err != nil {
-		return nil, err
-	}
-	blocklistCnt, err := tableCount(db, &dbBlocklistEntry{})
-	if err != nil {
-		return nil, err
-	}
-
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
 		alerts:    cfg.Alerts,
@@ -222,8 +203,6 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		logger:    l,
 
 		settings:      make(map[string]string),
-		hasAllowlist:  allowlistCnt > 0,
-		hasBlocklist:  blocklistCnt > 0,
 		walletAddress: cfg.WalletAddress,
 
 		slabPruneSigChan:          make(chan struct{}, 1),
@@ -268,43 +247,6 @@ func (s *SQLStore) initSlabPruning() error {
 		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
 		return err
 	})
-}
-
-func (ss *SQLStore) updateHasAllowlist(err *error) {
-	if *err != nil {
-		return
-	}
-
-	cnt, cErr := tableCount(ss.db, &dbAllowlistEntry{})
-	if cErr != nil {
-		*err = cErr
-		return
-	}
-
-	ss.mu.Lock()
-	ss.hasAllowlist = cnt > 0
-	ss.mu.Unlock()
-}
-
-func (ss *SQLStore) updateHasBlocklist(err *error) {
-	if *err != nil {
-		return
-	}
-
-	cnt, cErr := tableCount(ss.db, &dbBlocklistEntry{})
-	if cErr != nil {
-		*err = cErr
-		return
-	}
-
-	ss.mu.Lock()
-	ss.hasBlocklist = cnt > 0
-	ss.mu.Unlock()
-}
-
-func tableCount(db *gorm.DB, model interface{}) (cnt int64, err error) {
-	err = db.Model(model).Count(&cnt).Error
-	return
 }
 
 // Close closes the underlying database connection of the store.

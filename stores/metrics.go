@@ -10,6 +10,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -150,61 +151,28 @@ func (s *SQLStore) ContractMetrics(ctx context.Context, start time.Time, n uint6
 	return resp, nil
 }
 
-func (s *SQLStore) ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error) {
-	metrics, err := s.contractPruneMetrics(ctx, start, n, interval, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]api.ContractPruneMetric, len(metrics))
-	for i := range resp {
-		resp[i] = api.ContractPruneMetric{
-			Timestamp: api.TimeRFC3339(metrics[i].Timestamp),
-
-			ContractID:  types.FileContractID(metrics[i].FCID),
-			HostKey:     types.PublicKey(metrics[i].Host),
-			HostVersion: metrics[i].HostVersion,
-
-			Pruned:    uint64(metrics[i].Pruned),
-			Remaining: uint64(metrics[i].Remaining),
-			Duration:  metrics[i].Duration,
-		}
-	}
-	return resp, nil
+func (s *SQLStore) ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) (metrics []api.ContractPruneMetric, err error) {
+	err = s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
+		metrics, txErr = tx.ContractPruneMetrics(ctx, start, n, interval, opts)
+		return
+	})
+	return
 }
 
-func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	metrics, err := s.contractSetChurnMetrics(ctx, start, n, interval, opts)
-	if err != nil {
-		return nil, err
-	}
-	resp := make([]api.ContractSetChurnMetric, len(metrics))
-	for i := range resp {
-		resp[i] = api.ContractSetChurnMetric{
-			Direction:  metrics[i].Direction,
-			ContractID: types.FileContractID(metrics[i].FCID),
-			Name:       metrics[i].Name,
-			Reason:     metrics[i].Reason,
-			Timestamp:  api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
-		}
-	}
-	return resp, nil
+func (s *SQLStore) ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) (metrics []api.ContractSetChurnMetric, err error) {
+	err = s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
+		metrics, txErr = tx.ContractSetChurnMetrics(ctx, start, n, interval, opts)
+		return
+	})
+	return
 }
 
-func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
-	metrics, err := s.contractSetMetrics(ctx, start, n, interval, opts)
-	if err != nil {
-		return nil, err
-	}
-	resp := make([]api.ContractSetMetric, len(metrics))
-	for i := range resp {
-		resp[i] = api.ContractSetMetric{
-			Contracts: metrics[i].Contracts,
-			Name:      metrics[i].Name,
-			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
-		}
-	}
-	return resp, nil
+func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, err error) {
+	err = s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
+		metrics, txErr = tx.ContractSetMetrics(ctx, start, n, interval, opts)
+		return
+	})
+	return
 }
 
 func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
@@ -270,52 +238,20 @@ func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.Cont
 }
 
 func (s *SQLStore) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
-	dbMetrics := make([]dbContractPruneMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbContractPruneMetric{
-			Timestamp: unixTimeMS(metric.Timestamp),
-
-			FCID:        fileContractID(metric.ContractID),
-			Host:        publicKey(metric.HostKey),
-			HostVersion: metric.HostVersion,
-
-			Pruned:    unsigned64(metric.Pruned),
-			Remaining: unsigned64(metric.Remaining),
-			Duration:  metric.Duration,
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&dbMetrics).Error
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordContractPruneMetric(ctx, metrics...)
 	})
 }
 
 func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
-	dbMetrics := make([]dbContractSetChurnMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbContractSetChurnMetric{
-			Direction: string(metric.Direction),
-			FCID:      fileContractID(metric.ContractID),
-			Name:      metric.Name,
-			Reason:    metric.Reason,
-			Timestamp: unixTimeMS(metric.Timestamp),
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&dbMetrics).Error
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordContractSetChurnMetric(ctx, metrics...)
 	})
 }
 
 func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
-	dbMetrics := make([]dbContractSetMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbContractSetMetric{
-			Contracts: metric.Contracts,
-			Name:      metric.Name,
-			Timestamp: unixTimeMS(metric.Timestamp),
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&dbMetrics).Error
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordContractSetMetric(ctx, metrics...)
 	})
 }
 
@@ -458,66 +394,6 @@ func (s *SQLStore) contractMetrics(ctx context.Context, start time.Time, n uint6
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
-	}
-	for i, m := range metrics {
-		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
-	}
-	return metrics, nil
-}
-
-func (s *SQLStore) contractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]dbContractPruneMetric, error) {
-	whereExpr := gorm.Expr("TRUE")
-	if opts.ContractID != (types.FileContractID{}) {
-		whereExpr = gorm.Expr("? AND fcid = ?", whereExpr, fileContractID(opts.ContractID))
-	}
-	if opts.HostKey != (types.PublicKey{}) {
-		whereExpr = gorm.Expr("? AND host = ?", whereExpr, publicKey(opts.HostKey))
-	}
-	if opts.HostVersion != "" {
-		whereExpr = gorm.Expr("? AND host_version = ?", whereExpr, opts.HostVersion)
-	}
-
-	var metrics []dbContractPruneMetric
-	err := s.findPeriods(ctx, dbContractPruneMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
-	}
-
-	return metrics, nil
-}
-
-func (s *SQLStore) contractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]dbContractSetChurnMetric, error) {
-	whereExpr := gorm.Expr("TRUE")
-	if opts.Name != "" {
-		whereExpr = gorm.Expr("? AND name = ?", whereExpr, opts.Name)
-	}
-	if opts.Direction != "" {
-		whereExpr = gorm.Expr("? AND direction = ?", whereExpr, opts.Direction)
-	}
-	if opts.Reason != "" {
-		whereExpr = gorm.Expr("? AND reason = ?", whereExpr, opts.Reason)
-	}
-	var metrics []dbContractSetChurnMetric
-	err := s.findPeriods(ctx, dbContractSetChurnMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract set churn metrics: %w", err)
-	}
-	for i, m := range metrics {
-		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
-	}
-	return metrics, nil
-}
-
-func (s *SQLStore) contractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]dbContractSetMetric, error) {
-	whereExpr := gorm.Expr("TRUE")
-	if opts.Name != "" {
-		whereExpr = gorm.Expr("name = ?", opts.Name)
-	}
-
-	var metrics []dbContractSetMetric
-	err := s.findPeriods(ctx, dbContractSetMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract set metrics: %w", err)
 	}
 	for i, m := range metrics {
 		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)

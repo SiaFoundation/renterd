@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
+	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -284,6 +285,7 @@ func main() {
 	// worker
 	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "Allows hosts with private IPs")
 	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
+	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
 	flag.StringVar(&cfg.Worker.ID, "worker.id", cfg.Worker.ID, "Unique ID for worker (overrides with RENTERD_WORKER_ID)")
 	flag.DurationVar(&cfg.Worker.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", cfg.Worker.DownloadOverdriveTimeout, "Timeout for overdriving slab downloads")
@@ -360,6 +362,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
+	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
 	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
@@ -461,11 +464,11 @@ func main() {
 		},
 	}
 
-	type shutdownFn struct {
+	type shutdownFnEntry struct {
 		name string
 		fn   func(context.Context) error
 	}
-	var shutdownFns []shutdownFn
+	var shutdownFns []shutdownFnEntry
 
 	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
 		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
@@ -491,7 +494,7 @@ func main() {
 
 	// Create the webserver.
 	srv := &http.Server{Handler: mux}
-	shutdownFns = append(shutdownFns, shutdownFn{
+	shutdownFns = append(shutdownFns, shutdownFnEntry{
 		name: "HTTP Server",
 		fn:   srv.Shutdown,
 	})
@@ -506,7 +509,7 @@ func main() {
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		shutdownFns = append(shutdownFns, shutdownFn{
+		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
 			fn:   shutdown,
 		})
@@ -525,22 +528,27 @@ func main() {
 	var s3Srv *http.Server
 	var s3Listener net.Listener
 	var workers []autopilot.Worker
+	setupWorkerFn := node.NoopFn
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, s3Handler, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
+			workerAddr := cfg.HTTP.Address + "/api/worker"
+			var shutdownFn node.ShutdownFn
+			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
 			}, bc, seed, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			shutdownFns = append(shutdownFns, shutdownFn{
+			setupWorkerFn = func(ctx context.Context) error {
+				return setupFn(ctx, workerAddr, cfg.HTTP.Password)
+			}
+			shutdownFns = append(shutdownFns, shutdownFnEntry{
 				name: "Worker",
-				fn:   fn,
+				fn:   shutdownFn,
 			})
 
-			mux.Sub["/api/worker"] = utils.TreeMux{Handler: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
-			workerAddr := cfg.HTTP.Address + "/api/worker"
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: iworker.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
@@ -553,7 +561,7 @@ func main() {
 				if err != nil {
 					logger.Fatal("failed to create listener: " + err.Error())
 				}
-				shutdownFns = append(shutdownFns, shutdownFn{
+				shutdownFns = append(shutdownFns, shutdownFnEntry{
 					name: "S3",
 					fn:   s3Srv.Shutdown,
 				})
@@ -579,7 +587,7 @@ func main() {
 		}
 
 		// NOTE: the autopilot shutdown function needs to be called first.
-		shutdownFns = append(shutdownFns, shutdownFn{
+		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Autopilot",
 			fn:   fn,
 		})
@@ -618,6 +626,11 @@ func main() {
 		if err := bc.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
 			logger.Fatal("failed to update S3 authentication settings: " + err.Error())
 		}
+	}
+
+	// Finish worker setup.
+	if err := setupWorkerFn(context.Background()); err != nil {
+		logger.Fatal("failed to setup worker: " + err.Error())
 	}
 
 	logger.Info("api: Listening on " + l.Addr().String())
@@ -750,16 +763,4 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 	}
 
 	return nil
-}
-
-func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
-	return func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
-				h.ServeHTTP(w, req)
-			} else {
-				jape.BasicAuth(password)(h).ServeHTTP(w, req)
-			}
-		})
-	}
 }

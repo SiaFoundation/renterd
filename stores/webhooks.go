@@ -15,6 +15,8 @@ type (
 		Module string `gorm:"uniqueIndex:idx_module_event_url;NOT NULL;size:255"`
 		Event  string `gorm:"uniqueIndex:idx_module_event_url;NOT NULL;size:255"`
 		URL    string `gorm:"uniqueIndex:idx_module_event_url;NOT NULL;size:255"`
+
+		Headers map[string]string `gorm:"serializer:json"`
 	}
 )
 
@@ -35,14 +37,15 @@ func (s *SQLStore) DeleteWebhook(ctx context.Context, wb webhooks.Webhook) error
 	})
 }
 
-func (s *SQLStore) AddWebhook(ctx context.Context, wb webhooks.Webhook) error {
+func (s *SQLStore) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
 		return tx.Clauses(clause.OnConflict{
 			DoNothing: true,
 		}).Create(&dbWebhook{
-			Module: wb.Module,
-			Event:  wb.Event,
-			URL:    wb.URL,
+			Module:  wh.Module,
+			Event:   wh.Event,
+			URL:     wh.URL,
+			Headers: wh.Headers,
 		}).Error
 	})
 }
@@ -55,9 +58,10 @@ func (s *SQLStore) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
 	var whs []webhooks.Webhook
 	for _, wb := range dbWebhooks {
 		whs = append(whs, webhooks.Webhook{
-			Module: wb.Module,
-			Event:  wb.Event,
-			URL:    wb.URL,
+			Module:  wb.Module,
+			Event:   wb.Event,
+			URL:     wb.URL,
+			Headers: wb.Headers,
 		})
 	}
 	return whs, nil

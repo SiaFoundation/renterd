@@ -61,7 +61,7 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, r
 		// revision number which are stored as strings so we need to fetch the
 		// current contract info separately
 		var currRevisionHeight, currSize uint64
-		var currRevisionNumber Uint64
+		var currRevisionNumber Uint64Str
 		err := tx.
 			QueryRow(ctx, fmt.Sprintf("SELECT revision_height, revision_number, size FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
 			Scan(&currRevisionHeight, &currRevisionNumber, &currSize)

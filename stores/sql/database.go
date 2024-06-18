@@ -18,11 +18,11 @@ type (
 	Database interface {
 		io.Closer
 
-		// Transaction starts a new transaction.
-		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
-
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
+
+		// Transaction starts a new transaction.
+		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
 
 		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
@@ -77,6 +77,12 @@ type (
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
+		// DeleteHostSector deletes all contract sector links that a host has
+		// with the given root incrementing the lost sector count in the
+		// process. If another contract with a different host exists that
+		// contains the root, latest_host is updated to that host.
+		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
@@ -97,6 +103,13 @@ type (
 		// DeleteObjects deletes a batch of objects starting with the given
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
+
+		// HostAllowlist returns the list of public keys of hosts on the
+		// allowlist.
+		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
+
+		// HostBlocklist returns the list of host addresses on the blocklist.
+		HostBlocklist(ctx context.Context) ([]string, error)
 
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
@@ -143,6 +156,10 @@ type (
 		// therefore only useful for gouging checks.
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 
+		// RecordPriceTables records price tables for hosts in the database
+		// increasing the successful/failed interactions accordingly.
+		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
@@ -167,12 +184,15 @@ type (
 		// ResetChainState deletes all chain data in the database.
 		ResetChainState(ctx context.Context) error
 
+		// ResetLostSectors resets the lost sector count for the given host.
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
+
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones and setting the clean shutdown flag.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
 		// SearchHosts returns a list of hosts that match the provided filters
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int, hasAllowList, hasBlocklist bool) ([]api.Host, error)
+		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
@@ -191,6 +211,15 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
+
+		// UpdateHostAllowlistEntries updates the allowlist in the database
+		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
+
+		// UpdateHostBlocklistEntries updates the blocklist in the database
+		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
 		// UpdateObjectHealth updates the health of all objects to the lowest
 		// health of all its slabs.
@@ -219,8 +248,38 @@ type (
 
 	MetricsDatabase interface {
 		io.Closer
+
+		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
+
+		// Transaction starts a new transaction.
+		Transaction(ctx context.Context, fn func(MetricsDatabaseTx) error) error
+
+		// Version returns the database version and name.
 		Version(ctx context.Context) (string, string, error)
+	}
+
+	MetricsDatabaseTx interface {
+		// ContractPruneMetrics returns the contract prune metrics for the given
+		// time range and options.
+		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
+
+		// ContractSetChurnMetrics returns the contract set churn metrics for
+		// the given time range and options.
+		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
+
+		// ContractSetMetrics returns the contract set metrics for the given
+		// time range and options.
+		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
+
+		// RecordContractPruneMetric records a contract prune metric.
+		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
+
+		// RecordContractSetChurnMetric records a contract set churn metric.
+		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
+
+		// RecordContractSetMetric records a contract set metric.
+		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
 	}
 
 	UsedContract struct {

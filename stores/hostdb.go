@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
@@ -148,44 +147,6 @@ type (
 	}
 )
 
-func convertHostPriceTable(pt rhpv3.HostPriceTable) hostPriceTable {
-	return hostPriceTable{
-		UID:                          pt.UID,
-		Validity:                     pt.Validity,
-		HostBlockHeight:              pt.HostBlockHeight,
-		UpdatePriceTableCost:         pt.UpdatePriceTableCost,
-		AccountBalanceCost:           pt.AccountBalanceCost,
-		FundAccountCost:              pt.FundAccountCost,
-		LatestRevisionCost:           pt.LatestRevisionCost,
-		SubscriptionMemoryCost:       pt.SubscriptionMemoryCost,
-		SubscriptionNotificationCost: pt.SubscriptionNotificationCost,
-		InitBaseCost:                 pt.InitBaseCost,
-		MemoryTimeCost:               pt.MemoryTimeCost,
-		DownloadBandwidthCost:        pt.DownloadBandwidthCost,
-		UploadBandwidthCost:          pt.UploadBandwidthCost,
-		DropSectorsBaseCost:          pt.DropSectorsBaseCost,
-		DropSectorsUnitCost:          pt.DropSectorsUnitCost,
-		HasSectorBaseCost:            pt.HasSectorBaseCost,
-		ReadBaseCost:                 pt.ReadBaseCost,
-		ReadLengthCost:               pt.ReadLengthCost,
-		RenewContractCost:            pt.RenewContractCost,
-		RevisionBaseCost:             pt.RevisionBaseCost,
-		SwapSectorBaseCost:           pt.SwapSectorBaseCost,
-		WriteBaseCost:                pt.WriteBaseCost,
-		WriteLengthCost:              pt.WriteLengthCost,
-		WriteStoreCost:               pt.WriteStoreCost,
-		TxnFeeMinRecommended:         pt.TxnFeeMinRecommended,
-		TxnFeeMaxRecommended:         pt.TxnFeeMaxRecommended,
-		ContractPrice:                pt.ContractPrice,
-		CollateralCost:               pt.CollateralCost,
-		MaxCollateral:                pt.MaxCollateral,
-		MaxDuration:                  pt.MaxDuration,
-		WindowSize:                   pt.WindowSize,
-		RegistryEntriesLeft:          pt.RegistryEntriesLeft,
-		RegistryEntriesTotal:         pt.RegistryEntriesTotal,
-	}
-}
-
 // TableName implements the gorm.Tabler interface.
 func (dbAnnouncement) TableName() string { return "host_announcements" }
 
@@ -321,69 +282,9 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 }
 
 func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
-	err = ss.retryTransaction(ctx, (func(tx *gorm.DB) error {
-		// fetch ap id
-		var apID uint
-		if err := tx.
-			Table("autopilots").
-			Where("identifier = ?", autopilotID).
-			Select("id").
-			Take(&apID).
-			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrAutopilotNotFound
-		} else if err != nil {
-			return err
-		}
-
-		// fetch host id
-		var hID uint
-		if err := tx.
-			Model(&dbHost{}).
-			Where("public_key = ?", publicKey(hk)).
-			Select("id").
-			Take(&hID).
-			Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("%w %v", api.ErrHostNotFound, hk)
-		} else if err != nil {
-			return err
-		}
-
-		// update host info
-		return tx.
-			Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "db_autopilot_id"}, {Name: "db_host_id"}},
-				UpdateAll: true,
-			}).
-			Create(&dbHostCheck{
-				DBAutopilotID: apID,
-				DBHostID:      hID,
-
-				UsabilityBlocked:               hc.Usability.Blocked,
-				UsabilityOffline:               hc.Usability.Offline,
-				UsabilityLowScore:              hc.Usability.LowScore,
-				UsabilityRedundantIP:           hc.Usability.RedundantIP,
-				UsabilityGouging:               hc.Usability.Gouging,
-				UsabilityNotAcceptingContracts: hc.Usability.NotAcceptingContracts,
-				UsabilityNotAnnounced:          hc.Usability.NotAnnounced,
-				UsabilityNotCompletingScan:     hc.Usability.NotCompletingScan,
-
-				ScoreAge:              hc.Score.Age,
-				ScoreCollateral:       hc.Score.Collateral,
-				ScoreInteractions:     hc.Score.Interactions,
-				ScoreStorageRemaining: hc.Score.StorageRemaining,
-				ScoreUptime:           hc.Score.Uptime,
-				ScoreVersion:          hc.Score.Version,
-				ScorePrices:           hc.Score.Prices,
-
-				GougingContractErr: hc.Gouging.ContractErr,
-				GougingDownloadErr: hc.Gouging.DownloadErr,
-				GougingGougingErr:  hc.Gouging.GougingErr,
-				GougingPruneErr:    hc.Gouging.PruneErr,
-				GougingUploadErr:   hc.Gouging.UploadErr,
-			}).
-			Error
-	}))
-	return
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostCheck(ctx, autopilotID, hk, hc)
+	})
 }
 
 // HostsForScanning returns the address of hosts for scanning.
@@ -405,14 +306,9 @@ func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) err
 }
 
 func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	ss.mu.Lock()
-	hasAllowlist := ss.hasAllowlist
-	hasBlocklist := ss.hasBlocklist
-	ss.mu.Unlock()
-
 	var hosts []api.Host
 	err := ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit, hasAllowlist, hasBlocklist)
+		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 		return
 	})
 	return hosts, err
@@ -441,37 +337,8 @@ func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove 
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	defer ss.updateHasAllowlist(&err)
-
-	// clear allowlist
-	if clear {
-		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Where("TRUE").Delete(&dbAllowlistEntry{}).Error
-		})
-	}
-
-	var toInsert []dbAllowlistEntry
-	for _, entry := range add {
-		toInsert = append(toInsert, dbAllowlistEntry{Entry: publicKey(entry)})
-	}
-
-	toDelete := make([]publicKey, len(remove))
-	for i, entry := range remove {
-		toDelete[i] = publicKey(entry)
-	}
-
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if len(toInsert) > 0 {
-			if err := tx.Create(&toInsert).Error; err != nil {
-				return err
-			}
-		}
-		if len(toDelete) > 0 {
-			if err := tx.Delete(&dbAllowlistEntry{}, "entry IN ?", toDelete).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostAllowlistEntries(ctx, add, remove, clear)
 	})
 }
 
@@ -480,55 +347,24 @@ func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove 
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	defer ss.updateHasBlocklist(&err)
-
-	// clear blocklist
-	if clear {
-		return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-			return tx.Where("TRUE").Delete(&dbBlocklistEntry{}).Error
-		})
-	}
-
-	var toInsert []dbBlocklistEntry
-	for _, entry := range add {
-		toInsert = append(toInsert, dbBlocklistEntry{Entry: entry})
-	}
-
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if len(toInsert) > 0 {
-			if err := tx.Create(&toInsert).Error; err != nil {
-				return err
-			}
-		}
-		if len(remove) > 0 {
-			if err := tx.Delete(&dbBlocklistEntry{}, "entry IN ?", remove).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostBlocklistEntries(ctx, add, remove, clear)
 	})
 }
 
 func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
-	var pubkeys []publicKey
-	err = ss.db.
-		WithContext(ctx).
-		Model(&dbAllowlistEntry{}).
-		Pluck("entry", &pubkeys).
-		Error
-
-	for _, pubkey := range pubkeys {
-		allowlist = append(allowlist, types.PublicKey(pubkey))
-	}
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		allowlist, err = tx.HostAllowlist(ctx)
+		return err
+	})
 	return
 }
 
 func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
-	err = ss.db.
-		WithContext(ctx).
-		Model(&dbBlocklistEntry{}).
-		Pluck("entry", &blocklist).
-		Error
+	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		blocklist, err = tx.HostBlocklist(ctx)
+		return err
+	})
 	return
 }
 
@@ -539,89 +375,8 @@ func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) e
 }
 
 func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
-	if len(priceTableUpdate) == 0 {
-		return nil // nothing to do
-	}
-
-	// Get keys from input.
-	keyMap := make(map[publicKey]struct{})
-	var hks []publicKey
-	for _, ptu := range priceTableUpdate {
-		if _, exists := keyMap[publicKey(ptu.HostKey)]; !exists {
-			hks = append(hks, publicKey(ptu.HostKey))
-			keyMap[publicKey(ptu.HostKey)] = struct{}{}
-		}
-	}
-
-	// Fetch hosts for which to add interactions. This can be done
-	// outsisde the transaction to reduce the time we spend in the
-	// transaction since we don't need it to be perfectly
-	// consistent.
-	var hosts []dbHost
-	for i := 0; i < len(hks); i += maxSQLVars {
-		end := i + maxSQLVars
-		if end > len(hks) {
-			end = len(hks)
-		}
-		var batchHosts []dbHost
-		if err := ss.db.WithContext(ctx).Where("public_key IN (?)", hks[i:end]).
-			Find(&batchHosts).Error; err != nil {
-			return err
-		}
-		hosts = append(hosts, batchHosts...)
-	}
-	hostMap := make(map[publicKey]dbHost)
-	for _, h := range hosts {
-		hostMap[h.PublicKey] = h
-	}
-
-	// Write the interactions and update to the hosts atomically within a single
-	// transaction.
-	return ss.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Handle price table updates
-		for _, ptu := range priceTableUpdate {
-			host, exists := hostMap[publicKey(ptu.HostKey)]
-			if !exists {
-				continue // host doesn't exist
-			}
-			if ptu.Success {
-				// Handle successful update.
-				host.SuccessfulInteractions++
-				host.RecentDowntime = 0
-				host.RecentScanFailures = 0
-
-				// Update pricetable.
-				host.PriceTable = convertHostPriceTable(ptu.PriceTable.HostPriceTable)
-				host.PriceTableExpiry = dsql.NullTime{
-					Time:  ptu.PriceTable.Expiry,
-					Valid: ptu.PriceTable.Expiry != time.Time{},
-				}
-			} else {
-				// Handle failed update.
-				host.FailedInteractions++
-			}
-
-			// Save to map again.
-			hostMap[host.PublicKey] = host
-		}
-
-		// Persist.
-		for _, h := range hostMap {
-			err := tx.Model(&dbHost{}).
-				Where("public_key", h.PublicKey).
-				Updates(map[string]interface{}{
-					"recent_downtime":         h.RecentDowntime,
-					"recent_scan_failures":    h.RecentScanFailures,
-					"price_table":             h.PriceTable,
-					"price_table_expiry":      h.PriceTableExpiry,
-					"successful_interactions": h.SuccessfulInteractions,
-					"failed_interactions":     h.FailedInteractions,
-				}).Error
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.RecordPriceTables(ctx, priceTableUpdate)
 	})
 }
 
