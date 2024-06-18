@@ -143,8 +143,8 @@ func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) e
 		}
 		headers = string(h)
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) ON CONFLICT DO SET headers = EXCLUDED.headers",
-		time.Now(), wh.Module, wh.Event, headers)
+	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET headers = EXCLUDED.headers",
+		time.Now(), wh.Module, wh.Event, wh.URL, headers)
 	if err != nil {
 		return fmt.Errorf("failed to insert webhook: %w", err)
 	}
