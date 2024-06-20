@@ -71,6 +71,10 @@ func (b *MetricsDatabase) wrapTxn(tx sql.Tx) *MetricsDatabaseTx {
 	return &MetricsDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
+func (tx *MetricsDatabaseTx) ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
+	return ssql.ContractMetrics(ctx, tx, start, n, interval, ssql.ContractMetricsQueryOpts{ContractMetricsQueryOpts: opts})
+}
+
 func (tx *MetricsDatabaseTx) ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error) {
 	return ssql.ContractPruneMetrics(ctx, tx, start, n, interval, opts)
 }
@@ -83,6 +87,14 @@ func (tx *MetricsDatabaseTx) ContractSetMetrics(ctx context.Context, start time.
 	return ssql.ContractSetMetrics(ctx, tx, start, n, interval, opts)
 }
 
+func (tx *MetricsDatabaseTx) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
+	return ssql.PerformanceMetrics(ctx, tx, start, n, interval, opts)
+}
+
+func (tx *MetricsDatabaseTx) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
+	return ssql.RecordContractMetric(ctx, tx, metrics...)
+}
+
 func (tx *MetricsDatabaseTx) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
 	return ssql.RecordContractPruneMetric(ctx, tx, metrics...)
 }
@@ -93,4 +105,16 @@ func (tx *MetricsDatabaseTx) RecordContractSetChurnMetric(ctx context.Context, m
 
 func (tx *MetricsDatabaseTx) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
 	return ssql.RecordContractSetMetric(ctx, tx, metrics...)
+}
+
+func (tx *MetricsDatabaseTx) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
+	return ssql.RecordPerformanceMetric(ctx, tx, metrics...)
+}
+
+func (tx *MetricsDatabaseTx) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
+	return ssql.RecordWalletMetric(ctx, tx, metrics...)
+}
+
+func (tx *MetricsDatabaseTx) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	return ssql.WalletMetrics(ctx, tx, start, n, interval, opts)
 }

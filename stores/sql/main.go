@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 )
 
@@ -376,6 +377,18 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	return int(deletedSectors), nil
 }
 
+func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
+	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
+	if err != nil {
+		return fmt.Errorf("failed to delete webhook: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return webhooks.ErrWebhookNotFound
+	}
+	return nil
+}
+
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
 	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
 	if err != nil {
@@ -435,6 +448,32 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 		hosts = append(hosts, ha)
 	}
 	return hosts, nil
+}
+
+func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	// insert buffered slab
+	res, err := tx.Exec(ctx, `INSERT INTO buffered_slabs (created_at, filename) VALUES (?, ?)`,
+		time.Now(), fileName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert buffered slab: %w", err)
+	}
+	bufferedSlabID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch buffered slab id: %w", err)
+	}
+
+	key, err := ec.MarshalBinary()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO slabs (created_at, db_contract_set_id, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		time.Now(), contractSetID, bufferedSlabID, SecretKey(key), minShards, totalShards)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert slab: %w", err)
+	}
+	return bufferedSlabID, nil
 }
 
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
@@ -633,24 +672,32 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	return usedContracts, nil
 }
 
-func HealthQuery(limit int64, now time.Time) (string, []any) {
-	return `SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
-	THEN
-		CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
-		THEN -1
-		ELSE 1
-		END
-	ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-	END AS health
-	FROM slabs
-	INNER JOIN sectors s ON s.db_slab_id = slabs.id
-	LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
-	LEFT JOIN contracts c ON se.db_contract_id = c.id
-	LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
-	LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-	WHERE slabs.health_valid_until <= ?
-	GROUP BY slabs.id
-	LIMIT ?`, []any{now.Unix(), limit}
+func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Time) error {
+	_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS slabs_health")
+	if err != nil {
+		return fmt.Errorf("failed to drop temporary table: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		CREATE TEMPORARY TABLE slabs_health AS
+			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
+			THEN
+				CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+				THEN -1
+				ELSE 1
+				END
+			ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+			END as health
+			FROM slabs
+			INNER JOIN sectors s ON s.db_slab_id = slabs.id
+			LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+			LEFT JOIN contracts c ON se.db_contract_id = c.id
+			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
+			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+			WHERE slabs.health_valid_until <= ?
+			GROUP BY slabs.id
+			LIMIT ?
+	`, now.Unix(), limit)
+	return err
 }
 
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
@@ -1088,7 +1135,7 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
 	_, err := tx.Exec(ctx, "UPDATE hosts SET lost_sectors = 0 WHERE public_key = ?", PublicKey(hk))
 	if err != nil {
-		return fmt.Errorf("failed to reset lost sectors: %w", err)
+		return fmt.Errorf("failed to reset lost sectors for host %v: %w", hk, err)
 	}
 	return nil
 }
@@ -1319,6 +1366,30 @@ func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 	return err
 }
 
+func SlabBuffers(ctx context.Context, tx sql.Tx) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT buffered_slabs.filename, cs.name
+		FROM buffered_slabs
+		INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
+		INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets")
+	}
+	defer rows.Close()
+
+	fileNameToContractSet := make(map[string]string)
+	for rows.Next() {
+		var fileName string
+		var contractSetName string
+		if err := rows.Scan(&fileName, &contractSetName); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		fileNameToContractSet[fileName] = contractSetName
+	}
+	return fileNameToContractSet, nil
+}
+
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
 	policy, err := json.Marshal(bp)
 	if err != nil {
@@ -1335,18 +1406,25 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 	return nil
 }
 
-func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, `
-		UPDATE objects SET health = (
-			SELECT MIN(slabs.health)
-			FROM slabs
-			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-		) WHERE health != (
-			SELECT MIN(slabs.health)
-			FROM slabs
-			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-		)`)
-	return err
+func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
+	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	var whs []webhooks.Webhook
+	for rows.Next() {
+		var webhook webhooks.Webhook
+		var headers string
+		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL, &headers); err != nil {
+			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		} else if err := json.Unmarshal([]byte(headers), &webhook.Headers); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+		}
+		whs = append(whs, webhook)
+	}
+	return whs, nil
 }
 
 func scanAutopilot(s scanner) (api.Autopilot, error) {
