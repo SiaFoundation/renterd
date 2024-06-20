@@ -877,8 +877,8 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to compute slab health: %w", err)
 	}
 
-	args := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
-	res, err := tx.Exec(ctx, "UPDATE slabs sla INNER JOIN slabs_health h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", args...)
+	res, err := tx.Exec(ctx, "UPDATE slabs sla INNER JOIN slabs_health h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))",
+		now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds())
 	if err != nil {
 		return 0, fmt.Errorf("failed to update slab health: %w", err)
 	}
