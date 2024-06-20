@@ -99,7 +99,7 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 	})
 }
 
-func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) (metrics []api.ContractSetChurnMetric, err error) {
+func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
 	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetChurnMetric, err error) {
 		var placeHolder int64
 		var placeHolderTime time.Time
@@ -122,7 +122,7 @@ func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n 
 	})
 }
 
-func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, err error) {
+func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
 	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetMetric, err error) {
 		var placeHolder int64
 		var placeHolderTime time.Time
