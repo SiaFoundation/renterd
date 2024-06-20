@@ -664,24 +664,28 @@ func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID,
 }
 
 func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error {
-	// fetch ids
-	var ids []types.FileContractID
-	for id := range toArchive {
-		ids = append(ids, id)
-	}
+	// archive contracts one-by-one to avoid overwhelming the database due to
+	// the cascade deletion of contract-sectors.
+	var errs []string
+	for fcid, reason := range toArchive {
+		// invalidate health of related sectors before archiving the contract
+		// NOTE: even if this is not done in the same transaction it won't have any
+		// lasting negative effects.
+		if err := s.invalidateSlabHealthByFCID(ctx, []types.FileContractID{fcid}); err != nil {
+			return fmt.Errorf("ArchiveContracts: failed to invalidate slab health: %w", err)
+		}
 
-	// invalidate health of related sectors before archiving the contracts
-	// NOTE: even if this is not done in the same transaction it won't have any
-	// lasting negative effects.
-	if err := s.invalidateSlabHealthByFCID(ctx, ids); err != nil {
-		return fmt.Errorf("ArchiveContracts: failed to invalidate slab health: %w", err)
+		// archive the contract but don't interrupt the process if one contract
+		// fails
+		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			return tx.ArchiveContract(ctx, fcid, reason)
+		}); err != nil {
+			errs = append(errs, fmt.Sprintf("%v: %v", fcid, err))
+			continue
+		}
 	}
-
-	// archive them
-	if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return archiveContracts(ctx, tx, toArchive)
-	}); err != nil {
-		return fmt.Errorf("ArchiveContracts: failed to archive contracts: %w", err)
+	if len(errs) > 0 {
+		return fmt.Errorf("ArchiveContracts: failed to archive at least one contract: %v", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -1339,76 +1343,12 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 	return
 }
 
-func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
-	var deletedSectors int
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Fetch contract_sectors to delete.
-		var sectors []dbContractSector
-		err := tx.Raw(`
-			SELECT contract_sectors.*
-			FROM contract_sectors
-			INNER JOIN sectors s ON s.id = contract_sectors.db_sector_id
-			INNER JOIN contracts c ON c.id = contract_sectors.db_contract_id
-			INNER JOIN hosts h ON h.id = c.host_id
-			WHERE s.root = ? AND h.public_key = ?
-			`, root[:], publicKey(hk)).
-			Scan(&sectors).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch contract sectors for deletion: %w", err)
-		}
-
-		if len(sectors) > 0 {
-			// Update the affected slabs.
-			var sectorIDs []uint
-			uniqueIDs := make(map[uint]struct{})
-			for _, s := range sectors {
-				if _, exists := uniqueIDs[s.DBSectorID]; !exists {
-					uniqueIDs[s.DBSectorID] = struct{}{}
-					sectorIDs = append(sectorIDs, s.DBSectorID)
-				}
-			}
-			err = tx.Exec("UPDATE slabs SET health_valid_until = ? WHERE id IN (SELECT db_slab_id FROM sectors WHERE id IN (?))", time.Now().Unix(), sectorIDs).Error
-			if err != nil {
-				return fmt.Errorf("failed to invalidate slab health: %w", err)
-			}
-
-			// Delete contract_sectors.
-			res := tx.Delete(&sectors)
-			if err := res.Error; err != nil {
-				return fmt.Errorf("failed to delete contract sectors: %w", err)
-			} else if res.RowsAffected != int64(len(sectors)) {
-				return fmt.Errorf("expected %v affected rows but got %v", len(sectors), res.RowsAffected)
-			}
-			deletedSectors = len(sectors)
-
-			// Increment the host's lostSectors by the number of lost sectors.
-			if err := tx.Exec("UPDATE hosts SET lost_sectors = lost_sectors + ? WHERE public_key = ?", len(sectors), publicKey(hk)).Error; err != nil {
-				return fmt.Errorf("failed to increment lost sectors: %w", err)
-			}
-		}
-
-		// Fetch the sector and update the latest_host field if the host for
-		// which we remove the sector is the latest_host.
-		var sector dbSector
-		err = tx.Where("root", root[:]).
-			Preload("Contracts.Host").
-			Find(&sector).
-			Error
-		if err != nil {
-			return fmt.Errorf("failed to fetch sectors: %w", err)
-		}
-		if sector.LatestHost == publicKey(hk) {
-			if len(sector.Contracts) == 0 {
-				sector.LatestHost = publicKey{} // no more hosts
-			} else {
-				sector.LatestHost = sector.Contracts[len(sector.Contracts)-1].Host.PublicKey // most recent contract
-			}
-			return tx.Save(sector).Error
-		}
-		return nil
+func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (deletedSectors int, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		deletedSectors, err = tx.DeleteHostSector(ctx, hk, root)
+		return err
 	})
-	return deletedSectors, err
+	return
 }
 
 func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
@@ -2045,19 +1985,6 @@ func addContract(tx *gorm.DB, c rhpv2.ContractRevision, contractPrice, totalCost
 	// Populate host.
 	contract.Host = host
 	return contract, nil
-}
-
-// archiveContracts archives the given contracts and uses the given reason as
-// archival reason
-//
-// NOTE: this function archives the contracts without setting a renewed ID
-func archiveContracts(ctx context.Context, tx sql.DatabaseTx, toArchive map[types.FileContractID]string) error {
-	for fcid, reason := range toArchive {
-		if err := tx.ArchiveContract(ctx, fcid, reason); err != nil {
-			return fmt.Errorf("failed to archive contract %v: %w", fcid, err)
-		}
-	}
-	return nil
 }
 
 func (s *SQLStore) pruneSlabsLoop() {

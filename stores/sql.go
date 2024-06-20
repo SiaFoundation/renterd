@@ -24,13 +24,6 @@ import (
 	glogger "gorm.io/gorm/logger"
 )
 
-const (
-	// maxSQLVars is the maximum number of variables in an sql query. This
-	// number matches the sqlite default of 32766 rounded down to the nearest
-	// 1000. This is also lower than the mysql default of 65535.
-	maxSQLVars = 32000
-)
-
 var (
 	exprTRUE = gorm.Expr("TRUE")
 )
