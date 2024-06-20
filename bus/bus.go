@@ -2391,11 +2391,13 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 }
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	b.events.BroadcastEvent(api.EventConsensusUpdate{
-		ConsensusState: b.consensusState(),
-		TransactionFee: b.tp.RecommendedFee(),
-		Timestamp:      time.Now().UTC(),
-	})
+	if cc.Synced {
+		b.events.BroadcastEvent(api.EventConsensusUpdate{
+			ConsensusState: b.consensusState(),
+			TransactionFee: b.tp.RecommendedFee(),
+			Timestamp:      time.Now().UTC(),
+		})
+	}
 }
 
 // New returns a new Bus.
