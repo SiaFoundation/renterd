@@ -272,6 +272,10 @@ func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
+}
+
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
@@ -617,6 +621,10 @@ func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) SlabBuffers(ctx context.Context) (map[string]string, error) {
+	return ssql.SlabBuffers(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
 	res, err := tx.Exec(ctx, `
 		INSERT INTO autopilots (created_at, identifier, config, current_period)
@@ -775,10 +783,6 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
-	return ssql.UpdateObjectHealth(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
 	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
@@ -889,12 +893,30 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
 	now := time.Now()
-	args := []any{maxDuration.Seconds(), minDuration.Seconds(), now.Add(minDuration).Unix()}
-	healthQuery, healthArgs := ssql.HealthQuery(limit, now)
-	args = append(args, healthArgs...)
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) %% (? - ?) + ?) FROM (%s) AS inner WHERE slabs.id=inner.id", healthQuery), args...)
+	if err := ssql.PrepareSlabHealth(ctx, tx, limit, now); err != nil {
+		return 0, fmt.Errorf("failed to compute slab health: %w", err)
+	}
+
+	res, err := tx.Exec(ctx, "UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) % (? - ?) + ?) FROM slabs_health AS inner WHERE slabs.id=inner.id",
+		maxDuration.Seconds(), minDuration.Seconds(), now.Add(minDuration).Unix())
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to update slab health: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE objects SET health = (
+			SELECT MIN(h.health)
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
+		) WHERE EXISTS (
+			SELECT 1
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
+		)`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
 }

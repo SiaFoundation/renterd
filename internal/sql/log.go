@@ -73,13 +73,13 @@ func (ls *LoggedStmt) Exec(ctx context.Context, args ...any) (sql.Result, error)
 	return result, err
 }
 
-func (ls *LoggedStmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
+func (ls *LoggedStmt) Query(ctx context.Context, args ...any) (*LoggedRows, error) {
 	start := time.Now()
 	rows, err := ls.Stmt.QueryContext(ctx, args...)
 	if dur := time.Since(start); dur > ls.longQueryDuration {
 		ls.log.Warn("slow query", zap.String("query", ls.query), zap.Duration("elapsed", dur), zap.Stack("stack"))
 	}
-	return rows, err
+	return &LoggedRows{rows, ls.log.Named("rows"), ls.longQueryDuration}, err
 }
 
 func (ls *LoggedStmt) QueryRow(ctx context.Context, args ...any) *LoggedRow {

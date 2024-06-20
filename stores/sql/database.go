@@ -91,6 +91,12 @@ type (
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
+		// InsertBufferedSlab inserts a buffered slab into the database. This
+		// includes the creation of a buffered slab as well as the corresponding
+		// regular slab it is linked to. It returns the ID of the buffered slab
+		// that was created.
+		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
@@ -200,6 +206,10 @@ type (
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 
+		// SlabBuffers returns the filenames and associated contract sets of all
+		// slab buffers.
+		SlabBuffers(ctx context.Context) (map[string]string, error)
+
 		// UpdateAutopilot updates the autopilot with the provided one or
 		// creates a new one if it doesn't exist yet.
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
@@ -208,18 +218,14 @@ type (
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
-		// UpdateHostCheck updates the host check for the given host.
-		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
-
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 
 		// UpdateHostBlocklistEntries updates the blocklist in the database
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
-		// UpdateObjectHealth updates the health of all objects to the lowest
-		// health of all its slabs.
-		UpdateObjectHealth(ctx context.Context) error
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%
@@ -253,6 +259,10 @@ type (
 	}
 
 	MetricsDatabaseTx interface {
+		// ContractMetrics returns contract metrics  for the given time range
+		// and options.
+		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+
 		// ContractPruneMetrics returns the contract prune metrics for the given
 		// time range and options.
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
@@ -265,13 +275,16 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// RecordContractPruneMetric records a contract prune metric.
+		// RecordContractMetric records contract metrics.
+		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
+
+		// RecordContractPruneMetric records contract prune metrics.
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
-		// RecordContractSetChurnMetric records a contract set churn metric.
+		// RecordContractSetChurnMetric records contract set churn metrics.
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 
-		// RecordContractSetMetric records a contract set metric.
+		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
 	}
 
