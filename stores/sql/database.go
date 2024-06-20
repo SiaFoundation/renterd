@@ -8,6 +8,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -36,6 +37,10 @@ type (
 
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
+
+		// AddWebhook adds a new webhook to the database. If the webhook already
+		// exists, it is updated.
+		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
 
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
@@ -80,6 +85,11 @@ type (
 		// process. If another contract with a different host exists that
 		// contains the root, latest_host is updated to that host.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
+		// DeleteWebhook deletes the webhook with the matching module, event and
+		// URL of the provided webhook. If the webhook doesn't exist,
+		// webhooks.ErrWebhookNotFound is returned.
+		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
 		// InsertBufferedSlab inserts a buffered slab into the database. This
 		// includes the creation of a buffered slab as well as the corresponding
@@ -230,6 +240,9 @@ type (
 		// between 'minValidity' and 'maxValidity' is used to determine the time
 		// the health of the updated slabs becomes invalid
 		UpdateSlabHealth(ctx context.Context, limit int64, minValidity, maxValidity time.Duration) (int64, error)
+
+		// Webhooks returns all registered webhooks.
+		Webhooks(ctx context.Context) ([]webhooks.Webhook, error)
 	}
 
 	MetricsDatabase interface {
@@ -262,6 +275,9 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
+		// PerformanceMetrics returns performance metrics for the given time range
+		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
+
 		// RecordContractMetric records contract metrics.
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
@@ -273,6 +289,9 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
+
+		// RecordPerformanceMetric records performance metrics.
+		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
 	}
 
 	UsedContract struct {
