@@ -1363,7 +1363,7 @@ func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
 }
 
 func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
-	rows, err := tx.Query(ctx, "SELECT module, event, url FROM webhooks")
+	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch webhooks: %w", err)
 	}
@@ -1372,8 +1372,11 @@ func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
 	var whs []webhooks.Webhook
 	for rows.Next() {
 		var webhook webhooks.Webhook
-		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL); err != nil {
+		var headers string
+		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL, &headers); err != nil {
 			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		} else if err := json.Unmarshal([]byte(headers), &webhook.Headers); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
 		}
 		whs = append(whs, webhook)
 	}
