@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/internal/sql"
@@ -132,6 +133,23 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 
 func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
 	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+}
+
+func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	headers := "{}"
+	if len(wh.Headers) > 0 {
+		h, err := json.Marshal(wh.Headers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal headers: %w", err)
+		}
+		headers = string(h)
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE headers = VALUES(headers)",
+		time.Now(), wh.Module, wh.Event, wh.URL, headers)
+	if err != nil {
+		return fmt.Errorf("failed to insert webhook: %w", err)
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
@@ -252,6 +270,10 @@ func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName strin
 
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
+}
+
+func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
@@ -905,6 +927,10 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
+	return ssql.Webhooks(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {
