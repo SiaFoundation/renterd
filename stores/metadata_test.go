@@ -4017,7 +4017,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// add test hosts
-	hks, err := ss.addTestHosts(2)
+	hks, err := ss.addTestHosts(8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4037,10 +4037,13 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o1, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: object.GenerateEncryptionKey(),
+			MinShards: 2,
+			Key:       object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
+				newTestShard(hks[2], fcids[2], types.Hash256{2}),
+				newTestShard(hks[3], fcids[3], types.Hash256{3}),
 			},
 		}}},
 	}); err != nil {
@@ -4053,10 +4056,13 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o2, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: object.GenerateEncryptionKey(),
+			MinShards: 2,
+			Key:       object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
-				newTestShard(hks[0], fcids[0], types.Hash256{2}),
-				newTestShard(hks[1], fcids[1], types.Hash256{3}),
+				newTestShard(hks[4], fcids[4], types.Hash256{4}),
+				newTestShard(hks[5], fcids[5], types.Hash256{5}),
+				newTestShard(hks[6], fcids[6], types.Hash256{6}),
+				newTestShard(hks[7], fcids[7], types.Hash256{7}),
 			},
 		}}},
 	}); err != nil {
@@ -4065,8 +4071,8 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", added.Health)
 	}
 
-	// update contract set and refresh health, assert health is .5
-	err = ss.SetContractSet(context.Background(), testContractSet, fcids[:1])
+	// update contract set to not contain the first contract
+	err = ss.SetContractSet(context.Background(), testContractSet, fcids[1:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4076,42 +4082,24 @@ func TestRefreshHealth(t *testing.T) {
 	}
 	if health(o1) != .5 {
 		t.Fatal("expected health to be .5, got", health(o1))
-	} else if health(o2) != .5 {
-		t.Fatal("expected health to be .5, got", health(o2))
+	} else if health(o2) != 1 {
+		t.Fatal("expected health to be 1, got", health(o2))
 	}
 
-	// set the health of s1 to be lower than .5
-	err = ss.overrideSlabHealth(o1, 0.4)
+	// update contract set again to increase health of o1 again and lower health
+	// of o2
+	err = ss.SetContractSet(context.Background(), testContractSet, fcids[:6])
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// refresh health and assert only object 1's health got updated
 	err = ss.RefreshHealth(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if health(o1) != .4 {
+	if health(o1) != 1 {
 		t.Fatal("expected health to be .4, got", health(o1))
-	} else if health(o2) != .5 {
-		t.Fatal("expected health to be .5, got", health(o2))
-	}
-
-	// set the health of s2 to be higher than .5
-	err = ss.overrideSlabHealth(o2, 0.6)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// refresh health and assert only object 2's health got updated
-	err = ss.RefreshHealth(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if health(o1) != .4 {
-		t.Fatal("expected health to be .4, got", health(o1))
-	} else if health(o2) != .6 {
-		t.Fatal("expected health to be .6, got", health(o2))
+	} else if health(o2) != 0 {
+		t.Fatal("expected health to be 0, got", health(o2))
 	}
 
 	// add another object that is empty
@@ -4124,22 +4112,11 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", added.Health)
 	}
 
-	// update its health to .1
-	if err := ss.db.
-		Model(&dbObject{}).
-		Where("object_id", o3).
-		Update("health", 0.1).
-		Error; err != nil {
-		t.Fatal(err)
-	} else if health(o3) != .1 {
-		t.Fatalf("expected health to be .1, got %v", health(o3))
-	}
-
-	// a refresh should not update its health
+	// a refresh should keep the health at 1
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if health(o3) != .1 {
-		t.Fatalf("expected health to be .1, got %v", health(o3))
+	} else if health(o3) != 1 {
+		t.Fatalf("expected health to be 1, got %v", health(o3))
 	}
 }
 
