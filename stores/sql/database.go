@@ -16,6 +16,9 @@ type (
 	Database interface {
 		io.Closer
 
+		// LoadSlabBuffers loads the slab buffers from the database.
+		LoadSlabBuffers(ctx context.Context) ([]LoadedSlabBuffer, []string, error)
+
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
 
@@ -273,6 +276,16 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
+	}
+
+	LoadedSlabBuffer struct {
+		ID            int64
+		ContractSetID int64
+		Filename      string
+		Key           object.EncryptionKey
+		MinShards     uint8
+		Size          int64
+		TotalShards   uint8
 	}
 
 	UsedContract struct {
