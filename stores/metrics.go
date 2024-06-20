@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	sql "go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type (
@@ -189,41 +186,17 @@ func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.P
 }
 
 func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
-	dbMetrics := make([]dbWalletMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbWalletMetric{
-			Timestamp:     unixTimeMS(metric.Timestamp),
-			ConfirmedLo:   unsigned64(metric.Confirmed.Lo),
-			ConfirmedHi:   unsigned64(metric.Confirmed.Hi),
-			SpendableLo:   unsigned64(metric.Spendable.Lo),
-			SpendableHi:   unsigned64(metric.Spendable.Hi),
-			UnconfirmedLo: unsigned64(metric.Unconfirmed.Lo),
-			UnconfirmedHi: unsigned64(metric.Unconfirmed.Hi),
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&dbMetrics).Error
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordWalletMetric(ctx, metrics...)
 	})
 }
 
-func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
-	metrics, err := s.walletMetrics(ctx, start, n, interval, opts)
-	if err != nil {
-		return nil, err
-	}
-	resp := make([]api.WalletMetric, len(metrics))
-	toCurr := func(lo, hi unsigned64) types.Currency {
-		return types.NewCurrency(uint64(lo), uint64(hi))
-	}
-	for i := range resp {
-		resp[i] = api.WalletMetric{
-			Timestamp:   api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
-			Confirmed:   toCurr(metrics[i].ConfirmedLo, metrics[i].ConfirmedHi),
-			Spendable:   toCurr(metrics[i].SpendableLo, metrics[i].SpendableHi),
-			Unconfirmed: toCurr(metrics[i].UnconfirmedLo, metrics[i].UnconfirmedHi),
-		}
-	}
-	return resp, nil
+func (s *SQLStore) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []api.WalletMetric, err error) {
+	err = s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
+		metrics, txErr = tx.WalletMetrics(ctx, start, n, interval, opts)
+		return
+	})
+	return
 }
 
 func (s *SQLStore) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
@@ -264,57 +237,4 @@ func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) u
 	}
 	normalizedMS := (toNormaliseMS-startMS)/intervalMS*intervalMS + start.UnixMilli()
 	return unixTimeMS(time.UnixMilli(normalizedMS))
-}
-
-// findPeriods is the core of all methods retrieving metrics. By using integer
-// division rounding combined with a GROUP BY operation, all rows of a table are
-// split into intervals and the row with the lowest timestamp for each interval
-// is returned. The result is then joined with the original table to retrieve
-// only the metrics we want.
-func (s *SQLStore) findPeriods(ctx context.Context, table string, dst interface{}, start time.Time, n uint64, interval time.Duration, whereExpr clause.Expr) error {
-	if n > api.MetricMaxIntervals {
-		return api.ErrMaxIntervalsExceeded
-	}
-	end := start.Add(time.Duration(n) * interval)
-	return s.dbMetrics.WithContext(ctx).Raw(fmt.Sprintf(`
-		WITH RECURSIVE periods AS (
-			SELECT ? AS period_start
-			UNION ALL
-			SELECT period_start + ?
-			FROM periods
-			WHERE period_start < ? - ?
-		)
-		SELECT %s.* FROM %s
-		INNER JOIN (
-		SELECT
-			p.period_start as Period,
-			MIN(obj.id) AS id
-		FROM
-			periods p
-		INNER JOIN
-			%s obj ON obj.timestamp >= p.period_start AND obj.timestamp < p.period_start + ?
-		WHERE ?
-		GROUP BY
-			p.period_start
-		) i ON %s.id = i.id ORDER BY Period ASC
-	`, table, table, table, table),
-		unixTimeMS(start),
-		interval.Milliseconds(),
-		unixTimeMS(end),
-		interval.Milliseconds(),
-		interval.Milliseconds(),
-		whereExpr,
-	).Scan(dst).
-		Error
-}
-
-func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []dbWalletMetric, err error) {
-	err = s.findPeriods(ctx, dbWalletMetric{}.TableName(), &metrics, start, n, interval, gorm.Expr("TRUE"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch wallet metrics: %w", err)
-	}
-	for i, m := range metrics {
-		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
-	}
-	return
 }

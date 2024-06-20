@@ -111,3 +111,11 @@ func (tx *MetricsDatabaseTx) RecordContractSetMetric(ctx context.Context, metric
 func (tx *MetricsDatabaseTx) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
 	return ssql.RecordPerformanceMetric(ctx, tx, metrics...)
 }
+
+func (tx *MetricsDatabaseTx) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
+	return ssql.RecordWalletMetric(ctx, tx, metrics...)
+}
+
+func (tx *MetricsDatabaseTx) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	return ssql.WalletMetrics(ctx, tx, start, n, interval, opts)
+}

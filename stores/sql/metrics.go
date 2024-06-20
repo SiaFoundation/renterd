@@ -335,6 +335,58 @@ func RecordPerformanceMetric(ctx context.Context, tx sql.Tx, metrics ...api.Perf
 	return nil
 }
 
+func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMetric) error {
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO wallets (created_at, timestamp, confirmed_lo, confirmed_hi, spendable_lo, spendable_hi, unconfirmed_lo, unconfirmed_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert wallet metric: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, metric := range metrics {
+		res, err := insertStmt.Exec(ctx,
+			time.Now().UTC(),
+			UnixTimeMS(metric.Timestamp),
+			Unsigned64(metric.Confirmed.Lo),
+			Unsigned64(metric.Confirmed.Hi),
+			Unsigned64(metric.Spendable.Lo),
+			Unsigned64(metric.Spendable.Hi),
+			Unsigned64(metric.Unconfirmed.Lo),
+			Unsigned64(metric.Unconfirmed.Hi),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert wallet metric: %w", err)
+		} else if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		} else if n == 0 {
+			return fmt.Errorf("failed to insert wallet metric: no rows affected")
+		}
+	}
+
+	return nil
+}
+
+func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.WalletMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
+		var timestamp UnixTimeMS
+		err = rows.Scan(
+			&placeHolder,
+			&placeHolderTime,
+			&timestamp,
+			(*Unsigned64)(&m.Confirmed.Lo), (*Unsigned64)(&m.Confirmed.Hi),
+			(*Unsigned64)(&m.Spendable.Lo), (*Unsigned64)(&m.Spendable.Hi),
+			(*Unsigned64)(&m.Unconfirmed.Lo), (*Unsigned64)(&m.Unconfirmed.Hi),
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			return
+		}
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
+	})
+}
+
 func queryPeriods[T any](ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts interface{}, scanRowFn func(*sql.LoggedRows) (T, error)) ([]T, error) {
 	if n > api.MetricMaxIntervals {
 		return nil, api.ErrMaxIntervalsExceeded
@@ -524,6 +576,8 @@ func whereClauseFromQueryOpts(opts interface{}) (where whereClause, _ error) {
 			where.query += " AND origin = ?"
 			where.params = append(where.params, opts.Origin)
 		}
+	case api.WalletMetricsQueryOpts:
+		where.table = "wallets"
 	default:
 		return whereClause{}, fmt.Errorf("unknown query opts type: %T", opts)
 	}
