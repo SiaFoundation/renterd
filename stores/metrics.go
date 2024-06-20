@@ -150,22 +150,12 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n ui
 	return
 }
 
-func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
-	metrics, err := s.performanceMetrics(ctx, start, n, interval, opts)
-	if err != nil {
-		return nil, err
-	}
-	resp := make([]api.PerformanceMetric, len(metrics))
-	for i := range resp {
-		resp[i] = api.PerformanceMetric{
-			Action:    metrics[i].Action,
-			HostKey:   types.PublicKey(metrics[i].Host),
-			Origin:    metrics[i].Origin,
-			Duration:  metrics[i].Duration,
-			Timestamp: api.TimeRFC3339(time.Time(metrics[i].Timestamp).UTC()),
-		}
-	}
-	return resp, nil
+func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) (metrics []api.PerformanceMetric, err error) {
+	err = s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
+		metrics, txErr = tx.PerformanceMetrics(ctx, start, n, interval, opts)
+		return
+	})
+	return
 }
 
 func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
@@ -192,6 +182,12 @@ func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.C
 	})
 }
 
+func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
+	return s.bMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
+		return tx.RecordPerformanceMetric(ctx, metrics...)
+	})
+}
+
 func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
 	dbMetrics := make([]dbWalletMetric, len(metrics))
 	for i, metric := range metrics {
@@ -203,22 +199,6 @@ func (s *SQLStore) RecordWalletMetric(ctx context.Context, metrics ...api.Wallet
 			SpendableHi:   unsigned64(metric.Spendable.Hi),
 			UnconfirmedLo: unsigned64(metric.Unconfirmed.Lo),
 			UnconfirmedHi: unsigned64(metric.Unconfirmed.Hi),
-		}
-	}
-	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&dbMetrics).Error
-	})
-}
-
-func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
-	dbMetrics := make([]dbPerformanceMetric, len(metrics))
-	for i, metric := range metrics {
-		dbMetrics[i] = dbPerformanceMetric{
-			Action:    metric.Action,
-			Duration:  metric.Duration,
-			Host:      publicKey(metric.HostKey),
-			Origin:    metric.Origin,
-			Timestamp: unixTimeMS(metric.Timestamp),
 		}
 	}
 	return s.dbMetrics.Transaction(func(tx *gorm.DB) error {
@@ -337,25 +317,4 @@ func (s *SQLStore) walletMetrics(ctx context.Context, start time.Time, n uint64,
 		metrics[i].Timestamp = normaliseTimestamp(start, interval, m.Timestamp)
 	}
 	return
-}
-
-func (s *SQLStore) performanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]dbPerformanceMetric, error) {
-	whereExpr := gorm.Expr("TRUE")
-	if opts.Action != "" {
-		whereExpr = gorm.Expr("? AND action = ?", whereExpr, opts.Action)
-	}
-	if opts.HostKey != (types.PublicKey{}) {
-		whereExpr = gorm.Expr("? AND host = ?", whereExpr, publicKey(opts.HostKey))
-	}
-	if opts.Origin != "" {
-		whereExpr = gorm.Expr("? AND origin = ?", whereExpr, opts.Origin)
-	}
-
-	var metrics []dbPerformanceMetric
-	err := s.findPeriods(ctx, dbPerformanceMetric{}.TableName(), &metrics, start, n, interval, whereExpr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch performance metrics: %w", err)
-	}
-
-	return metrics, nil
 }
