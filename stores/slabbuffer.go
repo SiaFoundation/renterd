@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
-	"gorm.io/gorm"
+	sql "go.sia.tech/renterd/stores/sql"
 	"lukechampine.com/frand"
 )
 
@@ -204,8 +204,8 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// If there is still data left, create a new buffer.
 	if len(data) > 0 {
 		var sb *SlabBuffer
-		err = mgr.s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			sb, err = createSlabBuffer(tx, contractSet, mgr.dir, minShards, totalShards)
+		err = mgr.s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			sb, err = createSlabBuffer(ctx, tx, contractSet, mgr.dir, minShards, totalShards)
 			return err
 		})
 		if err != nil {
@@ -472,31 +472,21 @@ func bufferedSlabSize(minShards uint8) int {
 	return int(rhpv2.SectorSize) * int(minShards)
 }
 
-func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
-	ec := object.GenerateEncryptionKey()
-	key, err := ec.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
+func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
 	// Create a new buffer and slab.
 	fileName := bufferFilename(contractSetID, minShards, totalShards)
 	file, err := os.Create(filepath.Join(dir, fileName))
 	if err != nil {
 		return nil, err
 	}
-	createdSlab := dbBufferedSlab{
-		DBSlab: dbSlab{
-			DBContractSetID: contractSetID,
-			Key:             key,
-			MinShards:       minShards,
-			TotalShards:     totalShards,
-		},
-		Filename: fileName,
+
+	ec := object.GenerateEncryptionKey()
+	bufferedSlabID, err := tx.InsertBufferedSlab(ctx, fileName, int64(contractSetID), ec, minShards, totalShards)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert buffered slab: %w", err)
 	}
-	err = tx.Create(&createdSlab).
-		Error
 	return &SlabBuffer{
-		dbID:     createdSlab.ID,
+		dbID:     uint(bufferedSlabID),
 		filename: fileName,
 		slabKey:  ec,
 		maxSize:  int64(bufferedSlabSize(minShards)),
