@@ -1706,9 +1706,11 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		} else if err := pps.Validate(); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
 			return
-		} else if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
-			jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
-			return
+		} else if pps.Enabled {
+			if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
+				jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
+				return
+			}
 		}
 		b.pinMgr.TriggerUpdate()
 	}
