@@ -198,18 +198,14 @@ type (
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
-		// UpdateHostCheck updates the host check for the given host.
-		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
-
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 
 		// UpdateHostBlocklistEntries updates the blocklist in the database
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
-		// UpdateObjectHealth updates the health of all objects to the lowest
-		// health of all its slabs.
-		UpdateObjectHealth(ctx context.Context) error
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%

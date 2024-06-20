@@ -1528,13 +1528,6 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to update slab health: %w", err)
 		}
-		// update objects
-		err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-			return tx.UpdateObjectHealth(ctx)
-		})
-		if err != nil {
-			return fmt.Errorf("failed to update object health: %w", err)
-		}
 		// check if done
 		if rowsAffected < refreshHealthBatchSize {
 			return nil // done
