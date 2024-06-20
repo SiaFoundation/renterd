@@ -22,7 +22,7 @@ type (
 	}
 )
 
-func ContractMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts ContractMetricsQueryOpts) (metrics []api.ContractMetric, err error) {
+func ContractMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
 	// define a helper function to scan a contract metric from a row.
 	scanContractMetric := func(rows *sql.LoggedRows, aggregate bool) (cm api.ContractMetric, err error) {
 		var placeHolder int64
@@ -48,6 +48,8 @@ func ContractMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, 
 			(*Unsigned64)(&cm.ListSpending.Lo), (*Unsigned64)(&cm.ListSpending.Hi),
 		)
 		if err != nil {
+			err = fmt.Errorf("failed to scan contract metric: %w", err)
+			return
 		}
 
 		cm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
@@ -61,153 +63,129 @@ func ContractMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, 
 
 	// if a host filter is set, query periods
 	if opts.ContractID != (types.FileContractID{}) || opts.HostKey != (types.PublicKey{}) {
-		err = queryPeriods(ctx, tx, start, n, interval, opts.ContractMetricsQueryOpts, func(rows *sql.LoggedRows) error {
-			cm, err := scanContractMetric(rows, false)
-			if err != nil {
-				return fmt.Errorf("failed to scan contract metrics: %w", err)
-			}
-			metrics = append(metrics, cm)
-			return nil
+		return queryPeriods(ctx, tx, start, n, interval, opts.ContractMetricsQueryOpts, func(rows *sql.LoggedRows) (api.ContractMetric, error) {
+			return scanContractMetric(rows, false)
 		})
-		return
 	}
 
 	// otherwise we return the aggregated metrics for each period
-	currentPeriod := int64(math.MinInt64)
-	err = queryAggregatedPeriods(ctx, tx, start, n, interval, opts.IndexHint, func(period int64, rows *sql.LoggedRows) error {
-		cm, err := scanContractMetric(rows, true)
+	return queryAggregatedPeriods(ctx, tx, start, n, interval, opts.IndexHint, func(rows *sql.LoggedRows) (api.ContractMetric, error) {
+		return scanContractMetric(rows, true)
+	})
+}
+
+func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractPruneMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
+		var timestamp UnixTimeMS
+		err = rows.Scan(
+			&placeHolder,
+			&placeHolderTime,
+			&timestamp,
+			(*FileContractID)(&m.ContractID),
+			(*PublicKey)(&m.HostKey),
+			&m.HostVersion,
+			(*Unsigned64)(&m.Pruned),
+			(*Unsigned64)(&m.Remaining),
+			&m.Duration,
+		)
 		if err != nil {
-			return fmt.Errorf("failed to scan contract metrics: %w", err)
+			err = fmt.Errorf("failed to scan contract prune metric: %w", err)
+			return
 		}
-
-		if period != currentPeriod {
-			metrics = append(metrics, cm)
-			currentPeriod = period
-		} else {
-			metrics[len(metrics)-1] = aggregateMetrics(metrics[len(metrics)-1], cm)
-		}
-		return nil
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
 	})
-	return
 }
 
-func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) (metrics []api.ContractPruneMetric, err error) {
-	var placeHolder int64
-	var placeHolderTime time.Time
-	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
-		var cpm api.ContractPruneMetric
+func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetChurnMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
 		var timestamp UnixTimeMS
-		if err := rows.Scan(
+		err = rows.Scan(
 			&placeHolder,
 			&placeHolderTime,
 			&timestamp,
-			(*FileContractID)(&cpm.ContractID),
-			(*PublicKey)(&cpm.HostKey),
-			&cpm.HostVersion,
-			(*Unsigned64)(&cpm.Pruned),
-			(*Unsigned64)(&cpm.Remaining),
-			&cpm.Duration,
-		); err != nil {
-			return fmt.Errorf("failed to scan contract prune metric: %w", err)
+			&m.Name,
+			(*FileContractID)(&m.ContractID),
+			&m.Direction,
+			&m.Reason,
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to scan contract set churn metric: %w", err)
+			return
 		}
-		cpm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		metrics = append(metrics, cpm)
-		return nil
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
 	})
-	return
 }
 
-func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) (metrics []api.ContractSetChurnMetric, err error) {
-	var placeHolder int64
-	var placeHolderTime time.Time
-	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
-		var cscm api.ContractSetChurnMetric
+func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
 		var timestamp UnixTimeMS
-		if err := rows.Scan(
+		err = rows.Scan(
 			&placeHolder,
 			&placeHolderTime,
 			&timestamp,
-			&cscm.Name,
-			(*FileContractID)(&cscm.ContractID),
-			&cscm.Direction,
-			&cscm.Reason,
-		); err != nil {
-			return fmt.Errorf("failed to scan contract set churn metric: %w", err)
+			&m.Name,
+			&m.Contracts,
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			return
 		}
-		cscm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		metrics = append(metrics, cscm)
-		return nil
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
 	})
-	return
 }
 
-func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, err error) {
-	var placeHolder int64
-	var placeHolderTime time.Time
-	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
-		var csm api.ContractSetMetric
+func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.PerformanceMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
 		var timestamp UnixTimeMS
-		if err := rows.Scan(
+		err = rows.Scan(
 			&placeHolder,
 			&placeHolderTime,
 			&timestamp,
-			&csm.Name,
-			&csm.Contracts,
-		); err != nil {
-			return fmt.Errorf("failed to scan contract set metric: %w", err)
+			&m.Action,
+			(*PublicKey)(&m.HostKey),
+			&m.Origin,
+			&m.Duration,
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			return
 		}
-		csm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		metrics = append(metrics, csm)
-		return nil
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
 	})
-	return
 }
 
-func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) (metrics []api.PerformanceMetric, err error) {
-	var placeHolder int64
-	var placeHolderTime time.Time
-	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
-		var pm api.PerformanceMetric
+func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.WalletMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
 		var timestamp UnixTimeMS
-		if err := rows.Scan(
+		err = rows.Scan(
 			&placeHolder,
 			&placeHolderTime,
 			&timestamp,
-			&pm.Action,
-			(*PublicKey)(&pm.HostKey),
-			&pm.Origin,
-			&pm.Duration,
-		); err != nil {
-			return fmt.Errorf("failed to scan contract set metric: %w", err)
+			(*Unsigned64)(&m.Confirmed.Lo), (*Unsigned64)(&m.Confirmed.Hi),
+			(*Unsigned64)(&m.Spendable.Lo), (*Unsigned64)(&m.Spendable.Hi),
+			(*Unsigned64)(&m.Unconfirmed.Lo), (*Unsigned64)(&m.Unconfirmed.Hi),
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			return
 		}
-		pm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		metrics = append(metrics, pm)
-		return nil
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
 	})
-	return
-}
-
-func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) (metrics []api.WalletMetric, err error) {
-	var placeHolder int64
-	var placeHolderTime time.Time
-	err = queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) error {
-		var wm api.WalletMetric
-		var timestamp UnixTimeMS
-		if err := rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			(*Unsigned64)(&wm.Confirmed.Lo), (*Unsigned64)(&wm.Confirmed.Hi),
-			(*Unsigned64)(&wm.Spendable.Lo), (*Unsigned64)(&wm.Spendable.Hi),
-			(*Unsigned64)(&wm.Unconfirmed.Lo), (*Unsigned64)(&wm.Unconfirmed.Hi),
-		); err != nil {
-			return fmt.Errorf("failed to scan contract set metric: %w", err)
-		}
-		wm.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		metrics = append(metrics, wm)
-		return nil
-	})
-	return
 }
 
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
@@ -409,9 +387,9 @@ func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMet
 	return nil
 }
 
-func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts interface{}, scanRowFn func(*sql.LoggedRows) error) error {
+func queryPeriods[T any](ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts interface{}, scanRowFn func(*sql.LoggedRows) (T, error)) ([]T, error) {
 	if n > api.MetricMaxIntervals {
-		return api.ErrMaxIntervalsExceeded
+		return nil, api.ErrMaxIntervalsExceeded
 	}
 	params := []interface{}{
 		UnixTimeMS(start),
@@ -423,7 +401,7 @@ func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, int
 
 	where, err := whereClauseFromQueryOpts(opts)
 	if err != nil {
-		return fmt.Errorf("failed to build where clause: %w", err)
+		return nil, fmt.Errorf("failed to build where clause: %w", err)
 	} else if len(where.params) > 0 {
 		params = append(params, where.params...)
 	}
@@ -451,21 +429,24 @@ func queryPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, int
 		) i ON %s.id = i.id ORDER BY Period ASC
 	`, where.table, where.table, where.table, where.query, where.table), params...)
 	if err != nil {
-		return fmt.Errorf("failed to query periods: %w", err)
+		return nil, fmt.Errorf("failed to query periods: %w", err)
 	}
 	defer rows.Close()
 
+	var result []T
 	for rows.Next() {
-		if err := scanRowFn(rows); err != nil {
-			return fmt.Errorf("failed to scan row: %w", err)
+		m, err := scanRowFn(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
+		result = append(result, m)
 	}
-	return nil
+	return result, nil
 }
 
-func queryAggregatedPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, indexHint string, scanRowFn func(int64, *sql.LoggedRows) error) error {
+func queryAggregatedPeriods(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, indexHint string, scanRowFn func(int64 *sql.LoggedRows) (api.ContractMetric, error)) ([]api.ContractMetric, error) {
 	if n > api.MetricMaxIntervals {
-		return api.ErrMaxIntervalsExceeded
+		return nil, api.ErrMaxIntervalsExceeded
 	}
 	end := start.Add(time.Duration(n) * interval)
 
@@ -476,7 +457,7 @@ func queryAggregatedPeriods(ctx context.Context, tx sql.Tx, start time.Time, n u
 		UnixTimeMS(end),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to fetch distinct contract ids: %w", err)
+		return nil, fmt.Errorf("failed to fetch distinct contract ids: %w", err)
 	}
 	defer rows.Close()
 
@@ -484,7 +465,7 @@ func queryAggregatedPeriods(ctx context.Context, tx sql.Tx, start time.Time, n u
 	for rows.Next() {
 		var fcid FileContractID
 		if err := rows.Scan(&fcid); err != nil {
-			return fmt.Errorf("failed to scan contract id: %w", err)
+			return nil, fmt.Errorf("failed to scan contract id: %w", err)
 		}
 		fcids = append(fcids, fcid)
 	}
@@ -492,28 +473,39 @@ func queryAggregatedPeriods(ctx context.Context, tx sql.Tx, start time.Time, n u
 	// prepare statement to fetch contract metrics
 	queryStmt, err := tx.Prepare(ctx, fmt.Sprintf("SELECT * FROM contracts %s WHERE contracts.timestamp >= ? AND contracts.timestamp < ? AND contracts.fcid = ? LIMIT 1", indexHint))
 	if err != nil {
-		return fmt.Errorf("failed to prepare statement to fetch contract metrics: %w", err)
+		return nil, fmt.Errorf("failed to prepare statement to fetch contract metrics: %w", err)
 	}
 	defer queryStmt.Close()
 
+	var result []api.ContractMetric
+	currentPeriod := int64(math.MinInt64)
 	for intervalStart := start; intervalStart.Before(end); intervalStart = intervalStart.Add(interval) {
 		intervalEnd := intervalStart.Add(interval)
+		period := intervalStart.UnixMilli()
 		for _, fcid := range fcids {
 			rows, err := queryStmt.Query(ctx, UnixTimeMS(intervalStart), UnixTimeMS(intervalEnd), FileContractID(fcid))
 			if err != nil {
-				return fmt.Errorf("failed to fetch contract metrics: %w", err)
+				return nil, fmt.Errorf("failed to fetch contract metrics: %w", err)
 			}
 			for rows.Next() {
-				if err := scanRowFn(intervalStart.UnixMilli(), tx.LoggedRows(rows)); err != nil {
+				m, err := scanRowFn(rows)
+				if err != nil {
 					rows.Close()
-					return fmt.Errorf("failed to scan metric: %w", err)
+					return nil, fmt.Errorf("failed to scan metric: %w", err)
+				}
+
+				if period != currentPeriod {
+					result = append(result, m)
+					currentPeriod = period
+				} else {
+					result[len(result)-1] = aggregateMetrics(result[len(result)-1], m)
 				}
 			}
 			rows.Close()
 		}
 	}
 
-	return nil
+	return result, nil
 }
 
 type whereClause struct {

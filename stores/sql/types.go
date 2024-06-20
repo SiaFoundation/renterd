@@ -35,12 +35,24 @@ type (
 	Unsigned64      uint64
 )
 
+type scannerValuer interface {
+	driver.Valuer
+	sql.Scanner
+}
+
 var (
-	_ sql.Scanner = &Currency{}
-	_ sql.Scanner = &FileContractID{}
-	_ sql.Scanner = &Hash256{}
-	_ sql.Scanner = &PublicKey{}
-	_ sql.Scanner = &SecretKey{}
+	_ scannerValuer = (*AutopilotConfig)(nil)
+	_ scannerValuer = (*BigInt)(nil)
+	_ scannerValuer = (*Currency)(nil)
+	_ scannerValuer = (*FileContractID)(nil)
+	_ scannerValuer = (*Hash256)(nil)
+	_ scannerValuer = (*Settings)(nil)
+	_ scannerValuer = (*PriceTable)(nil)
+	_ scannerValuer = (*PublicKey)(nil)
+	_ scannerValuer = (*SecretKey)(nil)
+	_ scannerValuer = (*UnixTimeMS)(nil)
+	_ scannerValuer = (*UnixTimeNS)(nil)
+	_ scannerValuer = (*Unsigned64)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
@@ -206,6 +218,11 @@ func (k *SecretKey) Scan(value interface{}) error {
 	}
 	*k = append(SecretKey{}, SecretKey(bytes)...)
 	return nil
+}
+
+// Value returns an key value, implements driver.Valuer interface.
+func (k SecretKey) Value() (driver.Value, error) {
+	return []byte(k), nil
 }
 
 // Scan scan value into unixTimeMS, implements sql.Scanner interface.
