@@ -123,37 +123,10 @@ func (ms *mockStore) UpdateSetting(ctx context.Context, key, value string) error
 	return nil
 }
 
-func (ms *mockStore) DeleteSetting(ctx context.Context, key string) error {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	delete(ms.settings, key)
-	return nil
-}
-
-func (ms *mockStore) Settings(ctx context.Context) ([]string, error) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	var keys []string
-	for k := range ms.settings {
-		keys = append(keys, k)
-	}
-	return keys, nil
-}
-
 func (ms *mockStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.autopilots[id], nil
-}
-
-func (ms *mockStore) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	var autopilots []api.Autopilot
-	for _, ap := range ms.autopilots {
-		autopilots = append(autopilots, ap)
-	}
-	return autopilots, nil
 }
 
 func (ms *mockStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
@@ -173,7 +146,7 @@ func TestPinManager(t *testing.T) {
 	defer forex.Close()
 
 	// start a pinmanager
-	pm := newPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
+	pm := NewPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
 	if err := pm.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}

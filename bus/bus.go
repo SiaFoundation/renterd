@@ -23,11 +23,17 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
+)
+
+const (
+	defaultPinUpdateInterval = 5 * time.Minute
+	defaultPinRateWindow     = 6 * time.Hour
 )
 
 // Client re-exports the client from the client package.
@@ -228,7 +234,7 @@ type bus struct {
 
 	alerts      alerts.Alerter
 	alertMgr    *alerts.Manager
-	pinMgr      PinManager
+	pinMgr      ibus.PinManager
 	webhooksMgr *webhooks.Manager
 	logger      *zap.SugaredLogger
 }
@@ -1697,8 +1703,11 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 		if err := json.Unmarshal(data, &pps); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid request body"), http.StatusBadRequest)
 			return
-		} else if err := pps.Validate(jc.Request.Context()); err != nil {
+		} else if err := pps.Validate(); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
+			return
+		} else if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
 			return
 		}
 		b.pinMgr.TriggerUpdate()
@@ -2479,7 +2488,7 @@ func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, t
 		startTime: time.Now(),
 	}
 
-	b.pinMgr = newPinManager(whm, as, ss, 5*time.Minute, 6*time.Hour, b.logger.Desugar())
+	b.pinMgr = ibus.NewPinManager(whm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, b.logger.Desugar())
 
 	// ensure we don't hang indefinitely
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

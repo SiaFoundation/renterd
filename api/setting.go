@@ -1,12 +1,9 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
-
-	ibus "go.sia.tech/renterd/internal/bus"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -157,7 +154,7 @@ func (p Pin) IsPinned() bool {
 }
 
 // Validate returns an error if the price pin settings are not considered valid.
-func (pps PricePinSettings) Validate(ctx context.Context) error {
+func (pps PricePinSettings) Validate() error {
 	if !pps.Enabled {
 		return nil
 	}
@@ -169,9 +166,6 @@ func (pps PricePinSettings) Validate(ctx context.Context) error {
 	}
 	if pps.Threshold <= 0 || pps.Threshold >= 1 {
 		return fmt.Errorf("price pin settings must have a threshold between 0 and 1")
-	}
-	if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(ctx, pps.Currency); err != nil {
-		return fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err)
 	}
 	return nil
 }

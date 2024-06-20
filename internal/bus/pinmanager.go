@@ -12,17 +12,28 @@ import (
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
 type (
+	// An AutopilotStore stores autopilots.
+	AutopilotStore interface {
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+	}
+
 	// PinManager is a service that manages price pinning.
 	PinManager interface {
 		Close(context.Context) error
 		Run(context.Context) error
 		TriggerUpdate()
+	}
+
+	// A SettingStore stores settings.
+	SettingStore interface {
+		Setting(ctx context.Context, key string) (string, error)
+		UpdateSetting(ctx context.Context, key, value string) error
 	}
 )
 
@@ -47,7 +58,7 @@ type (
 	}
 )
 
-func newPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	return &pinManager{
 		as:          as,
 		ss:          ss,
@@ -369,7 +380,7 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	}
 
 	// fetch exchange rate
-	rate, err := ibus.NewForexClient(settings.ForexEndpointURL).SiacoinExchangeRate(ctx, settings.Currency)
+	rate, err := NewForexClient(settings.ForexEndpointURL).SiacoinExchangeRate(ctx, settings.Currency)
 	if err != nil {
 		return fmt.Errorf("failed to fetch exchange rate for '%s': %w", settings.Currency, err)
 	} else if rate <= 0 {
