@@ -166,28 +166,6 @@ func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint6
 	})
 }
 
-func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.WalletMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			(*Unsigned64)(&m.Confirmed.Lo), (*Unsigned64)(&m.Confirmed.Hi),
-			(*Unsigned64)(&m.Spendable.Lo), (*Unsigned64)(&m.Spendable.Hi),
-			(*Unsigned64)(&m.Unconfirmed.Lo), (*Unsigned64)(&m.Unconfirmed.Hi),
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
 	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, download_spending_lo, download_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, list_spending_lo, list_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
@@ -385,6 +363,28 @@ func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMet
 	}
 
 	return nil
+}
+
+func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.WalletMetric, err error) {
+		var placeHolder int64
+		var placeHolderTime time.Time
+		var timestamp UnixTimeMS
+		err = rows.Scan(
+			&placeHolder,
+			&placeHolderTime,
+			&timestamp,
+			(*Unsigned64)(&m.Confirmed.Lo), (*Unsigned64)(&m.Confirmed.Hi),
+			(*Unsigned64)(&m.Spendable.Lo), (*Unsigned64)(&m.Spendable.Hi),
+			(*Unsigned64)(&m.Unconfirmed.Lo), (*Unsigned64)(&m.Unconfirmed.Hi),
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			return
+		}
+		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
+		return
+	})
 }
 
 func queryPeriods[T any](ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts interface{}, scanRowFn func(*sql.LoggedRows) (T, error)) ([]T, error) {
