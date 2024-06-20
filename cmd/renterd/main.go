@@ -468,7 +468,7 @@ func main() {
 		if len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
 			logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 		} else if cfg.Worker.ServiceAddress == "" {
-			logger.Fatal("if the bus is remote, it needs to know the service address of the worker for the worker to complete its setup")
+			logger.Fatal("if the bus is remote, the worker needs to be able to tell it where to find its API, this can be configured using worker.serviceAddress")
 		}
 	}
 	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
