@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/internal/sql"
@@ -134,6 +135,23 @@ func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path
 	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
 }
 
+func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	headers := "{}"
+	if len(wh.Headers) > 0 {
+		h, err := json.Marshal(wh.Headers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal headers: %w", err)
+		}
+		headers = string(h)
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE headers = VALUES(headers)",
+		time.Now(), wh.Module, wh.Event, wh.URL, headers)
+	if err != nil {
+		return fmt.Errorf("failed to insert webhook: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
@@ -246,8 +264,16 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
 }
 
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
+}
+
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
+}
+
+func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
@@ -597,6 +623,10 @@ func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) SlabBuffers(ctx context.Context) (map[string]string, error) {
+	return ssql.SlabBuffers(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
 	res, err := tx.Exec(ctx, `
 		INSERT INTO autopilots (created_at, identifier, config, current_period)
@@ -756,10 +786,6 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
-	return ssql.UpdateObjectHealth(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
 	// find all used contracts
 	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
@@ -877,14 +903,34 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
 	now := time.Now()
-	healthQuery, args := ssql.HealthQuery(limit, now)
-	durationArgs := []any{now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds()}
-	args = append(args, durationArgs...)
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs sla INNER JOIN (%s) h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))", healthQuery), args...)
+	if err := ssql.PrepareSlabHealth(ctx, tx, limit, now); err != nil {
+		return 0, fmt.Errorf("failed to compute slab health: %w", err)
+	}
+
+	res, err := tx.Exec(ctx, "UPDATE slabs sla INNER JOIN slabs_health h ON sla.id = h.id SET sla.health = h.health, health_valid_until = (FLOOR(? + RAND() * (? - ?)))",
+		now.Add(minDuration).Unix(), maxDuration.Seconds(), minDuration.Seconds())
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to update slab health: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE objects o
+		INNER JOIN (
+			SELECT sli.db_object_id as id, MIN(h.health) as health
+			FROM slabs_health h
+			INNER JOIN slices sli ON sli.db_slab_id = h.id
+			GROUP BY sli.db_object_id
+		) AS object_health ON object_health.id = o.id
+		SET o.health = object_health.health
+		`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
+	return ssql.Webhooks(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {

@@ -544,21 +544,16 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 }
 
 func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
-	// Slab buffer info from the database.
-	var bufferedSlabs []dbBufferedSlab
-	err := s.db.Model(&dbBufferedSlab{}).
-		Joins("DBSlab").
-		Joins("DBSlab.DBContractSet").
-		Find(&bufferedSlabs).
-		Error
+	var err error
+	var fileNameToContractSet map[string]string
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		fileNameToContractSet, err = tx.SlabBuffers(ctx)
+		return err
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch slab buffers: %w", err)
 	}
-	// Translate buffers to contract set.
-	fileNameToContractSet := make(map[string]string)
-	for _, slab := range bufferedSlabs {
-		fileNameToContractSet[slab.Filename] = slab.DBSlab.DBContractSet.Name
-	}
+
 	// Fetch in-memory buffer info and fill in contract set name.
 	buffers := s.slabBufferMgr.SlabBuffers()
 	for i := range buffers {
@@ -1528,13 +1523,6 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to update slab health: %w", err)
 		}
-		// update objects
-		err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-			return tx.UpdateObjectHealth(ctx)
-		})
-		if err != nil {
-			return fmt.Errorf("failed to update object health: %w", err)
-		}
 		// check if done
 		if rowsAffected < refreshHealthBatchSize {
 			return nil // done
@@ -1876,14 +1864,12 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 	}
 
 	// delete buffer
-	var buffer dbBufferedSlab
-	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
+	var fileName string
+	if err := tx.Raw("SELECT filename FROM buffered_slabs WHERE id = ?", slab.BufferID).
+		Scan(&fileName).Error; err != nil {
 		return "", err
 	}
-	fileName := buffer.Filename
-	err = tx.Delete(&buffer).
-		Error
-	if err != nil {
+	if err := tx.Exec("DELETE FROM buffered_slabs WHERE id = ?", slab.BufferID).Error; err != nil {
 		return "", err
 	}
 

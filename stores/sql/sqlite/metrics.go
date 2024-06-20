@@ -95,10 +95,6 @@ func (tx *MetricsDatabaseTx) PruneMetrics(ctx context.Context, metric string, cu
 	return ssql.PruneMetrics(ctx, tx, metric, cutoff)
 }
 
-func (tx *MetricsDatabaseTx) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
-	return ssql.WalletMetrics(ctx, tx, start, n, interval, opts)
-}
-
 func (tx *MetricsDatabaseTx) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
 	return ssql.RecordContractMetric(ctx, tx, metrics...)
 }
@@ -121,4 +117,8 @@ func (tx *MetricsDatabaseTx) RecordPerformanceMetric(ctx context.Context, metric
 
 func (tx *MetricsDatabaseTx) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {
 	return ssql.RecordWalletMetric(ctx, tx, metrics...)
+}
+
+func (tx *MetricsDatabaseTx) WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error) {
+	return ssql.WalletMetrics(ctx, tx, start, n, interval, opts)
 }
