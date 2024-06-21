@@ -75,7 +75,7 @@ type (
 	Bus interface {
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
-		RegisterWebhook(ctx context.Context, wh webhooks.Webhook, opts ...webhooks.HeaderOption) error
+		RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error
 	}
 
 	WorkerCache interface {
@@ -196,13 +196,17 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 
 func (c *cache) Initialize(ctx context.Context, workerAPI string, webhookOpts ...webhooks.HeaderOption) error {
 	eventsURL := fmt.Sprintf("%s/events", workerAPI)
+	headers := make(map[string]string)
+	for _, opt := range webhookOpts {
+		opt(headers)
+	}
 	for _, wh := range []webhooks.Webhook{
-		webhooks.NewEventWebhook(eventsURL, api.EventConsensusUpdate{}),
-		webhooks.NewEventWebhook(eventsURL, api.EventContractArchive{}),
-		webhooks.NewEventWebhook(eventsURL, api.EventContractRenew{}),
-		webhooks.NewEventWebhook(eventsURL, api.EventSettingUpdate{}),
+		api.WebhookConsensusUpdate(eventsURL, headers),
+		api.WebhookContractArchive(eventsURL, headers),
+		api.WebhookContractRenew(eventsURL, headers),
+		api.WebhookSettingUpdate(eventsURL, headers),
 	} {
-		if err := c.b.RegisterWebhook(ctx, wh, webhookOpts...); err != nil {
+		if err := c.b.RegisterWebhook(ctx, wh); err != nil {
 			return fmt.Errorf("failed to register webhook '%s', err: %v", wh, err)
 		}
 	}

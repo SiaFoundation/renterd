@@ -70,7 +70,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 
 	// create client
 	client := client.New("http://"+l.Addr().String(), "test")
-	b, cleanup, err := node.NewBus(node.BusConfig{
+	b, _, cleanup, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,

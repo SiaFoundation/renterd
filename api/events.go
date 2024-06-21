@@ -62,53 +62,61 @@ type (
 	}
 )
 
-func (e EventConsensusUpdate) Event() webhooks.Event {
-	return webhooks.Event{
-		Module:  ModuleConsensus,
-		Event:   EventUpdate,
-		Payload: e,
+var (
+	WebhookConsensusUpdate = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventUpdate,
+			Headers: headers,
+			Module:  ModuleConsensus,
+			URL:     url,
+		}
 	}
-}
 
-func (e EventContractArchive) Event() webhooks.Event {
-	return webhooks.Event{
-		Module:  ModuleContract,
-		Event:   EventArchive,
-		Payload: e,
+	WebhookContractArchive = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventArchive,
+			Headers: headers,
+			Module:  ModuleContract,
+			URL:     url,
+		}
 	}
-}
 
-func (e EventContractRenew) Event() webhooks.Event {
-	return webhooks.Event{
-		Module:  ModuleContract,
-		Event:   EventRenew,
-		Payload: e,
+	WebhookContractRenew = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventRenew,
+			Headers: headers,
+			Module:  ModuleContract,
+			URL:     url,
+		}
 	}
-}
 
-func (e EventContractSetUpdate) Event() webhooks.Event {
-	return webhooks.Event{
-		Module:  ModuleContractSet,
-		Event:   EventUpdate,
-		Payload: e,
+	WebhookContractSetUpdate = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventUpdate,
+			Headers: headers,
+			Module:  ModuleContractSet,
+			URL:     url,
+		}
 	}
-}
 
-func (e EventSettingUpdate) Event() webhooks.Event {
-	return webhooks.Event{
-		Module:  ModuleSetting,
-		Event:   EventUpdate,
-		Payload: e,
+	WebhookSettingUpdate = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventUpdate,
+			Headers: headers,
+			Module:  ModuleSetting,
+			URL:     url,
+		}
 	}
-}
 
-func (e EventSettingDelete) Event() webhooks.Event {
-	return webhooks.Event{
-		Module:  ModuleSetting,
-		Event:   EventDelete,
-		Payload: e,
+	WebhookSettingDelete = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventDelete,
+			Headers: headers,
+			Module:  ModuleSetting,
+			URL:     url,
+		}
 	}
-}
+)
 
 func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 	bytes, err := json.Marshal(event.Payload)
