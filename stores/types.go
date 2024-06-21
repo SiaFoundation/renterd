@@ -31,7 +31,6 @@ type (
 	publicKey      types.PublicKey
 	hostSettings   rhpv2.HostSettings
 	hostPriceTable rhpv3.HostPriceTable
-	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
 	setting        string
 )
@@ -314,36 +313,6 @@ func (u *unixTimeMS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u unixTimeMS) Value() (driver.Value, error) {
 	return time.Time(u).UnixMilli(), nil
-}
-
-// GormDataType implements gorm.GormDataTypeInterface.
-func (unsigned64) GormDataType() string {
-	return "BIGINT"
-}
-
-// Scan scan value into unsigned64, implements sql.Scanner interface.
-func (u *unsigned64) Scan(value interface{}) error {
-	var n int64
-	var err error
-	switch value := value.(type) {
-	case int64:
-		n = value
-	case []uint8:
-		n, err = strconv.ParseInt(string(value), 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
-		}
-	default:
-		return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
-	}
-
-	*u = unsigned64(n)
-	return nil
-}
-
-// Value returns a datetime value, implements driver.Valuer interface.
-func (u unsigned64) Value() (driver.Value, error) {
-	return int64(u), nil
 }
 
 func (bCurrency) GormDataType() string {
