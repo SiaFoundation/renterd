@@ -531,6 +531,73 @@ func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, s
 	return res.LastInsertId()
 }
 
+func LoadSlabBuffers(ctx context.Context, db *sql.DB) (bufferedSlabs []LoadedSlabBuffer, orphanedBuffers []string, err error) {
+	err = db.Transaction(ctx, func(tx sql.Tx) error {
+		// collect all buffers
+		rows, err := db.Query(ctx, `
+			SELECT bs.id, bs.filename, sla.db_contract_set_id, sla.key, sla.min_shards, sla.total_shards
+			FROM buffered_slabs bs
+			INNER JOIN slabs sla ON sla.db_buffered_slab_id = bs.id
+		`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var bs LoadedSlabBuffer
+			var sk SecretKey
+			if err := rows.Scan(&bs.ID, &bs.Filename, &bs.ContractSetID, &sk, &bs.MinShards, &bs.TotalShards); err != nil {
+				return fmt.Errorf("failed to scan buffered slab: %w", err)
+			} else if err := bs.Key.UnmarshalBinary(sk[:]); err != nil {
+				return fmt.Errorf("failed to unmarshal secret key: %w", err)
+			}
+			bufferedSlabs = append(bufferedSlabs, bs)
+		}
+
+		// fill in sizes
+		for i := range bufferedSlabs {
+			err = tx.QueryRow(ctx, `
+				SELECT COALESCE(MAX(offset+length), 0)
+				FROM slabs sla
+				INNER JOIN slices sli ON sla.id = sli.db_slab_id
+				WHERE sla.db_buffered_slab_id = ?
+		`, bufferedSlabs[i].ID).Scan(&bufferedSlabs[i].Size)
+			if err != nil {
+				return fmt.Errorf("failed to fetch buffered slab size: %w", err)
+			}
+		}
+
+		// find orphaned buffers and delete them
+		rows, err = tx.Query(ctx, `
+			SELECT bs.id, bs.filename
+			FROM buffered_slabs bs
+			LEFT JOIN slabs ON slabs.db_buffered_slab_id = bs.id
+			WHERE slabs.id IS NULL
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to fetch orphaned buffers: %w", err)
+		}
+		var toDelete []int64
+		for rows.Next() {
+			var id int64
+			var filename string
+			if err := rows.Scan(&id, &filename); err != nil {
+				return fmt.Errorf("failed to scan orphaned buffer: %w", err)
+			}
+			orphanedBuffers = append(orphanedBuffers, filename)
+			toDelete = append(toDelete, id)
+		}
+		for _, id := range toDelete {
+			if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", id); err != nil {
+				return fmt.Errorf("failed to delete orphaned buffer: %w", err)
+			}
+		}
+		return nil
+	})
+	return
+}
+
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
 	if err := DeleteMetadata(ctx, tx, objID); err != nil {
 		return err

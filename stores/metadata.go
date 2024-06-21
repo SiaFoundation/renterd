@@ -187,14 +187,6 @@ type (
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
-	dbBufferedSlab struct {
-		Model
-
-		DBSlab dbSlab
-
-		Filename string
-	}
-
 	dbSector struct {
 		Model
 
@@ -329,9 +321,6 @@ func (dbSector) TableName() string { return "sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbBufferedSlab) TableName() string { return "buffered_slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
