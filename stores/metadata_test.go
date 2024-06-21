@@ -2722,7 +2722,13 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("wrong data")
 	}
 
-	var buffer dbBufferedSlab
+	type bufferedSlab struct {
+		ID       uint
+		DBSlab   dbSlab `gorm:"foreignKey:DBBufferedSlabID"`
+		Filename string
+	}
+
+	var buffer bufferedSlab
 	sk, _ := slabs[0].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
@@ -2784,7 +2790,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if !bytes.Equal(data, slab2Data) {
 		t.Fatal("wrong data")
 	}
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	sk, _ = slabs[0].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
@@ -2825,13 +2831,13 @@ func TestPartialSlab(t *testing.T) {
 	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
 		t.Fatal("wrong data")
 	}
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	sk, _ = slabs[0].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	sk, _ = slabs[1].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
@@ -2860,11 +2866,11 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
-	var foo []dbBufferedSlab
+	var foo []bufferedSlab
 	if err := ss.db.Find(&foo).Error; err != nil {
 		t.Fatal(err)
 	}
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	if err := ss.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -2883,7 +2889,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	if err := ss.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
@@ -4131,10 +4137,8 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// create buffered slab
-	bs := dbBufferedSlab{
-		Filename: "foo",
-	}
-	if err := ss.db.Create(&bs).Error; err != nil {
+	bsID := uint(1)
+	if err := ss.db.Exec("INSERT INTO buffered_slabs (filename) VALUES ('foo');").Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -4223,7 +4227,7 @@ func TestSlabCleanup(t *testing.T) {
 	// create another object that references a slab with buffer
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
 	bufferedSlab := dbSlab{
-		DBBufferedSlabID: bs.ID,
+		DBBufferedSlabID: bsID,
 		DBContractSet:    cs,
 		Health:           1,
 		Key:              ek,

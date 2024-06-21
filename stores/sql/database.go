@@ -17,6 +17,9 @@ type (
 	Database interface {
 		io.Closer
 
+		// LoadSlabBuffers loads the slab buffers from the database.
+		LoadSlabBuffers(ctx context.Context) ([]LoadedSlabBuffer, []string, error)
+
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
 
@@ -302,6 +305,16 @@ type (
 
 		// WalletMetrics returns wallet metrics for the given time range
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
+	}
+
+	LoadedSlabBuffer struct {
+		ID            int64
+		ContractSetID int64
+		Filename      string
+		Key           object.EncryptionKey
+		MinShards     uint8
+		Size          int64
+		TotalShards   uint8
 	}
 
 	UsedContract struct {
