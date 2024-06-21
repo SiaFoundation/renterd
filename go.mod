@@ -11,10 +11,11 @@ require (
 	github.com/klauspost/reedsolomon v1.12.1
 	github.com/minio/minio-go/v7 v7.0.71
 	github.com/montanaflynn/stats v0.7.1
+	github.com/shopspring/decimal v1.4.0
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.7
 	go.sia.tech/coreutils v0.0.6
-	go.sia.tech/gofakes3 v0.0.3
+	go.sia.tech/gofakes3 v0.0.4-0.20240621132246-60f57d3be37e
 	go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272
 	go.sia.tech/jape v0.11.2-0.20240306154058-9832414a5385
 	go.sia.tech/mux v1.2.0
@@ -58,7 +59,6 @@ require (
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
-	github.com/shopspring/decimal v1.4.0 // indirect
 	gitlab.com/NebulousLabs/bolt v1.4.4 // indirect
 	gitlab.com/NebulousLabs/demotemutex v0.0.0-20151003192217-235395f71c40 // indirect
 	gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500 // indirect
