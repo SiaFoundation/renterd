@@ -92,6 +92,10 @@ func (tx *MetricsDatabaseTx) PerformanceMetrics(ctx context.Context, start time.
 	return ssql.PerformanceMetrics(ctx, tx, start, n, interval, opts)
 }
 
+func (tx *MetricsDatabaseTx) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
+	return ssql.PruneMetrics(ctx, tx, metric, cutoff)
+}
+
 func (tx *MetricsDatabaseTx) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
 	return ssql.RecordContractMetric(ctx, tx, metrics...)
 }
