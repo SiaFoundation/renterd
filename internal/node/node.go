@@ -118,11 +118,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			cfg.Database.MySQL.MetricsDatabase,
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
 		dbMetrics, err = mysql.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
 	} else {
 		// create database directory
@@ -136,11 +136,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
 		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
 	}
 
