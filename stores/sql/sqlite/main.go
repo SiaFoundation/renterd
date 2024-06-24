@@ -800,7 +800,8 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 }
 
 func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) error {
-	_, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value")
+	_, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+		time.Now(), key, value)
 	if err != nil {
 		return fmt.Errorf("failed to update setting '%s': %w", key, err)
 	}
