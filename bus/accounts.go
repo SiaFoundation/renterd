@@ -164,6 +164,7 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	acc.Balance.Set(balance)
 	acc.CleanShutdown = true
 	acc.RequiresSync = false // resetting the balance resets the sync field
+	balanceAfter := acc.Balance.String()
 	acc.mu.Unlock()
 
 	// Log resets.
@@ -171,7 +172,7 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 		"account", acc.ID,
 		"host", acc.HostKey.String(),
 		"balanceBefore", balanceBefore,
-		"balanceAfter", acc.Balance.String(),
+		"balanceAfter", balanceAfter,
 		"driftBefore", driftBefore,
 		"driftAfter", acc.Drift.String(),
 		"delta", delta.String())

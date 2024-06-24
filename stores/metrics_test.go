@@ -224,7 +224,7 @@ func TestContractMetrics(t *testing.T) {
 
 	// Check how many metrics were recorded.
 	var n int64
-	if err := ss.dbMetrics.Raw("SELECT COUNT(*) FROM contracts").Scan(&n).Error; err != nil {
+	if err := ss.DBMetrics().QueryRow(context.Background(), "SELECT COUNT(*) FROM contracts").Scan(&n); err != nil {
 		t.Fatal(err)
 	} else if n != 2 {
 		t.Fatalf("expected 2 metrics, got %v", n)
