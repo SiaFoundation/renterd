@@ -5,20 +5,7 @@ import (
 	"fmt"
 
 	sql "go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm/clause"
 )
-
-type (
-	dbSetting struct {
-		Model
-
-		Key   string  `gorm:"unique;index;NOT NULL"`
-		Value setting `gorm:"NOT NULL"`
-	}
-)
-
-// TableName implements the gorm.Tabler interface.
-func (dbSetting) TableName() string { return "settings" }
 
 // DeleteSetting implements the bus.SettingStore interface.
 func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
@@ -71,13 +58,9 @@ func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
-	err := s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&dbSetting{
-		Key:   key,
-		Value: setting(value),
-	}).Error
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateSetting(ctx, key, value)
+	})
 	if err != nil {
 		return err
 	}

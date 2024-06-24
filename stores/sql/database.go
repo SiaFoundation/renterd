@@ -239,6 +239,10 @@ type (
 		// UpdateHostCheck updates the host check for the given host.
 		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
 
+		// UpdateSetting updates the setting with the given key to the given
+		// value.
+		UpdateSetting(ctx context.Context, key, value string) error
+
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%
 		// - Invalidate health_valid_until
