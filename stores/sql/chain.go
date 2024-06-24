@@ -182,9 +182,8 @@ func contractNotFoundErr(fcid types.FileContractID) error {
 }
 
 func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, currRevisionHeight, currRevisionNumber, revisionHeight, revisionNumber, size uint64) (err error) {
-	var res dsql.Result
 	if revisionNumber > currRevisionNumber {
-		res, err = tx.Exec(
+		_, err = tx.Exec(
 			ctx,
 			fmt.Sprintf("UPDATE %s SET revision_height = ?, revision_number = ?, size = ? WHERE fcid = ?", table),
 			revisionHeight,
@@ -193,22 +192,12 @@ func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.Fil
 			FileContractID(fcid),
 		)
 	} else if revisionHeight > currRevisionHeight {
-		res, err = tx.Exec(
+		_, err = tx.Exec(
 			ctx,
 			fmt.Sprintf("UPDATE %s SET revision_height = ? WHERE fcid = ?", table),
 			revisionHeight,
 			FileContractID(fcid),
 		)
-	} else {
-		return nil
-	}
-
-	if err == nil {
-		if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n != 1 {
-			return fmt.Errorf("failed to update %s: no rows affected", table[:len(table)-1])
-		}
 	}
 	return
 }
