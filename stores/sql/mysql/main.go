@@ -143,7 +143,14 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 }
 
 func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
-	_, err := tx.Exec(ctx, "INSERT IGNORE INTO syncer_peers (address, first_seen, last_connect, synced_blocks, sync_duration) VALUES (?, ?, ?, ?, ?)", addr, ssql.UnixTimeMS(time.Now()), ssql.UnixTimeMS(time.Time{}), 0, 0)
+	_, err := tx.Exec(ctx,
+		"INSERT IGNORE INTO syncer_peers (address, first_seen, last_connect, synced_blocks, sync_duration) VALUES (?, ?, ?, ?, ?)",
+		addr,
+		ssql.UnixTimeMS(time.Now()),
+		ssql.UnixTimeMS(time.Time{}),
+		0,
+		0,
+	)
 	return err
 }
 
@@ -182,10 +189,13 @@ func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration tim
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `INSERT INTO syncer_bans (created_at, net_cidr, expiration, reason)
-                           VALUES (?, ?, ?, ?)
-                           ON DUPLICATE KEY UPDATE expiration = VALUES(expiration), reason = VALUES(reason)`,
-		time.Now(), cidr, ssql.UnixTimeMS(time.Now().Add(duration)), reason)
+	_, err = tx.Exec(ctx,
+		"INSERT INTO syncer_bans (created_at, net_cidr, expiration, reason) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE expiration = VALUES(expiration), reason = VALUES(reason)",
+		time.Now(),
+		cidr,
+		ssql.UnixTimeMS(time.Now().Add(duration)),
+		reason,
+	)
 	return err
 }
 
