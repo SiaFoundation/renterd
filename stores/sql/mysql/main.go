@@ -60,6 +60,10 @@ func (b *MainDatabase) DB() *sql.DB {
 	return b.db
 }
 
+func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBuffer, []string, error) {
+	return ssql.LoadSlabBuffers(ctx, b.db)
+}
+
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
 	return mtx.MakeDirsForPath(ctx, path)

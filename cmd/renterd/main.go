@@ -502,14 +502,16 @@ func main() {
 	}
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
+	setupBusFn := node.NoopFn
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
+		b, setupFn, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
+		setupBusFn = setupFn
 		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
-			fn:   fn,
+			fn:   shutdownFn,
 		})
 
 		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b)}
@@ -603,6 +605,16 @@ func main() {
 	// Start server.
 	go srv.Serve(l)
 
+	// Finish bus setup.
+	if err := setupBusFn(context.Background()); err != nil {
+		logger.Fatal("failed to setup bus: " + err.Error())
+	}
+
+	// Finish worker setup.
+	if err := setupWorkerFn(context.Background()); err != nil {
+		logger.Fatal("failed to setup worker: " + err.Error())
+	}
+
 	// Set initial S3 keys.
 	if cfg.S3.Enabled && !cfg.S3.DisableAuth {
 		as, err := bc.S3AuthenticationSettings(context.Background())
@@ -630,11 +642,6 @@ func main() {
 		if err := bc.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
 			logger.Fatal("failed to update S3 authentication settings: " + err.Error())
 		}
-	}
-
-	// Finish worker setup.
-	if err := setupWorkerFn(context.Background()); err != nil {
-		logger.Fatal("failed to setup worker: " + err.Error())
 	}
 
 	logger.Info("api: Listening on " + l.Addr().String())

@@ -31,6 +31,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultPinUpdateInterval = 5 * time.Minute
+	defaultPinRateWindow     = 6 * time.Hour
+)
+
 // Client re-exports the client from the client package.
 type Client struct {
 	*client.Client
@@ -227,11 +232,11 @@ type bus struct {
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
-	alerts   alerts.Alerter
-	alertMgr *alerts.Manager
-	events   ibus.EventBroadcaster
-	hooks    *webhooks.Manager
-	logger   *zap.SugaredLogger
+	alerts      alerts.Alerter
+	alertMgr    *alerts.Manager
+	pinMgr      ibus.PinManager
+	webhooksMgr *webhooks.Manager
+	logger      *zap.SugaredLogger
 }
 
 // Handler returns an HTTP handler that serves the bus API.
@@ -376,9 +381,14 @@ func (b *bus) Handler() http.Handler {
 	})
 }
 
+// Setup starts the pin manager.
+func (b *bus) Setup(ctx context.Context) error {
+	return b.pinMgr.Run(ctx)
+}
+
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
-	b.hooks.Close()
+	b.webhooksMgr.Close()
 	accounts := b.accounts.ToPersist()
 	err := b.eas.SaveAccounts(ctx, accounts)
 	if err != nil {
@@ -386,7 +396,11 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	} else {
 		b.logger.Infof("successfully saved %v accounts", len(accounts))
 	}
-	return err
+
+	return errors.Join(
+		err,
+		b.pinMgr.Close(ctx),
+	)
 }
 
 func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
@@ -956,10 +970,14 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 
 	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
 		for fcid, reason := range toArchive {
-			b.events.BroadcastEvent(api.EventContractArchive{
-				ContractID: fcid,
-				Reason:     reason,
-				Timestamp:  time.Now().UTC(),
+			b.broadcastAction(webhooks.Event{
+				Module: api.ModuleContract,
+				Event:  api.EventArchive,
+				Payload: api.EventContractArchive{
+					ContractID: fcid,
+					Reason:     reason,
+					Timestamp:  time.Now().UTC(),
+				},
 			})
 		}
 	}
@@ -982,10 +1000,14 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
 		return
 	} else {
-		b.events.BroadcastEvent(api.EventContractSetUpdate{
-			Name:        set,
-			ContractIDs: contractIds,
-			Timestamp:   time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleContractSet,
+			Event:  api.EventUpdate,
+			Payload: api.EventContractSetUpdate{
+				Name:        set,
+				ContractIDs: contractIds,
+				Timestamp:   time.Now().UTC(),
+			},
 		})
 	}
 }
@@ -1172,9 +1194,13 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	}
 
 	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	b.events.BroadcastEvent(api.EventContractRenew{
-		Renewal:   r,
-		Timestamp: time.Now().UTC(),
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventRenew,
+		Payload: api.EventContractRenew{
+			Renewal:   r,
+			Timestamp: time.Now().UTC(),
+		},
 	})
 
 	jc.Encode(r)
@@ -1653,6 +1679,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+		b.pinMgr.TriggerUpdate()
 	case api.SettingRedundancy:
 		var rs api.RedundancySettings
 		if err := json.Unmarshal(data, &rs); err != nil {
@@ -1671,13 +1698,32 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
 			return
 		}
+	case api.SettingPricePinning:
+		var pps api.PricePinSettings
+		if err := json.Unmarshal(data, &pps); err != nil {
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid request body"), http.StatusBadRequest)
+			return
+		} else if err := pps.Validate(); err != nil {
+			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
+			return
+		} else if pps.Enabled {
+			if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
+				jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
+				return
+			}
+		}
+		b.pinMgr.TriggerUpdate()
 	}
 
 	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
-		b.events.BroadcastEvent(api.EventSettingUpdate{
-			Key:       key,
-			Update:    value,
-			Timestamp: time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventUpdate,
+			Payload: api.EventSettingUpdate{
+				Key:       key,
+				Update:    value,
+				Timestamp: time.Now().UTC(),
+			},
 		})
 	}
 }
@@ -1690,9 +1736,13 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	}
 
 	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
-		b.events.BroadcastEvent(api.EventSettingDelete{
-			Key:       key,
-			Timestamp: time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventDelete,
+			Payload: api.EventSettingDelete{
+				Key:       key,
+				Timestamp: time.Now().UTC(),
+			},
 		})
 	}
 }
@@ -2012,7 +2062,9 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap))
+	if jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
+		b.pinMgr.TriggerUpdate()
+	}
 }
 
 func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
@@ -2035,6 +2087,16 @@ func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 		return
 	} else if jc.Check("failed to update host", err) != nil {
 		return
+	}
+}
+
+func (b *bus) broadcastAction(e webhooks.Event) {
+	log := b.logger.With("event", e.Event).With("module", e.Module)
+	err := b.webhooksMgr.BroadcastAction(context.Background(), e)
+	if err != nil {
+		log.With(zap.Error(err)).Error("failed to broadcast action")
+	} else {
+		log.Debug("successfully broadcast action")
 	}
 }
 
@@ -2091,7 +2153,7 @@ func (b *bus) webhookActionHandlerPost(jc jape.Context) {
 	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
 		return
 	}
-	b.hooks.BroadcastAction(jc.Request.Context(), action)
+	b.broadcastAction(action)
 }
 
 func (b *bus) webhookHandlerDelete(jc jape.Context) {
@@ -2099,7 +2161,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	if jc.Decode(&wh) != nil {
 		return
 	}
-	err := b.hooks.Delete(jc.Request.Context(), wh)
+	err := b.webhooksMgr.Delete(jc.Request.Context(), wh)
 	if errors.Is(err, webhooks.ErrWebhookNotFound) {
 		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
 		return
@@ -2109,7 +2171,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 }
 
 func (b *bus) webhookHandlerGet(jc jape.Context) {
-	webhooks, queueInfos := b.hooks.Info()
+	webhooks, queueInfos := b.webhooksMgr.Info()
 	jc.Encode(api.WebhookResponse{
 		Queues:   queueInfos,
 		Webhooks: webhooks,
@@ -2122,7 +2184,7 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 		return
 	}
 
-	err := b.hooks.Register(jc.Request.Context(), webhooks.Webhook{
+	err := b.webhooksMgr.Register(jc.Request.Context(), webhooks.Webhook{
 		Event:   req.Event,
 		Module:  req.Module,
 		URL:     req.URL,
@@ -2392,21 +2454,21 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 
 func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
 	if cc.Synced {
-		b.events.BroadcastEvent(api.EventConsensusUpdate{
-			ConsensusState: b.consensusState(),
-			TransactionFee: b.tp.RecommendedFee(),
-			Timestamp:      time.Now().UTC(),
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleConsensus,
+			Event:  api.EventUpdate,
+			Payload: api.EventConsensusUpdate{
+				ConsensusState: b.consensusState(),
+				TransactionFee: b.tp.RecommendedFee(),
+				Timestamp:      time.Now().UTC(),
+			},
 		})
 	}
 }
 
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
-		alerts:           alerts.WithOrigin(am, "bus"),
-		alertMgr:         am,
-		events:           ibus.NewEventBroadcaster(hm, l.Named("events").Sugar()),
-		hooks:            hm,
 		s:                s,
 		cm:               cm,
 		tp:               tp,
@@ -2419,10 +2481,16 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 		eas:              eas,
 		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
-		logger:           l.Sugar().Named("bus"),
+
+		alerts:      alerts.WithOrigin(am, "bus"),
+		alertMgr:    am,
+		webhooksMgr: whm,
+		logger:      l.Sugar().Named("bus"),
 
 		startTime: time.Now(),
 	}
+
+	b.pinMgr = ibus.NewPinManager(whm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, b.logger.Desugar())
 
 	// ensure we don't hang indefinitely
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -2431,6 +2499,7 @@ func New(s Syncer, am *alerts.Manager, hm *webhooks.Manager, cm ChainManager, tp
 	// load default settings if the setting is not already set
 	for key, value := range map[string]interface{}{
 		api.SettingGouging:       build.DefaultGougingSettings,
+		api.SettingPricePinning:  build.DefaultPricePinSettings,
 		api.SettingRedundancy:    build.DefaultRedundancySettings,
 		api.SettingUploadPacking: build.DefaultUploadPackingSettings,
 	} {

@@ -26,7 +26,7 @@ func (m *mockBus) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.
 func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) {
 	return m.gougingParams, nil
 }
-func (m *mockBus) RegisterWebhook(ctx context.Context, wh webhooks.Webhook, opts ...webhooks.HeaderOption) error {
+func (m *mockBus) RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return nil
 }
 
@@ -145,14 +145,14 @@ func TestWorkerCache(t *testing.T) {
 
 	// assert the worker cache handles every event
 	_ = observedLogs.TakeAll() // clear logs
-	for _, event := range []webhooks.EventWebhook{
-		api.EventConsensusUpdate{},
-		api.EventContractArchive{},
-		api.EventContractRenew{},
-		api.EventSettingUpdate{},
-		api.EventSettingDelete{},
+	for _, event := range []webhooks.Event{
+		{Module: api.ModuleConsensus, Event: api.EventUpdate, Payload: nil},
+		{Module: api.ModuleContract, Event: api.EventArchive, Payload: nil},
+		{Module: api.ModuleContract, Event: api.EventRenew, Payload: nil},
+		{Module: api.ModuleSetting, Event: api.EventUpdate, Payload: nil},
+		{Module: api.ModuleSetting, Event: api.EventDelete, Payload: nil},
 	} {
-		if err := c.HandleEvent(event.Event()); err != nil {
+		if err := c.HandleEvent(event); err != nil {
 			t.Fatal(err)
 		}
 	}

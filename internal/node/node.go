@@ -18,6 +18,9 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
@@ -54,31 +57,32 @@ type AutopilotConfig struct {
 }
 
 type (
-	RunFn      = func() error
-	SetupFn    = func(context.Context, string, string) error
-	ShutdownFn = func(context.Context) error
+	RunFn         = func() error
+	BusSetupFn    = func(context.Context) error
+	WorkerSetupFn = func(context.Context, string, string) error
+	ShutdownFn    = func(context.Context) error
 )
 
 var NoopFn = func(context.Context) error { return nil }
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, ShutdownFn, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, BusSetupFn, ShutdownFn, error) {
 	gatewayDir := filepath.Join(dir, "gateway")
 	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cs, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
 	select {
 	case err := <-errCh:
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	default:
 		go func() {
@@ -89,15 +93,16 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 	tpoolDir := filepath.Join(dir, "transactionpool")
 	if err := os.MkdirAll(tpoolDir, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	tp, err := transactionpool.New(cs, g, tpoolDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// create database connections
-	var dbConn, dbMetricsConn gorm.Dialector
+	var dbConn gorm.Dialector
+	var dbMetrics sql.MetricsDatabase
 	if cfg.Database.MySQL.URI != "" {
 		// create MySQL connections
 		dbConn = stores.NewMySQLConnection(
@@ -106,22 +111,37 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.Database,
 		)
-		dbMetricsConn = stores.NewMySQLConnection(
+		dbm, err := mysql.Open(
 			cfg.Database.MySQL.User,
 			cfg.Database.MySQL.Password,
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.MetricsDatabase,
 		)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+		}
 	} else {
 		// create database directory
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		// create SQLite connections
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
-		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
+
+		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+		}
 	}
 
 	// create database logger
@@ -140,8 +160,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
 	sqlStore, ccid, err := stores.NewSQLStore(stores.Config{
 		Conn:                          dbConn,
-		ConnMetrics:                   dbMetricsConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
+		DBMetrics:                     dbMetrics,
 		PartialSlabDir:                sqlStoreDir,
 		Migrate:                       true,
 		AnnouncementMaxAge:            announcementMaxAge,
@@ -155,11 +175,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 		LongTxDuration:                cfg.DatabaseLog.SlowThreshold,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	hooksMgr, err := webhooks.NewManager(l.Named("webhooks").Sugar(), sqlStore)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Hook up webhooks to alerts.
@@ -189,24 +209,24 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry, zap.NewNop().Sugar())
 	tp.TransactionPoolSubscribe(w)
 	if err := cs.ConsensusSetSubscribe(w, modules.ConsensusChangeRecent, nil); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if m := cfg.Miner; m != nil {
 		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		tp.TransactionPoolSubscribe(m)
 	}
 
 	cm, err := NewChainManager(cs, NewTransactionPool(tp), cfg.Network)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
@@ -219,10 +239,10 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			sqlStore.Close(),
 		)
 	}
-	return b.Handler(), shutdownFn, nil
+	return b.Handler(), b.Setup, shutdownFn, nil
 }
 
-func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, SetupFn, ShutdownFn, error) {
+func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, WorkerSetupFn, ShutdownFn, error) {
 	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
 	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, l)
 	if err != nil {

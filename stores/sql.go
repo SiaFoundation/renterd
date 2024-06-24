@@ -39,7 +39,7 @@ type (
 	// Config contains all params for creating a SQLStore
 	Config struct {
 		Conn                          gorm.Dialector
-		ConnMetrics                   gorm.Dialector
+		DBMetrics                     sql.MetricsDatabase
 		Alerts                        alerts.Alerter
 		PartialSlabDir                string
 		Migrate                       bool
@@ -56,12 +56,11 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts    alerts.Alerter
-		db        *gorm.DB
-		dbMetrics *gorm.DB
-		bMain     sql.Database
-		bMetrics  sql.MetricsDatabase
-		logger    *zap.SugaredLogger
+		alerts   alerts.Alerter
+		db       *gorm.DB
+		bMain    sql.Database
+		bMetrics sql.MetricsDatabase
+		logger   *zap.SugaredLogger
 
 		slabBufferMgr *SlabBufferManager
 
@@ -171,38 +170,24 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open SQL db")
 	}
-	dbMetrics, err := gorm.Open(cfg.ConnMetrics, &gorm.Config{
-		Logger: cfg.GormLogger, // custom logger
-	})
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to open metrics db")
-	}
 	l := cfg.Logger.Named("sql")
 
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db: %v", err)
 	}
-	sqlDBMetrics, err := dbMetrics.DB()
-	if err != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch metrics db: %v", err)
-	}
 
 	// Print DB version
 	var dbMain sql.Database
-	var bMetrics sql.MetricsDatabase
-	var mainErr, metricsErr error
+	dbMetrics := cfg.DBMetrics
+	var mainErr error
 	if cfg.Conn.Name() == "sqlite" {
 		dbMain, mainErr = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics, metricsErr = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
 		dbMain, mainErr = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics, metricsErr = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
 	if mainErr != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create main database: %v", mainErr)
-	} else if metricsErr != nil {
-		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create metrics database: %v", metricsErr)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -217,7 +202,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	if cfg.Migrate {
 		if err := dbMain.Migrate(context.Background()); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations: %v", err)
-		} else if err := bMetrics.Migrate(context.Background()); err != nil {
+		} else if err := dbMetrics.Migrate(context.Background()); err != nil {
 			return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
@@ -250,9 +235,8 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		alerts:                 cfg.Alerts,
 		ccid:                   ccid,
 		db:                     db,
-		dbMetrics:              dbMetrics,
 		bMain:                  dbMain,
-		bMetrics:               bMetrics,
+		bMetrics:               dbMetrics,
 		logger:                 l,
 		knownContracts:         isOurContract,
 		lastSave:               time.Now(),
@@ -279,7 +263,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		shutdownCtxCancel: shutdownCtxCancel,
 	}
 
-	ss.slabBufferMgr, err = newSlabBufferManager(ss, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
+	ss.slabBufferMgr, err = newSlabBufferManager(shutdownCtx, cfg.Alerts, dbMain, l.Named("slabbuffers"), cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
