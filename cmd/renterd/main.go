@@ -295,7 +295,7 @@ func main() {
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
 	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
-	flag.StringVar(&cfg.Worker.ServiceAddress, "worker.serviceAddress", cfg.Worker.ServiceAddress, "Worker API address, only necessary when the bus is remote (overrides with RENTERD_WORKER_SERVICE_ADDR)")
+	flag.StringVar(&cfg.Worker.ExternalAddress, "worker.externalAddress", cfg.Worker.ExternalAddress, "Address of the worker on the network, only necessary when the bus is remote (overrides with RENTERD_WORKER_EXTERNAL_ADDR)")
 
 	// autopilot
 	flag.DurationVar(&cfg.Autopilot.AccountsRefillInterval, "autopilot.accountRefillInterval", cfg.Autopilot.AccountsRefillInterval, "Interval for refilling workers' account balances")
@@ -366,7 +366,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
 	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
 	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
-	parseEnvVar("RENTERD_WORKER_SERVICE_ADDR", &cfg.Worker.ServiceAddress)
+	parseEnvVar("RENTERD_WORKER_EXTERNAL_ADDR", &cfg.Worker.ExternalAddress)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
@@ -467,8 +467,8 @@ func main() {
 	if cfg.Bus.RemoteAddr != "" {
 		if len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
 			logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
-		} else if cfg.Worker.ServiceAddress == "" {
-			logger.Fatal("if the bus is remote, the worker needs to be able to tell it where to find its API, this can be configured using worker.serviceAddress")
+		} else if cfg.Worker.ExternalAddress == "" {
+			logger.Fatal("if the bus is remote, the worker needs to be able to tell it where to find its API, this can be configured using worker.externalAddress")
 		}
 	}
 	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
@@ -529,6 +529,7 @@ func main() {
 	setupWorkerFn := node.NoopFn
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
+			workerAddr := cfg.HTTP.Address + "/api/worker"
 			var shutdownFn node.ShutdownFn
 			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
@@ -537,14 +538,14 @@ func main() {
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			var workerURL string
+			var workerExternAddr string
 			if cfg.Bus.RemoteAddr != "" {
-				workerURL = cfg.Worker.ServiceAddress + "/api/worker"
+				workerExternAddr = cfg.Worker.ExternalAddress + "/api/worker"
 			} else {
-				workerURL = cfg.HTTP.Address + "/api/worker"
+				workerExternAddr = workerAddr
 			}
 			setupWorkerFn = func(ctx context.Context) error {
-				return setupFn(ctx, workerURL, cfg.HTTP.Password)
+				return setupFn(ctx, workerExternAddr, cfg.HTTP.Password)
 			}
 			shutdownFns = append(shutdownFns, shutdownFnEntry{
 				name: "Worker",
@@ -552,7 +553,7 @@ func main() {
 			})
 
 			mux.Sub["/api/worker"] = utils.TreeMux{Handler: iworker.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
-			wc := worker.NewClient(cfg.HTTP.Address+"/api/worker", cfg.HTTP.Password)
+			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
