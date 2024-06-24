@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -17,6 +19,9 @@ import (
 type (
 	Database interface {
 		io.Closer
+
+		// LoadSlabBuffers loads the slab buffers from the database.
+		LoadSlabBuffers(ctx context.Context) ([]LoadedSlabBuffer, []string, error)
 
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
@@ -39,6 +44,13 @@ type (
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
+		// AddPeer adds a peer to the store.
+		AddPeer(ctx context.Context, addr string) error
+
+		// AddWebhook adds a new webhook to the database. If the webhook already
+		// exists, it is updated.
+		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
+
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
@@ -49,6 +61,11 @@ type (
 
 		// Autopilots returns all autopilots.
 		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+
+		// BanPeer temporarily bans one or more IPs. The addr should either be a
+		// single IP with port (e.g. 1.2.3.4:5678) or a CIDR subnet (e.g.
+		// 1.2.3.4/16).
+		BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error
 
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
@@ -82,6 +99,17 @@ type (
 		// process. If another contract with a different host exists that
 		// contains the root, latest_host is updated to that host.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
+		// DeleteWebhook deletes the webhook with the matching module, event and
+		// URL of the provided webhook. If the webhook doesn't exist,
+		// webhooks.ErrWebhookNotFound is returned.
+		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
+
+		// InsertBufferedSlab inserts a buffered slab into the database. This
+		// includes the creation of a buffered slab as well as the corresponding
+		// regular slab it is linked to. It returns the ID of the buffered slab
+		// that was created.
+		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
@@ -137,6 +165,16 @@ type (
 
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
+
+		// PeerBanned returns true if the peer is banned.
+		PeerBanned(ctx context.Context, addr string) (bool, error)
+
+		// PeerInfo returns the metadata for the specified peer or
+		// ErrPeerNotFound if the peer wasn't found in the store.
+		PeerInfo(ctx context.Context, addr string) (syncer.PeerInfo, error)
+
+		// Peers returns the set of known peers.
+		Peers(ctx context.Context) ([]syncer.PeerInfo, error)
 
 		// ProcessChainUpdate applies the given chain update to the database.
 		ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error
@@ -198,6 +236,10 @@ type (
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 
+		// SlabBuffers returns the filenames and associated contract sets of all
+		// slab buffers.
+		SlabBuffers(ctx context.Context) (map[string]string, error)
+
 		// Tip returns the sync height.
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
@@ -212,18 +254,17 @@ type (
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
-		// UpdateHostCheck updates the host check for the given host.
-		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
-
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 
 		// UpdateHostBlocklistEntries updates the blocklist in the database
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
-		// UpdateObjectHealth updates the health of all objects to the lowest
-		// health of all its slabs.
-		UpdateObjectHealth(ctx context.Context) error
+		// UpdateHostCheck updates the host check for the given host.
+		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
+
+		// UpdatePeerInfo updates the metadata for the specified peer.
+		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%
@@ -244,6 +285,9 @@ type (
 
 		// WalletEventCount returns the total number of events in the database.
 		WalletEventCount(ctx context.Context) (uint64, error)
+
+		// Webhooks returns all registered webhooks.
+		Webhooks(ctx context.Context) ([]webhooks.Webhook, error)
 	}
 
 	MetricsDatabase interface {
@@ -260,6 +304,10 @@ type (
 	}
 
 	MetricsDatabaseTx interface {
+		// ContractMetrics returns contract metrics  for the given time range
+		// and options.
+		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
+
 		// ContractPruneMetrics returns the contract prune metrics for the given
 		// time range and options.
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
@@ -272,14 +320,43 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// RecordContractPruneMetric records a contract prune metric.
+		// PerformanceMetrics returns performance metrics for the given time range
+		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
+
+		// PruneMetrics deletes metrics of a certain type older than the given
+		// cutoff time.
+		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
+
+		// RecordContractMetric records contract metrics.
+		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
+
+		// RecordContractPruneMetric records contract prune metrics.
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
-		// RecordContractSetChurnMetric records a contract set churn metric.
+		// RecordContractSetChurnMetric records contract set churn metrics.
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 
-		// RecordContractSetMetric records a contract set metric.
+		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
+
+		// RecordPerformanceMetric records performance metrics.
+		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
+
+		// RecordWalletMetric records wallet metrics.
+		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
+
+		// WalletMetrics returns wallet metrics for the given time range
+		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
+	}
+
+	LoadedSlabBuffer struct {
+		ID            int64
+		ContractSetID int64
+		Filename      string
+		Key           object.EncryptionKey
+		MinShards     uint8
+		Size          int64
+		TotalShards   uint8
 	}
 
 	UsedContract struct {

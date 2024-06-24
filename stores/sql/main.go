@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,10 +18,12 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 )
 
@@ -377,6 +381,18 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	return int(deletedSectors), nil
 }
 
+func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
+	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
+	if err != nil {
+		return fmt.Errorf("failed to delete webhook: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return webhooks.ErrWebhookNotFound
+	}
+	return nil
+}
+
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
 	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
 	if err != nil {
@@ -438,6 +454,32 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 	return hosts, nil
 }
 
+func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	// insert buffered slab
+	res, err := tx.Exec(ctx, `INSERT INTO buffered_slabs (created_at, filename) VALUES (?, ?)`,
+		time.Now(), fileName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert buffered slab: %w", err)
+	}
+	bufferedSlabID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch buffered slab id: %w", err)
+	}
+
+	key, err := ec.MarshalBinary()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO slabs (created_at, db_contract_set_id, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		time.Now(), contractSetID, bufferedSlabID, SecretKey(key), minShards, totalShards)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert slab: %w", err)
+	}
+	return bufferedSlabID, nil
+}
+
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	// fetch bucket id
 	var bucketID int64
@@ -491,6 +533,73 @@ func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, s
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+func LoadSlabBuffers(ctx context.Context, db *sql.DB) (bufferedSlabs []LoadedSlabBuffer, orphanedBuffers []string, err error) {
+	err = db.Transaction(ctx, func(tx sql.Tx) error {
+		// collect all buffers
+		rows, err := db.Query(ctx, `
+			SELECT bs.id, bs.filename, sla.db_contract_set_id, sla.key, sla.min_shards, sla.total_shards
+			FROM buffered_slabs bs
+			INNER JOIN slabs sla ON sla.db_buffered_slab_id = bs.id
+		`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var bs LoadedSlabBuffer
+			var sk SecretKey
+			if err := rows.Scan(&bs.ID, &bs.Filename, &bs.ContractSetID, &sk, &bs.MinShards, &bs.TotalShards); err != nil {
+				return fmt.Errorf("failed to scan buffered slab: %w", err)
+			} else if err := bs.Key.UnmarshalBinary(sk[:]); err != nil {
+				return fmt.Errorf("failed to unmarshal secret key: %w", err)
+			}
+			bufferedSlabs = append(bufferedSlabs, bs)
+		}
+
+		// fill in sizes
+		for i := range bufferedSlabs {
+			err = tx.QueryRow(ctx, `
+				SELECT COALESCE(MAX(offset+length), 0)
+				FROM slabs sla
+				INNER JOIN slices sli ON sla.id = sli.db_slab_id
+				WHERE sla.db_buffered_slab_id = ?
+		`, bufferedSlabs[i].ID).Scan(&bufferedSlabs[i].Size)
+			if err != nil {
+				return fmt.Errorf("failed to fetch buffered slab size: %w", err)
+			}
+		}
+
+		// find orphaned buffers and delete them
+		rows, err = tx.Query(ctx, `
+			SELECT bs.id, bs.filename
+			FROM buffered_slabs bs
+			LEFT JOIN slabs ON slabs.db_buffered_slab_id = bs.id
+			WHERE slabs.id IS NULL
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to fetch orphaned buffers: %w", err)
+		}
+		var toDelete []int64
+		for rows.Next() {
+			var id int64
+			var filename string
+			if err := rows.Scan(&id, &filename); err != nil {
+				return fmt.Errorf("failed to scan orphaned buffer: %w", err)
+			}
+			orphanedBuffers = append(orphanedBuffers, filename)
+			toDelete = append(toDelete, id)
+		}
+		for _, id := range toDelete {
+			if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", id); err != nil {
+				return fmt.Errorf("failed to delete orphaned buffer: %w", err)
+			}
+		}
+		return nil
+	})
+	return
 }
 
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
@@ -634,24 +743,32 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	return usedContracts, nil
 }
 
-func HealthQuery(limit int64, now time.Time) (string, []any) {
-	return `SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
-	THEN
-		CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
-		THEN -1
-		ELSE 1
-		END
-	ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-	END AS health
-	FROM slabs
-	INNER JOIN sectors s ON s.db_slab_id = slabs.id
-	LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
-	LEFT JOIN contracts c ON se.db_contract_id = c.id
-	LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
-	LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-	WHERE slabs.health_valid_until <= ?
-	GROUP BY slabs.id
-	LIMIT ?`, []any{now.Unix(), limit}
+func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Time) error {
+	_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS slabs_health")
+	if err != nil {
+		return fmt.Errorf("failed to drop temporary table: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		CREATE TEMPORARY TABLE slabs_health AS
+			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
+			THEN
+				CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+				THEN -1
+				ELSE 1
+				END
+			ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+			END as health
+			FROM slabs
+			INNER JOIN sectors s ON s.db_slab_id = slabs.id
+			LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+			LEFT JOIN contracts c ON se.db_contract_id = c.id
+			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
+			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+			WHERE slabs.health_valid_until <= ?
+			GROUP BY slabs.id
+			LIMIT ?
+	`, now.Unix(), limit)
+	return err
 }
 
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
@@ -877,6 +994,38 @@ func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, u
 	return mpu, neededParts, size, eTag, nil
 }
 
+func NormalizePeer(peer string) (string, error) {
+	host, _, err := net.SplitHostPort(peer)
+	if err != nil {
+		host = peer
+	}
+	if strings.IndexByte(host, '/') != -1 {
+		_, subnet, err := net.ParseCIDR(host)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse CIDR: %w", err)
+		}
+		return subnet.String(), nil
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", errors.New("invalid IP address")
+	}
+
+	var maskLen int
+	if ip.To4() != nil {
+		maskLen = 32
+	} else {
+		maskLen = 128
+	}
+
+	_, normalized, err := net.ParseCIDR(fmt.Sprintf("%s/%d", ip.String(), maskLen))
+	if err != nil {
+		panic("failed to parse CIDR")
+	}
+	return normalized.String(), nil
+}
+
 func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	var args []any
 	var bucketExpr string
@@ -954,6 +1103,78 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
 		TotalUploadedSize:          totalUploaded,
 	}, nil
+}
+
+func PeerBanned(ctx context.Context, tx sql.Tx, addr string) (bool, error) {
+	// normalize the address to a CIDR
+	netCIDR, err := NormalizePeer(addr)
+	if err != nil {
+		return false, err
+	}
+
+	// parse the subnet
+	_, subnet, err := net.ParseCIDR(netCIDR)
+	if err != nil {
+		return false, err
+	}
+
+	// check all subnets from the given subnet to the max subnet length
+	var maxMaskLen int
+	if subnet.IP.To4() != nil {
+		maxMaskLen = 32
+	} else {
+		maxMaskLen = 128
+	}
+
+	checkSubnets := make([]any, 0, maxMaskLen)
+	for i := maxMaskLen; i > 0; i-- {
+		_, subnet, err := net.ParseCIDR(subnet.IP.String() + "/" + strconv.Itoa(i))
+		if err != nil {
+			return false, err
+		}
+		checkSubnets = append(checkSubnets, subnet.String())
+	}
+
+	var expiration time.Time
+	err = tx.QueryRow(ctx, fmt.Sprintf(`SELECT expiration FROM syncer_bans WHERE net_cidr IN (%s) ORDER BY expiration DESC LIMIT 1`, strings.Repeat("?, ", len(checkSubnets)-1)+"?"), checkSubnets...).
+		Scan((*UnixTimeMS)(&expiration))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return time.Now().Before(expiration), nil
+}
+
+func PeerInfo(ctx context.Context, tx sql.Tx, addr string) (syncer.PeerInfo, error) {
+	var peer syncer.PeerInfo
+	err := tx.QueryRow(ctx, "SELECT address, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE address = ?", addr).
+		Scan(&peer.Address, (*UnixTimeMS)(&peer.FirstSeen), (*UnixTimeMS)(&peer.LastConnect), (*Unsigned64)(&peer.SyncedBlocks), &peer.SyncDuration)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return syncer.PeerInfo{}, syncer.ErrPeerNotFound
+	} else if err != nil {
+		return syncer.PeerInfo{}, fmt.Errorf("failed to fetch peer: %w", err)
+	}
+	return peer, nil
+}
+
+func Peers(ctx context.Context, tx sql.Tx) ([]syncer.PeerInfo, error) {
+	rows, err := tx.Query(ctx, "SELECT address, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch peers: %w", err)
+	}
+	defer rows.Close()
+
+	var peers []syncer.PeerInfo
+	for rows.Next() {
+		var peer syncer.PeerInfo
+		if err := rows.Scan(&peer.Address, (*UnixTimeMS)(&peer.FirstSeen), (*UnixTimeMS)(&peer.LastConnect), (*Unsigned64)(&peer.SyncedBlocks), &peer.SyncDuration); err != nil {
+			return nil, fmt.Errorf("failed to scan peer: %w", err)
+		}
+		peers = append(peers, peer)
+	}
+	return peers, nil
 }
 
 func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
@@ -1100,7 +1321,7 @@ func ResetChainState(ctx context.Context, tx sql.Tx) error {
 func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
 	_, err := tx.Exec(ctx, "UPDATE hosts SET lost_sectors = 0 WHERE public_key = ?", PublicKey(hk))
 	if err != nil {
-		return fmt.Errorf("failed to reset lost sectors: %w", err)
+		return fmt.Errorf("failed to reset lost sectors for host %v: %w", hk, err)
 	}
 	return nil
 }
@@ -1331,6 +1552,30 @@ func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 	return err
 }
 
+func SlabBuffers(ctx context.Context, tx sql.Tx) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT buffered_slabs.filename, cs.name
+		FROM buffered_slabs
+		INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
+		INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets")
+	}
+	defer rows.Close()
+
+	fileNameToContractSet := make(map[string]string)
+	for rows.Next() {
+		var fileName string
+		var contractSetName string
+		if err := rows.Scan(&fileName, &contractSetName); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		fileNameToContractSet[fileName] = contractSetName
+	}
+	return fileNameToContractSet, nil
+}
+
 func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	var id Hash256
 	var height uint64
@@ -1360,18 +1605,49 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 	return nil
 }
 
-func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, `
-		UPDATE objects SET health = (
-			SELECT MIN(slabs.health)
-			FROM slabs
-			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-		) WHERE health != (
-			SELECT MIN(slabs.health)
-			FROM slabs
-			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-		)`)
-	return err
+func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer.PeerInfo)) error {
+	info, err := PeerInfo(ctx, tx, addr)
+	if err != nil {
+		return err
+	}
+	fn(&info)
+
+	res, err := tx.Exec(ctx, "UPDATE syncer_peers SET last_connect = ?, synced_blocks = ?, sync_duration = ? WHERE address = ?",
+		UnixTimeMS(info.LastConnect),
+		Unsigned64(info.SyncedBlocks),
+		info.SyncDuration,
+		addr,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update peer info: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return syncer.ErrPeerNotFound
+	}
+
+	return nil
+}
+
+func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
+	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	var whs []webhooks.Webhook
+	for rows.Next() {
+		var webhook webhooks.Webhook
+		var headers string
+		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL, &headers); err != nil {
+			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		} else if err := json.Unmarshal([]byte(headers), &webhook.Headers); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+		}
+		whs = append(whs, webhook)
+	}
+	return whs, nil
 }
 
 func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {

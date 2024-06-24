@@ -19,20 +19,21 @@ import (
 // TestEvents is a test that verifies the bus sends webhooks for certain events,
 // providing an event webhook was registered.
 func TestEvents(t *testing.T) {
-	// list all events
-	allEvents := []webhooks.EventWebhook{
-		api.EventConsensusUpdate{},
-		api.EventContractArchive{},
-		api.EventContractRenew{},
-		api.EventContractSetUpdate{},
-		api.EventSettingUpdate{},
-		api.EventSettingDelete{},
+	// list all webhooks
+	allEvents := []func(string, map[string]string) webhooks.Webhook{
+		api.WebhookConsensusUpdate,
+		api.WebhookContractArchive,
+		api.WebhookContractRenew,
+		api.WebhookContractSetUpdate,
+		api.WebhookSettingDelete,
+		api.WebhookSettingUpdate,
 	}
 
 	// define helper to check if the event is known
 	isKnownEvent := func(e webhooks.Event) bool {
-		for _, known := range allEvents {
-			if known.Event().Module == e.Module && known.Event().Event == e.Event {
+		for _, eFn := range allEvents {
+			known := eFn("", nil)
+			if known.Module == e.Module && known.Event == e.Event {
 				return true
 			}
 		}
@@ -83,7 +84,7 @@ func TestEvents(t *testing.T) {
 
 	// register webhooks
 	for _, e := range allEvents {
-		tt.OK(b.RegisterWebhook(context.Background(), webhooks.NewEventWebhook(server.URL, e)))
+		tt.OK(b.RegisterWebhook(context.Background(), e(server.URL, nil)))
 	}
 
 	// fetch our contract

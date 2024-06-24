@@ -12,12 +12,14 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 
 	"go.uber.org/zap"
@@ -60,6 +62,10 @@ func (b *MainDatabase) DB() *sql.DB {
 	return b.db
 }
 
+func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBuffer, []string, error) {
+	return ssql.LoadSlabBuffers(ctx, b.db)
+}
+
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
 	return mtx.MakeDirsForPath(ctx, path)
@@ -85,6 +91,10 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 
 func (tx *MainDatabaseTx) Accounts(ctx context.Context) ([]api.Account, error) {
 	return ssql.Accounts(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
 }
 
 func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
@@ -131,8 +141,26 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
 }
 
-func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
+	_, err := tx.Exec(ctx, "INSERT OR IGNORE INTO syncer_peers (address, first_seen, last_connect, synced_blocks, sync_duration) VALUES (?, ?, ?, ?, ?)", addr, ssql.UnixTimeMS(time.Now()), ssql.UnixTimeMS(time.Time{}), 0, 0)
+	return err
+}
+
+func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	headers := "{}"
+	if len(wh.Headers) > 0 {
+		h, err := json.Marshal(wh.Headers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal headers: %w", err)
+		}
+		headers = string(h)
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET headers = EXCLUDED.headers",
+		time.Now(), wh.Module, wh.Event, wh.URL, headers)
+	if err != nil {
+		return fmt.Errorf("failed to insert webhook: %w", err)
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
@@ -145,6 +173,17 @@ func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopil
 
 func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
 	return ssql.Autopilots(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
+	cidr, err := ssql.NormalizePeer(addr)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `INSERT INTO syncer_bans (created_at, net_cidr, expiration, reason) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET expiration = EXCLUDED.expiration, reason = EXCLUDED.reason`,
+		time.Now(), cidr, ssql.UnixTimeMS(time.Now().Add(duration)), reason)
+	return err
 }
 
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
@@ -250,6 +289,14 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 
 func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
+}
+
+func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
+	return ssql.DeleteWebhook(ctx, tx, wh)
+}
+
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
 }
 
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
@@ -425,6 +472,18 @@ func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, 
 
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	return ssql.ObjectsStats(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) PeerBanned(ctx context.Context, addr string) (bool, error) {
+	return ssql.PeerBanned(ctx, tx, addr)
+}
+
+func (tx *MainDatabaseTx) PeerInfo(ctx context.Context, addr string) (syncer.PeerInfo, error) {
+	return ssql.PeerInfo(ctx, tx, addr)
+}
+
+func (tx *MainDatabaseTx) Peers(ctx context.Context) ([]syncer.PeerInfo, error) {
+	return ssql.Peers(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(chain.ChainUpdateTx) error) (err error) {
@@ -609,6 +668,10 @@ func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) SlabBuffers(ctx context.Context) (map[string]string, error) {
+	return ssql.SlabBuffers(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
 	return ssql.Tip(ctx, tx.Tx)
 }
@@ -775,8 +838,8 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateObjectHealth(ctx context.Context) error {
-	return ssql.UpdateObjectHealth(ctx, tx)
+func (tx *MainDatabaseTx) UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error {
+	return ssql.UpdatePeerInfo(ctx, tx, addr, fn)
 }
 
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
@@ -889,12 +952,30 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
 	now := time.Now()
-	args := []any{maxDuration.Seconds(), minDuration.Seconds(), now.Add(minDuration).Unix()}
-	healthQuery, healthArgs := ssql.HealthQuery(limit, now)
-	args = append(args, healthArgs...)
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) %% (? - ?) + ?) FROM (%s) AS inner WHERE slabs.id=inner.id", healthQuery), args...)
+	if err := ssql.PrepareSlabHealth(ctx, tx, limit, now); err != nil {
+		return 0, fmt.Errorf("failed to compute slab health: %w", err)
+	}
+
+	res, err := tx.Exec(ctx, "UPDATE slabs SET health = inner.health, health_valid_until = (ABS(RANDOM()) % (? - ?) + ?) FROM slabs_health AS inner WHERE slabs.id=inner.id",
+		maxDuration.Seconds(), minDuration.Seconds(), now.Add(minDuration).Unix())
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to update slab health: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE objects SET health = (
+			SELECT MIN(h.health)
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
+		) WHERE EXISTS (
+			SELECT 1
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = objects.id
+		)`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
 }
@@ -905,6 +986,10 @@ func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) (
 
 func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, err error) {
 	return ssql.WalletEventCount(ctx, tx.Tx)
+}
+
+func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
+	return ssql.Webhooks(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {

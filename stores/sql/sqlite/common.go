@@ -20,6 +20,14 @@ var deadlockMsgs = []string{
 //go:embed all:migrations/*
 var migrationsFs embed.FS
 
+func Open(path string) (*dsql.DB, error) {
+	return dsql.Open("sqlite3", fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_cache_size=65536", path))
+}
+
+func OpenEphemeral(name string) (*dsql.DB, error) {
+	return dsql.Open("sqlite3", fmt.Sprintf("file:%s?mode=memory&cache=shared&_foreign_keys=1", name))
+}
+
 func applyMigration(ctx context.Context, db *sql.DB, fn func(tx sql.Tx) (bool, error)) (err error) {
 	if _, err := db.Exec(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
 		return fmt.Errorf("failed to disable foreign keys: %w", err)

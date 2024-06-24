@@ -66,19 +66,7 @@ type (
 		Event   string      `json:"event"`
 		Payload interface{} `json:"payload,omitempty"`
 	}
-
-	EventWebhook interface {
-		Event() Event
-	}
 )
-
-func NewEventWebhook(url string, e EventWebhook) Webhook {
-	return Webhook{
-		Module: e.Event().Module,
-		Event:  e.Event().Event,
-		URL:    url,
-	}
-}
 
 type Manager struct {
 	logger *zap.SugaredLogger
