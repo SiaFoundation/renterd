@@ -611,21 +611,20 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
 		ok = true
 		switch kind {
+		case wallet.EventTypeMinerPayout:
+		case wallet.EventTypeFoundationSubsidy:
+		case wallet.EventTypeSiafundClaim:
+			payout, _ := data.(wallet.EventPayout)
+			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
 		case wallet.EventTypeV1Transaction:
 			v1Txn, _ := data.(wallet.EventV1Transaction)
 			txn = types.Transaction(v1Txn)
-		case wallet.EventTypeFoundationSubsidy:
-			subsidy, _ := data.(wallet.EventFoundationSubsidy)
-			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{subsidy.SiacoinElement.SiacoinOutput}}
-		case wallet.EventTypeV1Contract:
-			payout, _ := data.(wallet.EventV1ContractPayout)
+		case wallet.EventTypeV1ContractResolution:
+			fce, _ := data.(wallet.EventV1ContractResolution)
 			txn = types.Transaction{
-				FileContracts:  []types.FileContract{payout.FileContract.FileContract},
-				SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput},
+				FileContracts:  []types.FileContract{fce.Parent.FileContract},
+				SiacoinOutputs: []types.SiacoinOutput{fce.SiacoinElement.SiacoinOutput},
 			}
-		case wallet.EventTypeMinerPayout:
-			payout, _ := data.(wallet.EventMinerPayout)
-			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
 		default:
 			ok = false
 		}
