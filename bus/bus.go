@@ -611,9 +611,9 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
 		ok = true
 		switch kind {
-		case wallet.EventTypeMinerPayout:
-		case wallet.EventTypeFoundationSubsidy:
-		case wallet.EventTypeSiafundClaim:
+		case wallet.EventTypeMinerPayout,
+			wallet.EventTypeFoundationSubsidy,
+			wallet.EventTypeSiafundClaim:
 			payout, _ := data.(wallet.EventPayout)
 			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
 		case wallet.EventTypeV1Transaction:

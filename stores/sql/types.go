@@ -338,9 +338,9 @@ func (u Uint64Str) Value() (driver.Value, error) {
 
 func UnmarshalEventData(b []byte, t string) (dst wallet.EventData, err error) {
 	switch t {
-	case wallet.EventTypeMinerPayout:
-	case wallet.EventTypeSiafundClaim:
-	case wallet.EventTypeFoundationSubsidy:
+	case wallet.EventTypeMinerPayout,
+		wallet.EventTypeSiafundClaim,
+		wallet.EventTypeFoundationSubsidy:
 		dst = new(wallet.EventPayout)
 	case wallet.EventTypeV1ContractResolution:
 		dst = new(wallet.EventV1ContractResolution)
