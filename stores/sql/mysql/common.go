@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	dsql "database/sql"
 	"embed"
 	"fmt"
 
@@ -10,6 +11,10 @@ import (
 
 var deadlockMsgs = []string{
 	"Deadlock found when trying to get lock",
+}
+
+func Open(user, password, addr, dbName string) (*dsql.DB, error) {
+	return dsql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, addr, dbName))
 }
 
 //go:embed all:migrations/*

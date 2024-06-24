@@ -18,6 +18,9 @@ import (
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
@@ -98,7 +101,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 
 	// create database connections
-	var dbConn, dbMetricsConn gorm.Dialector
+	var dbConn gorm.Dialector
+	var dbMetrics sql.MetricsDatabase
 	if cfg.Database.MySQL.URI != "" {
 		// create MySQL connections
 		dbConn = stores.NewMySQLConnection(
@@ -107,12 +111,19 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.Database,
 		)
-		dbMetricsConn = stores.NewMySQLConnection(
+		dbm, err := mysql.Open(
 			cfg.Database.MySQL.User,
 			cfg.Database.MySQL.Password,
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.MetricsDatabase,
 		)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+		}
 	} else {
 		// create database directory
 		dbDir := filepath.Join(dir, "db")
@@ -122,7 +133,15 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 		// create SQLite connections
 		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
-		dbMetricsConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "metrics.sqlite"))
+
+		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+		}
 	}
 
 	// create database logger
@@ -141,8 +160,8 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
 	sqlStore, ccid, err := stores.NewSQLStore(stores.Config{
 		Conn:                          dbConn,
-		ConnMetrics:                   dbMetricsConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
+		DBMetrics:                     dbMetrics,
 		PartialSlabDir:                sqlStoreDir,
 		Migrate:                       true,
 		AnnouncementMaxAge:            announcementMaxAge,
