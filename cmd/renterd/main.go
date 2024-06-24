@@ -294,6 +294,7 @@ func main() {
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
 	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
+	flag.StringVar(&cfg.Worker.ExternalAddress, "worker.externalAddress", cfg.Worker.ExternalAddress, "Address of the worker on the network, only necessary when the bus is remote (overrides with RENTERD_WORKER_EXTERNAL_ADDR)")
 
 	// autopilot
 	flag.DurationVar(&cfg.Autopilot.AccountsRefillInterval, "autopilot.accountRefillInterval", cfg.Autopilot.AccountsRefillInterval, "Interval for refilling workers' account balances")
@@ -364,6 +365,7 @@ func main() {
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
 	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
 	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
+	parseEnvVar("RENTERD_WORKER_EXTERNAL_ADDR", &cfg.Worker.ExternalAddress)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
@@ -470,8 +472,12 @@ func main() {
 	}
 	var shutdownFns []shutdownFnEntry
 
-	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
-		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
+	if cfg.Bus.RemoteAddr != "" {
+		if len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
+			logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
+		} else if cfg.Worker.ExternalAddress == "" {
+			logger.Fatal("if the bus is remote, the worker needs to be able to tell it where to find its API, this can be configured using worker.externalAddress")
+		}
 	}
 	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
 		logger.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
@@ -542,8 +548,14 @@ func main() {
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
+			var workerExternAddr string
+			if cfg.Bus.RemoteAddr != "" {
+				workerExternAddr = cfg.Worker.ExternalAddress + "/api/worker"
+			} else {
+				workerExternAddr = workerAddr
+			}
 			setupWorkerFn = func(ctx context.Context) error {
-				return setupFn(ctx, workerAddr, cfg.HTTP.Password)
+				return setupFn(ctx, workerExternAddr, cfg.HTTP.Password)
 			}
 			shutdownFns = append(shutdownFns, shutdownFnEntry{
 				name: "Worker",
