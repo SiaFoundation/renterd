@@ -89,6 +89,9 @@ type (
 		// contains the root, latest_host is updated to that host.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
+		// DeleteSettings deletes the settings with the given key.
+		DeleteSettings(ctx context.Context, key string) error
+
 		// DeleteWebhook deletes the webhook with the matching module, event and
 		// URL of the provided webhook. If the webhook doesn't exist,
 		// webhooks.ErrWebhookNotFound is returned.
@@ -208,6 +211,12 @@ type (
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
+
+		// Setting returns the setting with the given key from the database.
+		Setting(ctx context.Context, key string) (string, error)
+
+		// Settings returns all available settings from the database.
+		Settings(ctx context.Context) ([]string, error)
 
 		// SlabBuffers returns the filenames and associated contract sets of all
 		// slab buffers.

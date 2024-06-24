@@ -2,11 +2,9 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"go.sia.tech/renterd/api"
-	"gorm.io/gorm"
+	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm/clause"
 )
 
@@ -26,11 +24,13 @@ func (dbSetting) TableName() string { return "settings" }
 func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
 	// Delete from cache.
 	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	delete(s.settings, key)
-	s.settingsMu.Unlock()
 
 	// Delete from database.
-	return s.db.Where(&dbSetting{Key: key}).Delete(&dbSetting{}).Error
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.DeleteSettings(ctx, key)
+	})
 }
 
 // Setting implements the bus.SettingStore interface.
@@ -44,23 +44,25 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	}
 
 	// Check database.
-	var entry dbSetting
-	err := s.db.Where(&dbSetting{Key: key}).
-		Take(&entry).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", fmt.Errorf("key '%s' err: %w", key, api.ErrSettingNotFound)
-	} else if err != nil {
-		return "", err
+	var err error
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		value, err = tx.Setting(ctx, key)
+		return err
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch setting from db: %w", err)
 	}
-	s.settings[key] = string(entry.Value)
-	return string(entry.Value), nil
+	s.settings[key] = value
+	return value, nil
 }
 
 // Settings implements the bus.SettingStore interface.
-func (s *SQLStore) Settings(ctx context.Context) ([]string, error) {
-	var keys []string
-	tx := s.db.Model(&dbSetting{}).Select("Key").Find(&keys)
-	return keys, tx.Error
+func (s *SQLStore) Settings(ctx context.Context) (settings []string, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		settings, err = tx.Settings(ctx)
+		return err
+	})
+	return
 }
 
 // UpdateSetting implements the bus.SettingStore interface.
