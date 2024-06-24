@@ -9,15 +9,19 @@ import (
 
 // DeleteSetting implements the bus.SettingStore interface.
 func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
-	// Delete from cache.
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
-	delete(s.settings, key)
 
-	// Delete from database.
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	// delete from database first
+	if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.DeleteSettings(ctx, key)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// delete from cache
+	delete(s.settings, key)
+	return nil
 }
 
 // Setting implements the bus.SettingStore interface.
@@ -54,7 +58,7 @@ func (s *SQLStore) Settings(ctx context.Context) (settings []string, err error) 
 
 // UpdateSetting implements the bus.SettingStore interface.
 func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
-	// Update db first.
+	// update db first
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
@@ -65,7 +69,7 @@ func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
 		return err
 	}
 
-	// Update cache second.
+	// update cache second
 	s.settings[key] = value
 	return nil
 }
