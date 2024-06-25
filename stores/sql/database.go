@@ -77,6 +77,9 @@ type (
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 
+		// ContractSets returns the names of all contract sets.
+		ContractSets(ctx context.Context) ([]string, error)
+
 		// ContractSize returns the size of the contract with the given ID as
 		// well as the estimated number of bytes that can be pruned from it.
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)

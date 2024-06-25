@@ -282,6 +282,24 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	return contracts, nil
 }
 
+func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT name FROM contract_sets")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets: %w", err)
+	}
+	defer rows.Close()
+
+	var sets []string
+	for rows.Next() {
+		var cs string
+		if err := rows.Scan(&cs); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		sets = append(sets, cs)
+	}
+	return sets, nil
+}
+
 func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")

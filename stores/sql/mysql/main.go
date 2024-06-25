@@ -247,6 +247,10 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 	return ssql.Contracts(ctx, tx, opts)
 }
 
+func (tx *MainDatabaseTx) ContractSets(ctx context.Context) ([]string, error) {
+	return ssql.ContractSets(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
 	return ssql.ContractSize(ctx, tx, id)
 }

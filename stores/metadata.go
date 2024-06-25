@@ -671,11 +671,11 @@ func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (
 	return
 }
 
-func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
-	var sets []string
-	err := s.db.WithContext(ctx).Raw("SELECT name FROM contract_sets").
-		Scan(&sets).
-		Error
+func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		sets, err = tx.ContractSets(ctx)
+		return err
+	})
 	return sets, err
 }
 
