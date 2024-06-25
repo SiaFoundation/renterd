@@ -640,22 +640,14 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 }
 
 func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error {
-	// fetch contract ids
-	var fcids []fileContractID
-	if err := s.db.
-		WithContext(ctx).
-		Model(&dbContract{}).
-		Pluck("fcid", &fcids).
-		Error; err != nil {
-		return err
+	contracts, err := s.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
-
-	// create map
 	toArchive := make(map[types.FileContractID]string)
-	for _, fcid := range fcids {
-		toArchive[types.FileContractID(fcid)] = reason
+	for _, c := range contracts {
+		toArchive[c.ID] = reason
 	}
-
 	return s.ArchiveContracts(ctx, toArchive)
 }
 
