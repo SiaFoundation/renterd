@@ -4913,11 +4913,10 @@ func TestDirectories(t *testing.T) {
 	}
 
 	now := time.Now()
-	time.Sleep(time.Millisecond) // force a different time
-	ss.triggerSlabPruning()
-	if err := ss.waitForPruneLoop(now); err != nil {
-		t.Fatal(err)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		ss.triggerSlabPruning()
+		return ss.waitForPruneLoop(now)
+	})
 
 	var n int64
 	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {
