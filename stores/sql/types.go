@@ -159,7 +159,7 @@ func (h Hash256) Value() (driver.Value, error) {
 	return h[:], nil
 }
 
-// Scan scan value into Settings, implements sql.Scanner interface.
+// Scan scan value into HostSettings, implements sql.Scanner interface.
 func (hs *HostSettings) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
@@ -168,7 +168,7 @@ func (hs *HostSettings) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, hs)
 }
 
-// Value returns a Settings value, implements driver.Valuer interface.
+// Value returns a HostSettings value, implements driver.Valuer interface.
 func (hs HostSettings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }

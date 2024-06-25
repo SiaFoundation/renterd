@@ -15,7 +15,7 @@ require (
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.2.8
 	go.sia.tech/coreutils v0.0.7
-	go.sia.tech/gofakes3 v0.0.3
+	go.sia.tech/gofakes3 v0.0.4
 	go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272
 	go.sia.tech/jape v0.11.2-0.20240306154058-9832414a5385
 	go.sia.tech/mux v1.2.0
@@ -35,7 +35,7 @@ require (
 
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.54.3 // indirect
+	github.com/aws/aws-sdk-go v1.54.6 // indirect
 	github.com/cloudflare/cloudflare-go v0.97.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
