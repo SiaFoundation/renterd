@@ -664,22 +664,10 @@ func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (
 		return nil, api.ErrContractNotFound
 	}
 
-	var dbRoots []hash256
-	if err = s.db.
-		WithContext(ctx).
-		Raw(`
-SELECT sec.root
-FROM contracts c
-INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-INNER JOIN sectors sec ON cs.db_sector_id = sec.id
-WHERE c.fcid = ?
-`, fileContractID(id)).
-		Scan(&dbRoots).
-		Error; err == nil {
-		for _, r := range dbRoots {
-			roots = append(roots, *(*types.Hash256)(&r))
-		}
-	}
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		roots, err = tx.ContractRoots(ctx, id)
+		return err
+	})
 	return
 }
 

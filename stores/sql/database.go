@@ -70,6 +70,9 @@ type (
 		// duplicates but can contain gaps.
 		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
 
+		// ContractRoots returns the roots of the contract with the given ID.
+		ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error)
+
 		// Contracts returns contract metadata for all active contracts. The
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)

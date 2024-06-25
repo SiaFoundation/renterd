@@ -180,6 +180,30 @@ func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	return b, nil
 }
 
+func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([]types.Hash256, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT s.root
+		FROM contract_sectors cs
+		INNER JOIN sectors s ON s.id = cs.db_sector_id
+		INNER JOIN contracts c ON c.id = cs.db_contract_id
+		WHERE c.fcid = ?
+	`, FileContractID(fcid))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	defer rows.Close()
+
+	var roots []types.Hash256
+	for rows.Next() {
+		var root types.Hash256
+		if err := rows.Scan((*Hash256)(&root)); err != nil {
+			return nil, fmt.Errorf("failed to scan root: %w", err)
+		}
+		roots = append(roots, root)
+	}
+	return roots, nil
+}
+
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	var rows *sql.LoggedRows
 	var err error
