@@ -1560,17 +1560,13 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 	}
 
 	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?"}
+	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
 	whereArgs := []any{bucket}
 
 	// apply prefix
-	var prefixExpr string
-	var prefixArgs []any
 	if prefix != "" {
-		prefixExpr = "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?"
-		prefixArgs = append(prefixArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
-		whereExprs = append(whereExprs, prefixExpr)
-		whereArgs = append(whereArgs, prefixArgs...)
+		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
+		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
 	}
 
 	// apply sorting
@@ -1599,21 +1595,18 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 	}
 
 	// apply marker
-	queryMarker := func(marker any, col string) error {
-		expr := "o.object_id >= ?"
-		if prefixExpr != "" {
-			expr = prefixExpr + " AND " + expr
-		}
-		args := append([]any{bucket}, prefixArgs...)
-		args = append(args, marker)
-		return tx.QueryRow(ctx, fmt.Sprintf(`
+	queryMarker := func(dst any, marker, col string) error {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND %s
-			LIMIT 1 
-		`, col, expr), args...).
-			Scan(&marker)
+			WHERE b.name = ? AND o.object_id = ?
+		`, col), bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
 	}
 	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
 	if marker != "" {
@@ -1627,24 +1620,24 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 			whereArgs = append(whereArgs, marker)
 		case api.ObjectSortByHealth:
 			var markerHealth float64
-			if err := queryMarker(&markerHealth, "health"); err != nil {
+			if err := queryMarker(&markerHealth, marker, "health"); err != nil {
 				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
 			} else if desc {
-				whereExprs = append(whereExprs, "(o.health <= ? AND o.object_id >?) OR o.health < ?")
+				whereExprs = append(whereExprs, "((o.health <= ? AND o.object_id >?) OR o.health < ?)")
 				whereArgs = append(whereArgs, markerHealth, marker, markerHealth)
 			} else {
-				whereExprs = append(whereExprs, "o.health > ? OR (o.health >= ? AND object_id > ?)")
+				whereExprs = append(whereExprs, "(o.health > ? OR (o.health >= ? AND object_id > ?))")
 				whereArgs = append(whereArgs, markerHealth, markerHealth, marker)
 			}
 		case api.ObjectSortBySize:
 			var markerSize int64
-			if err := queryMarker(&markerSize, "size"); err != nil {
+			if err := queryMarker(&markerSize, marker, "size"); err != nil {
 				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
 			} else if desc {
-				whereExprs = append(whereExprs, "(o.size <= ? AND o.object_id >?) OR o.size < ?")
+				whereExprs = append(whereExprs, "((o.size <= ? AND o.object_id >?) OR o.size < ?)")
 				whereArgs = append(whereArgs, markerSize, marker, markerSize)
 			} else {
-				whereExprs = append(whereExprs, "o.size > ? OR (o.size >= ? AND object_id > ?)")
+				whereExprs = append(whereExprs, "(o.size > ? OR (o.size >= ? AND object_id > ?))")
 				whereArgs = append(whereArgs, markerSize, markerSize, marker)
 			}
 		default:

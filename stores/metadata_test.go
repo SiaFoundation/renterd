@@ -95,6 +95,17 @@ func randomMultisigUC() types.UnlockConditions {
 	return uc
 }
 
+func updateAllObjectsHealth(tx *gorm.DB) error {
+	return tx.Exec(`
+UPDATE objects
+SET health = (
+	SELECT COALESCE(MIN(slabs.health), 1)
+	FROM slabs
+	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
+	WHERE sli.db_object_id = objects.id)
+`).Error
+}
+
 // TestObjectBasic tests the hydration of raw objects works when we fetch
 // objects from the metadata store.
 func TestObjectBasic(t *testing.T) {

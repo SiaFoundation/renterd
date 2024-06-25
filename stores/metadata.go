@@ -2154,17 +2154,6 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 	}
 }
 
-func updateAllObjectsHealth(tx *gorm.DB) error {
-	return tx.Exec(`
-UPDATE objects
-SET health = (
-	SELECT COALESCE(MIN(slabs.health), 1)
-	FROM slabs
-	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
-	WHERE sli.db_object_id = objects.id)
-`).Error
-}
-
 func validateSort(sortBy, sortDir string) error {
 	allowed := func(s string, allowed ...string) bool {
 		for _, a := range allowed {
