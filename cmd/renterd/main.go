@@ -391,7 +391,11 @@ func main() {
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
 
 	// combine host bucket bases
-	cfg.S3.HostBucketBases = append(cfg.S3.HostBucketBases, strings.Split(hostBasesStr, ",")...)
+	for _, base := range strings.Split(hostBasesStr, ",") {
+		if trimmed := strings.TrimSpace(base); trimmed != "" {
+			cfg.S3.HostBucketBases = append(cfg.S3.HostBucketBases, base)
+		}
+	}
 
 	// check that the API password is set
 	if cfg.HTTP.Password == "" {
