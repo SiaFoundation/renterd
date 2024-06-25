@@ -276,6 +276,10 @@ func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
+func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
+	return ssql.DeleteSettings(ctx, tx, key)
+}
+
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
@@ -623,6 +627,14 @@ func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMo
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
+func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
+	return ssql.Setting(ctx, tx, key)
+}
+
+func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
+	return ssql.Settings(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
@@ -786,6 +798,15 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) error {
+	_, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+		time.Now(), key, value)
+	if err != nil {
+		return fmt.Errorf("failed to update setting '%s': %w", key, err)
 	}
 	return nil
 }

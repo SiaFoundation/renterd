@@ -377,6 +377,13 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	return int(deletedSectors), nil
 }
 
+func DeleteSettings(ctx context.Context, tx sql.Tx, key string) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
+		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
+	}
+	return nil
+}
+
 func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
 	if err != nil {
@@ -1109,8 +1116,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success,                      // recent_scan_failures
 			!scan.Success, scanTime, scanTime, // downtime
 			scan.Success, scanTime, scanTime, // uptime
-			scanTime,                              // last_scan
-			scan.Success, Settings(scan.Settings), // settings
+			scanTime,                                  // last_scan
+			scan.Success, HostSettings(scan.Settings), // settings
 			scan.Success, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
@@ -1358,7 +1365,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*Settings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked,
@@ -1423,6 +1430,33 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
 	}
 	return hosts, nil
+}
+
+func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
+	var value string
+	err := tx.QueryRow(ctx, "SELECT value FROM settings WHERE `key` = ?", key).Scan((*BusSetting)(&value))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return "", api.ErrSettingNotFound
+	} else if err != nil {
+		return "", fmt.Errorf("failed to fetch setting '%s': %w", key, err)
+	}
+	return value, nil
+}
+
+func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT `key` FROM settings")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query settings: %w", err)
+	}
+	var settings []string
+	for rows.Next() {
+		var setting string
+		if err := rows.Scan(&setting); err != nil {
+			return nil, fmt.Errorf("failed to scan setting key")
+		}
+		settings = append(settings, setting)
+	}
+	return settings, nil
 }
 
 func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
