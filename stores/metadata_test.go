@@ -4913,6 +4913,7 @@ func TestDirectories(t *testing.T) {
 	}
 
 	now := time.Now()
+	time.Sleep(time.Millisecond) // force a different time
 	ss.triggerSlabPruning()
 	if err := ss.waitForPruneLoop(now); err != nil {
 		t.Fatal(err)
