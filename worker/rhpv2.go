@@ -563,12 +563,11 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		// calculate the cost
 		cost, _ := settings.RPCSectorRootsCost(offset, n).Total()
 
-		// calculate the response size
-		proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
-		responseSize := (proofSize + n) * crypto.HashSize
-
 		// TODO: remove once host network is updated
 		if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+			// calculate the response size
+			proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
+			responseSize := (proofSize + n) * crypto.HashSize
 			if responseSize < minMessageSize {
 				responseSize = minMessageSize
 			}
@@ -609,7 +608,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		var rootsResp rhpv2.RPCSectorRootsResponse
 		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
 			return nil, err
-		} else if err := t.ReadResponse(&rootsResp, minMessageSize+responseSize); err != nil {
+		} else if err := t.ReadResponse(&rootsResp, maxMerkleProofResponseSize); err != nil {
 			return nil, fmt.Errorf("couldn't read sector roots response: %w", err)
 		}
 
