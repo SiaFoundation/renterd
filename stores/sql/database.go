@@ -89,6 +89,9 @@ type (
 		// contains the root, latest_host is updated to that host.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
+		// DeleteSettings deletes the settings with the given key.
+		DeleteSettings(ctx context.Context, key string) error
+
 		// DeleteWebhook deletes the webhook with the matching module, event and
 		// URL of the provided webhook. If the webhook doesn't exist,
 		// webhooks.ErrWebhookNotFound is returned.
@@ -209,6 +212,12 @@ type (
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 
+		// Setting returns the setting with the given key from the database.
+		Setting(ctx context.Context, key string) (string, error)
+
+		// Settings returns all available settings from the database.
+		Settings(ctx context.Context) ([]string, error)
+
 		// SlabBuffers returns the filenames and associated contract sets of all
 		// slab buffers.
 		SlabBuffers(ctx context.Context) (map[string]string, error)
@@ -229,6 +238,10 @@ type (
 
 		// UpdateHostCheck updates the host check for the given host.
 		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
+
+		// UpdateSetting updates the setting with the given key to the given
+		// value.
+		UpdateSetting(ctx context.Context, key, value string) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%

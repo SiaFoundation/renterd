@@ -2,35 +2,26 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"go.sia.tech/renterd/api"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	sql "go.sia.tech/renterd/stores/sql"
 )
-
-type (
-	dbSetting struct {
-		Model
-
-		Key   string  `gorm:"unique;index;NOT NULL"`
-		Value setting `gorm:"NOT NULL"`
-	}
-)
-
-// TableName implements the gorm.Tabler interface.
-func (dbSetting) TableName() string { return "settings" }
 
 // DeleteSetting implements the bus.SettingStore interface.
 func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
-	// Delete from cache.
 	s.settingsMu.Lock()
-	delete(s.settings, key)
-	s.settingsMu.Unlock()
+	defer s.settingsMu.Unlock()
 
-	// Delete from database.
-	return s.db.Where(&dbSetting{Key: key}).Delete(&dbSetting{}).Error
+	// delete from database first
+	if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.DeleteSettings(ctx, key)
+	}); err != nil {
+		return err
+	}
+
+	// delete from cache
+	delete(s.settings, key)
+	return nil
 }
 
 // Setting implements the bus.SettingStore interface.
@@ -44,43 +35,41 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	}
 
 	// Check database.
-	var entry dbSetting
-	err := s.db.Where(&dbSetting{Key: key}).
-		Take(&entry).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", fmt.Errorf("key '%s' err: %w", key, api.ErrSettingNotFound)
-	} else if err != nil {
-		return "", err
+	var err error
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		value, err = tx.Setting(ctx, key)
+		return err
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch setting from db: %w", err)
 	}
-	s.settings[key] = string(entry.Value)
-	return string(entry.Value), nil
+	s.settings[key] = value
+	return value, nil
 }
 
 // Settings implements the bus.SettingStore interface.
-func (s *SQLStore) Settings(ctx context.Context) ([]string, error) {
-	var keys []string
-	tx := s.db.Model(&dbSetting{}).Select("Key").Find(&keys)
-	return keys, tx.Error
+func (s *SQLStore) Settings(ctx context.Context) (settings []string, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		settings, err = tx.Settings(ctx)
+		return err
+	})
+	return
 }
 
 // UpdateSetting implements the bus.SettingStore interface.
 func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
-	// Update db first.
+	// update db first
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
-	err := s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&dbSetting{
-		Key:   key,
-		Value: setting(value),
-	}).Error
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateSetting(ctx, key, value)
+	})
 	if err != nil {
 		return err
 	}
 
-	// Update cache second.
+	// update cache second
 	s.settings[key] = value
 	return nil
 }
