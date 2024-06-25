@@ -325,34 +325,6 @@ func (dbSlab) TableName() string { return "slabs" }
 // TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
 
-// convert converts a dbContract to an ArchivedContract.
-func (c dbArchivedContract) convert() api.ArchivedContract {
-	var revisionNumber uint64
-	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
-	return api.ArchivedContract{
-		ID:        types.FileContractID(c.FCID),
-		HostKey:   types.PublicKey(c.Host),
-		RenewedTo: types.FileContractID(c.RenewedTo),
-
-		ProofHeight:    c.ProofHeight,
-		RevisionHeight: c.RevisionHeight,
-		RevisionNumber: revisionNumber,
-		Size:           c.Size,
-		StartHeight:    c.StartHeight,
-		State:          c.State.String(),
-		WindowStart:    c.WindowStart,
-		WindowEnd:      c.WindowEnd,
-
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(c.UploadSpending),
-			Downloads:   types.Currency(c.DownloadSpending),
-			FundAccount: types.Currency(c.FundAccountSpending),
-			Deletions:   types.Currency(c.DeleteSpending),
-			SectorRoots: types.Currency(c.ListSpending),
-		},
-	}
-}
-
 // convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
 	var revisionNumber uint64
@@ -628,19 +600,12 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 	return renewed.convert(), nil
 }
 
-func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
-	var ancestors []dbArchivedContract
-	err := s.db.WithContext(ctx).Raw("WITH RECURSIVE ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
-		Scan(&ancestors).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	contracts := make([]api.ArchivedContract, len(ancestors))
-	for i, ancestor := range ancestors {
-		contracts[i] = ancestor.convert()
-	}
-	return contracts, nil
+func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error {

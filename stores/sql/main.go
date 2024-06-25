@@ -76,6 +76,46 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 	return accounts, nil
 }
 
+func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+	rows, err := tx.Query(ctx, `
+		WITH RECURSIVE ancestors AS 
+		(
+			SELECT *
+			FROM archived_contracts
+			WHERE renewed_to = ?
+			UNION ALL
+			SELECT archived_contracts.*
+			FROM ancestors, archived_contracts
+			WHERE archived_contracts.renewed_to = ancestors.fcid
+		)
+		SELECT fcid, host, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
+		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end
+		FROM ancestors
+		WHERE start_height >= ?
+	`, FileContractID(fcid), startHeight)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ancestor contracts: %w", err)
+	}
+	defer rows.Close()
+
+	var contracts []api.ArchivedContract
+	for rows.Next() {
+		var c api.ArchivedContract
+		var state ContractState
+		err := rows.Scan((*FileContractID)(&c.ID), (*PublicKey)(&c.HostKey), (*FileContractID)(&c.RenewedTo),
+			(*Currency)(&c.Spending.Uploads), (*Currency)(&c.Spending.Downloads), (*Currency)(&c.Spending.FundAccount),
+			(*Currency)(&c.Spending.Deletions), &c.ProofHeight,
+			&c.RevisionHeight, &c.RevisionNumber, &c.Size, &c.StartHeight, &state, &c.WindowStart,
+			&c.WindowEnd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan contract: %w", err)
+		}
+		c.State = state.String()
+		contracts = append(contracts, c)
+	}
+	return contracts, nil
+}
+
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,

@@ -45,6 +45,10 @@ type (
 		// exists, it is updated.
 		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
 
+		// AncestorContracts returns all ancestor contracts of the contract up
+		// until the given start height.
+		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error)
+
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error

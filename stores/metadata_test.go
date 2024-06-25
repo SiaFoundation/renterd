@@ -863,7 +863,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
 	for i := 0; i < len(contracts)-1; i++ {
-		if !reflect.DeepEqual(contracts[i], api.ArchivedContract{
+		expected := api.ArchivedContract{
 			ID:          fcids[len(fcids)-2-i],
 			HostKey:     hk,
 			RenewedTo:   fcids[len(fcids)-1-i],
@@ -872,7 +872,9 @@ func TestAncestorsContracts(t *testing.T) {
 			State:       api.ContractStatePending,
 			WindowStart: 400,
 			WindowEnd:   500,
-		}) {
+		}
+		if !reflect.DeepEqual(contracts[i], expected) {
+			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
