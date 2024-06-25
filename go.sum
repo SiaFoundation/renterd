@@ -227,10 +227,10 @@ gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130/go.mod 
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.etcd.io/bbolt v1.3.10 h1:+BqfJTcCzTItrop8mq/lbzL8wSGtj94UO/3U31shqG0=
 go.etcd.io/bbolt v1.3.10/go.mod h1:bK3UQLPJZly7IlNmV7uVHJDxfe5aK9Ll93e/74Y9oEQ=
-go.sia.tech/core v0.2.7 h1:9Q/3BHL6ziAMPeiko863hhTD/Zs2s7OqEUiPKouDny8=
-go.sia.tech/core v0.2.7/go.mod h1:BMgT/reXtgv6XbDgUYTCPY7wSMbspDRDs7KMi1vL6Iw=
-go.sia.tech/coreutils v0.0.6 h1:xLpv3JyvbOoXcX3gC6a6Y3zQ/MZn/fyFvuPIzv/e/Eg=
-go.sia.tech/coreutils v0.0.6/go.mod h1:EiDcQk2qLuP32Qoj/XphY9fbjTXphJhJZMERoC4LF0c=
+go.sia.tech/core v0.2.8 h1:NQZw8gz9XWlkw9zr7HrLIA3xQnoatp8lYzyONS0IXJg=
+go.sia.tech/core v0.2.8/go.mod h1:BMgT/reXtgv6XbDgUYTCPY7wSMbspDRDs7KMi1vL6Iw=
+go.sia.tech/coreutils v0.0.7 h1:+4nAMevcItpVUi7IMffvpU/O4D47pjDNF3LOv4y8Y/E=
+go.sia.tech/coreutils v0.0.7/go.mod h1:Cke5eNMbvpjt+dX1u+m7/z1Du8jpwUaTGFafEMm0ZqE=
 go.sia.tech/gofakes3 v0.0.4 h1:Kvo8j5cVdJRBXvV1KBJ69bocY23twG8ao/HCdwuPMeI=
 go.sia.tech/gofakes3 v0.0.4/go.mod h1:6hh4lETCMbyFFNWp3FRE838geY6vh1Aeas7LtYDpQdc=
 go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272 h1:RJmZ1Y9PoqpHjYHT5nr6Vmo6tTUpB2AIyd8zFge2JAs=
