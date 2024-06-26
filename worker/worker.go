@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -1388,42 +1387,22 @@ func (w *worker) Shutdown(ctx context.Context) error {
 
 func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 	logger := w.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
+
+	// prepare a helper to create a context for scanning
+	timeoutCtx := func() (context.Context, context.CancelFunc) {
+		if timeout > 0 {
+			return context.WithTimeout(ctx, timeout)
+		}
+		return ctx, func() {}
+	}
+
 	// prepare a helper for scanning
 	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
-		// helper to prepare a context for scanning
-		withTimeoutCtx := func() (context.Context, context.CancelFunc) {
-			if timeout > 0 {
-				return context.WithTimeout(ctx, timeout)
-			}
-			return ctx, func() {}
-		}
-		// resolve the address
-		{
-			scanCtx, cancel := withTimeoutCtx()
-			defer cancel()
-			// resolve hostIP. We don't want to scan hosts on private networks.
-			if !w.allowPrivateIPs {
-				host, _, err := net.SplitHostPort(hostIP)
-				if err != nil {
-					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-				}
-				addrs, err := (&net.Resolver{}).LookupIPAddr(scanCtx, host)
-				if err != nil {
-					return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-				}
-				for _, addr := range addrs {
-					if isPrivateIP(addr.IP) {
-						return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
-					}
-				}
-			}
-		}
-
 		// fetch the host settings
 		start := time.Now()
 		var settings rhpv2.HostSettings
 		{
-			scanCtx, cancel := withTimeoutCtx()
+			scanCtx, cancel := timeoutCtx()
 			defer cancel()
 			err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 				var err error
@@ -1443,7 +1422,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		// fetch the host pricetable
 		var pt rhpv3.HostPriceTable
 		{
-			scanCtx, cancel := withTimeoutCtx()
+			scanCtx, cancel := timeoutCtx()
 			defer cancel()
 			err := w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
 				if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
@@ -1458,6 +1437,16 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 			}
 		}
 		return settings, pt, time.Since(start), nil
+	}
+
+	// resolve host ip, don't scan if the host is on a private network or if it
+	// resolves to more than two addresses of the same type, if it fails for
+	// another reason the host scan won't have subnets
+	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
+	if errors.Is(err, api.ErrHostTooManyAddresses) {
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+	} else if private {
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
 	}
 
 	// scan: first try
@@ -1498,10 +1487,11 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	scanErr := w.bus.RecordHostScans(recordCtx, []api.HostScan{
 		{
 			HostKey:    hostKey,
-			Success:    isSuccessfulInteraction(err),
-			Timestamp:  time.Now(),
-			Settings:   settings,
 			PriceTable: pt,
+			Subnets:    subnets,
+			Success:    isSuccessfulInteraction(err),
+			Settings:   settings,
+			Timestamp:  time.Now(),
 		},
 	})
 	if scanErr != nil {

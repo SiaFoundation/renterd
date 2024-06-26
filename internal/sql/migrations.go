@@ -175,6 +175,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00010_webhook_headers", log)
 				},
 			},
+			{
+				ID: "00011_host_subnets",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00011_host_subnets", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {

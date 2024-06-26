@@ -159,6 +159,7 @@ type (
 		Blocked          bool                 `json:"blocked"`
 		Checks           map[string]HostCheck `json:"checks"`
 		StoredData       uint64               `json:"storedData"`
+		Subnets          []string             `json:"subnets"`
 	}
 
 	HostAddress struct {
@@ -181,10 +182,11 @@ type (
 
 	HostScan struct {
 		HostKey    types.PublicKey `json:"hostKey"`
+		PriceTable rhpv3.HostPriceTable
+		Settings   rhpv2.HostSettings
+		Subnets    []string
 		Success    bool
 		Timestamp  time.Time
-		Settings   rhpv2.HostSettings
-		PriceTable rhpv3.HostPriceTable
 	}
 
 	HostPriceTable struct {
