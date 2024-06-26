@@ -1676,9 +1676,11 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 	var hasMore bool
 	var nextMarker string
 	if len(objects) == limit {
-		hasMore = true
 		objects = objects[:len(objects)-1]
-		nextMarker = objects[len(objects)-1].Name
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Name
+		}
 	}
 
 	return api.ObjectsListResponse{
