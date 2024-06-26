@@ -771,6 +771,12 @@ func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Tim
 			GROUP BY slabs.id
 			LIMIT ?
 	`, now.Unix(), limit)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary table: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "CREATE INDEX slabs_health_id ON slabs_health (id)"); err != nil {
+		return fmt.Errorf("failed to create index on temporary table: %w", err)
+	}
 	return err
 }
 

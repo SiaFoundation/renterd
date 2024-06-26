@@ -1490,12 +1490,10 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	default:
 	}
 
-	// record host scan - make sure this isn't interrupted by the same context
-	// used to time out the scan itself because otherwise we won't be able to
-	// record scans that timed out.
-	recordCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	scanErr := w.bus.RecordHostScans(recordCtx, []api.HostScan{
+	// record host scan - make sure this is interrupted by the request ctx and
+	// not the context with the timeout used to time out the scan itself.
+	// Otherwise scans that time out won't be recorded.
+	scanErr := w.bus.RecordHostScans(ctx, []api.HostScan{
 		{
 			HostKey:    hostKey,
 			Success:    isSuccessfulInteraction(err),
