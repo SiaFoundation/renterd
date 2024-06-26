@@ -155,6 +155,10 @@ func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) e
 	return nil
 }
 
+func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+	return ssql.AncestorContracts(ctx, tx, fcid, startHeight)
+}
+
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
@@ -239,8 +243,16 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	return eTag, nil
 }
 
+func (tx *MainDatabaseTx) ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error) {
+	return ssql.ContractRoots(ctx, tx, fcid)
+}
+
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return ssql.Contracts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) ContractSets(ctx context.Context) ([]string, error) {
+	return ssql.ContractSets(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
@@ -270,6 +282,10 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 
 func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
+}
+
+func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
+	return ssql.DeleteSettings(ctx, tx, key)
 }
 
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
@@ -625,6 +641,14 @@ func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMo
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
+func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
+	return ssql.Setting(ctx, tx, key)
+}
+
+func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
+	return ssql.Settings(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
@@ -787,6 +811,15 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) error {
+	_, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+		time.Now(), key, value)
+	if err != nil {
+		return fmt.Errorf("failed to update setting '%s': %w", key, err)
 	}
 	return nil
 }

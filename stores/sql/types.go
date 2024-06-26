@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -26,7 +27,8 @@ type (
 	Currency        types.Currency
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
-	Settings        rhpv2.HostSettings
+	BusSetting      string
+	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
 	SecretKey       []byte
@@ -43,10 +45,11 @@ type scannerValuer interface {
 var (
 	_ scannerValuer = (*AutopilotConfig)(nil)
 	_ scannerValuer = (*BigInt)(nil)
+	_ scannerValuer = (*BusSetting)(nil)
 	_ scannerValuer = (*Currency)(nil)
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
-	_ scannerValuer = (*Settings)(nil)
+	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
 	_ scannerValuer = (*SecretKey)(nil)
@@ -156,8 +159,8 @@ func (h Hash256) Value() (driver.Value, error) {
 	return h[:], nil
 }
 
-// Scan scan value into Settings, implements sql.Scanner interface.
-func (hs *Settings) Scan(value interface{}) error {
+// Scan scan value into HostSettings, implements sql.Scanner interface.
+func (hs *HostSettings) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
@@ -165,8 +168,8 @@ func (hs *Settings) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, hs)
 }
 
-// Value returns a Settings value, implements driver.Valuer interface.
-func (hs Settings) Value() (driver.Value, error) {
+// Value returns a HostSettings value, implements driver.Valuer interface.
+func (hs HostSettings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 
@@ -223,6 +226,33 @@ func (k *SecretKey) Scan(value interface{}) error {
 // Value returns an key value, implements driver.Valuer interface.
 func (k SecretKey) Value() (driver.Value, error) {
 	return []byte(k), nil
+}
+
+// String implements fmt.Stringer to prevent "s3authentication" settings from
+// getting leaked.
+func (s BusSetting) String() string {
+	if strings.Contains(string(s), "v4Keypairs") {
+		return "*****"
+	}
+	return string(s)
+}
+
+// Scan scans value into the BusSetting
+func (s *BusSetting) Scan(value interface{}) error {
+	switch value := value.(type) {
+	case string:
+		*s = BusSetting(value)
+	case []byte:
+		*s = BusSetting(value)
+	default:
+		return fmt.Errorf("failed to unmarshal BusSetting value from type %t", value)
+	}
+	return nil
+}
+
+// Value returns a BusSetting value, implements driver.Valuer interface.
+func (s BusSetting) Value() (driver.Value, error) {
+	return string(s), nil
 }
 
 // Scan scan value into unixTimeMS, implements sql.Scanner interface.

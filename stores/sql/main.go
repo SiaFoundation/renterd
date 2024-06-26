@@ -76,6 +76,46 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 	return accounts, nil
 }
 
+func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+	rows, err := tx.Query(ctx, `
+		WITH RECURSIVE ancestors AS 
+		(
+			SELECT *
+			FROM archived_contracts
+			WHERE renewed_to = ?
+			UNION ALL
+			SELECT archived_contracts.*
+			FROM ancestors, archived_contracts
+			WHERE archived_contracts.renewed_to = ancestors.fcid
+		)
+		SELECT fcid, host, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
+		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end
+		FROM ancestors
+		WHERE start_height >= ?
+	`, FileContractID(fcid), startHeight)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ancestor contracts: %w", err)
+	}
+	defer rows.Close()
+
+	var contracts []api.ArchivedContract
+	for rows.Next() {
+		var c api.ArchivedContract
+		var state ContractState
+		err := rows.Scan((*FileContractID)(&c.ID), (*PublicKey)(&c.HostKey), (*FileContractID)(&c.RenewedTo),
+			(*Currency)(&c.Spending.Uploads), (*Currency)(&c.Spending.Downloads), (*Currency)(&c.Spending.FundAccount),
+			(*Currency)(&c.Spending.Deletions), &c.ProofHeight,
+			&c.RevisionHeight, &c.RevisionNumber, &c.Size, &c.StartHeight, &state, &c.WindowStart,
+			&c.WindowEnd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan contract: %w", err)
+		}
+		c.State = state.String()
+		contracts = append(contracts, c)
+	}
+	return contracts, nil
+}
+
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
@@ -138,6 +178,30 @@ func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 		return api.Bucket{}, fmt.Errorf("failed to fetch bucket: %w", err)
 	}
 	return b, nil
+}
+
+func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([]types.Hash256, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT s.root
+		FROM contract_sectors cs
+		INNER JOIN sectors s ON s.id = cs.db_sector_id
+		INNER JOIN contracts c ON c.id = cs.db_contract_id
+		WHERE c.fcid = ?
+	`, FileContractID(fcid))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	defer rows.Close()
+
+	var roots []types.Hash256
+	for rows.Next() {
+		var root types.Hash256
+		if err := rows.Scan((*Hash256)(&root)); err != nil {
+			return nil, fmt.Errorf("failed to scan root: %w", err)
+		}
+		roots = append(roots, root)
+	}
+	return roots, nil
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
@@ -216,6 +280,24 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
 	}
 	return contracts, nil
+}
+
+func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT name FROM contract_sets")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets: %w", err)
+	}
+	defer rows.Close()
+
+	var sets []string
+	for rows.Next() {
+		var cs string
+		if err := rows.Scan(&cs); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		sets = append(sets, cs)
+	}
+	return sets, nil
 }
 
 func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
@@ -375,6 +457,13 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 		return 0, fmt.Errorf("failed to update lost sectors: %w", err)
 	}
 	return int(deletedSectors), nil
+}
+
+func DeleteSettings(ctx context.Context, tx sql.Tx, key string) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
+		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
+	}
+	return nil
 }
 
 func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
@@ -1109,8 +1198,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success,                      // recent_scan_failures
 			!scan.Success, scanTime, scanTime, // downtime
 			scan.Success, scanTime, scanTime, // uptime
-			scanTime,                              // last_scan
-			scan.Success, Settings(scan.Settings), // settings
+			scanTime,                                  // last_scan
+			scan.Success, HostSettings(scan.Settings), // settings
 			scan.Success, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
@@ -1358,7 +1447,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*Settings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked,
@@ -1423,6 +1512,33 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
 	}
 	return hosts, nil
+}
+
+func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
+	var value string
+	err := tx.QueryRow(ctx, "SELECT value FROM settings WHERE `key` = ?", key).Scan((*BusSetting)(&value))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return "", api.ErrSettingNotFound
+	} else if err != nil {
+		return "", fmt.Errorf("failed to fetch setting '%s': %w", key, err)
+	}
+	return value, nil
+}
+
+func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT `key` FROM settings")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query settings: %w", err)
+	}
+	var settings []string
+	for rows.Next() {
+		var setting string
+		if err := rows.Scan(&setting); err != nil {
+			return nil, fmt.Errorf("failed to scan setting key")
+		}
+		settings = append(settings, setting)
+	}
+	return settings, nil
 }
 
 func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {

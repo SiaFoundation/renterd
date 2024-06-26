@@ -325,34 +325,6 @@ func (dbSlab) TableName() string { return "slabs" }
 // TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
 
-// convert converts a dbContract to an ArchivedContract.
-func (c dbArchivedContract) convert() api.ArchivedContract {
-	var revisionNumber uint64
-	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
-	return api.ArchivedContract{
-		ID:        types.FileContractID(c.FCID),
-		HostKey:   types.PublicKey(c.Host),
-		RenewedTo: types.FileContractID(c.RenewedTo),
-
-		ProofHeight:    c.ProofHeight,
-		RevisionHeight: c.RevisionHeight,
-		RevisionNumber: revisionNumber,
-		Size:           c.Size,
-		StartHeight:    c.StartHeight,
-		State:          c.State.String(),
-		WindowStart:    c.WindowStart,
-		WindowEnd:      c.WindowEnd,
-
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(c.UploadSpending),
-			Downloads:   types.Currency(c.DownloadSpending),
-			FundAccount: types.Currency(c.FundAccountSpending),
-			Deletions:   types.Currency(c.DeleteSpending),
-			SectorRoots: types.Currency(c.ListSpending),
-		},
-	}
-}
-
 // convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
 	var revisionNumber uint64
@@ -628,19 +600,12 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 	return renewed.convert(), nil
 }
 
-func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
-	var ancestors []dbArchivedContract
-	err := s.db.WithContext(ctx).Raw("WITH RECURSIVE ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
-		Scan(&ancestors).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	contracts := make([]api.ArchivedContract, len(ancestors))
-	for i, ancestor := range ancestors {
-		contracts[i] = ancestor.convert()
-	}
-	return contracts, nil
+func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error {
@@ -675,22 +640,14 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 }
 
 func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error {
-	// fetch contract ids
-	var fcids []fileContractID
-	if err := s.db.
-		WithContext(ctx).
-		Model(&dbContract{}).
-		Pluck("fcid", &fcids).
-		Error; err != nil {
-		return err
+	contracts, err := s.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
-
-	// create map
 	toArchive := make(map[types.FileContractID]string)
-	for _, fcid := range fcids {
-		toArchive[types.FileContractID(fcid)] = reason
+	for _, c := range contracts {
+		toArchive[c.ID] = reason
 	}
-
 	return s.ArchiveContracts(ctx, toArchive)
 }
 
@@ -707,30 +664,18 @@ func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (
 		return nil, api.ErrContractNotFound
 	}
 
-	var dbRoots []hash256
-	if err = s.db.
-		WithContext(ctx).
-		Raw(`
-SELECT sec.root
-FROM contracts c
-INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-INNER JOIN sectors sec ON cs.db_sector_id = sec.id
-WHERE c.fcid = ?
-`, fileContractID(id)).
-		Scan(&dbRoots).
-		Error; err == nil {
-		for _, r := range dbRoots {
-			roots = append(roots, *(*types.Hash256)(&r))
-		}
-	}
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		roots, err = tx.ContractRoots(ctx, id)
+		return err
+	})
 	return
 }
 
-func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
-	var sets []string
-	err := s.db.WithContext(ctx).Raw("SELECT name FROM contract_sets").
-		Scan(&sets).
-		Error
+func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		sets, err = tx.ContractSets(ctx)
+		return err
+	})
 	return sets, err
 }
 
