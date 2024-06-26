@@ -373,13 +373,13 @@ func main() {
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
 
-	// deprecated: parse remotes
-	var depWorkerRemotePassStr string
-	var depWorkerRemoteAddrsStr string
-	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
-	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
-	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
-		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
+	// parse remotes
+	var workerRemotePassStr string
+	var workerRemoteAddrsStr string
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
+	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
+		mustParseWorkers(workerRemoteAddrsStr, workerRemotePassStr)
 	}
 
 	// disable worker if remotes are set
