@@ -85,6 +85,8 @@ overview of all settings configurable through the CLI.
 | `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
 | `Worker.AllowUnauthenticatedDownloads` | Allows unauthenticated downloads                    | -                                 | `--worker.unauthenticatedDownloads` | `RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS` | `worker.allowUnauthenticatedDownloads` |
 | `Worker.ExternalAddress`              | Address of the worker on the network, only necessary when the bus is remote | -                                 | -                                | `RENTERD_WORKER_EXTERNAL_ADDR`                     | `worker.externalAddress`                   |
+| `Worker.RemoteAddrs`                 | List of remote worker addresses (semicolon delimited) | -                                | -                                | `RENTERD_WORKER_REMOTE_ADDRS`                     | `worker.remotes`                    |
+| `Worker.RemotePassword`               | API password for the remote workers                 | -                                | -                                | `RENTERD_WORKER_API_PASSWORD`                     | `worker.remotes`              |
 | `Autopilot.Enabled`					| Enables/disables autopilot							| `true`							| `--autopilot.enabled`			| `RENTERD_AUTOPILOT_ENABLED`						| `autopilot.enabled`					|
 | `Autopilot.AccountsRefillInterval`   | Interval for refilling workers' account balances     | `24h`                             | `--autopilot.accountRefillInterval` | -                                              | `autopilot.accountsRefillInterval`  |
 | `Autopilot.Heartbeat`                | Interval for autopilot loop execution                | `30m`                             | `--autopilot.heartbeat`            | -                                              | `autopilot.heartbeat`               |
@@ -141,9 +143,8 @@ To run the autopilot separately, the worker has to be disabled using the
 configured with a remote bus for the node not to start a bus itself. Alongside
 with knowing where the bus is located, the autopilot also has to be aware of the
 workers. These remote workers can be configured through yaml under the option
-`worker.remotes`, for now it is still possible to configure them through
-environment variables (`RENTERD_WORKER_REMOTE_ADDRS` and
-`RENTERD_WORKER_API_PASSWORD`) but those will be deprecated in the near future.
+`worker.remotes`, or through environment variables
+(`RENTERD_WORKER_REMOTE_ADDRS` and `RENTERD_WORKER_API_PASSWORD`).
 
 #### Example docker-compose with minimal configuration
 
