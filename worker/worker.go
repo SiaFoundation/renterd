@@ -353,14 +353,8 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 
-	// apply timeout
-	if rptr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
-		defer cancel()
-	}
-
-	// defer interaction recording
+	// defer interaction recording before applying timeout to make sure we still
+	// record the failed update if it timed out
 	var err error
 	var hpt api.HostPriceTable
 	defer func() {
@@ -373,6 +367,13 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 			},
 		})
 	}()
+
+	// apply timeout
+	if rptr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
+		defer cancel()
+	}
 
 	err = w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
 		hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
