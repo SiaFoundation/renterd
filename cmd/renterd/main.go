@@ -34,7 +34,6 @@ import (
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"golang.org/x/sys/cpu"
-	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -153,20 +152,6 @@ var (
 	}
 	disableStdin bool
 )
-
-func mustLoadAPIPassword() {
-	if cfg.HTTP.Password != "" {
-		return
-	}
-
-	fmt.Print("Enter API password: ")
-	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
-	if err != nil {
-		log.Fatal(err)
-	}
-	cfg.HTTP.Password = string(pw)
-}
 
 func mustParseWorkers(workers, password string) {
 	if workers == "" {
@@ -415,10 +400,8 @@ func main() {
 			stdoutFatalError("API password must be set via environment variable or config file when --env flag is set")
 			return
 		}
-		setAPIPassword()
-	} else {
-		mustLoadAPIPassword()
 	}
+	setAPIPassword()
 
 	// check that the seed is set
 	if cfg.Seed == "" && (cfg.Worker.Enabled || cfg.Bus.RemoteAddr == "") { // only worker & bus require a seed
