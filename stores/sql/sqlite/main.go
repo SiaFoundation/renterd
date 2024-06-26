@@ -155,6 +155,10 @@ func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) e
 	return nil
 }
 
+func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+	return ssql.AncestorContracts(ctx, tx, fcid, startHeight)
+}
+
 func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error {
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
@@ -239,8 +243,16 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	return eTag, nil
 }
 
+func (tx *MainDatabaseTx) ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error) {
+	return ssql.ContractRoots(ctx, tx, fcid)
+}
+
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return ssql.Contracts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) ContractSets(ctx context.Context) ([]string, error) {
+	return ssql.ContractSets(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
