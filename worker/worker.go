@@ -345,8 +345,6 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
 	// decode the request
 	var rptr api.RHPPriceTableRequest
 	if jc.Decode(&rptr) != nil {
@@ -358,7 +356,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	var err error
 	var hpt api.HostPriceTable
 	defer func() {
-		w.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
+		w.bus.RecordPriceTables(jc.Request.Context(), []api.HostPriceTableUpdate{
 			{
 				HostKey:    rptr.HostKey,
 				Success:    isSuccessfulInteraction(err),
@@ -369,6 +367,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	}()
 
 	// apply timeout
+	ctx := jc.Request.Context()
 	if rptr.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
