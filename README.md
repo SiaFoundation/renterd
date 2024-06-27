@@ -130,7 +130,7 @@ using the `--autopilot.enabled` flag, and the bus has to be disabled. There's no
 flag to explicitly disable the `bus`, it's implied by configuring a remote
 address for the bus using the `--bus.remoteAddr` and `--bus.remotePassword`
 flags. When the bus is remote, the worker has to be configured with an external
-address of the form http://<worker-ip>:<port>, on localhost however this can be
+address of the form `http://<worker-ip>:<port>`, on localhost however this can be
 the same as the worker's HTTP address. The worker needs to know its location on
 the network because it relies on some webhooks it needs to register with the
 bus, which in turn needs to know how to reach the worker when certain events
@@ -174,6 +174,7 @@ services:
       - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-1:9980/api/worker
     ports:
       - "9982:9980"
+      - "8082:8080"
     depends_on:
       - bus
 
@@ -188,6 +189,7 @@ services:
       - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-2:9980/api/worker
     ports:
       - "9983:9980"
+      - "8083:8080"
     depends_on:
       - bus
 
@@ -206,7 +208,6 @@ services:
       - bus
       - worker-1
       - worker-2
-
 ```
 
 ## Tweaking Performance

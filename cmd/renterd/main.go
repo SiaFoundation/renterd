@@ -617,7 +617,7 @@ func main() {
 
 	// Finish worker setup.
 	if err := setupWorkerFn(context.Background()); err != nil {
-		logger.Warn("failed to setup worker: " + err.Error())
+		logger.Fatal("failed to setup worker: " + err.Error())
 	}
 
 	// Set initial S3 keys.
