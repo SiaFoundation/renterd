@@ -315,11 +315,14 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 			WHERE cs.db_contract_id = c.id
 		)
 		UNION ALL
-		SELECT c.fcid, c.size, CASE WHEN MAX(c.size) > COUNT(*) * ? THEN MAX(c.size) - COUNT(*) * ? ELSE 0 END
-		FROM contracts c
-		INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-		GROUP BY c.fcid
-	`, rhpv2.SectorSize, rhpv2.SectorSize)
+		SELECT fcid, size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END
+		FROM (
+			SELECT c.fcid, c.size, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size
+			FROM contracts c
+			INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+			GROUP BY c.fcid
+		) i
+	`, rhpv2.SectorSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract sizes: %w", err)
 	}
