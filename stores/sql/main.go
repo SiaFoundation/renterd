@@ -1098,8 +1098,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		price_table = CASE WHEN ? THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
-		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
-		subnets = CASE WHEN ? THEN ? ELSE subnets END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
+		subnets = CASE WHEN ? THEN ? ELSE subnets END
 		WHERE public_key = ?
 	`)
 	if err != nil {
@@ -1377,7 +1377,9 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		h.Subnets = strings.Split(subnets, ",")
+		if subnets != "" {
+			h.Subnets = strings.Split(subnets, ",")
+		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[hostID]
 		hosts = append(hosts, h)
