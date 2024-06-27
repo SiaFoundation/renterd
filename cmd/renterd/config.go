@@ -204,18 +204,25 @@ func setSeedPhrase() {
 // setAPIPassword prompts the user to enter an API password if one is not
 // already set via environment variable or config file.
 func setAPIPassword() {
+	// return early if the password is already set
+	if len(cfg.HTTP.Password) >= 4 {
+		return
+	}
+
 	// retry until a valid API password is entered
-	for len(cfg.HTTP.Password) < 4 {
+	for {
 		fmt.Println("Please choose a password for the renterd admin UI.")
 		fmt.Println("This password will be required to access the admin UI in your web browser.")
 		fmt.Println("(The password must be at least 4 characters.)")
 
 		cfg.HTTP.Password = readPasswordInput("Enter password")
-		if len(cfg.HTTP.Password) < 4 {
-			// invalid password, retry
-			fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
-			fmt.Println("")
+		if len(cfg.HTTP.Password) >= 4 {
+			break
 		}
+
+		// invalid password, retry
+		fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
+		fmt.Println("")
 	}
 }
 
