@@ -1302,7 +1302,7 @@ func InitConsensusInfo(ctx context.Context, tx sql.Tx) (types.ChainIndex, module
 	var ccid modules.ConsensusChangeID
 	var ci types.ChainIndex
 	err := tx.QueryRow(ctx, "SELECT cc_id, height, block_id FROM consensus_infos WHERE id = ?", consensuInfoID).
-		Scan(&ccid, ci.Height, ci.ID)
+		Scan((*CCID)(&ccid), &ci.Height, (*Hash256)(&ci.ID))
 	if err != nil && !errors.Is(err, dsql.ErrNoRows) {
 		return types.ChainIndex{}, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch consensus info: %w", err)
 	} else if err == nil {
@@ -1311,7 +1311,7 @@ func InitConsensusInfo(ctx context.Context, tx sql.Tx) (types.ChainIndex, module
 	// otherwise init
 	ci = types.ChainIndex{}
 	if _, err := tx.Exec(ctx, "INSERT INTO consensus_infos (id, created_at, cc_id, height, block_id) VALUES (?, ?, ?, ?, ?)",
-		consensuInfoID, time.Now(), modules.ConsensusChangeBeginning[:], ci.Height, ci.ID[:]); err != nil {
+		consensuInfoID, time.Now(), (CCID)(modules.ConsensusChangeBeginning), ci.Height, (Hash256)(ci.ID)); err != nil {
 		return types.ChainIndex{}, modules.ConsensusChangeID{}, fmt.Errorf("failed to init consensus infos: %w", err)
 	}
 	return types.ChainIndex{}, modules.ConsensusChangeBeginning, nil
