@@ -946,9 +946,9 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 
 	_, err = tx.Exec(ctx, `
 		UPDATE objects SET health = (
-			SELECT MIN(h.health)
-			FROM slabs_health h
-			INNER JOIN slices ON slices.db_slab_id = h.id
+			SELECT MIN(sla.health)
+			FROM slabs sla
+			INNER JOIN slices ON slices.db_slab_id = sla.id
 			WHERE slices.db_object_id = objects.id
 		) WHERE EXISTS (
 			SELECT 1

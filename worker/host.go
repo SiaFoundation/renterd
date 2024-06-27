@@ -199,14 +199,6 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt api.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			h.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
-				{
-					HostKey:    h.hk,
-					Success:    isSuccessfulInteraction(err),
-					Timestamp:  time.Now(),
-					PriceTable: hpt,
-				},
-			})
 			return
 		})
 		return

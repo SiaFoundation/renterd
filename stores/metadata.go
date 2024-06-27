@@ -706,7 +706,7 @@ SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SEL
 		return tx.
 			Raw(`
 SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
-SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
+SELECT c.fcid, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
 ) i`, rhpv2.SectorSize).
 			Scan(&dataContracts).
 			Error
