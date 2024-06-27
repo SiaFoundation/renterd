@@ -20,8 +20,11 @@ import (
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/siad/modules"
 	"lukechampine.com/frand"
 )
+
+const consensuInfoID = 1
 
 var ErrNegativeOffset = errors.New("offset can not be negative")
 
@@ -1183,8 +1186,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
-		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
 		WHERE public_key = ?
@@ -1206,7 +1209,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, scanTime, scanTime, // uptime
 			scanTime,                                  // last_scan
 			scan.Success, HostSettings(scan.Settings), // settings
-			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
@@ -1292,6 +1295,39 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func InitConsensusInfo(ctx context.Context, tx sql.Tx) (types.ChainIndex, modules.ConsensusChangeID, error) {
+	// try fetch existing
+	var ccid modules.ConsensusChangeID
+	var ci types.ChainIndex
+	err := tx.QueryRow(ctx, "SELECT cc_id, height, block_id FROM consensus_infos WHERE id = ?", consensuInfoID).
+		Scan((*CCID)(&ccid), &ci.Height, (*Hash256)(&ci.ID))
+	if err != nil && !errors.Is(err, dsql.ErrNoRows) {
+		return types.ChainIndex{}, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch consensus info: %w", err)
+	} else if err == nil {
+		return ci, ccid, nil
+	}
+	// otherwise init
+	ci = types.ChainIndex{}
+	if _, err := tx.Exec(ctx, "INSERT INTO consensus_infos (id, created_at, cc_id, height, block_id) VALUES (?, ?, ?, ?, ?)",
+		consensuInfoID, time.Now(), (CCID)(modules.ConsensusChangeBeginning), ci.Height, (Hash256)(ci.ID)); err != nil {
+		return types.ChainIndex{}, modules.ConsensusChangeID{}, fmt.Errorf("failed to init consensus infos: %w", err)
+	}
+	return types.ChainIndex{}, modules.ConsensusChangeBeginning, nil
+}
+
+func ResetConsensusSubscription(ctx context.Context, tx sql.Tx) (ci types.ChainIndex, err error) {
+	if _, err := tx.Exec(ctx, "DELETE FROM consensus_infos"); err != nil {
+		return types.ChainIndex{}, fmt.Errorf("failed to delete consensus infos: %w", err)
+	} else if _, err := tx.Exec(ctx, "DELETE FROM siacoin_elements"); err != nil {
+		return types.ChainIndex{}, fmt.Errorf("failed to delete siacoin elements: %w", err)
+	} else if _, err := tx.Exec(ctx, "DELETE FROM transactions"); err != nil {
+		return types.ChainIndex{}, fmt.Errorf("failed to delete transactions: %w", err)
+	} else if ci, _, err = InitConsensusInfo(ctx, tx); err != nil {
+		return types.ChainIndex{}, fmt.Errorf("failed to initialize consensus info: %w", err)
+	}
+	return ci, nil
 }
 
 func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
