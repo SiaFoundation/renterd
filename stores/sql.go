@@ -24,10 +24,6 @@ import (
 	glogger "gorm.io/gorm/logger"
 )
 
-var (
-	exprTRUE = gorm.Expr("TRUE")
-)
-
 type (
 	// Model defines the common fields of every table. Same as Model
 	// but excludes soft deletion since it breaks cascading deletes.
