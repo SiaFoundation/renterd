@@ -709,7 +709,7 @@ LOOP:
 		if contract.Revision == nil {
 			if !inSet || remainingKeepLeeway == 0 {
 				toStopUsing[fcid] = errContractNoRevision.Error()
-			} else if ctx.ShouldFilterRedundantIPs() && ipFilter.IsRedundantIP(host) {
+			} else if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
 				toStopUsing[fcid] = fmt.Sprintf("%v; %v", api.ErrUsabilityHostRedundantIP, errContractNoRevision)
 				hostChecks[contract.HostKey].Usability.RedundantIP = true
 			} else {
@@ -796,7 +796,7 @@ func (c *Contractor) runContractFormations(ctx *mCtx, w Worker, candidates score
 	filter := c.newIPFilter()
 	for _, h := range candidates {
 		if _, used := usedHosts[h.host.PublicKey]; used {
-			_ = filter.IsRedundantIP(h.host)
+			_ = filter.HasRedundantIP(h.host)
 		}
 	}
 
@@ -869,7 +869,7 @@ LOOP:
 		}
 
 		// check if we already have a contract with a host on that subnet
-		if ctx.ShouldFilterRedundantIPs() && filter.IsRedundantIP(host) {
+		if ctx.ShouldFilterRedundantIPs() && filter.HasRedundantIP(host) {
 			continue
 		}
 

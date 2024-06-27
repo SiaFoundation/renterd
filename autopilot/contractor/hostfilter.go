@@ -144,7 +144,7 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.Redundancy
 
 	// IP check should be last since it modifies the filter
 	shouldFilter := !cfg.Hosts.AllowRedundantIPs && (usable || recoverable)
-	if shouldFilter && f.IsRedundantIP(ci.host) {
+	if shouldFilter && f.HasRedundantIP(ci.host) {
 		reasons = append(reasons, api.ErrUsabilityHostRedundantIP.Error())
 		usable = false
 		recoverable = false // do not use in the contract set, but keep it around for downloads

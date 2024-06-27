@@ -1,8 +1,14 @@
 package contractor
 
 import (
+	"errors"
+
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
+)
+
+var (
+	errHostTooManySubnets = errors.New("host has more than two subnets")
 )
 
 type (
@@ -20,25 +26,35 @@ func (c *Contractor) newIPFilter() *ipFilter {
 	}
 }
 
-func (f *ipFilter) IsRedundantIP(host api.Host) bool {
-	// return early if we couldn't resolve to a subnet
+func (f *ipFilter) HasRedundantIP(host api.Host) bool {
+	// validate host subnets
 	if len(host.Subnets) == 0 {
 		f.logger.Errorf("host %v has no subnet, treating its IP %v as redundant", host.PublicKey, host.NetAddress)
 		return true
+	} else if len(host.Subnets) > 2 {
+		f.logger.Errorf("host %v has more than 2 subnets, treating its IP %v as redundant", host.PublicKey, errHostTooManySubnets)
+		return true
 	}
 
-	// check if we know about this subnet, if not register all the subnets
-	existing, found := f.subnetToHostKey[host.Subnets[0]]
-	if !found {
-		for _, subnet := range host.Subnets {
-			f.subnetToHostKey[subnet] = host.PublicKey.String()
+	// check if we know about this subnet
+	var knownHost string
+	for _, subnet := range host.Subnets {
+		if knownHost = f.subnetToHostKey[subnet]; knownHost != "" {
+			break
 		}
-		return false
 	}
 
-	// otherwise compare host keys
-	sameHost := host.PublicKey.String() == existing
-	return !sameHost
+	// if we know about the subnet, the host is redundant if it's not the same
+	if knownHost != "" {
+		return host.PublicKey.String() != knownHost
+	}
+
+	// otherwise register all the host'ssubnets
+	for _, subnet := range host.Subnets {
+		f.subnetToHostKey[subnet] = host.PublicKey.String()
+	}
+
+	return false
 }
 
 func (f *ipFilter) Remove(h api.Host) {
