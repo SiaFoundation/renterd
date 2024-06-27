@@ -228,9 +228,11 @@ type (
 	}
 
 	ListObjectOptions struct {
-		Prefix string
-		Marker string
-		Limit  int
+		Prefix  string
+		Marker  string
+		Limit   int
+		SortBy  string
+		SortDir string
 	}
 
 	SearchObjectOptions struct {

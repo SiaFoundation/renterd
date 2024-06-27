@@ -706,7 +706,7 @@ SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SEL
 		return tx.
 			Raw(`
 SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
-SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
+SELECT c.fcid, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
 ) i`, rhpv2.SectorSize).
 			Scan(&dataContracts).
 			Error
@@ -2002,62 +2002,12 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 // TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
 // a delimiter for now (see backend.go) but it would be interesting to have
 // arbitrary 'delim' support in ListObjects.
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else {
-		limit++
-	}
-
-	// build prefix expr
-	prefixExpr := buildPrefixExpr(prefix)
-
-	// build order clause
-	orderBy, err := buildOrderClause(sortBy, sortDir)
-	if err != nil {
-		return api.ObjectsListResponse{}, err
-	}
-
-	// build marker expr
-	markerExpr, markerOrderBy, err := buildMarkerExpr(s.db, bucket, prefix, marker, sortBy, sortDir)
-	if err != nil {
-		return api.ObjectsListResponse{}, err
-	}
-	var rows []rawObjectMetadata
-	if err := s.db.
-		Select("o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
-		Model(&dbObject{}).
-		Table("objects o").
-		Where("o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)", bucket).
-		Where("?", prefixExpr).
-		Where("?", markerExpr).
-		Order(orderBy).
-		Order(markerOrderBy).
-		Order("ObjectName ASC").
-		Limit(int(limit)).
-		Scan(&rows).Error; err != nil {
-		return api.ObjectsListResponse{}, err
-	}
-
-	var hasMore bool
-	var nextMarker string
-	if len(rows) == limit {
-		hasMore = true
-		rows = rows[:len(rows)-1]
-		nextMarker = rows[len(rows)-1].ObjectName
-	}
-
-	var objects []api.ObjectMetadata
-	for _, row := range rows {
-		objects = append(objects, row.convert())
-	}
-
-	return api.ObjectsListResponse{
-		HasMore:    hasMore,
-		NextMarker: nextMarker,
-		Objects:    objects,
-	}, nil
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
+		return err
+	})
+	return
 }
 
 func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) {
@@ -2147,117 +2097,6 @@ func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) 
 		}
 		height++
 	}
-}
-
-func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string) (markerExpr clause.Expr, orderBy clause.OrderBy, err error) {
-	// no marker
-	if marker == "" {
-		return exprTRUE, clause.OrderBy{}, nil
-	}
-
-	// for markers to work we need to order by object_id
-	orderBy = clause.OrderBy{
-		Columns: []clause.OrderByColumn{
-			{
-				Column: clause.Column{Name: "object_id"},
-				Desc:   false,
-			},
-		},
-	}
-
-	desc := strings.EqualFold(sortDir, api.ObjectSortDirDesc)
-	switch sortBy {
-	case "", api.ObjectSortByName:
-		if desc {
-			markerExpr = gorm.Expr("object_id < ?", marker)
-		} else {
-			markerExpr = gorm.Expr("object_id > ?", marker)
-		}
-	case api.ObjectSortByHealth:
-		// fetch marker health
-		var markerHealth float64
-		if marker != "" && sortBy == api.ObjectSortByHealth {
-			if err := db.
-				Select("o.health").
-				Model(&dbObject{}).
-				Table("objects o").
-				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
-				Limit(1).
-				Scan(&markerHealth).
-				Error; err != nil {
-				return exprTRUE, clause.OrderBy{}, err
-			}
-		}
-
-		if desc {
-			markerExpr = gorm.Expr("(Health <= ? AND object_id > ?) OR Health < ?", markerHealth, marker, markerHealth)
-		} else {
-			markerExpr = gorm.Expr("Health > ? OR (Health >= ? AND object_id > ?)", markerHealth, markerHealth, marker)
-		}
-	case api.ObjectSortBySize:
-		// fetch marker size
-		var markerSize float64
-		if marker != "" && sortBy == api.ObjectSortBySize {
-			if err := db.
-				Select("o.size").
-				Model(&dbObject{}).
-				Table("objects o").
-				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
-				Limit(1).
-				Scan(&markerSize).
-				Error; err != nil {
-				return exprTRUE, clause.OrderBy{}, err
-			}
-		}
-
-		if desc {
-			markerExpr = gorm.Expr("(Size <= ? AND object_id > ?) OR Size < ?", markerSize, marker, markerSize)
-		} else {
-			markerExpr = gorm.Expr("Size > ? OR (Size >= ? AND object_id > ?)", markerSize, markerSize, marker)
-		}
-	default:
-		err = fmt.Errorf("unhandled sortBy parameter '%s'", sortBy)
-	}
-	return
-}
-
-func buildOrderClause(sortBy, sortDir string) (clause.OrderByColumn, error) {
-	if err := validateSort(sortBy, sortDir); err != nil {
-		return clause.OrderByColumn{}, err
-	}
-
-	orderByColumns := map[string]string{
-		"":                     "object_id",
-		api.ObjectSortByName:   "object_id",
-		api.ObjectSortByHealth: "Health",
-		api.ObjectSortBySize:   "Size",
-	}
-
-	return clause.OrderByColumn{
-		Column: clause.Column{Name: orderByColumns[sortBy]},
-		Desc:   strings.EqualFold(sortDir, api.ObjectSortDirDesc),
-	}, nil
-}
-
-func buildPrefixExpr(prefix string) clause.Expr {
-	if prefix != "" {
-		return gorm.Expr("o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?", prefix+"%", utf8.RuneCountInString(prefix), prefix)
-	} else {
-		return exprTRUE
-	}
-}
-
-func updateAllObjectsHealth(tx *gorm.DB) error {
-	return tx.Exec(`
-UPDATE objects
-SET health = (
-	SELECT COALESCE(MIN(slabs.health), 1)
-	FROM slabs
-	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
-	WHERE sli.db_object_id = objects.id)
-`).Error
 }
 
 func validateSort(sortBy, sortDir string) error {

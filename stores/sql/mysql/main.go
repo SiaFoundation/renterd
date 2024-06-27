@@ -422,6 +422,10 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 	return ssql.ListBuckets(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+}
+
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
 	// Create root dir.
 	dirID := int64(sql.DirectoriesRootID)
@@ -953,12 +957,18 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 	_, err = tx.Exec(ctx, `
 		UPDATE objects o
 		INNER JOIN (
-			SELECT sli.db_object_id as id, MIN(h.health) as health
-			FROM slabs_health h
-			INNER JOIN slices sli ON sli.db_slab_id = h.id
+			SELECT sli.db_object_id as id, MIN(sla.health) as health
+			FROM slabs sla
+			INNER JOIN slices sli ON sli.db_slab_id = sla.id
 			GROUP BY sli.db_object_id
 		) AS object_health ON object_health.id = o.id
 		SET o.health = object_health.health
+		WHERE EXISTS (
+			SELECT 1
+			FROM slabs_health h
+			INNER JOIN slices ON slices.db_slab_id = h.id
+			WHERE slices.db_object_id = o.id
+		)
 		`)
 	if err != nil {
 		return 0, fmt.Errorf("failed to update object health: %w", err)

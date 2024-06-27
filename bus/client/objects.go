@@ -52,10 +52,12 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api
 // ListOBjects lists objects in the given bucket.
 func (c *Client) ListObjects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/objects/list", api.ObjectsListRequest{
-		Bucket: bucket,
-		Limit:  opts.Limit,
-		Prefix: opts.Prefix,
-		Marker: opts.Marker,
+		Bucket:  bucket,
+		Limit:   opts.Limit,
+		Prefix:  opts.Prefix,
+		Marker:  opts.Marker,
+		SortBy:  opts.SortBy,
+		SortDir: opts.SortDir,
 	}, &resp)
 	return
 }

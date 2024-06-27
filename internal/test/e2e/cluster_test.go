@@ -24,11 +24,149 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/wallet"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+func TestListObjects(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// assertMetadata asserts ModTime, ETag and MimeType are set and then clears
+	// them afterwards so we can compare without having to specify the metadata
+	start := time.Now()
+	assertMetadata := func(entries []api.ObjectMetadata) {
+		for i := range entries {
+			// assert mod time
+			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
+				t.Fatal("mod time should be set")
+			}
+			entries[i].ModTime = api.TimeRFC3339{}
+
+			// assert mime type
+			isDir := strings.HasSuffix(entries[i].Name, "/") && entries[i].Name != "//double/" // double is a file
+			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
+				t.Fatal("unexpected mime type", entries[i].MimeType)
+			}
+			entries[i].MimeType = ""
+
+			// assert etag
+			if isDir != (entries[i].ETag == "") {
+				t.Fatal("etag should be set for files and empty for dirs")
+			}
+			entries[i].ETag = ""
+		}
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: test.RedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// upload the following paths
+	uploads := []struct {
+		path string
+		size int
+	}{
+		{"/foo/bar", 1},
+		{"/foo/bat", 2},
+		{"/foo/baz/quux", 3},
+		{"/foo/baz/quuz", 4},
+		{"/gab/guub", 5},
+		{"/FOO/bar", 6}, // test case sensitivity
+	}
+
+	for _, upload := range uploads {
+		if upload.size == 0 {
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
+		} else {
+			data := make([]byte, upload.size)
+			frand.Read(data)
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
+		}
+	}
+
+	tests := []struct {
+		prefix  string
+		sortBy  string
+		sortDir string
+		want    []api.ObjectMetadata
+	}{
+		{"/", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", api.ObjectSortDirAsc, []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", api.ObjectSortDirDesc, []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/FOO/bar", Size: 6, Health: 1}}},
+		{"/", api.ObjectSortByHealth, api.ObjectSortDirAsc, []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", api.ObjectSortByHealth, api.ObjectSortDirDesc, []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"o/baz/quu", "", "", []api.ObjectMetadata{}},
+		{"/foo", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/foo", api.ObjectSortBySize, api.ObjectSortDirAsc, []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/foo", api.ObjectSortBySize, api.ObjectSortDirDesc, []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
+	}
+	for _, test := range tests {
+		// use the bus client
+		res, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+			Prefix:  test.prefix,
+			SortBy:  test.sortBy,
+			SortDir: test.sortDir,
+			Limit:   -1,
+		})
+		if err != nil {
+			t.Fatal(err, test.prefix)
+		}
+		assertMetadata(res.Objects)
+
+		got := res.Objects
+		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+			t.Log(cmp.Diff(got, test.want, cmp.Comparer(api.CompareTimeRFC3339)))
+			t.Fatalf("\nkey: %v\ngot: %v\nwant: %v\nsortBy: %v\nsortDir: %v", test.prefix, got, test.want, test.sortBy, test.sortDir)
+		}
+		if len(res.Objects) > 0 {
+			marker := ""
+			for offset := 0; offset < len(test.want); offset++ {
+				res, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+					Prefix:  test.prefix,
+					SortBy:  test.sortBy,
+					SortDir: test.sortDir,
+					Marker:  marker,
+					Limit:   1,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// assert mod time & clear it afterwards so we can compare
+				assertMetadata(res.Objects)
+
+				got := res.Objects
+				if len(got) != 1 {
+					t.Fatalf("expected 1 object, got %v", len(got))
+				} else if got[0].Name != test.want[offset].Name {
+					t.Fatalf("expected %v, got %v, offset %v, marker %v, sortBy %v, sortDir %v", test.want[offset].Name, got[0].Name, offset, marker, test.sortBy, test.sortDir)
+				}
+				marker = res.NextMarker
+			}
+		}
+	}
+
+	// list invalid marker
+	_, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		Marker: "invalid",
+		SortBy: api.ObjectSortByHealth,
+	})
+	if !utils.IsErr(err, api.ErrMarkerNotFound) {
+		t.Fatal(err)
+	}
+}
 
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.

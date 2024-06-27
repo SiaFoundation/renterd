@@ -853,6 +853,12 @@ func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Tim
 			GROUP BY slabs.id
 			LIMIT ?
 	`, now.Unix(), limit)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary table: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "CREATE INDEX slabs_health_id ON slabs_health (id)"); err != nil {
+		return fmt.Errorf("failed to create index on temporary table: %w", err)
+	}
 	return err
 }
 
@@ -1177,8 +1183,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
-		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
 		subnets = CASE WHEN ? THEN ? ELSE subnets END
@@ -1201,7 +1207,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, scanTime, scanTime, // uptime
 			scanTime,                                  // last_scan
 			scan.Success, HostSettings(scan.Settings), // settings
-			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
@@ -1655,4 +1661,159 @@ func scanMultipartUpload(s scanner) (resp api.MultipartUpload, _ error) {
 		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal encryption key: %w", err)
 	}
 	return
+}
+
+func scanObjectMetadata(s scanner) (api.ObjectMetadata, error) {
+	var md api.ObjectMetadata
+	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag); err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
+	}
+	return md, nil
+}
+
+func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// filter by bucket
+	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
+	whereArgs := []any{bucket}
+
+	// apply prefix
+	if prefix != "" {
+		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
+		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
+	}
+
+	// apply sorting
+	dir2SQL := map[string]string{
+		api.ObjectSortDirAsc:  "ASC",
+		api.ObjectSortDirDesc: "DESC",
+	}
+	if _, ok := dir2SQL[strings.ToLower(sortDir)]; !ok {
+		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortDir: %v", sortDir)
+	}
+	var orderByExprs []string
+	switch strings.ToLower(sortBy) {
+	case "", api.ObjectSortByName:
+		orderByExprs = append(orderByExprs, "o.object_id "+dir2SQL[strings.ToLower(sortDir)])
+	case api.ObjectSortByHealth:
+		orderByExprs = append(orderByExprs, "o.health "+dir2SQL[strings.ToLower(sortDir)])
+	case api.ObjectSortBySize:
+		orderByExprs = append(orderByExprs, "o.size "+dir2SQL[strings.ToLower(sortDir)])
+	default:
+		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortBy: %v", sortBy)
+	}
+
+	// always sort by object_id as well if we aren't explicitly
+	if sortBy != api.ObjectSortByName {
+		orderByExprs = append(orderByExprs, "o.object_id ASC")
+	}
+
+	// apply marker
+	queryMarker := func(dst any, marker, col string) error {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+		`, col), bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	}
+	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
+	if marker != "" {
+		switch strings.ToLower(sortBy) {
+		case api.ObjectSortByName:
+			if desc {
+				whereExprs = append(whereExprs, "o.object_id < ?")
+			} else {
+				whereExprs = append(whereExprs, "o.object_id > ?")
+			}
+			whereArgs = append(whereArgs, marker)
+		case api.ObjectSortByHealth:
+			var markerHealth float64
+			if err := queryMarker(&markerHealth, marker, "health"); err != nil {
+				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
+			} else if desc {
+				whereExprs = append(whereExprs, "((o.health <= ? AND o.object_id >?) OR o.health < ?)")
+				whereArgs = append(whereArgs, markerHealth, marker, markerHealth)
+			} else {
+				whereExprs = append(whereExprs, "(o.health > ? OR (o.health >= ? AND object_id > ?))")
+				whereArgs = append(whereArgs, markerHealth, markerHealth, marker)
+			}
+		case api.ObjectSortBySize:
+			var markerSize int64
+			if err := queryMarker(&markerSize, marker, "size"); err != nil {
+				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
+			} else if desc {
+				whereExprs = append(whereExprs, "((o.size <= ? AND o.object_id >?) OR o.size < ?)")
+				whereArgs = append(whereArgs, markerSize, marker, markerSize)
+			} else {
+				whereExprs = append(whereExprs, "(o.size > ? OR (o.size >= ? AND object_id > ?))")
+				whereArgs = append(whereArgs, markerSize, markerSize, marker)
+			}
+		default:
+			return api.ObjectsListResponse{}, fmt.Errorf("invalid marker: %v", marker)
+		}
+	}
+
+	// apply limit
+	whereArgs = append(whereArgs, limit)
+
+	// run query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		FROM objects o
+		WHERE %s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		strings.Join(whereExprs, " AND "),
+		strings.Join(orderByExprs, ", ")),
+		whereArgs...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := scanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Name
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
+	}, nil
 }
