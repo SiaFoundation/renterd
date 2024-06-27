@@ -1445,7 +1445,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
 	if errors.Is(err, api.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-	} else if private {
+	} else if private && !w.allowPrivateIPs {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
 	}
 
