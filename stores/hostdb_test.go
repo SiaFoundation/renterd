@@ -506,6 +506,16 @@ func TestRecordScan(t *testing.T) {
 	host, err = ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
+	} else if time.Now().Before(host.PriceTable.Expiry) {
+		t.Fatal("invalid expiry")
+	} else if host.PriceTable.HostBlockHeight != pt.HostBlockHeight {
+		t.Fatalf("mismatch %v %v", host.PriceTable.HostBlockHeight, pt.HostBlockHeight)
+	}
+
+	// Update the price table expiry to be in the future.
+	_, err = ss.DB().Exec(ctx, "UPDATE hosts SET price_table_expiry = ? WHERE public_key = ?", time.Now().Add(time.Hour), sql.PublicKey(hk))
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// We expect no uptime or downtime from only a single scan.
@@ -533,15 +543,19 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
+	pt.HostBlockHeight = 456
 	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if host.Interactions.LastScan.UnixNano() != secondScanTime.UnixNano() {
+	} else if host.Interactions.LastScan.UnixNano() != secondScanTime.UnixNano() {
 		t.Fatal("wrong time")
+	} else if time.Now().After(host.PriceTable.Expiry) {
+		t.Fatal("invalid expiry")
+	} else if host.PriceTable.HostBlockHeight != 123 {
+		t.Fatal("price table was updated")
 	}
 	host.Interactions.LastScan = time.Time{}
 	uptime += secondScanTime.Sub(firstScanTime)
