@@ -45,6 +45,10 @@ type (
 		// exists, it is updated.
 		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
 
+		// AncestorContracts returns all ancestor contracts of the contract up
+		// until the given start height.
+		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error)
+
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
@@ -66,9 +70,15 @@ type (
 		// duplicates but can contain gaps.
 		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
 
+		// ContractRoots returns the roots of the contract with the given ID.
+		ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error)
+
 		// Contracts returns contract metadata for all active contracts. The
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+
+		// ContractSets returns the names of all contract sets.
+		ContractSets(ctx context.Context) ([]string, error)
 
 		// ContractSize returns the size of the contract with the given ID as
 		// well as the estimated number of bytes that can be pruned from it.
