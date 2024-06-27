@@ -18,6 +18,7 @@ var (
 	errInvalidHandshake          = errors.New("couldn't read host's handshake")
 	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
 	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
+	errInvalidSectorRootsRange   = errors.New("number of roots does not match range")
 )
 
 const (
@@ -237,9 +238,10 @@ func humanReadableSize(b int) string {
 }
 
 func shouldSendPruneAlert(err error, version, release string) bool {
-	merkleRootIssue := utils.IsErr(err, errInvalidMerkleProof) &&
-		(build.VersionCmp(version, "1.6.0") < 0 || version == "1.6.0" && release == "")
-	return err != nil && !(merkleRootIssue ||
+	oldHost := (build.VersionCmp(version, "1.6.0") < 0 || version == "1.6.0" && release == "")
+	sectorRootsIssue := utils.IsErr(err, errInvalidSectorRootsRange) && oldHost
+	merkleRootIssue := utils.IsErr(err, errInvalidMerkleProof) && oldHost
+	return err != nil && !(sectorRootsIssue || merkleRootIssue ||
 		utils.IsErr(err, utils.ErrConnectionRefused) ||
 		utils.IsErr(err, utils.ErrConnectionTimedOut) ||
 		utils.IsErr(err, utils.ErrConnectionResetByPeer) ||

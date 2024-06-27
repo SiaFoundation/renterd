@@ -179,6 +179,18 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 }
 
+func (s *testSQLStore) DB() *isql.DB {
+	switch db := s.bMain.(type) {
+	case *sqlite.MainDatabase:
+		return db.DB()
+	case *mysql.MainDatabase:
+		return db.DB()
+	default:
+		s.t.Fatal("unknown db type", db)
+	}
+	panic("unreachable")
+}
+
 func (s *testSQLStore) DBMetrics() *isql.DB {
 	switch db := s.bMetrics.(type) {
 	case *sqlite.MetricsDatabase:

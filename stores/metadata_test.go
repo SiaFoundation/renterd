@@ -94,6 +94,17 @@ func randomMultisigUC() types.UnlockConditions {
 	return uc
 }
 
+func updateAllObjectsHealth(tx *gorm.DB) error {
+	return tx.Exec(`
+UPDATE objects
+SET health = (
+	SELECT COALESCE(MIN(slabs.health), 1)
+	FROM slabs
+	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
+	WHERE sli.db_object_id = objects.id)
+`).Error
+}
+
 // TestObjectBasic tests the hydration of raw objects works when we fetch
 // objects from the metadata store.
 func TestObjectBasic(t *testing.T) {
@@ -862,7 +873,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
 	for i := 0; i < len(contracts)-1; i++ {
-		if !reflect.DeepEqual(contracts[i], api.ArchivedContract{
+		expected := api.ArchivedContract{
 			ID:          fcids[len(fcids)-2-i],
 			HostKey:     hk,
 			RenewedTo:   fcids[len(fcids)-1-i],
@@ -871,7 +882,9 @@ func TestAncestorsContracts(t *testing.T) {
 			State:       api.ContractStatePending,
 			WindowStart: 400,
 			WindowEnd:   500,
-		}) {
+		}
+		if !reflect.DeepEqual(contracts[i], expected) {
+			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
@@ -4818,10 +4831,10 @@ func TestDirectories(t *testing.T) {
 	}
 
 	now := time.Now()
-	ss.triggerSlabPruning()
-	if err := ss.waitForPruneLoop(now); err != nil {
-		t.Fatal(err)
-	}
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		ss.triggerSlabPruning()
+		return ss.waitForPruneLoop(now)
+	})
 
 	var n int64
 	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {

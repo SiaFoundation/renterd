@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -22,15 +21,6 @@ import (
 	gsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	glogger "gorm.io/gorm/logger"
-)
-
-var (
-	exprTRUE = gorm.Expr("TRUE")
-)
-
-var (
-	errNoSuchTable    = errors.New("no such table")
-	errDuplicateEntry = errors.New("Duplicate entry")
 )
 
 type (
@@ -274,11 +264,9 @@ func (s *SQLStore) retryAbortFn(err error) bool {
 		utils.IsErr(err, api.ErrBucketNotEmpty) ||
 		utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
 		utils.IsErr(err, api.ErrObjectExists) ||
-		utils.IsErr(err, errNoSuchTable) ||
 		utils.IsErr(err, api.ErrPartNotFound) ||
 		utils.IsErr(err, api.ErrSlabNotFound) ||
-		utils.IsErr(err, syncer.ErrPeerNotFound) ||
-		utils.IsErr(err, errDuplicateEntry)
+		utils.IsErr(err, syncer.ErrPeerNotFound)
 }
 
 func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {

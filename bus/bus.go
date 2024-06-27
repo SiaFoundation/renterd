@@ -1473,7 +1473,10 @@ func (b *bus) objectsListHandlerPOST(jc jape.Context) {
 		req.Bucket = api.DefaultBucketName
 	}
 	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.SortBy, req.SortDir, req.Marker, req.Limit)
-	if jc.Check("couldn't list objects", err) != nil {
+	if errors.Is(err, api.ErrMarkerNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("couldn't list objects", err) != nil {
 		return
 	}
 	jc.Encode(resp)

@@ -176,7 +176,7 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 
 	// v1 contracts
 	cus := make(map[types.FileContractID]contractUpdate)
-	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+	cau.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
@@ -192,7 +192,7 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 
 	// v2 contracts
 	cus = make(map[types.FileContractID]contractUpdate)
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
@@ -213,7 +213,7 @@ func (s *ChainSubscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUp
 
 	// v1 contracts
 	var cus []contractUpdate
-	cru.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+	cru.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
 		cus = append(cus, v1ContractUpdate(fce, rev, resolved, valid))
 	})
 	for _, cu := range cus {
@@ -224,7 +224,7 @@ func (s *ChainSubscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUp
 
 	// v2 contracts
 	cus = cus[:0]
-	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
 	for _, cu := range cus {

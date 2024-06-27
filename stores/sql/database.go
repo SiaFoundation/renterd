@@ -51,6 +51,10 @@ type (
 		// exists, it is updated.
 		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
 
+		// AncestorContracts returns all ancestor contracts of the contract up
+		// until the given start height.
+		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error)
+
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
@@ -77,9 +81,15 @@ type (
 		// duplicates but can contain gaps.
 		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
 
+		// ContractRoots returns the roots of the contract with the given ID.
+		ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error)
+
 		// Contracts returns contract metadata for all active contracts. The
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+
+		// ContractSets returns the names of all contract sets.
+		ContractSets(ctx context.Context) ([]string, error)
 
 		// ContractSize returns the size of the contract with the given ID as
 		// well as the estimated number of bytes that can be pruned from it.
@@ -99,6 +109,9 @@ type (
 		// process. If another contract with a different host exists that
 		// contains the root, latest_host is updated to that host.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
+		// DeleteSettings deletes the settings with the given key.
+		DeleteSettings(ctx context.Context, key string) error
 
 		// DeleteWebhook deletes the webhook with the matching module, event and
 		// URL of the provided webhook. If the webhook doesn't exist,
@@ -148,6 +161,9 @@ type (
 
 		// ListBuckets returns a list of all buckets in the database.
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
+
+		// ListObjects returns a list of objects from the given bucket.
+		ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -236,6 +252,12 @@ type (
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 
+		// Setting returns the setting with the given key from the database.
+		Setting(ctx context.Context, key string) (string, error)
+
+		// Settings returns all available settings from the database.
+		Settings(ctx context.Context) ([]string, error)
+
 		// SlabBuffers returns the filenames and associated contract sets of all
 		// slab buffers.
 		SlabBuffers(ctx context.Context) (map[string]string, error)
@@ -265,6 +287,10 @@ type (
 
 		// UpdatePeerInfo updates the metadata for the specified peer.
 		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error
+
+		// UpdateSetting updates the setting with the given key to the given
+		// value.
+		UpdateSetting(ctx context.Context, key, value string) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%
