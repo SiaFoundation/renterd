@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/siad/modules"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/internal/sql"
@@ -355,6 +356,10 @@ func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time
 	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
 
+func (tx *MainDatabaseTx) InitConsensusInfo(ctx context.Context) (types.ChainIndex, modules.ConsensusChangeID, error) {
+	return ssql.InitConsensusInfo(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// get bucket id
 	var bucketID int64
@@ -602,6 +607,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) ResetConsensusSubscription(ctx context.Context) (types.ChainIndex, error) {
+	return ssql.ResetConsensusSubscription(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
