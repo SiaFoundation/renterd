@@ -98,7 +98,7 @@ CREATE TABLE `hosts` (
   `lost_sectors` bigint unsigned DEFAULT NULL,
   `last_announcement` datetime(3) DEFAULT NULL,
   `net_address` varchar(191) DEFAULT NULL,
-  `subnets` text NOT NULL DEFAULT '',
+  `subnets` text NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `public_key` (`public_key`),
   KEY `idx_hosts_public_key` (`public_key`),
