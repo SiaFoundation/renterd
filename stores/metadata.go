@@ -765,28 +765,17 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 }
 
 func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
-	return s.db.
-		WithContext(ctx).
-		Where(dbContractSet{Name: name}).
-		Delete(&dbContractSet{}).
-		Error
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.RemoveContractSet(ctx, name)
+	})
 }
 
-func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (_ api.ContractMetadata, err error) {
-	var contract dbContract
-
-	err = s.db.
-		WithContext(ctx).
-		Where(&dbContract{ContractCommon: ContractCommon{RenewedFrom: fileContractID(renewedFrom)}}).
-		Joins("Host").
-		Take(&contract).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = api.ErrContractNotFound
-		return
-	}
-
-	return contract.convert(), nil
+func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (cm api.ContractMetadata, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		cm, err = tx.RenewedContract(ctx, renewedFrom)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {

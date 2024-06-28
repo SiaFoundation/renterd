@@ -218,6 +218,10 @@ type (
 		// increasing the successful/failed interactions accordingly.
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 
+		// RemoveContractSet removes the contract set with the given name from
+		// the database.
+		RemoveContractSet(ctx context.Context, contractSet string) error
+
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
@@ -238,6 +242,10 @@ type (
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
+
+		// RenewedContract returns the metadata of the contract that was renewed
+		// fro mthe specified contract or ErrContractNotFound otherwise.
+		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
 		// ResetChainState deletes all chain data in the database.
 		ResetChainState(ctx context.Context) error
