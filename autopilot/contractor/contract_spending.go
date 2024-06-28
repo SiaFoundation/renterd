@@ -13,13 +13,11 @@ func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 
 	// filter contracts in the current period
 	var filtered []api.ContractMetadata
-	c.mu.Lock()
 	for _, contract := range contracts {
 		if contract.WindowStart <= currentPeriod {
 			filtered = append(filtered, contract.ContractMetadata)
 		}
 	}
-	c.mu.Unlock()
 
 	// calculate the money allocated
 	var totalAllocated types.Currency

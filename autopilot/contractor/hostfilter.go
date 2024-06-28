@@ -103,7 +103,7 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - refresh -> should be refreshed
 // - renew -> should be renewed
 func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, inSet bool, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
-	contract, s, pt := ci.contract, ci.settings, ci.priceTable
+	contract, s, pt := ci.contract, ci.host.Settings, ci.host.PriceTable.HostPriceTable
 
 	usable = true
 	if bh > contract.EndHeight() {
@@ -144,7 +144,7 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.Redundancy
 
 	// IP check should be last since it modifies the filter
 	shouldFilter := !cfg.Hosts.AllowRedundantIPs && (usable || recoverable)
-	if shouldFilter && f.IsRedundantIP(contract.HostIP, contract.HostKey) {
+	if shouldFilter && f.HasRedundantIP(ci.host) {
 		reasons = append(reasons, api.ErrUsabilityHostRedundantIP.Error())
 		usable = false
 		recoverable = false // do not use in the contract set, but keep it around for downloads

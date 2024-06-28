@@ -485,6 +485,11 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
+	// The host shouldn't have any subnets.
+	if len(host.Subnets) != 0 {
+		t.Fatal("unexpected", host.Subnets, len(host.Subnets))
+	}
+
 	// Fetch the host directly to get the creation time.
 	h, err := hostByPubKey(ss.db, hk)
 	if err != nil {
@@ -496,11 +501,12 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
+	subnets := []string{"212.1.96.0/24", "38.135.51.0/24"}
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
 	pt := rhpv3.HostPriceTable{
 		HostBlockHeight: 123,
 	}
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true, subnets)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -516,6 +522,11 @@ func TestRecordScan(t *testing.T) {
 	_, err = ss.DB().Exec(ctx, "UPDATE hosts SET price_table_expiry = ? WHERE public_key = ?", time.Now().Add(time.Hour), sql.PublicKey(hk))
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// The host should have the subnets.
+	if !reflect.DeepEqual(host.Subnets, subnets) {
+		t.Fatal("mismatch")
 	}
 
 	// We expect no uptime or downtime from only a single scan.
@@ -541,10 +552,11 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	// Record another scan 1 hour after the previous one.
+	// Record another scan 1 hour after the previous one. We don't pass any
+	// subnets this time.
 	secondScanTime := firstScanTime.Add(time.Hour)
 	pt.HostBlockHeight = 456
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true, nil)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -572,9 +584,14 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
+	// The host should still have the subnets.
+	if !reflect.DeepEqual(host.Subnets, subnets) {
+		t.Fatal("mismatch")
+	}
+
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false, nil)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -633,8 +650,8 @@ func TestRemoveHosts(t *testing.T) {
 	pt := rhpv3.HostPriceTable{}
 	t1 := now.Add(-time.Minute * 120) // 2 hours ago
 	t2 := now.Add(-time.Minute * 90)  // 1.5 hours ago (30min downtime)
-	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
-	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
+	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil)
+	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil)
 
 	// record interactions
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
@@ -664,7 +681,7 @@ func TestRemoveHosts(t *testing.T) {
 
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
-	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
+	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
@@ -1319,13 +1336,14 @@ func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool) api.HostScan {
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, subnets []string) api.HostScan {
 	return api.HostScan{
 		HostKey:    hk,
+		PriceTable: pt,
+		Settings:   settings,
+		Subnets:    subnets,
 		Success:    success,
 		Timestamp:  scanTime,
-		Settings:   settings,
-		PriceTable: pt,
 	}
 }
 
