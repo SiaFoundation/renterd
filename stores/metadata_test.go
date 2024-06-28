@@ -690,7 +690,7 @@ func TestRenewedContract(t *testing.T) {
 	// Assert we can't fetch the renewed contract.
 	_, err = ss.RenewedContract(context.Background(), fcid1)
 	if !errors.Is(err, api.ErrContractNotFound) {
-		t.Fatal("unexpected")
+		t.Fatal("unexpected", err)
 	}
 
 	// Renew it.
