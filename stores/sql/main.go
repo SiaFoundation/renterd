@@ -183,6 +183,16 @@ func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	return b, nil
 }
 
+func Contract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractMetadata, error) {
+	contracts, err := QueryContracts(ctx, tx, []string{"c.fcid = ?"}, []any{FileContractID(fcid)})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract: %w", err)
+	} else if len(contracts) == 0 {
+		return api.ContractMetadata{}, api.ErrContractNotFound
+	}
+	return contracts[0], nil
+}
+
 func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([]types.Hash256, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT s.root
@@ -543,6 +553,43 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 		return 0, fmt.Errorf("failed to insert slab: %w", err)
 	}
 	return bufferedSlabID, nil
+}
+
+func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
+	var contractState ContractState
+	if err := contractState.LoadString(state); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
+	}
+	var hostID int64
+	if err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = ?",
+		PublicKey(rev.HostKey())).Scan(&hostID); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to fetch host id: %w", err)
+	}
+
+	zero := Currency(types.ZeroCurrency)
+	res, err := tx.Exec(ctx, `
+		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
+		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending, 
+		fund_account_spending, delete_spending, list_spending)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
+		contractState, Currency(totalCost), 0, 0, "0", rev.Revision.Filesize, startHeight, rev.Revision.WindowStart, rev.Revision.WindowEnd,
+		zero, zero, zero, zero, zero)
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
+	}
+	cid, err := res.LastInsertId()
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract id: %w", err)
+	}
+
+	contracts, err := QueryContracts(ctx, tx, []string{"c.id = ?"}, []any{cid})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract: %w", err)
+	} else if len(contracts) == 0 {
+		return api.ContractMetadata{}, api.ErrContractNotFound
+	}
+	return contracts[0], nil
 }
 
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
