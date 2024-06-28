@@ -186,9 +186,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to create main database: %v", mainErr)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	dbName, dbVersion, err := dbMain.Version(ctx)
+	dbName, dbVersion, err := dbMain.Version(context.Background())
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, fmt.Errorf("failed to fetch db version: %v", err)
 	}
@@ -204,7 +202,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	// Get latest consensus change ID or init db.
-	ci, ccid, err := initConsensusInfo(ctx, dbMain)
+	ci, ccid, err := initConsensusInfo(context.Background(), dbMain)
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}

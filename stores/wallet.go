@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type (
@@ -329,7 +330,11 @@ func applyUnappliedOutputRemovals(tx *gorm.DB, oid hash256) error {
 }
 
 func applyUnappliedTxnAdditions(tx *gorm.DB, txn dbTransaction) error {
-	return tx.Create(&txn).Error
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "transaction_id"}},
+		UpdateAll: true,
+	}).
+		Create(&txn).Error
 }
 
 func applyUnappliedTxnRemovals(tx *gorm.DB, txnID hash256) error {
