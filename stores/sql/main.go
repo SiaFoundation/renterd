@@ -563,7 +563,7 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 	var hostID int64
 	if err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = ?",
 		PublicKey(rev.HostKey())).Scan(&hostID); err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to fetch host id: %w", err)
+		return api.ContractMetadata{}, api.ErrHostNotFound
 	}
 
 	zero := Currency(types.ZeroCurrency)

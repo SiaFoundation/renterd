@@ -2596,7 +2596,12 @@ func TestObjectsStats(t *testing.T) {
 	}
 	var newContractID types.FileContractID
 	frand.Read(newContractID[:])
-	c, err := ss.addTestContract(newContractID, types.PublicKey{})
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk := hks[0]
+	c, err := ss.addTestContract(newContractID, hk)
 	if err != nil {
 		t.Fatal(err)
 	}
