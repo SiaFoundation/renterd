@@ -204,7 +204,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 	}
 
 	// Get latest consensus change ID or init db.
-	ci, ccid, err := initConsensusInfo(db)
+	ci, ccid, err := initConsensusInfo(ctx, dbMain)
 	if err != nil {
 		return nil, modules.ConsensusChangeID{}, err
 	}
@@ -249,7 +249,7 @@ func NewSQLStore(cfg Config) (*SQLStore, modules.ConsensusChangeID, error) {
 		walletAddress: cfg.WalletAddress,
 		chainIndex: types.ChainIndex{
 			Height: ci.Height,
-			ID:     types.BlockID(ci.BlockID),
+			ID:     types.BlockID(ci.ID),
 		},
 
 		lastPrunedAt:              time.Now(),
@@ -510,47 +510,28 @@ func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) er
 	return fmt.Errorf("retryTransaction failed: %w", err)
 }
 
-func initConsensusInfo(db *gorm.DB) (dbConsensusInfo, modules.ConsensusChangeID, error) {
-	var ci dbConsensusInfo
-	if err := db.
-		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
-		Attrs(dbConsensusInfo{
-			Model: Model{ID: consensusInfoID},
-			CCID:  modules.ConsensusChangeBeginning[:],
-		}).
-		FirstOrCreate(&ci).
-		Error; err != nil {
-		return dbConsensusInfo{}, modules.ConsensusChangeID{}, err
-	}
-	var ccid modules.ConsensusChangeID
-	copy(ccid[:], ci.CCID)
-	return ci, ccid, nil
+func initConsensusInfo(ctx context.Context, db sql.Database) (ci types.ChainIndex, ccid modules.ConsensusChangeID, err error) {
+	err = db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		ci, ccid, err = tx.InitConsensusInfo(ctx)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) ResetConsensusSubscription(ctx context.Context) error {
-	// empty tables and reinit consensus_infos
-	var ci dbConsensusInfo
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		if err := s.db.Exec("DELETE FROM consensus_infos").Error; err != nil {
-			return err
-		} else if err := s.db.Exec("DELETE FROM siacoin_elements").Error; err != nil {
-			return err
-		} else if err := s.db.Exec("DELETE FROM transactions").Error; err != nil {
-			return err
-		} else if ci, _, err = initConsensusInfo(tx); err != nil {
-			return err
-		}
-		return nil
+	// reset db
+	var ci types.ChainIndex
+	var err error
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		ci, err = tx.ResetConsensusSubscription(ctx)
+		return err
 	})
 	if err != nil {
 		return err
 	}
 	// reset in-memory state.
 	s.persistMu.Lock()
-	s.chainIndex = types.ChainIndex{
-		Height: ci.Height,
-		ID:     types.BlockID(ci.BlockID),
-	}
+	s.chainIndex = ci
 	s.persistMu.Unlock()
 	return nil
 }

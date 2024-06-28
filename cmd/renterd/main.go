@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -33,7 +34,6 @@ import (
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"golang.org/x/sys/cpu"
-	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -152,20 +152,6 @@ var (
 	}
 	disableStdin bool
 )
-
-func mustLoadAPIPassword() {
-	if cfg.HTTP.Password != "" {
-		return
-	}
-
-	fmt.Print("Enter API password: ")
-	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
-	if err != nil {
-		log.Fatal(err)
-	}
-	cfg.HTTP.Password = string(pw)
-}
 
 func mustParseWorkers(workers, password string) {
 	if workers == "" {
@@ -342,8 +328,6 @@ func main() {
 	}
 
 	// Overwrite flags from environment if set.
-	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
-
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
 	parseEnvVar("RENTERD_BUS_API_PASSWORD", &cfg.Bus.RemotePassword)
 	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &cfg.Bus.GatewayAddr)
@@ -359,10 +343,6 @@ func main() {
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
-	var depWorkerRemotePassStr string
-	var depWorkerRemoteAddrsStr string
-	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
-	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
@@ -380,6 +360,7 @@ func main() {
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_BASES", &cfg.S3.HostBucketBases)
 
+	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
 	parseEnvVar("RENTERD_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_LOG_FILE_ENABLED", &cfg.Log.File.Enabled)
 	parseEnvVar("RENTERD_LOG_FILE_FORMAT", &cfg.Log.File.Format)
@@ -391,6 +372,20 @@ func main() {
 	parseEnvVar("RENTERD_LOG_DATABASE_LEVEL", &cfg.Log.Database.Level)
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
+
+	// parse remotes
+	var workerRemotePassStr string
+	var workerRemoteAddrsStr string
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
+	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
+		mustParseWorkers(workerRemoteAddrsStr, workerRemotePassStr)
+	}
+
+	// disable worker if remotes are set
+	if len(cfg.Worker.Remotes) > 0 {
+		cfg.Worker.Enabled = false
+	}
 
 	// combine host bucket bases
 	for _, base := range strings.Split(hostBasesStr, ",") {
@@ -405,11 +400,11 @@ func main() {
 			stdoutFatalError("API password must be set via environment variable or config file when --env flag is set")
 			return
 		}
-		setAPIPassword()
 	}
+	setAPIPassword()
 
 	// check that the seed is set
-	if cfg.Seed == "" {
+	if cfg.Seed == "" && (cfg.Worker.Enabled || cfg.Bus.RemoteAddr == "") { // only worker & bus require a seed
 		if disableStdin {
 			stdoutFatalError("Seed must be set via environment variable or config file when --env flag is set")
 			return
@@ -417,12 +412,17 @@ func main() {
 		setSeedPhrase()
 	}
 
-	var rawSeed [32]byte
-	if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
-		log.Fatal("failed to load wallet", zap.Error(err))
+	// generate private key from seed
+	var pk types.PrivateKey
+	if cfg.Seed != "" {
+		var rawSeed [32]byte
+		if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
+			log.Fatal("failed to load wallet", zap.Error(err))
+		}
+		pk = wallet.KeyFromSeed(&rawSeed, 0)
 	}
-	seed := wallet.KeyFromSeed(&rawSeed, 0)
 
+	// parse S3 auth keys
 	if cfg.S3.Enabled {
 		var keyPairsV4 string
 		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
@@ -435,12 +435,7 @@ func main() {
 		}
 	}
 
-	mustLoadAPIPassword()
-	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
-		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
-	}
-
-	// Create logger.
+	// create logger
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info" // default to 'info' if not set
 	}
@@ -474,14 +469,13 @@ func main() {
 	}
 	var shutdownFns []shutdownFnEntry
 
-	if cfg.Bus.RemoteAddr != "" {
-		if len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
-			logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
-		} else if cfg.Worker.ExternalAddress == "" {
-			logger.Fatal("if the bus is remote, the worker needs to be able to tell it where to find its API, this can be configured using worker.externalAddress")
-		}
+	if cfg.Bus.RemoteAddr != "" && !cfg.Worker.Enabled && !cfg.Autopilot.Enabled {
+		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
-	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
+	if cfg.Worker.Enabled && cfg.Bus.RemoteAddr != "" && cfg.Worker.ExternalAddress == "" {
+		logger.Fatal("can't enable the worker using a remote bus, without configuring the worker's external address")
+	}
+	if cfg.Autopilot.Enabled && !cfg.Worker.Enabled && len(cfg.Worker.Remotes) == 0 {
 		logger.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
 
@@ -514,7 +508,7 @@ func main() {
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	setupBusFn := node.NoopFn
 	if cfg.Bus.RemoteAddr == "" {
-		b, setupFn, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
+		b, setupFn, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, pk, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
@@ -547,13 +541,13 @@ func main() {
 				AuthDisabled:      cfg.S3.DisableAuth,
 				HostBucketBases:   cfg.S3.HostBucketBases,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, seed, logger)
+			}, bc, pk, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
 			var workerExternAddr string
 			if cfg.Bus.RemoteAddr != "" {
-				workerExternAddr = cfg.Worker.ExternalAddress + "/api/worker"
+				workerExternAddr = cfg.Worker.ExternalAddress
 			} else {
 				workerExternAddr = workerAddr
 			}
