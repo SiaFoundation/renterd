@@ -85,6 +85,10 @@ type (
 		// well as the estimated number of bytes that can be pruned from it.
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
 
+		// ContractSizes returns the sizes of all contracts in the database as
+		// well as the estimated number of bytes that can be pruned from them.
+		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
+
 		// CopyObject copies an object from one bucket and key to another. If
 		// source and destination are the same, only the metadata and mimeType
 		// are overwritten with the provided ones.

@@ -260,6 +260,10 @@ func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContrac
 	return ssql.ContractSize(ctx, tx, id)
 }
 
+func (tx *MainDatabaseTx) ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error) {
+	return ssql.ContractSizes(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
 }

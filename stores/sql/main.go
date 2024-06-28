@@ -303,6 +303,45 @@ func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
 	return sets, nil
 }
 
+func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api.ContractSize, error) {
+	// the following query consists of two parts:
+	// 1. fetch all contracts that have no sectors and consider their size as
+	//    prunable
+	// 2. fetch all contracts that have sectors and calculate the prunable size
+	//    based on the number of sectors
+	rows, err := tx.Query(ctx, `
+		SELECT c.fcid, c.size, c.size
+		FROM contracts c
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM contract_sectors cs
+			WHERE cs.db_contract_id = c.id
+		)
+		UNION ALL
+		SELECT fcid, size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END
+		FROM (
+			SELECT c.fcid, c.size, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size
+			FROM contracts c
+			INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+			GROUP BY c.fcid
+		) i
+	`, rhpv2.SectorSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sizes: %w", err)
+	}
+
+	sizes := make(map[types.FileContractID]api.ContractSize)
+	for rows.Next() {
+		var fcid types.FileContractID
+		var cs api.ContractSize
+		if err := rows.Scan((*FileContractID)(&fcid), &cs.Size, &cs.Prunable); err != nil {
+			return nil, fmt.Errorf("failed to scan contract size: %w", err)
+		}
+		sizes[fcid] = cs
+	}
+	return sizes, nil
+}
+
 func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
