@@ -679,52 +679,12 @@ func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) 
 	return sets, err
 }
 
-func (s *SQLStore) ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error) {
-	type size struct {
-		Fcid     fileContractID `json:"fcid"`
-		Size     uint64         `json:"size"`
-		Prunable uint64         `json:"prunable"`
-	}
-
-	var nullContracts []size
-	var dataContracts []size
-	if err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// first, we fetch all contracts without sectors and consider their
-		// entire size as prunable
-		if err := tx.
-			Raw(`
-SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SELECT 1 FROM contract_sectors cs WHERE cs.db_contract_id = c.id)`).
-			Scan(&nullContracts).
-			Error; err != nil {
-			return err
-		}
-
-		// second, we fetch how much data can be pruned from all contracts that
-		// do have sectors, we take a two-step approach because it allows us to
-		// use an INNER JOIN on contract_sectors, drastically improving the
-		// performance of the query
-		return tx.
-			Raw(`
-SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
-SELECT c.fcid, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
-) i`, rhpv2.SectorSize).
-			Scan(&dataContracts).
-			Error
-	}); err != nil {
-		return nil, err
-	}
-
-	sizes := make(map[types.FileContractID]api.ContractSize)
-	for _, row := range append(nullContracts, dataContracts...) {
-		if types.FileContractID(row.Fcid) == (types.FileContractID{}) {
-			return nil, errors.New("invalid file contract id")
-		}
-		sizes[types.FileContractID(row.Fcid)] = api.ContractSize{
-			Size:     row.Size,
-			Prunable: row.Prunable,
-		}
-	}
-	return sizes, nil
+func (s *SQLStore) ContractSizes(ctx context.Context) (sizes map[types.FileContractID]api.ContractSize, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		sizes, err = tx.ContractSizes(ctx)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (cs api.ContractSize, err error) {
