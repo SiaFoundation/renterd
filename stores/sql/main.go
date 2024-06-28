@@ -208,7 +208,19 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	return QueryContracts(ctx, tx, opts.ContractSet, nil, nil)
+	var whereExprs []string
+	var whereArgs []any
+	if opts.ContractSet != "" {
+		var contractSetID int64
+		err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
+			Scan(&contractSetID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return nil, api.ErrContractSetNotFound
+		}
+		whereExprs = append(whereExprs, "cs.id = ?")
+		whereArgs = append(whereArgs, contractSetID)
+	}
+	return QueryContracts(ctx, tx, whereExprs, whereArgs)
 }
 
 func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
@@ -1290,48 +1302,12 @@ func InitConsensusInfo(ctx context.Context, tx sql.Tx) (types.ChainIndex, module
 	return types.ChainIndex{}, modules.ConsensusChangeBeginning, nil
 }
 
-func QueryContracts(ctx context.Context, tx sql.Tx, contractSet string, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
+func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
 	var whereExpr string
 	if len(whereExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
 	}
-	var rows *sql.LoggedRows
-	var err error
-	if contractSet != "" {
-		// if we filter by contract set, we fetch the set first to check if it
-		// exists and then fetch the contracts. Knowing that the contracts are
-		// part of at least one set allows us to use INNER JOINs.
-		var contractSetID int64
-		err = tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", contractSet).
-			Scan(&contractSetID)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return nil, api.ErrContractSetNotFound
-		}
-		args := []any{contractSetID}
-		args = append(args, whereArgs...)
-		rows, err = tx.Query(ctx, fmt.Sprintf(`
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
-			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
-			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			cs.name, h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
-			FROM (
-				SELECT contracts.*
-				FROM contracts
-				INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id
-				INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-				WHERE cs.id = ?
-			) AS c
-			INNER JOIN hosts h ON h.id = c.host_id
-			INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-			INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			%s
-			ORDER BY c.id ASC`, whereExpr),
-			args...,
-		)
-	} else {
-		// if we don't filter, we need to left join here to ensure we don't miss
-		// contracts that are not part of any set
-		rows, err = tx.Query(ctx, fmt.Sprintf(`
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
@@ -1342,9 +1318,8 @@ func QueryContracts(ctx context.Context, tx sql.Tx, contractSet string, whereExp
 			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
 			%s
 			ORDER BY c.id ASC`, whereExpr),
-			whereArgs...,
-		)
-	}
+		whereArgs...,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1381,7 +1356,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, contractSet string, whereExp
 }
 
 func RenewedContract(ctx context.Context, tx sql.Tx, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
-	contracts, err := QueryContracts(ctx, tx, "", []string{"c.renewed_from = ?"}, []any{FileContractID(renewedFrom)})
+	contracts, err := QueryContracts(ctx, tx, []string{"c.renewed_from = ?"}, []any{FileContractID(renewedFrom)})
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to query renewed contract: %w", err)
 	} else if len(contracts) == 0 {
