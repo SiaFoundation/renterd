@@ -572,8 +572,10 @@ func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, c
 			download_spending = ?,
 			fund_account_spending = ?,
 			delete_spending = ?,
-			list_spending = ?,
-	`, time.Now(),
+			list_spending = ?
+		WHERE fcid = ?
+	`,
+		time.Now(),
 		FileContractID(rev.ID()),
 		FileContractID(renewedFrom),
 		Currency(contractPrice),
@@ -584,9 +586,10 @@ func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, c
 		fmt.Sprint(rev.Revision.RevisionNumber),
 		rev.Revision.Filesize,
 		startHeight, rev.Revision.WindowStart, rev.Revision.WindowEnd,
-		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
+		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
+		FileContractID(renewedFrom))
 	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("failed to update contract: %w", err)
 	}
 	return Contract(ctx, tx, rev.ID())
 }

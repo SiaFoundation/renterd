@@ -700,6 +700,7 @@ func TestRenewedContract(t *testing.T) {
 			ParentID:         fcid1Renewed,
 			UnlockConditions: uc,
 			FileContract: types.FileContract{
+				Filesize:           2 * rhpv2.SectorSize,
 				MissedProofOutputs: []types.SiacoinOutput{},
 				ValidProofOutputs:  []types.SiacoinOutput{},
 			},
@@ -759,7 +760,7 @@ func TestRenewedContract(t *testing.T) {
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid1,
-		Size:        rhpv2.SectorSize,
+		Size:        2 * rhpv2.SectorSize,
 		State:       api.ContractStatePending,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
