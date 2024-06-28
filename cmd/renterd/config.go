@@ -210,19 +210,17 @@ func setAPIPassword() {
 	}
 
 	// retry until a valid API password is entered
-	for {
+	for len(cfg.HTTP.Password) < 4 {
 		fmt.Println("Please choose a password for the renterd admin UI.")
 		fmt.Println("This password will be required to access the admin UI in your web browser.")
 		fmt.Println("(The password must be at least 4 characters.)")
 
 		cfg.HTTP.Password = readPasswordInput("Enter password")
-		if len(cfg.HTTP.Password) >= 4 {
-			break
+		if len(cfg.HTTP.Password) < 4 {
+			// invalid password, retry
+			fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
+			fmt.Println("")
 		}
-
-		// invalid password, retry
-		fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
-		fmt.Println("")
 	}
 }
 
