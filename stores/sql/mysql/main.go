@@ -540,6 +540,10 @@ func (tx *MainDatabaseTx) RecordPriceTables(ctx context.Context, priceTableUpdat
 	return ssql.RecordPriceTables(ctx, tx, priceTableUpdates)
 }
 
+func (tx *MainDatabaseTx) RemoveContractSet(ctx context.Context, contractSet string) error {
+	return ssql.RemoveContractSet(ctx, tx, contractSet)
+}
+
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
@@ -611,6 +615,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		return fmt.Errorf("%w: prefix %v", api.ErrObjectNotFound, prefixOld)
 	}
 	return nil
+}
+
+func (tx *MainDatabaseTx) RenewedContract(ctx context.Context, renwedFrom types.FileContractID) (api.ContractMetadata, error) {
+	return ssql.RenewedContract(ctx, tx, renwedFrom)
 }
 
 func (tx *MainDatabaseTx) ResetConsensusSubscription(ctx context.Context) (types.ChainIndex, error) {
