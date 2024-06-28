@@ -27,6 +27,10 @@ var (
 	// be scanned since it is on a private network.
 	ErrHostOnPrivateNetwork = errors.New("host is on a private network")
 
+	// ErrHostTooManyAddresses is returned by the worker API when a host has
+	// more than two addresses of the same type.
+	ErrHostTooManyAddresses = errors.New("host has more than two addresses, or two of the same type")
+
 	// ErrMultiRangeNotSupported is returned by the worker API when a request
 	// tries to download multiple ranges at once.
 	ErrMultiRangeNotSupported = errors.New("multipart ranges are not supported")
@@ -133,6 +137,7 @@ type (
 		ExpectedNewStorage uint64               `json:"expectedNewStorage"`
 		HostAddress        types.Address        `json:"hostAddress"`
 		HostKey            types.PublicKey      `json:"hostKey"`
+		MaxFundAmount      types.Currency       `json:"maxFundAmount"`
 		MinNewCollateral   types.Currency       `json:"minNewCollateral"`
 		SiamuxAddr         string               `json:"siamuxAddr"`
 		RenterAddress      types.Address        `json:"renterAddress"`
@@ -146,6 +151,7 @@ type (
 		ContractID     types.FileContractID   `json:"contractID"`
 		Contract       rhpv2.ContractRevision `json:"contract"`
 		ContractPrice  types.Currency         `json:"contractPrice"`
+		FundAmount     types.Currency         `json:"fundAmount"`
 		TransactionSet []types.Transaction    `json:"transactionSet"`
 	}
 

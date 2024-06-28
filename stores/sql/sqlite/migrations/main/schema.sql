@@ -12,7 +12,7 @@ CREATE INDEX `idx_archived_contracts_state` ON `archived_contracts`(`state`);
 CREATE INDEX `idx_archived_contracts_renewed_from` ON `archived_contracts`(`renewed_from`);
 
 -- dbHost
-CREATE TABLE `hosts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`public_key` blob NOT NULL UNIQUE,`settings` text,`price_table` text,`price_table_expiry` datetime,`total_scans` integer,`last_scan` integer,`last_scan_success` numeric,`second_to_last_scan_success` numeric,`scanned` numeric,`uptime` integer,`downtime` integer,`recent_downtime` integer,`recent_scan_failures` integer,`successful_interactions` real,`failed_interactions` real,`lost_sectors` integer,`last_announcement` datetime,`net_address` text);
+CREATE TABLE `hosts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`public_key` blob NOT NULL UNIQUE,`settings` text,`price_table` text,`price_table_expiry` datetime,`total_scans` integer,`last_scan` integer,`last_scan_success` numeric,`second_to_last_scan_success` numeric,`scanned` numeric,`uptime` integer,`downtime` integer,`recent_downtime` integer,`recent_scan_failures` integer,`successful_interactions` real,`failed_interactions` real,`lost_sectors` integer,`last_announcement` datetime,`net_address` text,`subnets` text NOT NULL DEFAULT '');
 CREATE INDEX `idx_hosts_recent_scan_failures` ON `hosts`(`recent_scan_failures`);
 CREATE INDEX `idx_hosts_recent_downtime` ON `hosts`(`recent_downtime`);
 CREATE INDEX `idx_hosts_scanned` ON `hosts`(`scanned`);
@@ -44,8 +44,13 @@ CREATE INDEX `idx_contract_set_contracts_db_contract_id` ON `contract_set_contra
 CREATE TABLE `buckets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`policy` text,`name` text NOT NULL UNIQUE);
 CREATE INDEX `idx_buckets_name` ON `buckets`(`name`);
 
+-- dbDirectory
+CREATE TABLE `directories` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_parent_id` integer,`name` text, CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories`(`id`));
+CREATE INDEX `idx_directories_parent_id` ON `directories`(`db_parent_id`);
+CREATE UNIQUE INDEX `idx_directories_name` ON `directories`(`name`);
+
 -- dbObject
-CREATE TABLE `objects` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_bucket_id` integer NOT NULL,`object_id` text,`key` blob,`health` real NOT NULL DEFAULT 1,`size` integer,`mime_type` text,`etag` text,CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`));
+CREATE TABLE `objects` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_bucket_id` integer NOT NULL, `db_directory_id` integer NOT NULL, `object_id` text,`key` blob,`health` real NOT NULL DEFAULT 1,`size` integer,`mime_type` text,`etag` text,CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`),CONSTRAINT `fk_objects_db_directories` FOREIGN KEY (`db_directory_id`) REFERENCES `directories`(`id`));
 CREATE INDEX `idx_objects_db_bucket_id` ON `objects`(`db_bucket_id`);
 CREATE INDEX `idx_objects_etag` ON `objects`(`etag`);
 CREATE INDEX `idx_objects_health` ON `objects`(`health`);
@@ -142,7 +147,7 @@ CREATE INDEX `idx_ephemeral_accounts_requires_sync` ON `ephemeral_accounts`(`req
 CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`identifier` text NOT NULL UNIQUE,`config` text,`current_period` integer DEFAULT 0);
 
 -- dbWebhook
-CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL);
+CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL,`headers` text DEFAULT ('{}'));
 CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`);
 
 -- dbObjectUserMetadata

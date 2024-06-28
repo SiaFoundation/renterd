@@ -1,7 +1,14 @@
 package api
 
 import (
+	"errors"
+
 	"go.sia.tech/core/types"
+)
+
+var (
+	ErrMarkerNotFound        = errors.New("marker not found")
+	ErrMaxFundAmountExceeded = errors.New("renewal exceeds max fund amount")
 )
 
 type (

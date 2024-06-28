@@ -52,6 +52,9 @@ var (
 	// errTransport is used to wrap rpc errors caused by the transport.
 	errTransport = errors.New("transport error")
 
+	// errDialTransport is returned when the worker could not dial the host.
+	errDialTransport = errors.New("could not dial transport")
+
 	// errBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
@@ -175,7 +178,7 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
 		if err != nil {
 			t.mu.Unlock()
-			return nil, fmt.Errorf("DialStream: could not dial transport: %w (%v)", err, time.Since(start))
+			return nil, fmt.Errorf("DialStream: %w: %w (%v)", errDialTransport, err, time.Since(start))
 		}
 		t.t = newTransport
 	}
@@ -258,7 +261,14 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 	p.mu.Unlock()
 
 	// Execute function.
-	err = fn(ctx, t)
+	err = func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic (withTransportV3): %v", r)
+			}
+		}()
+		return fn(ctx, t)
+	}()
 
 	// Decrement refcounter again and clean up pool.
 	p.mu.Lock()
@@ -623,7 +633,7 @@ type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, e
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
 func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ api.HostPriceTable, err error) {
-	defer wrapErr(&err, "PriceTable")
+	defer wrapErr(ctx, "PriceTable", &err)
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -660,7 +670,7 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 
 // RPCAccountBalance calls the AccountBalance RPC.
 func RPCAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
-	defer wrapErr(&err, "AccountBalance")
+	defer wrapErr(ctx, "AccountBalance", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.ZeroCurrency, err
@@ -685,7 +695,7 @@ func RPCAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.Paymen
 
 // RPCFundAccount calls the FundAccount RPC.
 func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (err error) {
-	defer wrapErr(&err, "FundAccount")
+	defer wrapErr(ctx, "FundAccount", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return err
@@ -712,7 +722,7 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 // fetching a pricetable using the fetched revision to pay for it. If
 // paymentFunc returns 'nil' as payment, the host is not paid.
 func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
-	defer wrapErr(&err, "LatestRevision")
+	defer wrapErr(ctx, "LatestRevision", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.FileContractRevision{}, err
@@ -738,7 +748,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
 func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
-	defer wrapErr(&err, "ReadSector")
+	defer wrapErr(ctx, "ReadSector", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.ZeroCurrency, types.ZeroCurrency, err
@@ -803,7 +813,7 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 }
 
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) (cost types.Currency, err error) {
-	defer wrapErr(&err, "AppendSector")
+	defer wrapErr(ctx, "AppendSector", &err)
 
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {
@@ -940,11 +950,12 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	return
 }
 
-func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transportV3, pt *rhpv3.HostPriceTable, rev types.FileContractRevision, renterKey types.PrivateKey, l *zap.SugaredLogger) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
-	defer wrapErr(&err, "RPCRenew")
+func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transportV3, pt *rhpv3.HostPriceTable, rev types.FileContractRevision, renterKey types.PrivateKey, l *zap.SugaredLogger) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
+	defer wrapErr(ctx, "RPCRenew", &err)
+
 	s, err := t.DialStream(ctx)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, fmt.Errorf("failed to dial stream: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to dial stream: %w", err)
 	}
 	defer s.Close()
 
@@ -954,7 +965,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		ptUID = pt.UID
 	}
 	if err = s.WriteRequest(rhpv3.RPCRenewContractID, &ptUID); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to send ptUID: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to send ptUID: %w", err)
 	}
 
 	// If we didn't have a valid pricetable, read the temporary one from the
@@ -962,28 +973,28 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	if ptUID == (rhpv3.SettingsID{}) {
 		var ptResp rhpv3.RPCUpdatePriceTableResponse
 		if err = s.ReadResponse(&ptResp, defaultRPCResponseMaxSize); err != nil {
-			return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to read RPCUpdatePriceTableResponse: %w", err)
+			return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to read RPCUpdatePriceTableResponse: %w", err)
 		}
 		pt = new(rhpv3.HostPriceTable)
 		if err = json.Unmarshal(ptResp.PriceTableJSON, pt); err != nil {
-			return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to unmarshal price table: %w", err)
+			return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to unmarshal price table: %w", err)
 		}
 	}
 
 	// Perform gouging checks.
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to get gouging checker: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to get gouging checker: %w", err)
 	}
 	if breakdown := gc.Check(nil, pt); breakdown.Gouging() {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("host gouging during renew: %v", breakdown)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("host gouging during renew: %v", breakdown)
 	}
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.MinNewCollateral, *pt, rrr.EndHeight, rrr.WindowSize, rrr.ExpectedNewStorage)
+	wprr, err := bus.WalletPrepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, *pt, rrr.EndHeight, rrr.WindowSize, rrr.ExpectedNewStorage)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to prepare renew: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to prepare renew: %w", err)
 	}
 
 	// Starting from here, we need to make sure to release the txn on error.
@@ -1006,13 +1017,13 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		FinalRevisionSignature: finalRevisionSignature,
 	}
 	if err = s.WriteResponse(&req); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to send RPCRenewContractRequest: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to send RPCRenewContractRequest: %w", err)
 	}
 
 	// Incorporate the host's additions.
 	var hostAdditions rhpv3.RPCRenewContractHostAdditions
 	if err = s.ReadResponse(&hostAdditions, defaultRPCResponseMaxSize); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to read RPCRenewContractHostAdditions: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to read RPCRenewContractHostAdditions: %w", err)
 	}
 	parents = append(parents, hostAdditions.Parents...)
 	txn.SiacoinInputs = append(txn.SiacoinInputs, hostAdditions.SiacoinInputs...)
@@ -1044,7 +1055,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		Signatures:       []uint64{0, 1},
 	}
 	if err := bus.WalletSign(ctx, &txn, wprr.ToSign, cf); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to sign transaction: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
 	// Create a new no-op revision and sign it.
@@ -1068,13 +1079,13 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 		RevisionSignature:     renterNoOpRevisionSignature,
 	}
 	if err = s.WriteResponse(&rs); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to send RPCRenewSignatures: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to send RPCRenewSignatures: %w", err)
 	}
 
 	// Receive the host's signatures.
 	var hostSigs rhpv3.RPCRenewSignatures
 	if err = s.ReadResponse(&hostSigs, defaultRPCResponseMaxSize); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, fmt.Errorf("failed to read RPCRenewSignatures: %w", err)
+		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to read RPCRenewSignatures: %w", err)
 	}
 	txn.Signatures = append(txn.Signatures, hostSigs.TransactionSignatures...)
 
@@ -1085,7 +1096,7 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	return rhpv2.ContractRevision{
 		Revision:   noOpRevision,
 		Signatures: [2]types.TransactionSignature{renterNoOpRevisionSignature, hostSigs.RevisionSignature},
-	}, txnSet, pt.ContractPrice, nil
+	}, txnSet, pt.ContractPrice, wprr.FundAmount, nil
 }
 
 // initialRevision returns the first revision of a file contract formation

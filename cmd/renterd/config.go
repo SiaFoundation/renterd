@@ -12,8 +12,8 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/config"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
 )
 
@@ -102,6 +102,15 @@ func stdoutError(msg string) {
 		fmt.Println(wrapANSI("\033[31m", msg, "\033[0m"))
 	} else {
 		fmt.Println(msg)
+	}
+}
+
+func setInputValue(context string, value *string) {
+	if *value != "" {
+		context = fmt.Sprintf("%s (default: %q)", context, *value)
+	}
+	if input := readInput(context); input != "" {
+		*value = input
 	}
 }
 
@@ -195,20 +204,23 @@ func setSeedPhrase() {
 // setAPIPassword prompts the user to enter an API password if one is not
 // already set via environment variable or config file.
 func setAPIPassword() {
+	// return early if the password is already set
+	if len(cfg.HTTP.Password) >= 4 {
+		return
+	}
+
 	// retry until a valid API password is entered
-	for {
+	for len(cfg.HTTP.Password) < 4 {
 		fmt.Println("Please choose a password for the renterd admin UI.")
 		fmt.Println("This password will be required to access the admin UI in your web browser.")
 		fmt.Println("(The password must be at least 4 characters.)")
 
 		cfg.HTTP.Password = readPasswordInput("Enter password")
-		if len(cfg.HTTP.Password) >= 4 {
-			break
+		if len(cfg.HTTP.Password) < 4 {
+			// invalid password, retry
+			fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
+			fmt.Println("")
 		}
-
-		// invalid password, retry
-		fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
-		fmt.Println("")
 	}
 }
 
@@ -237,8 +249,8 @@ func setAdvancedConfig() {
 	// database
 	fmt.Println("")
 	fmt.Println("The database is used to store the renter's metadata.")
-	fmt.Println("The embedded SQLite database is recommended for small (< 50TB), single-user setups. Choose this for the easiest setup.")
-	fmt.Println("MySQL database is recommended for larger (> 50TB) or multi-user setups. MySQL requires a separate MySQL server to connect to.")
+	fmt.Println("The embedded SQLite database requires no additional configuration and is ideal for testing or demo purposes.")
+	fmt.Println("For production usage, we recommend MySQL, which requires a separate MySQL server.")
 	setStoreConfig()
 }
 
@@ -258,15 +270,10 @@ func setStoreConfig() {
 
 		cfg.Database.MySQL.User = readInput("MySQL username")
 		cfg.Database.MySQL.Password = readPasswordInput("MySQL password")
-		objectDB := readInput("Object database name (default: renterd)")
-		if objectDB != "" {
-			cfg.Database.MySQL.Database = objectDB
-		}
-		metricsDB := readInput("Metrics database name (default: renterd_metrics)")
-		if metricsDB != "" {
-			cfg.Database.MySQL.MetricsDatabase = metricsDB
-		}
+		setInputValue("Object database name", &cfg.Database.MySQL.Database)
+		setInputValue("Metrics database name", &cfg.Database.MySQL.MetricsDatabase)
 	default:
+		cfg.Database.MySQL = config.MySQL{} // omit defaults
 		return
 	}
 }
@@ -336,60 +343,4 @@ func setS3Config() {
 	}
 
 	cfg.S3.KeypairsV4[accessKey] = secretKey
-}
-
-func cmdBuildConfig() {
-	if _, err := os.Stat("renterd.yml"); err == nil {
-		if !promptYesNo("renterd.yml already exists. Would you like to overwrite it?") {
-			return
-		}
-	}
-
-	fmt.Println("")
-	if cfg.Seed != "" {
-		fmt.Println(wrapANSI("\033[33m", "A wallet seed phrase is already set.", "\033[0m"))
-		fmt.Println("If you change your wallet seed phrase, your renter will not be able to access Siacoin associated with this wallet.")
-		fmt.Println("Ensure that you have backed up your wallet seed phrase before continuing.")
-		if promptYesNo("Would you like to change your wallet seed phrase?") {
-			setSeedPhrase()
-		}
-	} else {
-		setSeedPhrase()
-	}
-
-	fmt.Println("")
-	if cfg.HTTP.Password != "" {
-		fmt.Println(wrapANSI("\033[33m", "An admin password is already set.", "\033[0m"))
-		fmt.Println("If you change your admin password, you will need to update any scripts or applications that use the admin API.")
-		if promptYesNo("Would you like to change your admin password?") {
-			setAPIPassword()
-		}
-	} else {
-		setAPIPassword()
-	}
-
-	fmt.Println("")
-	setS3Config()
-
-	fmt.Println("")
-	setAdvancedConfig()
-
-	// write the config file
-	configPath := "renterd.yml"
-	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
-		configPath = str
-	}
-
-	f, err := os.Create(configPath)
-	if err != nil {
-		stdoutFatalError("Failed to create config file: " + err.Error())
-		return
-	}
-	defer f.Close()
-
-	enc := yaml.NewEncoder(f)
-	if err := enc.Encode(cfg); err != nil {
-		stdoutFatalError("Failed to encode config file: " + err.Error())
-		return
-	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"time"
 )
 
@@ -80,7 +81,13 @@ type (
 		Database DatabaseLog `yaml:"database,omitempty"`
 	}
 
-	// MySQL contains the configuration for an optional MySQL database.
+	// SQLite contains the configuration for a SQLite database.
+	SQLite struct {
+		Database        string `yaml:"database,omitempty"`
+		MetricsDatabase string `yaml:"metricsDatabase,omitempty"`
+	}
+
+	// MySQL contains the configuration for a MySQL database.
 	MySQL struct {
 		URI             string `yaml:"uri,omitempty"`
 		User            string `yaml:"user,omitempty"`
@@ -98,8 +105,9 @@ type (
 		Address           string            `yaml:"address,omitempty"`
 		DisableAuth       bool              `yaml:"disableAuth,omitempty"`
 		Enabled           bool              `yaml:"enabled,omitempty"`
-		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"`
+		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"` // deprecated. included for compatibility.
 		HostBucketEnabled bool              `yaml:"hostBucketEnabled,omitempty"`
+		HostBucketBases   []string          `yaml:"hostBucketBases,omitempty"`
 	}
 
 	// Worker contains the configuration for a worker.
@@ -117,6 +125,7 @@ type (
 		UploadMaxMemory               uint64         `yaml:"uploadMaxMemory,omitempty"`
 		UploadMaxOverdrive            uint64         `yaml:"uploadMaxOverdrive,omitempty"`
 		AllowUnauthenticatedDownloads bool           `yaml:"allowUnauthenticatedDownloads,omitempty"`
+		ExternalAddress               string         `yaml:"externalAddress,omitempty"`
 	}
 
 	// Autopilot contains the configuration for an autopilot.
@@ -133,3 +142,13 @@ type (
 		MigratorParallelSlabsPerWorker uint64        `yaml:"migratorParallelSlabsPerWorker,omitempty"`
 	}
 )
+
+func MySQLConfigFromEnv() MySQL {
+	return MySQL{
+		URI:             os.Getenv("RENTERD_DB_URI"),
+		User:            os.Getenv("RENTERD_DB_USER"),
+		Password:        os.Getenv("RENTERD_DB_PASSWORD"),
+		Database:        os.Getenv("RENTERD_DB_NAME"),
+		MetricsDatabase: os.Getenv("RENTERD_DB_METRICS_NAME"),
+	}
+}

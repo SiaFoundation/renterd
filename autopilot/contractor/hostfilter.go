@@ -102,8 +102,8 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
-	contract, s, pt := ci.contract, ci.settings, ci.priceTable
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, inSet bool, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
+	contract, s, pt := ci.contract, ci.host.Settings, ci.host.PriceTable.HostPriceTable
 
 	usable = true
 	if bh > contract.EndHeight() {
@@ -121,14 +121,14 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.Redundancy
 	} else {
 		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
-			usable = false
-			recoverable = true
+			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
+			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			usable = usable && c.shouldForgiveFailedRefresh(contract.ID)
+			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
 			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
@@ -144,7 +144,7 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.Redundancy
 
 	// IP check should be last since it modifies the filter
 	shouldFilter := !cfg.Hosts.AllowRedundantIPs && (usable || recoverable)
-	if shouldFilter && f.IsRedundantIP(contract.HostIP, contract.HostKey) {
+	if shouldFilter && f.HasRedundantIP(ci.host) {
 		reasons = append(reasons, api.ErrUsabilityHostRedundantIP.Error())
 		usable = false
 		recoverable = false // do not use in the contract set, but keep it around for downloads

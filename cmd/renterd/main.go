@@ -28,16 +28,13 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/stores"
+	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"golang.org/x/sys/cpu"
-	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
-	"gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 const (
@@ -61,10 +58,17 @@ There are 3 ways to configure renterd (sorted from lowest to highest precedence)
   - CLI flags
   - Environment variables
 
+Usage:
+`
+	// usageFooter is the footer for the CLI usage text.
+	usageFooter = `
+There are 3 commands:
+  - version: prints the network as well as build information
+  - config: builds a YAML config file through a series of prompts
+  - seed: generates a new seed and prints the recovery phrase
+
 See the documentation (https://docs.sia.tech/) for more information and examples
 on how to configure and use renterd.
-
-Usage:
 `
 )
 
@@ -80,8 +84,8 @@ var (
 		ShutdownTimeout: 5 * time.Minute,
 		Database: config.Database{
 			MySQL: config.MySQL{
-				Database:        "renterd",
 				User:            "renterd",
+				Database:        "renterd",
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
@@ -148,20 +152,6 @@ var (
 	}
 	disableStdin bool
 )
-
-func mustLoadAPIPassword() {
-	if cfg.HTTP.Password != "" {
-		return
-	}
-
-	fmt.Print("Enter API password: ")
-	pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
-	if err != nil {
-		log.Fatal(err)
-	}
-	cfg.HTTP.Password = string(pw)
-}
 
 func mustParseWorkers(workers, password string) {
 	if workers == "" {
@@ -282,6 +272,7 @@ func main() {
 	// worker
 	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "Allows hosts with private IPs")
 	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
+	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
 	flag.StringVar(&cfg.Worker.ID, "worker.id", cfg.Worker.ID, "Unique ID for worker (overrides with RENTERD_WORKER_ID)")
 	flag.DurationVar(&cfg.Worker.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", cfg.Worker.DownloadOverdriveTimeout, "Timeout for overdriving slab downloads")
@@ -290,6 +281,7 @@ func main() {
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
 	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
+	flag.StringVar(&cfg.Worker.ExternalAddress, "worker.externalAddress", cfg.Worker.ExternalAddress, "Address of the worker on the network, only necessary when the bus is remote (overrides with RENTERD_WORKER_EXTERNAL_ADDR)")
 
 	// autopilot
 	flag.DurationVar(&cfg.Autopilot.AccountsRefillInterval, "autopilot.accountRefillInterval", cfg.Autopilot.AccountsRefillInterval, "Interval for refilling workers' account balances")
@@ -304,35 +296,28 @@ func main() {
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "Timeout for node shutdown")
 
 	// s3
+	var hostBasesStr string
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")
 	flag.BoolVar(&cfg.S3.DisableAuth, "s3.disableAuth", cfg.S3.DisableAuth, "Disables authentication for S3 API (overrides with RENTERD_S3_DISABLE_AUTH)")
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
-	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
+	flag.StringVar(&hostBasesStr, "s3.hostBases", "", "Enables bucket rewriting in the router for specific hosts provided via comma-separated list (overrides with RENTERD_S3_HOST_BUCKET_BASES)")
+	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router for all hosts (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
 	// custom usage
 	flag.Usage = func() {
 		log.Print(usageHeader)
 		flag.PrintDefaults()
+		log.Print(usageFooter)
 	}
 
 	flag.Parse()
 
+	// NOTE: update the usage header when adding new commands
 	if flag.Arg(0) == "version" {
-		fmt.Println("renterd", build.Version())
-		fmt.Println("Network", build.NetworkName())
-		log.Println("Commit:", build.Commit())
-		log.Println("Build Date:", build.BuildTime())
+		cmdVersion()
 		return
 	} else if flag.Arg(0) == "seed" {
-		var seed [32]byte
-		phrase := wallet.NewSeedPhrase()
-		if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
-			println(err.Error())
-			os.Exit(1)
-		}
-		key := wallet.KeyFromSeed(&seed, 0)
-		fmt.Println("Recovery Phrase:", phrase)
-		fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
+		cmdSeed()
 		return
 	} else if flag.Arg(0) == "config" {
 		cmdBuildConfig()
@@ -343,8 +328,6 @@ func main() {
 	}
 
 	// Overwrite flags from environment if set.
-	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
-
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
 	parseEnvVar("RENTERD_BUS_API_PASSWORD", &cfg.Bus.RemotePassword)
 	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &cfg.Bus.GatewayAddr)
@@ -360,14 +343,12 @@ func main() {
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
-	var depWorkerRemotePassStr string
-	var depWorkerRemoteAddrsStr string
-	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &depWorkerRemoteAddrsStr)
-	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &depWorkerRemotePassStr)
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
+	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
 	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
+	parseEnvVar("RENTERD_WORKER_EXTERNAL_ADDR", &cfg.Worker.ExternalAddress)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
@@ -377,7 +358,9 @@ func main() {
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
 	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
+	parseEnvVar("RENTERD_S3_HOST_BUCKET_BASES", &cfg.S3.HostBucketBases)
 
+	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
 	parseEnvVar("RENTERD_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_LOG_FILE_ENABLED", &cfg.Log.File.Enabled)
 	parseEnvVar("RENTERD_LOG_FILE_FORMAT", &cfg.Log.File.Format)
@@ -390,17 +373,38 @@ func main() {
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
 
+	// parse remotes
+	var workerRemotePassStr string
+	var workerRemoteAddrsStr string
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
+	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
+		mustParseWorkers(workerRemoteAddrsStr, workerRemotePassStr)
+	}
+
+	// disable worker if remotes are set
+	if len(cfg.Worker.Remotes) > 0 {
+		cfg.Worker.Enabled = false
+	}
+
+	// combine host bucket bases
+	for _, base := range strings.Split(hostBasesStr, ",") {
+		if trimmed := strings.TrimSpace(base); trimmed != "" {
+			cfg.S3.HostBucketBases = append(cfg.S3.HostBucketBases, base)
+		}
+	}
+
 	// check that the API password is set
 	if cfg.HTTP.Password == "" {
 		if disableStdin {
 			stdoutFatalError("API password must be set via environment variable or config file when --env flag is set")
 			return
 		}
-		setAPIPassword()
 	}
+	setAPIPassword()
 
 	// check that the seed is set
-	if cfg.Seed == "" {
+	if cfg.Seed == "" && (cfg.Worker.Enabled || cfg.Bus.RemoteAddr == "") { // only worker & bus require a seed
 		if disableStdin {
 			stdoutFatalError("Seed must be set via environment variable or config file when --env flag is set")
 			return
@@ -408,12 +412,17 @@ func main() {
 		setSeedPhrase()
 	}
 
-	var rawSeed [32]byte
-	if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
-		log.Fatal("failed to load wallet", zap.Error(err))
+	// generate private key from seed
+	var pk types.PrivateKey
+	if cfg.Seed != "" {
+		var rawSeed [32]byte
+		if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
+			log.Fatal("failed to load wallet", zap.Error(err))
+		}
+		pk = wallet.KeyFromSeed(&rawSeed, 0)
 	}
-	seed := wallet.KeyFromSeed(&rawSeed, 0)
 
+	// parse S3 auth keys
 	if cfg.S3.Enabled {
 		var keyPairsV4 string
 		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
@@ -426,58 +435,7 @@ func main() {
 		}
 	}
 
-	mustLoadAPIPassword()
-	if depWorkerRemoteAddrsStr != "" && depWorkerRemotePassStr != "" {
-		mustParseWorkers(depWorkerRemoteAddrsStr, depWorkerRemotePassStr)
-	}
-
-	network, _ := build.Network()
-	busCfg := node.BusConfig{
-		Bus:                 cfg.Bus,
-		Network:             network,
-		SlabPruningInterval: time.Hour,
-	}
-	// Init db dialector
-	if cfg.Database.MySQL.URI != "" {
-		busCfg.DBDialector = stores.NewMySQLConnection(
-			cfg.Database.MySQL.User,
-			cfg.Database.MySQL.Password,
-			cfg.Database.MySQL.URI,
-			cfg.Database.MySQL.Database,
-		)
-		busCfg.DBMetricsDialector = stores.NewMySQLConnection(
-			cfg.Database.MySQL.User,
-			cfg.Database.MySQL.Password,
-			cfg.Database.MySQL.URI,
-			cfg.Database.MySQL.MetricsDatabase,
-		)
-	}
-
-	// Log level for db
-	lvlStr := cfg.Log.Level
-	if cfg.Log.Database.Level != "" {
-		lvlStr = cfg.Log.Database.Level
-	}
-	var level logger.LogLevel
-	switch strings.ToLower(lvlStr) {
-	case "":
-		level = logger.Warn // default to 'warn' if not set
-	case "error":
-		level = logger.Error
-	case "warn":
-		level = logger.Warn
-	case "info":
-		level = logger.Info
-	case "debug":
-		level = logger.Info
-	default:
-		log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Log.Level)
-	}
-	if !cfg.Log.Database.Enabled {
-		level = logger.Silent
-	}
-
-	// Create logger.
+	// create logger
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info" // default to 'info' if not set
 	}
@@ -492,30 +450,32 @@ func main() {
 		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
 	}
 
-	// configure database logger
-	dbLogCfg := cfg.Log.Database
-	if cfg.Database.Log != (config.DatabaseLog{}) {
-		dbLogCfg = cfg.Database.Log
-	}
-	busCfg.DBLogger = zapgorm2.Logger{
-		ZapLogger:                 logger.Named("SQL"),
-		LogLevel:                  level,
-		SlowThreshold:             dbLogCfg.SlowThreshold,
-		SkipCallerLookup:          false,
-		IgnoreRecordNotFoundError: dbLogCfg.IgnoreRecordNotFoundError,
-		Context:                   nil,
+	if cfg.Log.Database.Level == "" {
+		cfg.Log.Database.Level = cfg.Log.Level
 	}
 
-	type shutdownFn struct {
+	network, _ := build.Network()
+	busCfg := node.BusConfig{
+		Bus:         cfg.Bus,
+		Database:    cfg.Database,
+		DatabaseLog: cfg.Log.Database,
+		Logger:      logger,
+		Network:     network,
+	}
+
+	type shutdownFnEntry struct {
 		name string
 		fn   func(context.Context) error
 	}
-	var shutdownFns []shutdownFn
+	var shutdownFns []shutdownFnEntry
 
-	if cfg.Bus.RemoteAddr != "" && len(cfg.Worker.Remotes) != 0 && !cfg.Autopilot.Enabled {
+	if cfg.Bus.RemoteAddr != "" && !cfg.Worker.Enabled && !cfg.Autopilot.Enabled {
 		logger.Fatal("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
-	if len(cfg.Worker.Remotes) == 0 && !cfg.Worker.Enabled && cfg.Autopilot.Enabled {
+	if cfg.Worker.Enabled && cfg.Bus.RemoteAddr != "" && cfg.Worker.ExternalAddress == "" {
+		logger.Fatal("can't enable the worker using a remote bus, without configuring the worker's external address")
+	}
+	if cfg.Autopilot.Enabled && !cfg.Worker.Enabled && len(cfg.Worker.Remotes) == 0 {
 		logger.Fatal("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
 
@@ -530,13 +490,13 @@ func main() {
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	auth := jape.BasicAuth(cfg.HTTP.Password)
-	mux := &treeMux{
-		sub: make(map[string]treeMux),
+	mux := &utils.TreeMux{
+		Sub: make(map[string]utils.TreeMux),
 	}
 
 	// Create the webserver.
 	srv := &http.Server{Handler: mux}
-	shutdownFns = append(shutdownFns, shutdownFn{
+	shutdownFns = append(shutdownFns, shutdownFnEntry{
 		name: "HTTP Server",
 		fn:   srv.Shutdown,
 	})
@@ -546,22 +506,24 @@ func main() {
 	}
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
+	setupBusFn := node.NoopFn
 	if cfg.Bus.RemoteAddr == "" {
-		b, fn, err := node.NewBus(busCfg, cfg.Directory, seed, logger)
+		b, setupFn, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, pk, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		shutdownFns = append(shutdownFns, shutdownFn{
+		setupBusFn = setupFn
+		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
-			fn:   fn,
+			fn:   shutdownFn,
 		})
 
-		mux.sub["/api/bus"] = treeMux{h: auth(b)}
+		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b)}
 		busAddr = cfg.HTTP.Address + "/api/bus"
 		busPassword = cfg.HTTP.Password
 
 		// only serve the UI if a bus is created
-		mux.h = renterd.Handler()
+		mux.Handler = renterd.Handler()
 	} else {
 		logger.Info("connecting to remote bus at " + busAddr)
 	}
@@ -570,22 +532,34 @@ func main() {
 	var s3Srv *http.Server
 	var s3Listener net.Listener
 	var workers []autopilot.Worker
+	setupWorkerFn := node.NoopFn
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			w, s3Handler, fn, err := node.NewWorker(cfg.Worker, s3.Opts{
+			workerAddr := cfg.HTTP.Address + "/api/worker"
+			var shutdownFn node.ShutdownFn
+			w, s3Handler, setupFn, shutdownFn, err := node.NewWorker(cfg.Worker, s3.Opts{
 				AuthDisabled:      cfg.S3.DisableAuth,
+				HostBucketBases:   cfg.S3.HostBucketBases,
 				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, seed, logger)
+			}, bc, pk, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			shutdownFns = append(shutdownFns, shutdownFn{
+			var workerExternAddr string
+			if cfg.Bus.RemoteAddr != "" {
+				workerExternAddr = cfg.Worker.ExternalAddress
+			} else {
+				workerExternAddr = workerAddr
+			}
+			setupWorkerFn = func(ctx context.Context) error {
+				return setupFn(ctx, workerExternAddr, cfg.HTTP.Password)
+			}
+			shutdownFns = append(shutdownFns, shutdownFnEntry{
 				name: "Worker",
-				fn:   fn,
+				fn:   shutdownFn,
 			})
 
-			mux.sub["/api/worker"] = treeMux{h: workerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
-			workerAddr := cfg.HTTP.Address + "/api/worker"
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: iworker.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
@@ -598,7 +572,7 @@ func main() {
 				if err != nil {
 					logger.Fatal("failed to create listener: " + err.Error())
 				}
-				shutdownFns = append(shutdownFns, shutdownFn{
+				shutdownFns = append(shutdownFns, shutdownFnEntry{
 					name: "S3",
 					fn:   s3Srv.Shutdown,
 				})
@@ -624,17 +598,27 @@ func main() {
 		}
 
 		// NOTE: the autopilot shutdown function needs to be called first.
-		shutdownFns = append(shutdownFns, shutdownFn{
+		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Autopilot",
 			fn:   fn,
 		})
 
 		go func() { autopilotErr <- runFn() }()
-		mux.sub["/api/autopilot"] = treeMux{h: auth(ap)}
+		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap)}
 	}
 
 	// Start server.
 	go srv.Serve(l)
+
+	// Finish bus setup.
+	if err := setupBusFn(context.Background()); err != nil {
+		logger.Fatal("failed to setup bus: " + err.Error())
+	}
+
+	// Finish worker setup.
+	if err := setupWorkerFn(context.Background()); err != nil {
+		logger.Fatal("failed to setup worker: " + err.Error())
+	}
 
 	// Set initial S3 keys.
 	if cfg.S3.Enabled && !cfg.S3.DisableAuth {
@@ -795,16 +779,4 @@ func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err e
 	}
 
 	return nil
-}
-
-func workerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
-	return func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
-				h.ServeHTTP(w, req)
-			} else {
-				jape.BasicAuth(password)(h).ServeHTTP(w, req)
-			}
-		})
-	}
 }

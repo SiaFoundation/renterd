@@ -103,6 +103,15 @@ func TestHostScore(t *testing.T) {
 	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
+
+	// assert zero allowance does not panic
+	cfg.Contracts.Allowance = types.ZeroCurrency
+	_ = hostScore(cfg, h1, redundancy)
+
+	// assert missing amount does not panic
+	cfg.Contracts.Allowance = types.Siacoins(1000) // reset
+	cfg.Contracts.Amount = 0
+	_ = hostScore(cfg, h1, redundancy)
 }
 
 func TestPriceAdjustmentScore(t *testing.T) {
@@ -230,11 +239,4 @@ func TestCollateralScore(t *testing.T) {
 	if s := round(score(cutoffCollateral-1, math.MaxInt64)); s != 0 {
 		t.Errorf("expected %v but got %v", 0, s)
 	}
-}
-
-func absDiffInt(x, y int) int {
-	if x < y {
-		return y - x
-	}
-	return x - y
 }

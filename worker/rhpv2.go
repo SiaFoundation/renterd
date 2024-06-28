@@ -14,6 +14,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/crypto"
 	"lukechampine.com/frand"
@@ -22,6 +23,11 @@ import (
 const (
 	// minMessageSize is the minimum size of an RPC message
 	minMessageSize = 4096
+
+	// maxMerkleProofResponseSize caps the response message size to a generous
+	// value of 100 MB worth of roots. This is approximately double the size of
+	// what we have observed on the live network for 5TB+ contracts to be safe.
+	maxMerkleProofResponseSize = 100 * 1 << 20 // 100 MB
 )
 
 var (
@@ -85,9 +91,12 @@ func (hes HostErrorSet) Error() string {
 	return "\n" + strings.Join(strs, "\n")
 }
 
-func wrapErr(err *error, fnName string) {
+func wrapErr(ctx context.Context, fnName string, err *error) {
 	if *err != nil {
 		*err = fmt.Errorf("%s: %w", fnName, *err)
+		if cause := context.Cause(ctx); cause != nil && !utils.IsErr(*err, cause) {
+			*err = fmt.Errorf("%w; %w", cause, *err)
+		}
 	}
 }
 
@@ -133,7 +142,7 @@ func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral typ
 
 // RPCSettings calls the Settings RPC, returning the host's reported settings.
 func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
-	defer wrapErr(&err, "Settings")
+	defer wrapErr(ctx, "Settings", &err)
 
 	var resp rhpv2.RPCSettingsResponse
 	if err := t.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
@@ -147,7 +156,7 @@ func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSe
 
 // RPCFormContract forms a contract with a host.
 func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
-	defer wrapErr(&err, "FormContract")
+	defer wrapErr(ctx, "FormContract", &err)
 
 	// strip our signatures before sending
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
@@ -424,17 +433,15 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			}
 			cost, _ = rpcCost.Total()
 
-			// calculate the response size
-			proofSize := rhpv2.DiffProofSize(actions, numSectors)
-			responseSize := (proofSize + 1) * crypto.HashSize
-
-			// TODO: remove once the host network is updated
-			if build.VersionCmp(settings.Version, "1.6.0") < 0 {
-				if responseSize < minMessageSize {
-					responseSize = minMessageSize
-				}
-				cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
-				cost = cost.Mul64(2) // generous leeway
+			// NOTE: we currently overpay hosts by quite a large margin (~10x)
+			// to ensure we cover both 1.5.9 and pre v0.2.1 hosts.
+			//
+			// TODO: remove once host network is updated, or once we include the
+			// host release in the scoring and stop using old hosts
+			proofSize := (128 + uint64(len(actions))) * crypto.HashSize
+			compatCost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
+			if cost.Cmp(compatCost) < 0 {
+				cost = compatCost
 			}
 
 			if rev.RenterFunds().Cmp(cost) < 0 {
@@ -470,7 +477,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			var merkleResp rhpv2.RPCWriteMerkleProof
 			if err := t.WriteRequest(rhpv2.RPCWriteID, wReq); err != nil {
 				return err
-			} else if err := t.ReadResponse(&merkleResp, minMessageSize+responseSize); err != nil {
+			} else if err := t.ReadResponse(&merkleResp, maxMerkleProofResponseSize); err != nil {
 				err := fmt.Errorf("couldn't read Merkle proof response, err: %v", err)
 				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				return err
@@ -556,12 +563,11 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		// calculate the cost
 		cost, _ := settings.RPCSectorRootsCost(offset, n).Total()
 
-		// calculate the response size
-		proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
-		responseSize := (proofSize + n) * crypto.HashSize
-
 		// TODO: remove once host network is updated
 		if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+			// calculate the response size
+			proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
+			responseSize := (proofSize + n) * crypto.HashSize
 			if responseSize < minMessageSize {
 				responseSize = minMessageSize
 			}
@@ -602,7 +608,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		var rootsResp rhpv2.RPCSectorRootsResponse
 		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
 			return nil, err
-		} else if err := t.ReadResponse(&rootsResp, minMessageSize+responseSize); err != nil {
+		} else if err := t.ReadResponse(&rootsResp, maxMerkleProofResponseSize); err != nil {
 			return nil, fmt.Errorf("couldn't read sector roots response: %w", err)
 		}
 
@@ -654,6 +660,12 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 		return err
 	}
 	defer t.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic (withTransportV2): %v", r)
+		}
+	}()
 	return fn(t)
 }
 

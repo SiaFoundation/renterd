@@ -24,6 +24,7 @@ type (
 	}
 
 	permissions struct {
+		Authenticated           bool
 		ListBuckets             bool
 		ListBucket              bool
 		CreateBucket            bool
@@ -52,6 +53,7 @@ var (
 	// rootPerms are used for requests that were successfully authenticated
 	// using v4 signatures.
 	rootPerms = permissions{
+		Authenticated:           true,
 		ListBuckets:             true,
 		ListBucket:              true,
 		CreateBucket:            true,
@@ -123,31 +125,54 @@ func (b *authenticatedBackend) reloadV4Keys(ctx context.Context) error {
 	return nil
 }
 
-func (b *authenticatedBackend) AuthenticationMiddleware(handler http.Handler) http.Handler {
+func (b *authenticatedBackend) AuthenticationMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
+		// start with no permissions
 		perms := noAccessPerms
-		if rq.Header.Get("Authorization") == "" {
-			// No auth header, we continue without permissions. Request might
-			// still succeed due to bucket policy.
-		} else if err := b.reloadV4Keys(rq.Context()); err != nil {
-			writeResponse(w, signature.APIError{
-				Code:           string(gofakes3.ErrInternal),
-				Description:    fmt.Sprintf("failed to reload v4 keys: %v", err),
-				HTTPStatusCode: http.StatusInternalServerError,
-			})
-			return
-		} else if result := signature.V4SignVerify(rq); result != signature.ErrNone {
-			// Authentication attempted but failed.
-			writeResponse(w, signature.GetAPIError(result))
-			return
-		} else {
-			// Authenticated request, treat as root user.
+
+		if rq.Header.Get("Authorization") != "" {
+			// auth header found, refresh keys
+			if err := b.reloadV4Keys(rq.Context()); err != nil {
+				writeResponse(w, signature.APIError{
+					Code:           string(gofakes3.ErrInternal),
+					Description:    fmt.Sprintf("failed to reload v4 keys: %v", err),
+					HTTPStatusCode: http.StatusInternalServerError,
+				})
+				return
+			}
+			// verify signature
+			if _, result := signature.V4SignVerify(rq); result != signature.ErrNone {
+				// authentication attempted but failed.
+				writeResponse(w, signature.GetAPIError(result))
+				return
+			}
+			// authenticated request successfully
 			perms = rootPerms
 		}
-		// Add permissions to context.
-		ctx := context.WithValue(rq.Context(), permissionKey, &perms)
-		handler.ServeHTTP(w, rq.WithContext(ctx))
+
+		// add permissions to context
+		h.ServeHTTP(w, rq.WithContext(context.WithValue(rq.Context(), permissionKey, &perms)))
 	})
+}
+
+func (b *authenticatedBackend) IsAuthenticated(w http.ResponseWriter, rq *http.Request, bucket string) bool {
+	// fetch permissions from context
+	perms := rq.Context().Value(permissionKey).(*permissions)
+
+	// if no authentication has happened so far and no bucket is specified, deny
+	// access
+	if !perms.Authenticated && bucket == "" {
+		writeResponse(w, signature.APIError{
+			Code:           string(gofakes3.ErrAccessDenied),
+			Description:    "no authentication provided",
+			HTTPStatusCode: http.StatusForbidden,
+		})
+		return false
+	}
+
+	// apply bucket-specific policies
+	b.applyBucketPolicy(rq.Context(), bucket, perms)
+	return true
 }
 
 func (b *authenticatedBackend) ListBuckets(ctx context.Context) ([]gofakes3.BucketInfo, error) {

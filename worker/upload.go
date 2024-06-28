@@ -30,10 +30,11 @@ const (
 )
 
 var (
-	errContractExpired     = errors.New("contract expired")
-	errNoCandidateUploader = errors.New("no candidate uploader found")
-	errNotEnoughContracts  = errors.New("not enough contracts to support requested redundancy")
-	errUploadInterrupted   = errors.New("upload was interrupted")
+	errContractExpired      = errors.New("contract expired")
+	errNoCandidateUploader  = errors.New("no candidate uploader found")
+	errNotEnoughContracts   = errors.New("not enough contracts to support requested redundancy")
+	errUploadInterrupted    = errors.New("upload was interrupted")
+	errSectorUploadFinished = errors.New("sector upload already finished")
 )
 
 type (
@@ -117,7 +118,7 @@ type (
 		root  types.Hash256
 
 		ctx    context.Context
-		cancel context.CancelFunc
+		cancel context.CancelCauseFunc
 
 		mu       sync.Mutex
 		uploaded object.Sector
@@ -415,7 +416,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// defer a function that finishes the upload
 	defer func() {
 		ctx, cancel := context.WithTimeout(mgr.shutdownCtx, time.Minute)
-		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil {
+		if err := mgr.os.FinishUpload(ctx, upload.id); err != nil && !errors.Is(err, context.Canceled) {
 			mgr.logger.Errorf("failed to mark upload %v as finished: %v", upload.id, err)
 		}
 		cancel()
@@ -750,7 +751,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 		wg.Add(1)
 		go func(idx int) {
 			// create the ctx
-			sCtx, sCancel := context.WithCancel(ctx)
+			sCtx, sCancel := context.WithCancelCause(ctx)
 
 			// create the sector
 			// NOTE: we are computing the sector root here and pass it all the
@@ -1087,7 +1088,7 @@ func (s *sectorUpload) finish(sector object.Sector) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.cancel()
+	s.cancel(errSectorUploadFinished)
 	s.uploaded = sector
 	s.data = nil
 }

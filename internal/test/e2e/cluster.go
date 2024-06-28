@@ -24,16 +24,17 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/utils"
+	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker/s3"
+	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
-	gormlogger "gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 const (
@@ -202,7 +203,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	defer cancel()
 
 	// Apply options.
-	dbName := opts.dbName
 	dir := t.TempDir()
 	if opts.dir != "" {
 		dir = opts.dir
@@ -241,35 +241,31 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
 	}
-
-	// default database logger
-	if busCfg.DBLogger == nil {
-		busCfg.DBLogger = zapgorm2.Logger{
-			ZapLogger:                 logger.Named("SQL"),
-			LogLevel:                  gormlogger.Warn,
-			SlowThreshold:             100 * time.Millisecond,
-			SkipCallerLookup:          false,
-			IgnoreRecordNotFoundError: true,
-			Context:                   nil,
-		}
+	if busCfg.Logger == nil {
+		busCfg.Logger = logger
+	}
+	if opts.dbName != "" {
+		busCfg.Database.MySQL.Database = opts.dbName
 	}
 
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
-	uri, user, password, _ := stores.DBConfigFromEnv()
-	if uri != "" {
-		tmpDB, err := gorm.Open(stores.NewMySQLConnection(user, password, uri, ""))
-		tt.OK(err)
-
-		if dbName == "" {
-			dbName = "db" + hex.EncodeToString(frand.Bytes(16))
+	if mysql := config.MySQLConfigFromEnv(); mysql.URI != "" {
+		// generate a random database name if none are set
+		if busCfg.Database.MySQL.Database == "" {
+			busCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
-		dbMetricsName := "db" + hex.EncodeToString(frand.Bytes(16))
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbName)).Error)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbMetricsName)).Error)
+		if busCfg.Database.MySQL.MetricsDatabase == "" {
+			busCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
+		}
 
-		busCfg.DBDialector = stores.NewMySQLConnection(user, password, uri, dbName)
-		busCfg.DBMetricsDialector = stores.NewMySQLConnection(user, password, uri, dbMetricsName)
+		tmpDB, err := gorm.Open(stores.NewMySQLConnection(mysql.User, mysql.Password, mysql.URI, ""))
+		tt.OK(err)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)).Error)
+		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)).Error)
+		tmpDBB, err := tmpDB.DB()
+		tt.OK(err)
+		tt.OK(tmpDBB.Close())
 	}
 
 	// Prepare individual dirs.
@@ -292,7 +288,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotListener, err := net.Listen("tcp", "127.0.0.1:0")
 	tt.OK(err)
 
-	busAddr := "http://" + busListener.Addr().String()
+	busAddr := fmt.Sprintf("http://%s/bus", busListener.Addr().String())
 	workerAddr := "http://" + workerListener.Addr().String()
 	s3Addr := s3Listener.Addr().String() // not fully qualified path
 	autopilotAddr := "http://" + autopilotListener.Addr().String()
@@ -317,25 +313,30 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busCfg.Miner = node.NewMiner(busClient)
 
 	// Create bus.
-	b, bStopFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bSetupFn, bShutdownFn, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
-	busServer := http.Server{
-		Handler: busAuth(b),
+	busServer := &http.Server{
+		Handler: utils.TreeMux{
+			Handler: renterd.Handler(), // ui
+			Sub: map[string]utils.TreeMux{
+				"/bus": {
+					Handler: busAuth(b),
+				},
+			},
+		},
 	}
 
 	var busShutdownFns []func(context.Context) error
 	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
-	busShutdownFns = append(busShutdownFns, bStopFn)
+	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
-	w, s3Handler, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
+	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
-
-	workerAuth := jape.BasicAuth(workerPassword)
 	workerServer := http.Server{
-		Handler: workerAuth(w),
+		Handler: iworker.Auth(workerPassword, false)(w),
 	}
 
 	var workerShutdownFns []func(context.Context) error
@@ -366,7 +367,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	cluster := &TestCluster{
 		apID:    apCfg.ID,
 		dir:     dir,
-		dbName:  dbName,
+		dbName:  busCfg.Database.MySQL.Database,
 		logger:  logger,
 		network: busCfg.Network,
 		miner:   busCfg.Miner,
@@ -414,6 +415,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}()
 	}
 
+	// Finish bus setup.
+	if err := bSetupFn(ctx); err != nil {
+		tt.Fatalf("failed to setup bus, err: %v", err)
+	}
+
+	// Finish worker setup.
+	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
+		tt.Fatalf("failed to setup worker, err: %v", err)
+	}
+
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
 	tt.OK(busClient.SetContractSet(ctx, test.ContractSet, []types.FileContractID{}))
@@ -428,8 +439,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Update the bus settings.
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, test.GougingSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, test.ContractSetSettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingPricePinning, test.PricePinSettings))
+	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
 		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
 	}))
@@ -466,7 +478,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
-		_ = cluster.WaitForAccounts()
+		cluster.WaitForAccounts()
+	}
+
+	// Ping the UI
+	resp, err := http.DefaultClient.Get(fmt.Sprintf("http://%v", busListener.Addr()))
+	tt.OK(err)
+	if resp.StatusCode != http.StatusOK {
+		tt.Fatalf("unexpected status code: %v", resp.StatusCode)
 	}
 
 	return cluster
@@ -565,7 +584,9 @@ func (c *TestCluster) MineBlocks(n int) {
 	if len(c.hosts) == 0 {
 		c.tt.OK(c.miner.Mine(wallet.Address, n))
 		c.Sync()
+		return
 	}
+
 	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
 	// hosts by too many blocks.
 	for mined := 0; mined < n; {
@@ -891,8 +912,15 @@ func testBusCfg() node.BusConfig {
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
-		Network:             testNetwork(),
-		SlabPruningInterval: time.Second,
+		Database: config.Database{
+			MySQL: config.MySQLConfigFromEnv(),
+		},
+		DatabaseLog: config.DatabaseLog{
+			Enabled:                   true,
+			IgnoreRecordNotFoundError: true,
+			SlowThreshold:             100 * time.Millisecond,
+		},
+		Network: testNetwork(),
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -32,8 +31,6 @@ type (
 	publicKey      types.PublicKey
 	hostSettings   rhpv2.HostSettings
 	hostPriceTable rhpv3.HostPriceTable
-	balance        big.Int
-	unsigned64     uint64 // used for storing large uint64 values in sqlite
 	secretKey      []byte
 	setting        string
 )
@@ -230,27 +227,6 @@ func (hs hostPriceTable) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 
-func (balance) GormDataType() string {
-	return "string"
-}
-
-// Scan scan value into balance, implements sql.Scanner interface.
-func (hs *balance) Scan(value interface{}) error {
-	var s string
-	switch value := value.(type) {
-	case string:
-		s = value
-	case []byte:
-		s = string(value)
-	default:
-		return fmt.Errorf("failed to unmarshal balance value: %v %t", value, value)
-	}
-	if _, success := (*big.Int)(hs).SetString(s, 10); !success {
-		return errors.New(fmt.Sprint("failed to scan balance value", value))
-	}
-	return nil
-}
-
 // SQLiteTimestampFormats were taken from github.com/mattn/go-sqlite3 and are
 // used when parsing a string to a date
 var SQLiteTimestampFormats = []string{
@@ -265,17 +241,12 @@ var SQLiteTimestampFormats = []string{
 	"2006-01-02",
 }
 
-// Value returns a balance value, implements driver.Valuer interface.
-func (hs balance) Value() (driver.Value, error) {
-	return (*big.Int)(&hs).String(), nil
-}
-
 // GormDataType implements gorm.GormDataTypeInterface.
 func (datetime) GormDataType() string {
 	return "string"
 }
 
-// Scan scan value into balance, implements sql.Scanner interface.
+// Scan scan value into datetime, implements sql.Scanner interface.
 func (dt *datetime) Scan(value interface{}) error {
 	var s string
 	switch value := value.(type) {
@@ -318,7 +289,7 @@ func (unixTimeMS) GormDataType() string {
 	return "BIGINT"
 }
 
-// Scan scan value into balance, implements sql.Scanner interface.
+// Scan scan value into unixTimeMS, implements sql.Scanner interface.
 func (u *unixTimeMS) Scan(value interface{}) error {
 	var msec int64
 	var err error
@@ -342,36 +313,6 @@ func (u *unixTimeMS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u unixTimeMS) Value() (driver.Value, error) {
 	return time.Time(u).UnixMilli(), nil
-}
-
-// GormDataType implements gorm.GormDataTypeInterface.
-func (unsigned64) GormDataType() string {
-	return "BIGINT"
-}
-
-// Scan scan value into balance, implements sql.Scanner interface.
-func (u *unsigned64) Scan(value interface{}) error {
-	var n int64
-	var err error
-	switch value := value.(type) {
-	case int64:
-		n = value
-	case []uint8:
-		n, err = strconv.ParseInt(string(value), 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
-		}
-	default:
-		return fmt.Errorf("failed to unmarshal unsigned64 value: %v %T", value, value)
-	}
-
-	*u = unsigned64(n)
-	return nil
-}
-
-// Value returns a datetime value, implements driver.Valuer interface.
-func (u unsigned64) Value() (driver.Value, error) {
-	return int64(u), nil
 }
 
 func (bCurrency) GormDataType() string {

@@ -85,7 +85,6 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 
 	// Complete the upload. Check that the number of slices stays the same.
-	ts := time.Now()
 	var nSlicesBefore int64
 	var nSlicesAfter int64
 	if err := ss.db.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
@@ -98,8 +97,6 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		t.Fatal(err)
 	} else if nSlicesBefore != nSlicesAfter {
 		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
-	} else if err := ss.waitForPruneLoop(ts); err != nil {
-		t.Fatal(err)
 	}
 
 	// Fetch the object.
@@ -267,5 +264,46 @@ func TestMultipartUploads(t *testing.T) {
 	}
 	if len(orderedUploads) != 0 {
 		t.Fatal("expected 3 iterations")
+	}
+}
+
+func TestMultipartUploadEmptyObjects(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create 2 multipart parts
+	resp1, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo1", object.NoOpKey, testMimeType, testMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", object.NoOpKey, testMimeType, testMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// complete uploads in reverse order
+	cmu1, err := ss.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", resp2.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmu2, err := ss.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "/foo1", resp1.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foo1, err := ss.ObjectMetadata(context.Background(), api.DefaultBucketName, "/foo1")
+	if err != nil {
+		t.Fatal(err)
+	} else if foo1.ETag != cmu1.ETag {
+		t.Fatal("unexpected etag")
+	}
+	foo2, err := ss.ObjectMetadata(context.Background(), api.DefaultBucketName, "/foo2")
+	if err != nil {
+		t.Fatal(err)
+	} else if foo2.ETag != cmu2.ETag {
+		t.Fatal("unexpected etag")
 	}
 }

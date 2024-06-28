@@ -85,6 +85,7 @@ type busMock struct {
 	*syncerMock
 	*walletMock
 	*webhookBroadcasterMock
+	*webhookStoreMock
 }
 
 func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *busMock {
@@ -673,7 +674,7 @@ func (*walletMock) WalletPrepareForm(context.Context, types.Address, types.Publi
 	return nil, nil
 }
 
-func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
+func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
 	return api.WalletPrepareRenewResponse{}, nil
 }
 
@@ -686,5 +687,13 @@ var _ webhooks.Broadcaster = (*webhookBroadcasterMock)(nil)
 type webhookBroadcasterMock struct{}
 
 func (*webhookBroadcasterMock) BroadcastAction(context.Context, webhooks.Event) error {
+	return nil
+}
+
+var _ WebhookStore = (*webhookStoreMock)(nil)
+
+type webhookStoreMock struct{}
+
+func (*webhookStoreMock) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
 	return nil
 }

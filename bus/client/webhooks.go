@@ -23,17 +23,13 @@ func (c *Client) DeleteWebhook(ctx context.Context, url, module, event string) e
 }
 
 // RegisterWebhook registers a new webhook for the given URL.
-func (c *Client) RegisterWebhook(ctx context.Context, url, module, event string) error {
-	err := c.c.WithContext(ctx).POST("/webhooks", webhooks.Webhook{
-		Event:  event,
-		Module: module,
-		URL:    url,
-	}, nil)
+func (c *Client) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
+	err := c.c.WithContext(ctx).POST("/webhooks", webhook, nil)
 	return err
 }
 
 // Webhooks returns all webhooks currently registered.
-func (c *Client) Webhooks(ctx context.Context) (resp api.WebHookResponse, err error) {
+func (c *Client) Webhooks(ctx context.Context) (resp api.WebhookResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/webhooks", &resp)
 	return
 }

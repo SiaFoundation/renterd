@@ -68,8 +68,20 @@ func ContractsFromShards(shards []Sector) map[types.PublicKey]map[types.FileCont
 	return usedContracts
 }
 
-func (s Slab) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
-	return ContractsFromShards(s.Shards)
+func (s Slab) Contracts() []types.FileContractID {
+	var usedContracts []types.FileContractID
+	added := make(map[types.FileContractID]struct{})
+	for _, shard := range s.Shards {
+		for _, fcids := range shard.Contracts {
+			for _, fcid := range fcids {
+				if _, exists := added[fcid]; !exists {
+					usedContracts = append(usedContracts, fcid)
+					added[fcid] = struct{}{}
+				}
+			}
+		}
+	}
+	return usedContracts
 }
 
 // Length returns the length of the raw data stored in s.
@@ -187,6 +199,26 @@ func (ss SlabSlice) Recover(w io.Writer, shards [][]byte) error {
 	}
 	skip := ss.Offset % (rhpv2.LeafSize * uint32(ss.MinShards))
 	return stripedJoin(w, shards[:ss.MinShards], int(skip), int(ss.Length))
+}
+
+type SlabSlices []SlabSlice
+
+func (ss SlabSlices) Contracts() []types.FileContractID {
+	var usedContracts []types.FileContractID
+	added := make(map[types.FileContractID]struct{})
+	for _, s := range ss {
+		for _, shard := range s.Shards {
+			for _, fcids := range shard.Contracts {
+				for _, fcid := range fcids {
+					if _, exists := added[fcid]; !exists {
+						added[fcid] = struct{}{}
+						usedContracts = append(usedContracts, fcid)
+					}
+				}
+			}
+		}
+	}
+	return usedContracts
 }
 
 // stripedSplit splits data into striped data shards, which must have sufficient

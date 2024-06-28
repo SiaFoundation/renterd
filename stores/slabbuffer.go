@@ -16,7 +16,8 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
-	"gorm.io/gorm"
+	sql "go.sia.tech/renterd/stores/sql"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -40,9 +41,11 @@ type SlabBuffer struct {
 type bufferGroupID [6]byte
 
 type SlabBufferManager struct {
+	alerts                          alerts.Alerter
 	bufferedSlabCompletionThreshold int64
+	db                              sql.Database
 	dir                             string
-	s                               *SQLStore
+	logger                          *zap.SugaredLogger
 
 	mu                sync.Mutex
 	completeBuffers   map[bufferGroupID][]*SlabBuffer
@@ -50,84 +53,67 @@ type SlabBufferManager struct {
 	buffersByKey      map[string]*SlabBuffer
 }
 
-func newSlabBufferManager(sqlStore *SQLStore, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
+func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database, logger *zap.SugaredLogger, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
 	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
 		return nil, fmt.Errorf("invalid slabBufferCompletionThreshold %v", slabBufferCompletionThreshold)
 	}
 
 	// load existing buffers
-	var buffers []dbBufferedSlab
-	err := sqlStore.db.
-		Joins("DBSlab").
-		Find(&buffers).
-		Error
+	buffers, orphans, err := db.LoadSlabBuffers(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load slab buffers: %w", err)
 	}
+
 	mgr := &SlabBufferManager{
+		alerts:                          a,
 		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
+		db:                              db,
 		dir:                             partialSlabDir,
-		s:                               sqlStore,
-		completeBuffers:                 make(map[bufferGroupID][]*SlabBuffer),
-		incompleteBuffers:               make(map[bufferGroupID][]*SlabBuffer),
-		buffersByKey:                    make(map[string]*SlabBuffer),
+		logger:                          logger,
+
+		completeBuffers:   make(map[bufferGroupID][]*SlabBuffer),
+		incompleteBuffers: make(map[bufferGroupID][]*SlabBuffer),
+		buffersByKey:      make(map[string]*SlabBuffer),
 	}
+
+	for _, orphan := range orphans {
+		// Buffer doesn't have a slab. We can delete it.
+		logger.Warn(fmt.Sprintf("buffer '%v' has no associated slab, deleting it", orphan))
+		if err := os.RemoveAll(filepath.Join(partialSlabDir, orphan)); err != nil {
+			return nil, fmt.Errorf("failed to remove buffer file %v: %v", orphan, err)
+		}
+	}
+
 	for _, buffer := range buffers {
-		if buffer.DBSlab.ID == 0 {
-			// Buffer doesn't have a slab. We can delete it.
-			sqlStore.logger.Warn(fmt.Sprintf("buffer %v has no associated slab, deleting it", buffer.Filename))
-			if err := sqlStore.db.Delete(&buffer).Error; err != nil {
-				return nil, fmt.Errorf("failed to delete buffer %v: %v", buffer.ID, err)
-			}
-			if err := os.RemoveAll(filepath.Join(partialSlabDir, buffer.Filename)); err != nil {
-				return nil, fmt.Errorf("failed to remove buffer file %v: %v", buffer.Filename, err)
-			}
-			continue
-		}
-		// Get the encryption key.
-		var ec object.EncryptionKey
-		if err := ec.UnmarshalBinary(buffer.DBSlab.Key); err != nil {
-			return nil, err
-		}
 		// Open the file.
 		file, err := os.OpenFile(filepath.Join(partialSlabDir, buffer.Filename), os.O_RDWR, 0600)
 		if err != nil {
-			_ = sqlStore.alerts.RegisterAlert(sqlStore.shutdownCtx, alerts.Alert{
+			_ = a.RegisterAlert(ctx, alerts.Alert{
 				ID:       types.HashBytes([]byte(buffer.Filename)),
 				Severity: alerts.SeverityCritical,
 				Message:  "failed to read buffer file on startup",
 				Data: map[string]interface{}{
 					"filename": buffer.Filename,
-					"slabKey":  ec,
+					"slabKey":  buffer.Key,
 				},
 				Timestamp: time.Now(),
 			})
-			sqlStore.logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.DBSlab.Key, err)
+			logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.Key, err)
 			continue
 		}
-		// Get the size of the buffer by looking at all slices using it
-		var size int64
-		err = sqlStore.db.Model(&dbSlab{}).
-			Joins("INNER JOIN slices sli ON slabs.id = sli.db_slab_id").
-			Select("COALESCE(MAX(offset+length), 0) as Size").
-			Where("slabs.db_buffered_slab_id = ?", buffer.ID).
-			Scan(&size).
-			Error
-		if err != nil {
-			return nil, err
-		}
+
 		// Create the slab buffer.
 		sb := &SlabBuffer{
-			dbID:     buffer.ID,
+			dbID:     uint(buffer.ID),
 			filename: buffer.Filename,
-			slabKey:  ec,
-			maxSize:  int64(bufferedSlabSize(buffer.DBSlab.MinShards)),
+			slabKey:  buffer.Key,
+			maxSize:  int64(bufferedSlabSize(buffer.MinShards)),
 			file:     file,
-			size:     size,
+			size:     buffer.Size,
 		}
 		// Add the buffer to the manager.
-		gid := bufferGID(buffer.DBSlab.MinShards, buffer.DBSlab.TotalShards, uint32(buffer.DBSlab.DBContractSetID))
-		if size >= int64(sb.maxSize-slabBufferCompletionThreshold) {
+		gid := bufferGID(buffer.MinShards, buffer.TotalShards, uint32(buffer.ContractSetID))
+		if sb.size >= int64(sb.maxSize-slabBufferCompletionThreshold) {
 			mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], sb)
 		} else {
 			mgr.incompleteBuffers[gid] = append(mgr.incompleteBuffers[gid], sb)
@@ -204,8 +190,8 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// If there is still data left, create a new buffer.
 	if len(data) > 0 {
 		var sb *SlabBuffer
-		err = mgr.s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			sb, err = createSlabBuffer(tx, contractSet, mgr.dir, minShards, totalShards)
+		err = mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			sb, err = createSlabBuffer(ctx, tx, contractSet, mgr.dir, minShards, totalShards)
 			return err
 		})
 		if err != nil {
@@ -306,8 +292,10 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 }
 
 func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
+	// Deep copy complete buffers. We don't want to block the manager while we
+	// perform disk I/O.
 	mgr.mu.Lock()
-	buffers := mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]
+	buffers := append([]*SlabBuffer{}, mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]...)
 	mgr.mu.Unlock()
 
 	for _, buffer := range buffers {
@@ -317,7 +305,7 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 		data := make([]byte, buffer.size)
 		_, err := buffer.file.ReadAt(data, 0)
 		if err != nil {
-			mgr.s.alerts.RegisterAlert(ctx, alerts.Alert{
+			mgr.alerts.RegisterAlert(ctx, alerts.Alert{
 				ID:       types.HashBytes([]byte(buffer.filename)),
 				Severity: alerts.SeverityCritical,
 				Message:  "failed to read data from buffer",
@@ -327,7 +315,7 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 				},
 				Timestamp: time.Now(),
 			})
-			mgr.s.logger.Error(ctx, fmt.Sprintf("failed to read buffer %v: %s", buffer.filename, err))
+			mgr.logger.Error(ctx, fmt.Sprintf("failed to read buffer %v: %s", buffer.filename, err))
 			return nil, err
 		}
 		slabs = append(slabs, api.PackedSlab{
@@ -359,9 +347,9 @@ func (mgr *SlabBufferManager) RemoveBuffers(fileNames ...string) {
 			// an error because the buffers are not meant to be used anymore
 			// anyway.
 			if err := buffers[i].file.Close(); err != nil {
-				mgr.s.logger.Errorf("failed to close buffer %v: %v", buffers[i].filename, err)
+				mgr.logger.Errorf("failed to close buffer %v: %v", buffers[i].filename, err)
 			} else if err := os.RemoveAll(filepath.Join(mgr.dir, buffers[i].filename)); err != nil {
-				mgr.s.logger.Errorf("failed to remove buffer %v: %v", buffers[i].filename, err)
+				mgr.logger.Errorf("failed to remove buffer %v: %v", buffers[i].filename, err)
 			}
 			delete(mgr.buffersByKey, buffers[i].slabKey.String())
 			buffers[i] = buffers[len(buffers)-1]
@@ -470,31 +458,21 @@ func bufferedSlabSize(minShards uint8) int {
 	return int(rhpv2.SectorSize) * int(minShards)
 }
 
-func createSlabBuffer(tx *gorm.DB, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
-	ec := object.GenerateEncryptionKey()
-	key, err := ec.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
+func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
 	// Create a new buffer and slab.
 	fileName := bufferFilename(contractSetID, minShards, totalShards)
 	file, err := os.Create(filepath.Join(dir, fileName))
 	if err != nil {
 		return nil, err
 	}
-	createdSlab := dbBufferedSlab{
-		DBSlab: dbSlab{
-			DBContractSetID: contractSetID,
-			Key:             key,
-			MinShards:       minShards,
-			TotalShards:     totalShards,
-		},
-		Filename: fileName,
+
+	ec := object.GenerateEncryptionKey()
+	bufferedSlabID, err := tx.InsertBufferedSlab(ctx, fileName, int64(contractSetID), ec, minShards, totalShards)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert buffered slab: %w", err)
 	}
-	err = tx.Create(&createdSlab).
-		Error
 	return &SlabBuffer{
-		dbID:     createdSlab.ID,
+		dbID:     uint(bufferedSlabID),
 		filename: fileName,
 		slabKey:  ec,
 		maxSize:  int64(bufferedSlabSize(minShards)),

@@ -18,8 +18,11 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/config"
+	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
+	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
@@ -36,6 +39,22 @@ func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string
 func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix string) error {
 	ts := time.Now()
 	if err := s.RemoveObjects(ctx, bucket, prefix); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
+	ts := time.Now()
+	if err := s.RenameObject(ctx, bucket, keyOld, keyNew, force); err != nil {
+		return err
+	}
+	return s.waitForPruneLoop(ts)
+}
+
+func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
+	ts := time.Now()
+	if err := s.RenameObjects(ctx, bucket, prefixOld, prefixNew, force); err != nil {
 		return err
 	}
 	return s.waitForPruneLoop(ts)
@@ -74,6 +93,17 @@ func randomMultisigUC() types.UnlockConditions {
 		uc.PublicKeys[i].Key = frand.Bytes(32)
 	}
 	return uc
+}
+
+func updateAllObjectsHealth(tx *gorm.DB) error {
+	return tx.Exec(`
+UPDATE objects
+SET health = (
+	SELECT COALESCE(MIN(slabs.health), 1)
+	FROM slabs
+	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
+	WHERE sli.db_object_id = objects.id)
+`).Error
 }
 
 // TestObjectBasic tests the hydration of raw objects works when we fetch
@@ -660,7 +690,7 @@ func TestRenewedContract(t *testing.T) {
 	// Assert we can't fetch the renewed contract.
 	_, err = ss.RenewedContract(context.Background(), fcid1)
 	if !errors.Is(err, api.ErrContractNotFound) {
-		t.Fatal("unexpected")
+		t.Fatal("unexpected", err)
 	}
 
 	// Renew it.
@@ -844,7 +874,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
 	for i := 0; i < len(contracts)-1; i++ {
-		if !reflect.DeepEqual(contracts[i], api.ArchivedContract{
+		expected := api.ArchivedContract{
 			ID:          fcids[len(fcids)-2-i],
 			HostKey:     hk,
 			RenewedTo:   fcids[len(fcids)-1-i],
@@ -853,7 +883,9 @@ func TestAncestorsContracts(t *testing.T) {
 			State:       api.ContractStatePending,
 			WindowStart: 400,
 			WindowEnd:   500,
-		}) {
+		}
+		if !reflect.DeepEqual(contracts[i], expected) {
+			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
@@ -1047,11 +1079,12 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	one := uint(1)
 	expectedObj := dbObject{
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
-		ObjectID:   objID,
-		Key:        obj1Key,
-		Size:       obj1.TotalSize(),
+		DBDirectoryID: 1,
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
+		ObjectID:      objID,
+		Key:           obj1Key,
+		Size:          obj1.TotalSize(),
 		Slabs: []dbSlice{
 			{
 				DBObjectID:  &one,
@@ -1446,6 +1479,7 @@ func TestObjectEntries(t *testing.T) {
 	// assertMetadata asserts both ModTime, MimeType and ETag and clears them so the
 	// entries are ready for comparison
 	assertMetadata := func(entries []api.ObjectMetadata) {
+		t.Helper()
 		for i := range entries {
 			// assert mod time
 			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
@@ -1454,14 +1488,15 @@ func TestObjectEntries(t *testing.T) {
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			if entries[i].MimeType != testMimeType {
+			isDir := strings.HasSuffix(entries[i].Name, "/")
+			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType != testMimeType) {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
 			entries[i].MimeType = ""
 
 			// assert etag
-			if entries[i].ETag == "" {
-				t.Fatal("etag should be set")
+			if isDir != (entries[i].ETag == "") {
+				t.Fatal("etag should be set for files and empty for dirs")
 			}
 			entries[i].ETag = ""
 		}
@@ -1907,7 +1942,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// delete the sector - we manually invalidate the slabs for the contract
 	// before deletion.
-	err = invalidateSlabHealthByFCID(ss.db, []fileContractID{fileContractID(fcid1)})
+	err = ss.invalidateSlabHealthByFCID(context.Background(), []types.FileContractID{(fcid1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2467,6 +2502,43 @@ func TestRenameObjects(t *testing.T) {
 			t.Fatal("unexpected path", obj.Name)
 		}
 	}
+
+	// Assert directories are correct
+	expectedDirs := []struct {
+		id       uint
+		parentID uint
+		name     string
+	}{
+		{
+			id:       1,
+			parentID: 0,
+			name:     "/",
+		},
+		{
+			id:       2,
+			parentID: 1,
+			name:     "/fileś/",
+		},
+	}
+	var directories []dbDirectory
+	test.Retry(100, 100*time.Millisecond, func() error {
+		if err := ss.db.Find(&directories).Error; err != nil {
+			return err
+		} else if len(directories) != len(expectedDirs) {
+			return fmt.Errorf("unexpected number of directories, %v != %v", len(directories), len(expectedDirs))
+		}
+		return nil
+	})
+
+	for i, dir := range directories {
+		if dir.ID != expectedDirs[i].id {
+			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
+		} else if dir.DBParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected directory parent id, %v != %v", dir.DBParentID, expectedDirs[i].parentID)
+		} else if dir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
+		}
+	}
 }
 
 // TestObjectsStats is a unit test for ObjectsStats.
@@ -2663,7 +2735,13 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal("wrong data")
 	}
 
-	var buffer dbBufferedSlab
+	type bufferedSlab struct {
+		ID       uint
+		DBSlab   dbSlab `gorm:"foreignKey:DBBufferedSlabID"`
+		Filename string
+	}
+
+	var buffer bufferedSlab
 	sk, _ := slabs[0].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
@@ -2685,8 +2763,8 @@ func TestPartialSlab(t *testing.T) {
 						Key:       object.GenerateEncryptionKey(),
 						MinShards: 1,
 						Shards: []object.Sector{
-							newTestShard(hk1, fcid1, types.Hash256{1}),
-							newTestShard(hk2, fcid2, types.Hash256{2}),
+							newTestShard(hk1, fcid1, frand.Entropy256()),
+							newTestShard(hk2, fcid2, frand.Entropy256()),
 						},
 					},
 					Offset: 0,
@@ -2725,7 +2803,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if !bytes.Equal(data, slab2Data) {
 		t.Fatal("wrong data")
 	}
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	sk, _ = slabs[0].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
@@ -2766,13 +2844,13 @@ func TestPartialSlab(t *testing.T) {
 	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
 		t.Fatal("wrong data")
 	}
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	sk, _ = slabs[0].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	sk, _ = slabs[1].Key.MarshalBinary()
 	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
@@ -2801,11 +2879,11 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
-	var foo []dbBufferedSlab
+	var foo []bufferedSlab
 	if err := ss.db.Find(&foo).Error; err != nil {
 		t.Fatal(err)
 	}
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	if err := ss.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -2824,7 +2902,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	buffer = dbBufferedSlab{}
+	buffer = bufferedSlab{}
 	if err := ss.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
@@ -3242,7 +3320,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
-	if err := ss.RenameObject(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
+	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3259,7 +3337,7 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
-	if err := ss.RenameObjects(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
+	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
 	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
 		t.Fatal(err)
@@ -3676,6 +3754,29 @@ func TestDeleteHostSector(t *testing.T) {
 	} else if hi.Interactions.LostSectors != 0 {
 		t.Fatalf("expected 0 lost sector, got %v", hi.Interactions.LostSectors)
 	}
+
+	// Prune the sector from hk2.
+	if n, err := ss.DeleteHostSector(context.Background(), hk2, root); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal("no sectors were pruned", n)
+	}
+
+	hi, err = ss.Host(context.Background(), hk2)
+	if err != nil {
+		t.Fatal(err)
+	} else if hi.Interactions.LostSectors != 2 {
+		t.Fatalf("expected 0 lost sector, got %v", hi.Interactions.LostSectors)
+	}
+
+	// Fetch the sector and check the public key has the default value
+	if err := ss.db.Model(&dbSector{}).Find(&sectors).Error; err != nil {
+		t.Fatal(err)
+	} else if len(sectors) != 1 {
+		t.Fatal("expected 1 sector", len(sectors))
+	} else if sector := sectors[0]; sector.LatestHost != [32]byte{} {
+		t.Fatal("expected latest host to be empty", sector.LatestHost)
+	}
 }
 func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) []object.Sector {
 	return []object.Sector{
@@ -3739,7 +3840,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err := ss.UpdateSlab(context.Background(), object.Slab{
 		Key:    slab.Key,
 		Shards: shards[:len(shards)-1],
-	}, testContractSet); !errors.Is(err, errInvalidNumberOfShards) {
+	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
 		t.Fatal(err)
 	}
 
@@ -3753,7 +3854,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		Key:    slab.Key,
 		Shards: reversedShards,
 	}
-	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, errShardRootChanged) {
+	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
 		t.Fatal(err)
 	}
 }
@@ -3935,7 +4036,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// add test hosts
-	hks, err := ss.addTestHosts(2)
+	hks, err := ss.addTestHosts(8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3955,10 +4056,13 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o1, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: object.GenerateEncryptionKey(),
+			MinShards: 2,
+			Key:       object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
+				newTestShard(hks[2], fcids[2], types.Hash256{2}),
+				newTestShard(hks[3], fcids[3], types.Hash256{3}),
 			},
 		}}},
 	}); err != nil {
@@ -3971,10 +4075,13 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o2, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: object.GenerateEncryptionKey(),
+			MinShards: 2,
+			Key:       object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
-				newTestShard(hks[0], fcids[0], types.Hash256{2}),
-				newTestShard(hks[1], fcids[1], types.Hash256{3}),
+				newTestShard(hks[4], fcids[4], types.Hash256{4}),
+				newTestShard(hks[5], fcids[5], types.Hash256{5}),
+				newTestShard(hks[6], fcids[6], types.Hash256{6}),
+				newTestShard(hks[7], fcids[7], types.Hash256{7}),
 			},
 		}}},
 	}); err != nil {
@@ -3983,8 +4090,8 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", added.Health)
 	}
 
-	// update contract set and refresh health, assert health is .5
-	err = ss.SetContractSet(context.Background(), testContractSet, fcids[:1])
+	// update contract set to not contain the first contract
+	err = ss.SetContractSet(context.Background(), testContractSet, fcids[1:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3994,42 +4101,24 @@ func TestRefreshHealth(t *testing.T) {
 	}
 	if health(o1) != .5 {
 		t.Fatal("expected health to be .5, got", health(o1))
-	} else if health(o2) != .5 {
-		t.Fatal("expected health to be .5, got", health(o2))
+	} else if health(o2) != 1 {
+		t.Fatal("expected health to be 1, got", health(o2))
 	}
 
-	// set the health of s1 to be lower than .5
-	err = ss.overrideSlabHealth(o1, 0.4)
+	// update contract set again to increase health of o1 again and lower health
+	// of o2
+	err = ss.SetContractSet(context.Background(), testContractSet, fcids[:6])
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// refresh health and assert only object 1's health got updated
 	err = ss.RefreshHealth(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if health(o1) != .4 {
+	if health(o1) != 1 {
 		t.Fatal("expected health to be .4, got", health(o1))
-	} else if health(o2) != .5 {
-		t.Fatal("expected health to be .5, got", health(o2))
-	}
-
-	// set the health of s2 to be higher than .5
-	err = ss.overrideSlabHealth(o2, 0.6)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// refresh health and assert only object 2's health got updated
-	err = ss.RefreshHealth(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if health(o1) != .4 {
-		t.Fatal("expected health to be .4, got", health(o1))
-	} else if health(o2) != .6 {
-		t.Fatal("expected health to be .6, got", health(o2))
+	} else if health(o2) != 0 {
+		t.Fatal("expected health to be 0, got", health(o2))
 	}
 
 	// add another object that is empty
@@ -4042,22 +4131,11 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", added.Health)
 	}
 
-	// update its health to .1
-	if err := ss.db.
-		Model(&dbObject{}).
-		Where("object_id", o3).
-		Update("health", 0.1).
-		Error; err != nil {
-		t.Fatal(err)
-	} else if health(o3) != .1 {
-		t.Fatalf("expected health to be .1, got %v", health(o3))
-	}
-
-	// a refresh should not update its health
+	// a refresh should keep the health at 1
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if health(o3) != .1 {
-		t.Fatalf("expected health to be .1, got %v", health(o3))
+	} else if health(o3) != 1 {
+		t.Fatalf("expected health to be 1, got %v", health(o3))
 	}
 }
 
@@ -4072,26 +4150,36 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// create buffered slab
-	bs := dbBufferedSlab{
-		Filename: "foo",
+	bsID := uint(1)
+	if err := ss.db.Exec("INSERT INTO buffered_slabs (filename) VALUES ('foo');").Error; err != nil {
+		t.Fatal(err)
 	}
-	if err := ss.db.Create(&bs).Error; err != nil {
+
+	var dirID int64
+	err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		var err error
+		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
+		return err
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	// create objects
 	obj1 := dbObject{
-		ObjectID:   "1",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: uint(dirID),
+		ObjectID:      "1",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj1).Error; err != nil {
 		t.Fatal(err)
 	}
 	obj2 := dbObject{
-		ObjectID:   "2",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: uint(dirID),
+		ObjectID:      "2",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj2).Error; err != nil {
 		t.Fatal(err)
@@ -4126,7 +4214,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4152,7 +4240,7 @@ func TestSlabCleanup(t *testing.T) {
 	// create another object that references a slab with buffer
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
 	bufferedSlab := dbSlab{
-		DBBufferedSlabID: bs.ID,
+		DBBufferedSlabID: bsID,
 		DBContractSet:    cs,
 		Health:           1,
 		Key:              ek,
@@ -4162,9 +4250,10 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj3 := dbObject{
-		ObjectID:   "3",
-		DBBucketID: ss.DefaultBucketID(),
-		Health:     1,
+		DBDirectoryID: uint(dirID),
+		ObjectID:      "3",
+		DBBucketID:    ss.DefaultBucketID(),
+		Health:        1,
 	}
 	if err := ss.db.Create(&obj3).Error; err != nil {
 		t.Fatal(err)
@@ -4593,8 +4682,7 @@ func TestTypeCurrency(t *testing.T) {
 // same transaction, deadlocks become more likely due to the gap locks MySQL
 // uses.
 func TestUpdateObjectParallel(t *testing.T) {
-	dbURI, _, _, _ := DBConfigFromEnv()
-	if dbURI == "" {
+	if config.MySQLConfigFromEnv().URI == "" {
 		// it's pretty much impossile to optimise for both sqlite and mysql at
 		// the same time so we skip this test for SQLite for now
 		// TODO: once we moved away from gorm and implement separate interfaces
@@ -4760,5 +4848,93 @@ func TestFetchUsedContracts(t *testing.T) {
 		t.Fatal("contracts should match")
 	} else if contracts[types.FileContractID{1}].convert().ID != fcid2 {
 		t.Fatal("contracts should point to the renewed contract")
+	}
+}
+
+func TestDirectories(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	objects := []string{
+		"/foo",
+		"/bar/baz",
+		"///somefile",
+		"/dir/fakedir/",
+		"/",
+		"/bar/fileinsamedirasbefore",
+	}
+
+	for _, o := range objects {
+		var dirID int64
+		err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+			var err error
+			dirID, err = tx.MakeDirsForPath(context.Background(), o)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		} else if dirID == 0 {
+			t.Fatalf("unexpected dir id %v", dirID)
+		}
+	}
+
+	expectedDirs := []struct {
+		name     string
+		id       uint
+		parentID uint
+	}{
+		{
+			name:     "/",
+			id:       1,
+			parentID: 0,
+		},
+		{
+			name:     "/bar/",
+			id:       2,
+			parentID: 1,
+		},
+		{
+			name:     "//",
+			id:       3,
+			parentID: 1,
+		},
+		{
+			name:     "///",
+			id:       4,
+			parentID: 3,
+		},
+		{
+			name:     "/dir/",
+			id:       2,
+			parentID: 1,
+		},
+	}
+
+	var dbDirs []dbDirectory
+	if err := ss.db.Find(&dbDirs).Error; err != nil {
+		t.Fatal(err)
+	} else if len(dbDirs) != len(expectedDirs) {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), len(dbDirs))
+	}
+
+	for i, dbDir := range dbDirs {
+		if dbDir.ID != uint(i+1) {
+			t.Fatalf("unexpected id %v", dbDir.ID)
+		} else if dbDir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected name '%v' != '%v'", dbDir.Name, expectedDirs[i].name)
+		}
+	}
+
+	now := time.Now()
+	ss.Retry(100, 100*time.Millisecond, func() error {
+		ss.triggerSlabPruning()
+		return ss.waitForPruneLoop(now)
+	})
+
+	var n int64
+	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal("expected 1 dir, got", n)
 	}
 }

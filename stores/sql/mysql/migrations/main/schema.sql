@@ -51,7 +51,7 @@ CREATE TABLE `autopilots` (
 CREATE TABLE `buckets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `policy` longtext,
+  `policy` JSON,
   `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`),
@@ -81,7 +81,7 @@ CREATE TABLE `hosts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `public_key` varbinary(32) NOT NULL,
-  `settings` longtext,
+  `settings` JSON,
   `price_table` longtext,
   `price_table_expiry` datetime(3) DEFAULT NULL,
   `total_scans` bigint unsigned DEFAULT NULL,
@@ -98,6 +98,7 @@ CREATE TABLE `hosts` (
   `lost_sectors` bigint unsigned DEFAULT NULL,
   `last_announcement` datetime(3) DEFAULT NULL,
   `net_address` varchar(191) DEFAULT NULL,
+  `subnets` varchar(255) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
   UNIQUE KEY `public_key` (`public_key`),
   KEY `idx_hosts_public_key` (`public_key`),
@@ -313,11 +314,24 @@ CREATE TABLE `multipart_parts` (
   CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- dbDirectory
+CREATE TABLE `directories` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(3) DEFAULT NULL,
+  `db_parent_id` bigint unsigned,
+  `name` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_directories_parent_id` (`db_parent_id`),
+  UNIQUE KEY `idx_directories_name` (`name`),
+  CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- dbObject
 CREATE TABLE `objects` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `db_bucket_id` bigint unsigned NOT NULL,
+  `db_directory_id` bigint unsigned NOT NULL,
   `object_id` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   `key` longblob,
   `health` double NOT NULL DEFAULT '1',
@@ -332,7 +346,9 @@ CREATE TABLE `objects` (
   KEY `idx_objects_etag` (`etag`),
   KEY `idx_objects_size` (`size`),
   KEY `idx_objects_created_at` (`created_at`),
-  CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`)
+  KEY `idx_objects_db_directory_id` (`db_directory_id`),
+  CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`),
+  CONSTRAINT `fk_objects_db_directory_id` FOREIGN KEY (`db_directory_id`) REFERENCES `directories` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbSetting
@@ -404,6 +420,7 @@ CREATE TABLE `webhooks` (
   `module` varchar(255) NOT NULL,
   `event` varchar(255) NOT NULL,
   `url` varchar(255) NOT NULL,
+  `headers` JSON DEFAULT ('{}'),
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_module_event_url` (`module`,`event`,`url`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

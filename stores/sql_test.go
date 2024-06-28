@@ -3,6 +3,7 @@ package stores
 import (
 	"bytes"
 	"context"
+	dsql "database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,7 +18,12 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/config"
+	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
+	sql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -43,19 +49,12 @@ var (
 )
 
 type testSQLStore struct {
-	t *testing.T
+	cfg testSQLStoreConfig
+	t   *testing.T
 	*SQLStore
-
-	dbName        string
-	dbMetricsName string
-	dir           string
-	ccid          modules.ConsensusChangeID
 }
 
 type testSQLStoreConfig struct {
-	dbURI           string
-	dbUser          string
-	dbPassword      string
 	dbName          string
 	dbMetricsName   string
 	dir             string
@@ -66,78 +65,114 @@ type testSQLStoreConfig struct {
 
 var defaultTestSQLStoreConfig = testSQLStoreConfig{}
 
+func randomDBName() string {
+	return "db" + hex.EncodeToString(frand.Bytes(16))
+}
+
+func (cfg *testSQLStoreConfig) dbConnections() (gorm.Dialector, sql.MetricsDatabase, error) {
+	var connMain gorm.Dialector
+	var dbm *dsql.DB
+	var dbMetrics sql.MetricsDatabase
+	var err error
+	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
+		// create MySQL connections if URI is set
+
+		// sanity check config
+		if cfg.persistent {
+			return nil, nil, errors.New("invalid store config, can't use both persistent and dbURI")
+		}
+
+		// use db names from config if not set
+		if mysqlCfg.Database == "" {
+			mysqlCfg.Database = cfg.dbName
+		}
+		if mysqlCfg.MetricsDatabase == "" {
+			mysqlCfg.MetricsDatabase = cfg.dbMetricsName
+		}
+
+		// use a tmp connection to precreate the two databases
+		if tmpDB, err := gorm.Open(NewMySQLConnection(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, "")); err != nil {
+			return nil, nil, err
+		} else if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", mysqlCfg.Database)).Error; err != nil {
+			return nil, nil, err
+		} else if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", mysqlCfg.MetricsDatabase)).Error; err != nil {
+			return nil, nil, err
+		}
+
+		connMain = NewMySQLConnection(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, mysqlCfg.Database)
+		dbm, err = mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, mysqlCfg.MetricsDatabase)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(dbm, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+	} else if cfg.persistent {
+		// create SQL connections if we want a persistent store
+		connMain = NewSQLiteConnection(filepath.Join(cfg.dir, "db.sqlite"))
+		dbm, err = sqlite.Open(filepath.Join(cfg.dir, "metrics.sqlite"))
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+	} else {
+		// otherwise return ephemeral connections
+		connMain = NewEphemeralSQLiteConnection(cfg.dbName)
+		dbm, err = sqlite.OpenEphemeral(cfg.dbMetricsName)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open ephemeral SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create metrics database: %w", err)
+	}
+	return connMain, dbMetrics, nil
+}
+
 // newTestSQLStore creates a new SQLStore for testing.
 func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	t.Helper()
-	dir := cfg.dir
-	if dir == "" {
-		dir = t.TempDir()
+
+	// default dir to tmp dir
+	if cfg.dir == "" {
+		cfg.dir = t.TempDir()
 	}
 
-	dbURI, dbUser, dbPassword, dbName := DBConfigFromEnv()
-	if dbURI == "" {
-		dbURI = cfg.dbURI
+	// default db names to random strings if not set
+	if cfg.dbName == "" {
+		cfg.dbName = randomDBName()
 	}
-	if cfg.persistent && dbURI != "" {
-		t.Fatal("invalid store config, can't use both persistent and dbURI")
-	}
-	if dbUser == "" {
-		dbUser = cfg.dbUser
-	}
-	if dbPassword == "" {
-		dbPassword = cfg.dbPassword
-	}
-	if dbName == "" {
-		if cfg.dbName != "" {
-			dbName = cfg.dbName
-		} else {
-			dbName = hex.EncodeToString(frand.Bytes(32)) // random name for db
-		}
-	}
-	dbMetricsName := cfg.dbMetricsName
-	if dbMetricsName == "" {
-		dbMetricsName = hex.EncodeToString(frand.Bytes(32)) // random name for metrics db
+	if cfg.dbMetricsName == "" {
+		cfg.dbMetricsName = randomDBName()
 	}
 
-	var conn, connMetrics gorm.Dialector
-	if dbURI != "" {
-		if tmpDB, err := gorm.Open(NewMySQLConnection(dbUser, dbPassword, dbURI, "")); err != nil {
-			t.Fatal(err)
-		} else if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", dbName)).Error; err != nil {
-			t.Fatal(err)
-		} else if err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", dbMetricsName)).Error; err != nil {
-			t.Fatal(err)
-		}
-
-		conn = NewMySQLConnection(dbUser, dbPassword, dbURI, dbName)
-		connMetrics = NewMySQLConnection(dbUser, dbPassword, dbURI, dbMetricsName)
-	} else if cfg.persistent {
-		conn = NewSQLiteConnection(filepath.Join(dir, "db.sqlite"))
-		connMetrics = NewSQLiteConnection(filepath.Join(dir, "metrics.sqlite"))
-	} else {
-		conn = NewEphemeralSQLiteConnection(dbName)
-		connMetrics = NewEphemeralSQLiteConnection(dbMetricsName)
+	// create db connections
+	conn, dbMetrics, err := cfg.dbConnections()
+	if err != nil {
+		t.Fatal("failed to create db connections", err)
 	}
 
 	walletAddrs := types.Address(frand.Entropy256())
 	alerts := alerts.WithOrigin(alerts.NewManager(), "test")
-	sqlStore, ccid, err := NewSQLStore(Config{
+	sqlStore, _, err := NewSQLStore(Config{
 		Conn:                          conn,
-		ConnMetrics:                   connMetrics,
 		Alerts:                        alerts,
-		PartialSlabDir:                dir,
+		DBMetrics:                     dbMetrics,
+		PartialSlabDir:                cfg.dir,
 		Migrate:                       !cfg.skipMigrate,
 		AnnouncementMaxAge:            time.Hour,
 		PersistInterval:               time.Second,
 		WalletAddress:                 walletAddrs,
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop().Sugar(),
+		LongQueryDuration:             100 * time.Millisecond,
+		LongTxDuration:                100 * time.Millisecond,
 		GormLogger:                    newTestLogger(),
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
 	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
+
 	if !cfg.skipContractSet {
 		err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
 		if err != nil {
@@ -145,13 +180,34 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		}
 	}
 	return &testSQLStore{
-		SQLStore:      sqlStore,
-		dbName:        dbName,
-		dbMetricsName: dbMetricsName,
-		dir:           dir,
-		ccid:          ccid,
-		t:             t,
+		cfg:      cfg,
+		t:        t,
+		SQLStore: sqlStore,
 	}
+}
+
+func (s *testSQLStore) DB() *isql.DB {
+	switch db := s.bMain.(type) {
+	case *sqlite.MainDatabase:
+		return db.DB()
+	case *mysql.MainDatabase:
+		return db.DB()
+	default:
+		s.t.Fatal("unknown db type", db)
+	}
+	panic("unreachable")
+}
+
+func (s *testSQLStore) DBMetrics() *isql.DB {
+	switch db := s.bMetrics.(type) {
+	case *sqlite.MetricsDatabase:
+		return db.DB()
+	case *mysql.MetricsDatabase:
+		return db.DB()
+	default:
+		s.t.Fatal("unknown db type", db)
+	}
+	panic("unreachable")
 }
 
 func (s *testSQLStore) Close() error {
@@ -175,10 +231,7 @@ func (s *testSQLStore) DefaultBucketID() uint {
 
 func (s *testSQLStore) Reopen() *testSQLStore {
 	s.t.Helper()
-	cfg := defaultTestSQLStoreConfig
-	cfg.dir = s.dir
-	cfg.dbName = s.dbName
-	cfg.dbMetricsName = s.dbMetricsName
+	cfg := s.cfg
 	cfg.skipContractSet = true
 	cfg.skipMigrate = true
 	return newTestSQLStore(s.t, cfg)
@@ -470,8 +523,18 @@ func TestRetryTransaction(t *testing.T) {
 		t.Fatal("unexpected logs", cmp.Diff(got, want))
 	}
 
-	// retry transaction that aborts, assert no logs were added
-	ss.retryTransaction(context.Background(), func(tx *gorm.DB) error { return context.Canceled })
+	// retry transaction with cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
+	if len(observedLogs.All()) != len(want) {
+		t.Fatal("expected no logs")
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Microsecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
 	if len(observedLogs.All()) != len(want) {
 		t.Fatal("expected no logs")
 	}

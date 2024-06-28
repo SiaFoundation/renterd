@@ -117,6 +117,7 @@ type Autopilot struct {
 	mu               sync.Mutex
 	pruning          bool
 	pruningLastStart time.Time
+	pruningAlertIDs  map[types.FileContractID]types.Hash256
 
 	maintenanceTxnIDs []types.TransactionID
 }
@@ -136,6 +137,8 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 		shutdownCtxCancel: shutdownCtxCancel,
 
 		tickerDuration: heartbeat,
+
+		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 	scanner, err := newScanner(
 		ap,
@@ -203,7 +206,15 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	jc.Encode(contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts))
+	res, err := contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts)
+	if errors.Is(err, contractor.ErrMissingRequiredFields) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(res)
 }
 
 func (ap *Autopilot) Run() error {
@@ -876,7 +887,7 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 				return nil, err
 			}
 			ap.logger.Infof("initialised current period to %d", autopilot.CurrentPeriod)
-		} else if nextPeriod := autopilot.CurrentPeriod + autopilot.Config.Contracts.Period; cs.BlockHeight >= nextPeriod {
+		} else if nextPeriod := computeNextPeriod(cs.BlockHeight, autopilot.CurrentPeriod, autopilot.Config.Contracts.Period); nextPeriod != autopilot.CurrentPeriod {
 			prevPeriod := autopilot.CurrentPeriod
 			autopilot.CurrentPeriod = nextPeriod
 			err := ap.bus.UpdateAutopilot(ctx, autopilot)
@@ -949,4 +960,13 @@ func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
 		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
 	}
 	return nil
+}
+
+func computeNextPeriod(bh, currentPeriod, period uint64) uint64 {
+	prevPeriod := currentPeriod
+	nextPeriod := prevPeriod
+	for bh >= nextPeriod+period {
+		nextPeriod += period
+	}
+	return nextPeriod
 }

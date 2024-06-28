@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	errFailedToCreatePayment = errors.New("failed to create payment")
+)
+
 type (
 	Host interface {
 		PublicKey() types.PublicKey
@@ -28,7 +32,7 @@ type (
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 
-		RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error)
+		RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error)
 	}
 
 	HostManager interface {
@@ -106,11 +110,14 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 				return err
 			}
 
-			var refund types.Currency
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-			cost, refund, err = RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
+			cost, refund, err := RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
+			if err != nil {
+				return err
+			}
+
 			amount = cost.Sub(refund)
-			return err
+			return nil
 		})
 		return
 	})
@@ -136,7 +143,7 @@ func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 	}
 	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
 	if !ok {
-		return errors.New("failed to create payment")
+		return errFailedToCreatePayment
 	}
 
 	var cost types.Currency
@@ -153,7 +160,7 @@ func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 	return nil
 }
 
-func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _ types.Currency, err error) {
+func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
 	// Try to get a valid pricetable.
 	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -169,21 +176,22 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	var rev rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var renewErr error
+	var fundAmount types.Currency
 	err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		// NOTE: to avoid an edge case where the contract is drained and can
 		// therefore not be used to pay for the revision, we simply don't pay
 		// for it.
 		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 			// Renew contract.
-			rev, txnSet, contractPrice, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
+			rev, txnSet, contractPrice, fundAmount, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
 			return rhpv3.HostPriceTable{}, nil, nil
 		})
 		return err
 	})
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, contractPrice, err
+		return rhpv2.ContractRevision{}, nil, contractPrice, fundAmount, err
 	}
-	return rev, txnSet, contractPrice, renewErr
+	return rev, txnSet, contractPrice, fundAmount, renewErr
 }
 
 func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error) {
@@ -191,14 +199,6 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt api.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			h.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
-				{
-					HostKey:    h.hk,
-					Success:    isSuccessfulInteraction(err),
-					Timestamp:  time.Now(),
-					PriceTable: hpt,
-				},
-			})
 			return
 		})
 		return

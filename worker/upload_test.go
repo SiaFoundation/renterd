@@ -498,20 +498,11 @@ func TestRefreshUploaders(t *testing.T) {
 	ul := w.uploadManager
 	cs := w.cs
 	hm := w.hm
+	bh := uint64(1)
 
-	// create test data
-	data := frand.Bytes(128)
-
-	// create upload params
-	params := testParameters(t.Name())
-	opts := testOpts()
-
-	// upload data
+	// refresh uploaders
 	contracts := w.Contracts()
-	_, err := w.upload(context.Background(), params.bucket, t.Name(), bytes.NewReader(data), contracts, opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ul.refreshUploaders(contracts, bh)
 
 	// assert we have the expected number of uploaders
 	if len(ul.uploaders) != len(contracts) {
@@ -530,12 +521,9 @@ func TestRefreshUploaders(t *testing.T) {
 	// add a new host/contract
 	hNew := w.AddHost()
 
-	// upload data
+	// refresh uploaders
 	contracts = w.Contracts()
-	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), contracts, params, lockingPriorityUpload)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ul.refreshUploaders(contracts, bh)
 
 	// assert we added and renewed exactly one uploader
 	var added, renewed int
@@ -570,9 +558,10 @@ func TestRefreshUploaders(t *testing.T) {
 		}
 	}
 
-	// upload data again but now with a blockheight that should expire most uploaders
-	params.bh = c1.WindowEnd
-	ul.Upload(context.Background(), bytes.NewReader(data), contracts, params, lockingPriorityUpload)
+	// refresh uploaders, use blockheight that expires most uploaders
+	bh = c1.WindowEnd
+	contracts = w.Contracts()
+	ul.refreshUploaders(contracts, bh)
 
 	// assert we only have one uploader left
 	if len(ul.uploaders) != 1 {
