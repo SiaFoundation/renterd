@@ -767,6 +767,7 @@ func TestRenewedContract(t *testing.T) {
 			FundAccount: types.ZeroCurrency,
 		},
 		ContractPrice: types.NewCurrency64(2),
+		ContractSets:  []string{"test"},
 		TotalCost:     newContractTotal,
 	}
 	if !reflect.DeepEqual(newContract, expected) {
