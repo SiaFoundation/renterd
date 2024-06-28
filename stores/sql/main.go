@@ -120,19 +120,7 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 }
 
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
-			proof_height, revision_height, revision_number, size, start_height, window_start, window_end,
-			upload_spending, download_spending, fund_account_spending, delete_spending, list_spending, renewed_to,
-			host, reason)
-		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
-			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
-			delete_spending, list_spending, NULL, h.public_key, ?
-		FROM contracts c
-		INNER JOIN hosts h ON h.id = c.host_id
-		WHERE fcid = ?
-	`, time.Now(), reason, FileContractID(fcid))
-	if err != nil {
+	if err := copyContractToArchive(ctx, tx, fcid, nil, reason); err != nil {
 		return fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
 	}
 	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", FileContractID(fcid))
@@ -555,6 +543,54 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 	return bufferedSlabID, nil
 }
 
+func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
+	var contractState ContractState
+	if err := contractState.LoadString(state); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
+	}
+	// create copy of contract in archived_contracts
+	if err := copyContractToArchive(ctx, tx, renewedFrom, &rev.Revision.ParentID, api.ContractArchivalReasonRenewed); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
+	}
+	// update existing contract
+	_, err := tx.Exec(ctx, `
+		UPDATE contracts SET
+			created_at = ?,
+			fcid = ?,
+			renewed_from = ?,
+			contract_price = ?,
+			state = ?,
+			total_cost = ?,
+			proof_height = ?,
+			revision_height = ?,
+			revision_number = ?,
+			size = ?,
+			start_height = ?,
+			window_start = ?,
+			window_end = ?,
+			upload_spending = ?,
+			download_spending = ?,
+			fund_account_spending = ?,
+			delete_spending = ?,
+			list_spending = ?,
+	`, time.Now(),
+		FileContractID(rev.ID()),
+		FileContractID(renewedFrom),
+		Currency(contractPrice),
+		contractState,
+		Currency(totalCost),
+		0,
+		0,
+		fmt.Sprint(rev.Revision.RevisionNumber),
+		rev.Revision.Filesize,
+		startHeight, rev.Revision.WindowStart, rev.Revision.WindowEnd,
+		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
+	}
+	return Contract(ctx, tx, rev.ID())
+}
+
 func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
 	var contractState ContractState
 	if err := contractState.LoadString(state); err != nil {
@@ -566,7 +602,6 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 		return api.ContractMetadata{}, api.ErrHostNotFound
 	}
 
-	zero := Currency(types.ZeroCurrency)
 	res, err := tx.Exec(ctx, `
 		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
 		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending, 
@@ -574,7 +609,7 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
 		contractState, Currency(totalCost), 0, 0, "0", rev.Revision.Filesize, startHeight, rev.Revision.WindowStart, rev.Revision.WindowEnd,
-		zero, zero, zero, zero, zero)
+		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
 	}
@@ -1947,4 +1982,20 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 		NextMarker: nextMarker,
 		Objects:    objects,
 	}, nil
+}
+
+func copyContractToArchive(ctx context.Context, tx sql.Tx, fcid types.FileContractID, renewedTo *types.FileContractID, reason string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
+			proof_height, revision_height, revision_number, size, start_height, window_start, window_end,
+			upload_spending, download_spending, fund_account_spending, delete_spending, list_spending, renewed_to,
+			host, reason)
+		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
+			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
+			delete_spending, list_spending, ?, h.public_key, ?
+		FROM contracts c
+		INNER JOIN hosts h ON h.id = c.host_id
+		WHERE fcid = ?
+	`, time.Now(), (*FileContractID)(renewedTo), reason, FileContractID(fcid))
+	return err
 }

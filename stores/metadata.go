@@ -550,51 +550,16 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	var cs contractState
-	if err := cs.LoadString(state); err != nil {
-		return api.ContractMetadata{}, err
+func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		renewed, err = tx.RenewContract(ctx, c, contractPrice, totalCost, startHeight, renewedFrom, state)
+		return err
+	})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to add renewed contract: %w", err)
 	}
-	var renewed dbContract
-	if err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// Fetch contract we renew from.
-		oldContract, err := contract(tx, fileContractID(renewedFrom))
-		if err != nil {
-			return err
-		}
-
-		// Create copy in archive.
-		err = tx.Create(&dbArchivedContract{
-			Host:      publicKey(oldContract.Host.PublicKey),
-			Reason:    api.ContractArchivalReasonRenewed,
-			RenewedTo: fileContractID(c.ID()),
-
-			ContractCommon: oldContract.ContractCommon,
-		}).Error
-		if err != nil {
-			return err
-		}
-
-		// Overwrite the old contract with the new one.
-		newContract := newContract(oldContract.HostID, c.ID(), renewedFrom, contractPrice, totalCost, startHeight, c.Revision.WindowStart, c.Revision.WindowEnd, oldContract.Size, cs)
-		newContract.Model = oldContract.Model
-		newContract.CreatedAt = time.Now()
-		err = tx.Save(&newContract).Error
-		if err != nil {
-			return err
-		}
-
-		// Populate host.
-		newContract.Host = oldContract.Host
-
-		s.addKnownContract(c.ID())
-		renewed = newContract
-		return nil
-	}); err != nil {
-		return api.ContractMetadata{}, err
-	}
-
-	return renewed.convert(), nil
+	s.addKnownContract(c.ID())
+	return
 }
 
 func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
@@ -1799,33 +1764,6 @@ func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err err
 		Find(&contracts).
 		Error
 	return
-}
-
-func newContract(hostID uint, fcid, renewedFrom types.FileContractID, contractPrice, totalCost types.Currency, startHeight, windowStart, windowEnd, size uint64, state contractState) dbContract {
-	return dbContract{
-		HostID:       hostID,
-		ContractSets: nil, // new contract isn't in a set yet
-
-		ContractCommon: ContractCommon{
-			FCID:        fileContractID(fcid),
-			RenewedFrom: fileContractID(renewedFrom),
-
-			ContractPrice:  currency(contractPrice),
-			State:          state,
-			TotalCost:      currency(totalCost),
-			RevisionNumber: "0",
-			Size:           size,
-			StartHeight:    startHeight,
-			WindowStart:    windowStart,
-			WindowEnd:      windowEnd,
-
-			UploadSpending:      zeroCurrency,
-			DownloadSpending:    zeroCurrency,
-			FundAccountSpending: zeroCurrency,
-			DeleteSpending:      zeroCurrency,
-			ListSpending:        zeroCurrency,
-		},
-	}
 }
 
 func (s *SQLStore) pruneSlabsLoop() {

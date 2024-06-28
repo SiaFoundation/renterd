@@ -22,6 +22,10 @@ const (
 	secretKeySize = 32
 )
 
+var (
+	ZeroCurrency = Currency(types.ZeroCurrency)
+)
+
 type (
 	AutopilotConfig api.AutopilotConfig
 	BigInt          big.Int
