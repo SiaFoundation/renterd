@@ -184,13 +184,13 @@ var (
 			{
 				ID: "00012_peer_store",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00011_peer_store", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00012_peer_store", log)
 				},
 			},
 			{
 				ID: "00013_coreutils_wallet",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00012_coreutils_wallet", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00013_coreutils_wallet", log)
 				},
 			},
 		}
