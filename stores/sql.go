@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -24,15 +23,6 @@ import (
 	glogger "gorm.io/gorm/logger"
 )
 
-var (
-	exprTRUE = gorm.Expr("TRUE")
-)
-
-var (
-	errNoSuchTable    = errors.New("no such table")
-	errDuplicateEntry = errors.New("Duplicate entry")
-)
-
 type (
 	// Model defines the common fields of every table. Same as Model
 	// but excludes soft deletion since it breaks cascading deletes.
@@ -44,7 +34,7 @@ type (
 	// Config contains all params for creating a SQLStore
 	Config struct {
 		Conn                          gorm.Dialector
-		ConnMetrics                   gorm.Dialector
+		DBMetrics                     sql.MetricsDatabase
 		Alerts                        alerts.Alerter
 		PartialSlabDir                string
 		Migrate                       bool
@@ -60,12 +50,11 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts    alerts.Alerter
-		db        *gorm.DB
-		dbMetrics *gorm.DB
-		bMain     sql.Database
-		bMetrics  sql.MetricsDatabase
-		logger    *zap.SugaredLogger
+		alerts   alerts.Alerter
+		db       *gorm.DB
+		bMain    sql.Database
+		bMetrics sql.MetricsDatabase
+		logger   *zap.SugaredLogger
 
 		walletAddress types.Address
 
@@ -142,38 +131,24 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open SQL db")
 	}
-	dbMetrics, err := gorm.Open(cfg.ConnMetrics, &gorm.Config{
-		Logger: cfg.GormLogger, // custom logger
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open metrics db")
-	}
 	l := cfg.Logger.Named("sql")
 
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch db: %v", err)
 	}
-	sqlDBMetrics, err := dbMetrics.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch metrics db: %v", err)
-	}
 
 	// Print DB version
 	var dbMain sql.Database
-	var bMetrics sql.MetricsDatabase
-	var mainErr, metricsErr error
+	dbMetrics := cfg.DBMetrics
+	var mainErr error
 	if cfg.Conn.Name() == "sqlite" {
 		dbMain, mainErr = sqlite.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics, metricsErr = sqlite.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	} else {
 		dbMain, mainErr = mysql.NewMainDatabase(sqlDB, l, cfg.LongQueryDuration, cfg.LongTxDuration)
-		bMetrics, metricsErr = mysql.NewMetricsDatabase(sqlDBMetrics, l, cfg.LongQueryDuration, cfg.LongTxDuration)
 	}
 	if mainErr != nil {
 		return nil, fmt.Errorf("failed to create main database: %v", mainErr)
-	} else if metricsErr != nil {
-		return nil, fmt.Errorf("failed to create metrics database: %v", metricsErr)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -188,19 +163,18 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if cfg.Migrate {
 		if err := dbMain.Migrate(context.Background()); err != nil {
 			return nil, fmt.Errorf("failed to perform migrations: %v", err)
-		} else if err := bMetrics.Migrate(context.Background()); err != nil {
+		} else if err := dbMetrics.Migrate(context.Background()); err != nil {
 			return nil, fmt.Errorf("failed to perform migrations for metrics db: %v", err)
 		}
 	}
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		alerts:    cfg.Alerts,
-		db:        db,
-		dbMetrics: dbMetrics,
-		bMain:     dbMain,
-		bMetrics:  bMetrics,
-		logger:    l,
+		alerts:   cfg.Alerts,
+		db:       db,
+		bMain:    dbMain,
+		bMetrics: dbMetrics,
+		logger:   l,
 
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
@@ -213,7 +187,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		shutdownCtxCancel: shutdownCtxCancel,
 	}
 
-	ss.slabBufferMgr, err = newSlabBufferManager(ss, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
+	ss.slabBufferMgr, err = newSlabBufferManager(shutdownCtx, cfg.Alerts, dbMain, l.Named("slabbuffers"), cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
 	if err != nil {
 		return nil, err
 	}
@@ -290,11 +264,9 @@ func (s *SQLStore) retryAbortFn(err error) bool {
 		utils.IsErr(err, api.ErrBucketNotEmpty) ||
 		utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
 		utils.IsErr(err, api.ErrObjectExists) ||
-		utils.IsErr(err, errNoSuchTable) ||
 		utils.IsErr(err, api.ErrPartNotFound) ||
 		utils.IsErr(err, api.ErrSlabNotFound) ||
-		utils.IsErr(err, syncer.ErrPeerNotFound) ||
-		utils.IsErr(err, errDuplicateEntry)
+		utils.IsErr(err, syncer.ErrPeerNotFound)
 }
 
 func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {

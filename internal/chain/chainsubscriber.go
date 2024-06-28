@@ -11,8 +11,8 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -46,10 +46,10 @@ type (
 	ApplyChainUpdateFn = func(ChainUpdateTx) error
 
 	ChainSubscriber struct {
-		cm     ChainManager
-		cs     ChainStore
-		events bus.EventBroadcaster
-		logger *zap.SugaredLogger
+		cm          ChainManager
+		cs          ChainStore
+		webhooksMgr *webhooks.Manager
+		logger      *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
 		walletAddress      types.Address
@@ -81,7 +81,7 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be shut down by calling the Close method.
-func NewChainSubscriber(cm *chain.Manager, cs ChainStore, events bus.EventBroadcaster, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
+func NewChainSubscriber(whm *webhooks.Manager, cm *chain.Manager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
@@ -89,10 +89,10 @@ func NewChainSubscriber(cm *chain.Manager, cs ChainStore, events bus.EventBroadc
 	// create subscriber
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &ChainSubscriber{
-		cm:     cm,
-		cs:     cs,
-		events: events,
-		logger: logger.Sugar(),
+		cm:          cm,
+		cs:          cs,
+		webhooksMgr: whm,
+		logger:      logger.Sugar().Named("chainsubscriber"),
 
 		announcementMaxAge: announcementMaxAge,
 		walletAddress:      walletAddress,
@@ -176,7 +176,7 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 
 	// v1 contracts
 	cus := make(map[types.FileContractID]contractUpdate)
-	cau.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+	cau.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
@@ -192,7 +192,7 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 
 	// v2 contracts
 	cus = make(map[types.FileContractID]contractUpdate)
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
@@ -213,7 +213,7 @@ func (s *ChainSubscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUp
 
 	// v1 contracts
 	var cus []contractUpdate
-	cru.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+	cru.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
 		cus = append(cus, v1ContractUpdate(fce, rev, resolved, valid))
 	})
 	for _, cu := range cus {
@@ -224,7 +224,7 @@ func (s *ChainSubscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUp
 
 	// v2 contracts
 	cus = cus[:0]
-	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
 	for _, cu := range cus {
@@ -270,15 +270,18 @@ func (s *ChainSubscriber) sync() error {
 
 		// broadcast consensus update
 		if IsSynced(block) {
-			s.events.BroadcastEvent(api.EventConsensusUpdate{
-				ConsensusState: api.ConsensusState{
-					BlockHeight:   index.Height,
-					LastBlockTime: api.TimeRFC3339(block.Timestamp),
-					Synced:        true,
-				},
-				TransactionFee: s.cm.RecommendedFee(),
-				Timestamp:      time.Now().UTC(),
-			})
+			s.webhooksMgr.BroadcastAction(s.shutdownCtx, webhooks.Event{
+				Module: api.ModuleConsensus,
+				Event:  api.EventUpdate,
+				Payload: api.EventConsensusUpdate{
+					ConsensusState: api.ConsensusState{
+						BlockHeight:   index.Height,
+						LastBlockTime: api.TimeRFC3339(block.Timestamp),
+						Synced:        true,
+					},
+					TransactionFee: s.cm.RecommendedFee(),
+					Timestamp:      time.Now().UTC(),
+				}})
 		}
 	}
 

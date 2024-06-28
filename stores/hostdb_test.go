@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
@@ -457,10 +458,23 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
+	pt := rhpv3.HostPriceTable{
+		HostBlockHeight: 123,
+	}
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
+	if err != nil {
+		t.Fatal(err)
+	} else if time.Now().Before(host.PriceTable.Expiry) {
+		t.Fatal("invalid expiry")
+	} else if host.PriceTable.HostBlockHeight != pt.HostBlockHeight {
+		t.Fatalf("mismatch %v %v", host.PriceTable.HostBlockHeight, pt.HostBlockHeight)
+	}
+
+	// Update the price table expiry to be in the future.
+	_, err = ss.DB().Exec(ctx, "UPDATE hosts SET price_table_expiry = ? WHERE public_key = ?", time.Now().Add(time.Hour), sql.PublicKey(hk))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,15 +504,19 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 1 hour after the previous one.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
+	pt.HostBlockHeight = 456
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if host.Interactions.LastScan.UnixNano() != secondScanTime.UnixNano() {
+	} else if host.Interactions.LastScan.UnixNano() != secondScanTime.UnixNano() {
 		t.Fatal("wrong time")
+	} else if time.Now().After(host.PriceTable.Expiry) {
+		t.Fatal("invalid expiry")
+	} else if host.PriceTable.HostBlockHeight != 123 {
+		t.Fatal("price table was updated")
 	}
 	host.Interactions.LastScan = time.Time{}
 	uptime += secondScanTime.Sub(firstScanTime)
@@ -517,7 +535,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -644,10 +662,11 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
+	pt := rhpv3.HostPriceTable{}
 	t1 := now.Add(-time.Minute * 120) // 2 hours ago
 	t2 := now.Add(-time.Minute * 90)  // 1.5 hours ago (30min downtime)
-	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, false)
-	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, false)
+	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
+	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
 
 	// record interactions
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
@@ -677,7 +696,7 @@ func TestRemoveHosts(t *testing.T) {
 
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
-	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, false)
+	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
@@ -1264,12 +1283,13 @@ func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, success bool) api.HostScan {
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool) api.HostScan {
 	return api.HostScan{
-		HostKey:   hk,
-		Success:   success,
-		Timestamp: scanTime,
-		Settings:  settings,
+		HostKey:    hk,
+		Success:    success,
+		Timestamp:  scanTime,
+		Settings:   settings,
+		PriceTable: pt,
 	}
 }
 

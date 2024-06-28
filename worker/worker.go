@@ -157,7 +157,7 @@ type (
 	}
 
 	WebhookStore interface {
-		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook, opts ...webhooks.HeaderOption) error
+		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
 
 	ConsensusState interface {
@@ -344,26 +344,18 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 }
 
 func (w *worker) rhpPriceTableHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
 	// decode the request
 	var rptr api.RHPPriceTableRequest
 	if jc.Decode(&rptr) != nil {
 		return
 	}
 
-	// apply timeout
-	if rptr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
-		defer cancel()
-	}
-
-	// defer interaction recording
+	// defer interaction recording before applying timeout to make sure we still
+	// record the failed update if it timed out
 	var err error
 	var hpt api.HostPriceTable
 	defer func() {
-		w.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
+		w.bus.RecordPriceTables(jc.Request.Context(), []api.HostPriceTableUpdate{
 			{
 				HostKey:    rptr.HostKey,
 				Success:    isSuccessfulInteraction(err),
@@ -372,6 +364,14 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 			},
 		})
 	}()
+
+	// apply timeout
+	ctx := jc.Request.Context()
+	if rptr.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
+		defer cancel()
+	}
 
 	err = w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
 		hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
@@ -1301,9 +1301,8 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
-	cache := iworker.NewCache(b, l)
-
 	l = l.Named("worker").Named(id)
+	cache := iworker.NewCache(b, l)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
@@ -1491,12 +1490,10 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	default:
 	}
 
-	// record host scan - make sure this isn't interrupted by the same context
-	// used to time out the scan itself because otherwise we won't be able to
-	// record scans that timed out.
-	recordCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	scanErr := w.bus.RecordHostScans(recordCtx, []api.HostScan{
+	// record host scan - make sure this is interrupted by the request ctx and
+	// not the context with the timeout used to time out the scan itself.
+	// Otherwise scans that time out won't be recorded.
+	scanErr := w.bus.RecordHostScans(ctx, []api.HostScan{
 		{
 			HostKey:    hostKey,
 			Success:    isSuccessfulInteraction(err),

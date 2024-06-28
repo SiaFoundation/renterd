@@ -12,6 +12,7 @@ import (
 const (
 	SettingContractSet      = "contractset"
 	SettingGouging          = "gouging"
+	SettingPricePinning     = "pricepinning"
 	SettingRedundancy       = "redundancy"
 	SettingS3Authentication = "s3authentication"
 	SettingUploadPacking    = "uploadpacking"
@@ -80,6 +81,55 @@ type (
 		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
+	// PricePinSettings holds the configuration for pinning certain settings to
+	// a specific currency (e.g., USD). It uses a Forex API to fetch the current
+	// exchange rate, allowing users to set prices in USD instead of SC.
+	PricePinSettings struct {
+		// Enabled can be used to either enable or temporarily disable price
+		// pinning. If enabled, both the currency and the Forex endpoint URL
+		// must be valid.
+		Enabled bool `json:"enabled"`
+
+		// Currency is the external three-letter currency code.
+		Currency string `json:"currency"`
+
+		// ForexEndpointURL is the endpoint that returns the exchange rate for
+		// Siacoin against the underlying currency.
+		ForexEndpointURL string `json:"forexEndpointURL"`
+
+		// Threshold is a percentage between 0 and 1 that determines when the
+		// pinned settings are updated based on the exchange rate at the time.
+		Threshold float64 `json:"threshold"`
+
+		// Autopilots contains the pinned settings for every autopilot.
+		Autopilots map[string]AutopilotPins `json:"autopilots,omitempty"`
+
+		// GougingSettingsPins contains the pinned settings for the gouging
+		// settings.
+		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins,omitempty"`
+	}
+
+	// AutopilotPins contains the available autopilot settings that can be
+	// pinned.
+	AutopilotPins struct {
+		Allowance Pin `json:"allowance"`
+	}
+
+	// GougingSettingsPins contains the available gouging settings that can be
+	// pinned.
+	GougingSettingsPins struct {
+		MaxDownload Pin `json:"maxDownload"`
+		MaxRPCPrice Pin `json:"maxRPCPrice"`
+		MaxStorage  Pin `json:"maxStorage"`
+		MaxUpload   Pin `json:"maxUpload"`
+	}
+
+	// A Pin is a pinned price in an external currency.
+	Pin struct {
+		Pinned bool    `json:"pinned"`
+		Value  float64 `json:"value"`
+	}
+
 	// RedundancySettings contain settings that dictate an object's redundancy.
 	RedundancySettings struct {
 		MinShards   int `json:"minShards"`
@@ -97,6 +147,28 @@ type (
 		SlabBufferMaxSizeSoft int64 `json:"slabBufferMaxSizeSoft"`
 	}
 )
+
+// IsPinned returns true if the pin is enabled and the value is greater than 0.
+func (p Pin) IsPinned() bool {
+	return p.Pinned && p.Value > 0
+}
+
+// Validate returns an error if the price pin settings are not considered valid.
+func (pps PricePinSettings) Validate() error {
+	if !pps.Enabled {
+		return nil
+	}
+	if pps.ForexEndpointURL == "" {
+		return fmt.Errorf("price pin settings must have a forex endpoint URL")
+	}
+	if pps.Currency == "" {
+		return fmt.Errorf("price pin settings must have a currency")
+	}
+	if pps.Threshold <= 0 || pps.Threshold >= 1 {
+		return fmt.Errorf("price pin settings must have a threshold between 0 and 1")
+	}
+	return nil
+}
 
 // Validate returns an error if the gouging settings are not considered valid.
 func (gs GougingSettings) Validate() error {

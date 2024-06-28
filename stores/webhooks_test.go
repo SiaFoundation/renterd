@@ -16,11 +16,17 @@ func TestWebhooks(t *testing.T) {
 		Module: "foo",
 		Event:  "bar",
 		URL:    "http://example.com",
+		Headers: map[string]string{
+			"foo1": "bar1",
+		},
 	}
 	wh2 := webhooks.Webhook{
 		Module: "foo2",
 		Event:  "bar2",
 		URL:    "http://example2.com",
+		Headers: map[string]string{
+			"foo2": "bar2",
+		},
 	}
 
 	// Add hook.

@@ -13,7 +13,7 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 	defer ss.Close()
 
 	completionThreshold := int64(1000)
-	mgr, err := newSlabBufferManager(ss.SQLStore, completionThreshold, t.TempDir())
+	mgr, err := newSlabBufferManager(context.Background(), ss.alerts, ss.bMain, ss.logger, completionThreshold, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestMarkBufferCompleteTwice(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	mgr, err := newSlabBufferManager(ss.SQLStore, 0, t.TempDir())
+	mgr, err := newSlabBufferManager(context.Background(), ss.alerts, ss.bMain, ss.logger, 0, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

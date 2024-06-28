@@ -110,11 +110,14 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 				return err
 			}
 
-			var refund types.Currency
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-			cost, refund, err = RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
+			cost, refund, err := RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
+			if err != nil {
+				return err
+			}
+
 			amount = cost.Sub(refund)
-			return err
+			return nil
 		})
 		return
 	})
@@ -196,14 +199,6 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt api.HostPriceTable, err error) {
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			h.bus.RecordPriceTables(ctx, []api.HostPriceTableUpdate{
-				{
-					HostKey:    h.hk,
-					Success:    isSuccessfulInteraction(err),
-					Timestamp:  time.Now(),
-					PriceTable: hpt,
-				},
-			})
 			return
 		})
 		return

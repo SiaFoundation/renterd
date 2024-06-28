@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func TestPeers(t *testing.T) {
 
 	// assert ErrPeerNotFound before we add it
 	err := ss.UpdatePeerInfo(testPeer, func(info *syncer.PeerInfo) {})
-	if err != syncer.ErrPeerNotFound {
+	if !errors.Is(err, syncer.ErrPeerNotFound) {
 		t.Fatal("expected peer not found")
 	}
 

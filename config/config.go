@@ -107,6 +107,7 @@ type (
 		Enabled           bool              `yaml:"enabled,omitempty"`
 		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"` // deprecated. included for compatibility.
 		HostBucketEnabled bool              `yaml:"hostBucketEnabled,omitempty"`
+		HostBucketBases   []string          `yaml:"hostBucketBases,omitempty"`
 	}
 
 	// Worker contains the configuration for a worker.
@@ -124,6 +125,7 @@ type (
 		UploadMaxMemory               uint64         `yaml:"uploadMaxMemory,omitempty"`
 		UploadMaxOverdrive            uint64         `yaml:"uploadMaxOverdrive,omitempty"`
 		AllowUnauthenticatedDownloads bool           `yaml:"allowUnauthenticatedDownloads,omitempty"`
+		ExternalAddress               string         `yaml:"externalAddress,omitempty"`
 	}
 
 	// Autopilot contains the configuration for an autopilot.

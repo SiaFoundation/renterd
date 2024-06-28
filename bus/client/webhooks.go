@@ -23,13 +23,7 @@ func (c *Client) DeleteWebhook(ctx context.Context, url, module, event string) e
 }
 
 // RegisterWebhook registers a new webhook for the given URL.
-func (c *Client) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook, opts ...webhooks.HeaderOption) error {
-	if webhook.Headers == nil {
-		webhook.Headers = make(map[string]string)
-	}
-	for _, opt := range opts {
-		opt(webhook.Headers)
-	}
+func (c *Client) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
 	err := c.c.WithContext(ctx).POST("/webhooks", webhook, nil)
 	return err
 }

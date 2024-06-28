@@ -7,6 +7,7 @@ import (
 )
 
 var (
+	ErrMarkerNotFound        = errors.New("marker not found")
 	ErrMaxFundAmountExceeded = errors.New("renewal exceeds max fund amount")
 )
 

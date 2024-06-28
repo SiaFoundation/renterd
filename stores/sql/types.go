@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -15,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/siad/modules"
 )
 
 const (
@@ -25,11 +27,13 @@ const (
 type (
 	AutopilotConfig api.AutopilotConfig
 	BigInt          big.Int
+	BusSetting      string
+	CCID            modules.ConsensusChangeID
 	Currency        types.Currency
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
 	MerkleProof     struct{ Hashes []types.Hash256 }
-	Settings        rhpv2.HostSettings
+	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
 	SecretKey       []byte
@@ -39,13 +43,27 @@ type (
 	Unsigned64      uint64
 )
 
+type scannerValuer interface {
+	driver.Valuer
+	sql.Scanner
+}
+
 var (
-	_ sql.Scanner = &Currency{}
-	_ sql.Scanner = &FileContractID{}
-	_ sql.Scanner = &Hash256{}
-	_ sql.Scanner = &MerkleProof{}
-	_ sql.Scanner = &PublicKey{}
-	_ sql.Scanner = &SecretKey{}
+	_ scannerValuer = (*AutopilotConfig)(nil)
+	_ scannerValuer = (*BigInt)(nil)
+	_ scannerValuer = (*BusSetting)(nil)
+	_ scannerValuer = (*CCID)(nil)
+	_ scannerValuer = (*Currency)(nil)
+	_ scannerValuer = (*FileContractID)(nil)
+	_ scannerValuer = (*Hash256)(nil)
+	_ scannerValuer = (*MerkleProof)(nil)
+	_ scannerValuer = (*HostSettings)(nil)
+	_ scannerValuer = (*PriceTable)(nil)
+	_ scannerValuer = (*PublicKey)(nil)
+	_ scannerValuer = (*SecretKey)(nil)
+	_ scannerValuer = (*UnixTimeMS)(nil)
+	_ scannerValuer = (*UnixTimeNS)(nil)
+	_ scannerValuer = (*Unsigned64)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
@@ -87,6 +105,22 @@ func (b *BigInt) Scan(value interface{}) error {
 // Value returns a BigInt value, implements driver.Valuer interface.
 func (b BigInt) Value() (driver.Value, error) {
 	return (*big.Int)(&b).String(), nil
+}
+
+// Scan scan value into CCID, implements sql.Scanner interface.
+func (c *CCID) Scan(value interface{}) error {
+	switch value := value.(type) {
+	case []byte:
+		copy(c[:], value)
+	default:
+		return fmt.Errorf("failed to unmarshal CCID value: %v %t", value, value)
+	}
+	return nil
+}
+
+// Value returns a publicKey value, implements driver.Valuer interface.
+func (c CCID) Value() (driver.Value, error) {
+	return c[:], nil
 }
 
 // Scan scan value into Currency, implements sql.Scanner interface.
@@ -149,8 +183,8 @@ func (h Hash256) Value() (driver.Value, error) {
 	return h[:], nil
 }
 
-// Scan scan value into Settings, implements sql.Scanner interface.
-func (hs *Settings) Scan(value interface{}) error {
+// Scan scan value into HostSettings, implements sql.Scanner interface.
+func (hs *HostSettings) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
@@ -158,8 +192,8 @@ func (hs *Settings) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, hs)
 }
 
-// Value returns a Settings value, implements driver.Valuer interface.
-func (hs Settings) Value() (driver.Value, error) {
+// Value returns a HostSettings value, implements driver.Valuer interface.
+func (hs HostSettings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 
@@ -236,6 +270,38 @@ func (k *SecretKey) Scan(value interface{}) error {
 	}
 	*k = append(SecretKey{}, SecretKey(bytes)...)
 	return nil
+}
+
+// Value returns an key value, implements driver.Valuer interface.
+func (k SecretKey) Value() (driver.Value, error) {
+	return []byte(k), nil
+}
+
+// String implements fmt.Stringer to prevent "s3authentication" settings from
+// getting leaked.
+func (s BusSetting) String() string {
+	if strings.Contains(string(s), "v4Keypairs") {
+		return "*****"
+	}
+	return string(s)
+}
+
+// Scan scans value into the BusSetting
+func (s *BusSetting) Scan(value interface{}) error {
+	switch value := value.(type) {
+	case string:
+		*s = BusSetting(value)
+	case []byte:
+		*s = BusSetting(value)
+	default:
+		return fmt.Errorf("failed to unmarshal BusSetting value from type %t", value)
+	}
+	return nil
+}
+
+// Value returns a BusSetting value, implements driver.Valuer interface.
+func (s BusSetting) Value() (driver.Value, error) {
+	return string(s), nil
 }
 
 // Scan scan value into unixTimeMS, implements sql.Scanner interface.
@@ -321,16 +387,16 @@ func (u Uint64Str) Value() (driver.Value, error) {
 
 func UnmarshalEventData(b []byte, t string) (dst wallet.EventData, err error) {
 	switch t {
-	case wallet.EventTypeMinerPayout:
-		dst = new(wallet.EventMinerPayout)
-	case wallet.EventTypeFoundationSubsidy:
-		dst = new(wallet.EventFoundationSubsidy)
-	case wallet.EventTypeV1Contract:
-		dst = new(wallet.EventV1ContractPayout)
+	case wallet.EventTypeMinerPayout,
+		wallet.EventTypeSiafundClaim,
+		wallet.EventTypeFoundationSubsidy:
+		dst = new(wallet.EventPayout)
+	case wallet.EventTypeV1ContractResolution:
+		dst = new(wallet.EventV1ContractResolution)
+	case wallet.EventTypeV2ContractResolution:
+		dst = new(wallet.EventV2ContractResolution)
 	case wallet.EventTypeV1Transaction:
 		dst = new(wallet.EventV1Transaction)
-	case wallet.EventTypeV2Contract:
-		dst = new(wallet.EventV2ContractPayout)
 	case wallet.EventTypeV2Transaction:
 		dst = new(wallet.EventV2Transaction)
 	default:

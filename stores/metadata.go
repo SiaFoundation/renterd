@@ -186,14 +186,6 @@ type (
 		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
 	}
 
-	dbBufferedSlab struct {
-		Model
-
-		DBSlab dbSlab
-
-		Filename string
-	}
-
 	dbSector struct {
 		Model
 
@@ -330,38 +322,7 @@ func (dbSector) TableName() string { return "sectors" }
 func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbBufferedSlab) TableName() string { return "buffered_slabs" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
-
-// convert converts a dbContract to an ArchivedContract.
-func (c dbArchivedContract) convert() api.ArchivedContract {
-	var revisionNumber uint64
-	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
-	return api.ArchivedContract{
-		ID:        types.FileContractID(c.FCID),
-		HostKey:   types.PublicKey(c.Host),
-		RenewedTo: types.FileContractID(c.RenewedTo),
-
-		ProofHeight:    c.ProofHeight,
-		RevisionHeight: c.RevisionHeight,
-		RevisionNumber: revisionNumber,
-		Size:           c.Size,
-		StartHeight:    c.StartHeight,
-		State:          c.State.String(),
-		WindowStart:    c.WindowStart,
-		WindowEnd:      c.WindowEnd,
-
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(c.UploadSpending),
-			Downloads:   types.Currency(c.DownloadSpending),
-			FundAccount: types.Currency(c.FundAccountSpending),
-			Deletions:   types.Currency(c.DeleteSpending),
-			SectorRoots: types.Currency(c.ListSpending),
-		},
-	}
-}
 
 // convert converts a dbContract to a ContractMetadata.
 func (c dbContract) convert() api.ContractMetadata {
@@ -543,21 +504,16 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 }
 
 func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
-	// Slab buffer info from the database.
-	var bufferedSlabs []dbBufferedSlab
-	err := s.db.Model(&dbBufferedSlab{}).
-		Joins("DBSlab").
-		Joins("DBSlab.DBContractSet").
-		Find(&bufferedSlabs).
-		Error
+	var err error
+	var fileNameToContractSet map[string]string
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		fileNameToContractSet, err = tx.SlabBuffers(ctx)
+		return err
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch slab buffers: %w", err)
 	}
-	// Translate buffers to contract set.
-	fileNameToContractSet := make(map[string]string)
-	for _, slab := range bufferedSlabs {
-		fileNameToContractSet[slab.Filename] = slab.DBSlab.DBContractSet.Name
-	}
+
 	// Fetch in-memory buffer info and fill in contract set name.
 	buffers := s.slabBufferMgr.SlabBuffers()
 	for i := range buffers {
@@ -641,19 +597,12 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 	return renewed.convert(), nil
 }
 
-func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
-	var ancestors []dbArchivedContract
-	err := s.db.WithContext(ctx).Raw("WITH RECURSIVE ancestors AS (SELECT * FROM archived_contracts WHERE renewed_to = ? UNION ALL SELECT archived_contracts.* FROM ancestors, archived_contracts WHERE archived_contracts.renewed_to = ancestors.fcid) SELECT * FROM ancestors WHERE start_height >= ?", fileContractID(id), startHeight).
-		Scan(&ancestors).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	contracts := make([]api.ArchivedContract, len(ancestors))
-	for i, ancestor := range ancestors {
-		contracts[i] = ancestor.convert()
-	}
-	return contracts, nil
+func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error {
@@ -688,22 +637,14 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 }
 
 func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error {
-	// fetch contract ids
-	var fcids []fileContractID
-	if err := s.db.
-		WithContext(ctx).
-		Model(&dbContract{}).
-		Pluck("fcid", &fcids).
-		Error; err != nil {
-		return err
+	contracts, err := s.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
-
-	// create map
 	toArchive := make(map[types.FileContractID]string)
-	for _, fcid := range fcids {
-		toArchive[types.FileContractID(fcid)] = reason
+	for _, c := range contracts {
+		toArchive[c.ID] = reason
 	}
-
 	return s.ArchiveContracts(ctx, toArchive)
 }
 
@@ -716,30 +657,18 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (api.C
 }
 
 func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
-	var dbRoots []hash256
-	if err = s.db.
-		WithContext(ctx).
-		Raw(`
-SELECT sec.root
-FROM contracts c
-INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-INNER JOIN sectors sec ON cs.db_sector_id = sec.id
-WHERE c.fcid = ?
-`, fileContractID(id)).
-		Scan(&dbRoots).
-		Error; err == nil {
-		for _, r := range dbRoots {
-			roots = append(roots, *(*types.Hash256)(&r))
-		}
-	}
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		roots, err = tx.ContractRoots(ctx, id)
+		return err
+	})
 	return
 }
 
-func (s *SQLStore) ContractSets(ctx context.Context) ([]string, error) {
-	var sets []string
-	err := s.db.WithContext(ctx).Raw("SELECT name FROM contract_sets").
-		Scan(&sets).
-		Error
+func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		sets, err = tx.ContractSets(ctx)
+		return err
+	})
 	return sets, err
 }
 
@@ -770,7 +699,7 @@ SELECT c.fcid, c.size, c.size as prunable FROM contracts c WHERE NOT EXISTS (SEL
 		return tx.
 			Raw(`
 SELECT fcid, contract_size as size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END as prunable FROM (
-SELECT c.fcid, MAX(c.size) as contract_size, COUNT(cs.db_sector_id) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
+SELECT c.fcid, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size FROM contracts c INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id GROUP BY c.fcid
 ) i`, rhpv2.SectorSize).
 			Scan(&dataContracts).
 			Error
@@ -1508,13 +1437,6 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to update slab health: %w", err)
 		}
-		// update objects
-		err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-			return tx.UpdateObjectHealth(ctx)
-		})
-		if err != nil {
-			return fmt.Errorf("failed to update object health: %w", err)
-		}
 		// check if done
 		if rowsAffected < refreshHealthBatchSize {
 			return nil // done
@@ -1856,14 +1778,12 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 	}
 
 	// delete buffer
-	var buffer dbBufferedSlab
-	if err := tx.Take(&buffer, "id = ?", slab.BufferID).Error; err != nil {
+	var fileName string
+	if err := tx.Raw("SELECT filename FROM buffered_slabs WHERE id = ?", slab.BufferID).
+		Scan(&fileName).Error; err != nil {
 		return "", err
 	}
-	fileName := buffer.Filename
-	err = tx.Delete(&buffer).
-		Error
-	if err != nil {
+	if err := tx.Exec("DELETE FROM buffered_slabs WHERE id = ?", slab.BufferID).Error; err != nil {
 		return "", err
 	}
 
@@ -2062,173 +1982,12 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 // TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
 // a delimiter for now (see backend.go) but it would be interesting to have
 // arbitrary 'delim' support in ListObjects.
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else {
-		limit++
-	}
-
-	// build prefix expr
-	prefixExpr := buildPrefixExpr(prefix)
-
-	// build order clause
-	orderBy, err := buildOrderClause(sortBy, sortDir)
-	if err != nil {
-		return api.ObjectsListResponse{}, err
-	}
-
-	// build marker expr
-	markerExpr, markerOrderBy, err := buildMarkerExpr(s.db, bucket, prefix, marker, sortBy, sortDir)
-	if err != nil {
-		return api.ObjectsListResponse{}, err
-	}
-	var rows []rawObjectMetadata
-	if err := s.db.
-		Select("o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType, o.created_at as ModTime, o.etag as ETag").
-		Model(&dbObject{}).
-		Table("objects o").
-		Where("o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)", bucket).
-		Where("?", prefixExpr).
-		Where("?", markerExpr).
-		Order(orderBy).
-		Order(markerOrderBy).
-		Order("ObjectName ASC").
-		Limit(int(limit)).
-		Scan(&rows).Error; err != nil {
-		return api.ObjectsListResponse{}, err
-	}
-
-	var hasMore bool
-	var nextMarker string
-	if len(rows) == limit {
-		hasMore = true
-		rows = rows[:len(rows)-1]
-		nextMarker = rows[len(rows)-1].ObjectName
-	}
-
-	var objects []api.ObjectMetadata
-	for _, row := range rows {
-		objects = append(objects, row.convert())
-	}
-
-	return api.ObjectsListResponse{
-		HasMore:    hasMore,
-		NextMarker: nextMarker,
-		Objects:    objects,
-	}, nil
-}
-
-func buildMarkerExpr(db *gorm.DB, bucket, prefix, marker, sortBy, sortDir string) (markerExpr clause.Expr, orderBy clause.OrderBy, err error) {
-	// no marker
-	if marker == "" {
-		return exprTRUE, clause.OrderBy{}, nil
-	}
-
-	// for markers to work we need to order by object_id
-	orderBy = clause.OrderBy{
-		Columns: []clause.OrderByColumn{
-			{
-				Column: clause.Column{Name: "object_id"},
-				Desc:   false,
-			},
-		},
-	}
-
-	desc := strings.EqualFold(sortDir, api.ObjectSortDirDesc)
-	switch sortBy {
-	case "", api.ObjectSortByName:
-		if desc {
-			markerExpr = gorm.Expr("object_id < ?", marker)
-		} else {
-			markerExpr = gorm.Expr("object_id > ?", marker)
-		}
-	case api.ObjectSortByHealth:
-		// fetch marker health
-		var markerHealth float64
-		if marker != "" && sortBy == api.ObjectSortByHealth {
-			if err := db.
-				Select("o.health").
-				Model(&dbObject{}).
-				Table("objects o").
-				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
-				Limit(1).
-				Scan(&markerHealth).
-				Error; err != nil {
-				return exprTRUE, clause.OrderBy{}, err
-			}
-		}
-
-		if desc {
-			markerExpr = gorm.Expr("(Health <= ? AND object_id > ?) OR Health < ?", markerHealth, marker, markerHealth)
-		} else {
-			markerExpr = gorm.Expr("Health > ? OR (Health >= ? AND object_id > ?)", markerHealth, markerHealth, marker)
-		}
-	case api.ObjectSortBySize:
-		// fetch marker size
-		var markerSize float64
-		if marker != "" && sortBy == api.ObjectSortBySize {
-			if err := db.
-				Select("o.size").
-				Model(&dbObject{}).
-				Table("objects o").
-				Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-				Where("b.name = ? AND ? AND ?", bucket, buildPrefixExpr(prefix), gorm.Expr("o.object_id >= ?", marker)).
-				Limit(1).
-				Scan(&markerSize).
-				Error; err != nil {
-				return exprTRUE, clause.OrderBy{}, err
-			}
-		}
-
-		if desc {
-			markerExpr = gorm.Expr("(Size <= ? AND object_id > ?) OR Size < ?", markerSize, marker, markerSize)
-		} else {
-			markerExpr = gorm.Expr("Size > ? OR (Size >= ? AND object_id > ?)", markerSize, markerSize, marker)
-		}
-	default:
-		err = fmt.Errorf("unhandled sortBy parameter '%s'", sortBy)
-	}
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
+		return err
+	})
 	return
-}
-
-func buildOrderClause(sortBy, sortDir string) (clause.OrderByColumn, error) {
-	if err := validateSort(sortBy, sortDir); err != nil {
-		return clause.OrderByColumn{}, err
-	}
-
-	orderByColumns := map[string]string{
-		"":                     "object_id",
-		api.ObjectSortByName:   "object_id",
-		api.ObjectSortByHealth: "Health",
-		api.ObjectSortBySize:   "Size",
-	}
-
-	return clause.OrderByColumn{
-		Column: clause.Column{Name: orderByColumns[sortBy]},
-		Desc:   strings.EqualFold(sortDir, api.ObjectSortDirDesc),
-	}, nil
-}
-
-func buildPrefixExpr(prefix string) clause.Expr {
-	if prefix != "" {
-		return gorm.Expr("o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?", prefix+"%", utf8.RuneCountInString(prefix), prefix)
-	} else {
-		return exprTRUE
-	}
-}
-
-func updateAllObjectsHealth(tx *gorm.DB) error {
-	return tx.Exec(`
-UPDATE objects
-SET health = (
-	SELECT COALESCE(MIN(slabs.health), 1)
-	FROM slabs
-	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
-	WHERE sli.db_object_id = objects.id)
-`).Error
 }
 
 func validateSort(sortBy, sortDir string) error {

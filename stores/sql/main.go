@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,10 +18,12 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
 )
 
@@ -74,6 +78,46 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 		accounts = append(accounts, a)
 	}
 	return accounts, nil
+}
+
+func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+	rows, err := tx.Query(ctx, `
+		WITH RECURSIVE ancestors AS 
+		(
+			SELECT *
+			FROM archived_contracts
+			WHERE renewed_to = ?
+			UNION ALL
+			SELECT archived_contracts.*
+			FROM ancestors, archived_contracts
+			WHERE archived_contracts.renewed_to = ancestors.fcid
+		)
+		SELECT fcid, host, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
+		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end
+		FROM ancestors
+		WHERE start_height >= ?
+	`, FileContractID(fcid), startHeight)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ancestor contracts: %w", err)
+	}
+	defer rows.Close()
+
+	var contracts []api.ArchivedContract
+	for rows.Next() {
+		var c api.ArchivedContract
+		var state ContractState
+		err := rows.Scan((*FileContractID)(&c.ID), (*PublicKey)(&c.HostKey), (*FileContractID)(&c.RenewedTo),
+			(*Currency)(&c.Spending.Uploads), (*Currency)(&c.Spending.Downloads), (*Currency)(&c.Spending.FundAccount),
+			(*Currency)(&c.Spending.Deletions), &c.ProofHeight,
+			&c.RevisionHeight, &c.RevisionNumber, &c.Size, &c.StartHeight, &state, &c.WindowStart,
+			&c.WindowEnd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan contract: %w", err)
+		}
+		c.State = state.String()
+		contracts = append(contracts, c)
+	}
+	return contracts, nil
 }
 
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
@@ -138,6 +182,30 @@ func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 		return api.Bucket{}, fmt.Errorf("failed to fetch bucket: %w", err)
 	}
 	return b, nil
+}
+
+func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([]types.Hash256, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT s.root
+		FROM contract_sectors cs
+		INNER JOIN sectors s ON s.id = cs.db_sector_id
+		INNER JOIN contracts c ON c.id = cs.db_contract_id
+		WHERE c.fcid = ?
+	`, FileContractID(fcid))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	defer rows.Close()
+
+	var roots []types.Hash256
+	for rows.Next() {
+		var root types.Hash256
+		if err := rows.Scan((*Hash256)(&root)); err != nil {
+			return nil, fmt.Errorf("failed to scan root: %w", err)
+		}
+		roots = append(roots, root)
+	}
+	return roots, nil
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
@@ -216,6 +284,24 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
 	}
 	return contracts, nil
+}
+
+func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT name FROM contract_sets")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets: %w", err)
+	}
+	defer rows.Close()
+
+	var sets []string
+	for rows.Next() {
+		var cs string
+		if err := rows.Scan(&cs); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		sets = append(sets, cs)
+	}
+	return sets, nil
 }
 
 func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
@@ -377,6 +463,25 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	return int(deletedSectors), nil
 }
 
+func DeleteSettings(ctx context.Context, tx sql.Tx, key string) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
+		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
+	}
+	return nil
+}
+
+func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
+	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
+	if err != nil {
+		return fmt.Errorf("failed to delete webhook: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return webhooks.ErrWebhookNotFound
+	}
+	return nil
+}
+
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
 	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
 	if err != nil {
@@ -438,6 +543,32 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 	return hosts, nil
 }
 
+func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	// insert buffered slab
+	res, err := tx.Exec(ctx, `INSERT INTO buffered_slabs (created_at, filename) VALUES (?, ?)`,
+		time.Now(), fileName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert buffered slab: %w", err)
+	}
+	bufferedSlabID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch buffered slab id: %w", err)
+	}
+
+	key, err := ec.MarshalBinary()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO slabs (created_at, db_contract_set_id, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		time.Now(), contractSetID, bufferedSlabID, SecretKey(key), minShards, totalShards)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert slab: %w", err)
+	}
+	return bufferedSlabID, nil
+}
+
 func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	// fetch bucket id
 	var bucketID int64
@@ -491,6 +622,73 @@ func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, s
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+func LoadSlabBuffers(ctx context.Context, db *sql.DB) (bufferedSlabs []LoadedSlabBuffer, orphanedBuffers []string, err error) {
+	err = db.Transaction(ctx, func(tx sql.Tx) error {
+		// collect all buffers
+		rows, err := db.Query(ctx, `
+			SELECT bs.id, bs.filename, sla.db_contract_set_id, sla.key, sla.min_shards, sla.total_shards
+			FROM buffered_slabs bs
+			INNER JOIN slabs sla ON sla.db_buffered_slab_id = bs.id
+		`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var bs LoadedSlabBuffer
+			var sk SecretKey
+			if err := rows.Scan(&bs.ID, &bs.Filename, &bs.ContractSetID, &sk, &bs.MinShards, &bs.TotalShards); err != nil {
+				return fmt.Errorf("failed to scan buffered slab: %w", err)
+			} else if err := bs.Key.UnmarshalBinary(sk[:]); err != nil {
+				return fmt.Errorf("failed to unmarshal secret key: %w", err)
+			}
+			bufferedSlabs = append(bufferedSlabs, bs)
+		}
+
+		// fill in sizes
+		for i := range bufferedSlabs {
+			err = tx.QueryRow(ctx, `
+				SELECT COALESCE(MAX(offset+length), 0)
+				FROM slabs sla
+				INNER JOIN slices sli ON sla.id = sli.db_slab_id
+				WHERE sla.db_buffered_slab_id = ?
+		`, bufferedSlabs[i].ID).Scan(&bufferedSlabs[i].Size)
+			if err != nil {
+				return fmt.Errorf("failed to fetch buffered slab size: %w", err)
+			}
+		}
+
+		// find orphaned buffers and delete them
+		rows, err = tx.Query(ctx, `
+			SELECT bs.id, bs.filename
+			FROM buffered_slabs bs
+			LEFT JOIN slabs ON slabs.db_buffered_slab_id = bs.id
+			WHERE slabs.id IS NULL
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to fetch orphaned buffers: %w", err)
+		}
+		var toDelete []int64
+		for rows.Next() {
+			var id int64
+			var filename string
+			if err := rows.Scan(&id, &filename); err != nil {
+				return fmt.Errorf("failed to scan orphaned buffer: %w", err)
+			}
+			orphanedBuffers = append(orphanedBuffers, filename)
+			toDelete = append(toDelete, id)
+		}
+		for _, id := range toDelete {
+			if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", id); err != nil {
+				return fmt.Errorf("failed to delete orphaned buffer: %w", err)
+			}
+		}
+		return nil
+	})
+	return
 }
 
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
@@ -634,24 +832,38 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	return usedContracts, nil
 }
 
-func HealthQuery(limit int64, now time.Time) (string, []any) {
-	return `SELECT slabs.id, slabs.db_contract_set_id, CASE WHEN (slabs.min_shards = slabs.total_shards)
-	THEN
-		CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
-		THEN -1
-		ELSE 1
-		END
-	ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-	END AS health
-	FROM slabs
-	INNER JOIN sectors s ON s.db_slab_id = slabs.id
-	LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
-	LEFT JOIN contracts c ON se.db_contract_id = c.id
-	LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
-	LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-	WHERE slabs.health_valid_until <= ?
-	GROUP BY slabs.id
-	LIMIT ?`, []any{now.Unix(), limit}
+func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Time) error {
+	_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS slabs_health")
+	if err != nil {
+		return fmt.Errorf("failed to drop temporary table: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		CREATE TEMPORARY TABLE slabs_health AS
+			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
+			THEN
+				CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+				THEN -1
+				ELSE 1
+				END
+			ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+			END as health
+			FROM slabs
+			INNER JOIN sectors s ON s.db_slab_id = slabs.id
+			LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+			LEFT JOIN contracts c ON se.db_contract_id = c.id
+			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
+			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+			WHERE slabs.health_valid_until <= ?
+			GROUP BY slabs.id
+			LIMIT ?
+	`, now.Unix(), limit)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary table: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "CREATE INDEX slabs_health_id ON slabs_health (id)"); err != nil {
+		return fmt.Errorf("failed to create index on temporary table: %w", err)
+	}
+	return err
 }
 
 func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
@@ -877,6 +1089,38 @@ func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, u
 	return mpu, neededParts, size, eTag, nil
 }
 
+func NormalizePeer(peer string) (string, error) {
+	host, _, err := net.SplitHostPort(peer)
+	if err != nil {
+		host = peer
+	}
+	if strings.IndexByte(host, '/') != -1 {
+		_, subnet, err := net.ParseCIDR(host)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse CIDR: %w", err)
+		}
+		return subnet.String(), nil
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", errors.New("invalid IP address")
+	}
+
+	var maskLen int
+	if ip.To4() != nil {
+		maskLen = 32
+	} else {
+		maskLen = 128
+	}
+
+	_, normalized, err := net.ParseCIDR(fmt.Sprintf("%s/%d", ip.String(), maskLen))
+	if err != nil {
+		panic("failed to parse CIDR")
+	}
+	return normalized.String(), nil
+}
+
 func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	var args []any
 	var bucketExpr string
@@ -956,6 +1200,78 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func PeerBanned(ctx context.Context, tx sql.Tx, addr string) (bool, error) {
+	// normalize the address to a CIDR
+	netCIDR, err := NormalizePeer(addr)
+	if err != nil {
+		return false, err
+	}
+
+	// parse the subnet
+	_, subnet, err := net.ParseCIDR(netCIDR)
+	if err != nil {
+		return false, err
+	}
+
+	// check all subnets from the given subnet to the max subnet length
+	var maxMaskLen int
+	if subnet.IP.To4() != nil {
+		maxMaskLen = 32
+	} else {
+		maxMaskLen = 128
+	}
+
+	checkSubnets := make([]any, 0, maxMaskLen)
+	for i := maxMaskLen; i > 0; i-- {
+		_, subnet, err := net.ParseCIDR(subnet.IP.String() + "/" + strconv.Itoa(i))
+		if err != nil {
+			return false, err
+		}
+		checkSubnets = append(checkSubnets, subnet.String())
+	}
+
+	var expiration time.Time
+	err = tx.QueryRow(ctx, fmt.Sprintf(`SELECT expiration FROM syncer_bans WHERE net_cidr IN (%s) ORDER BY expiration DESC LIMIT 1`, strings.Repeat("?, ", len(checkSubnets)-1)+"?"), checkSubnets...).
+		Scan((*UnixTimeMS)(&expiration))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return time.Now().Before(expiration), nil
+}
+
+func PeerInfo(ctx context.Context, tx sql.Tx, addr string) (syncer.PeerInfo, error) {
+	var peer syncer.PeerInfo
+	err := tx.QueryRow(ctx, "SELECT address, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE address = ?", addr).
+		Scan(&peer.Address, (*UnixTimeMS)(&peer.FirstSeen), (*UnixTimeMS)(&peer.LastConnect), (*Unsigned64)(&peer.SyncedBlocks), &peer.SyncDuration)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return syncer.PeerInfo{}, syncer.ErrPeerNotFound
+	} else if err != nil {
+		return syncer.PeerInfo{}, fmt.Errorf("failed to fetch peer: %w", err)
+	}
+	return peer, nil
+}
+
+func Peers(ctx context.Context, tx sql.Tx) ([]syncer.PeerInfo, error) {
+	rows, err := tx.Query(ctx, "SELECT address, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch peers: %w", err)
+	}
+	defer rows.Close()
+
+	var peers []syncer.PeerInfo
+	for rows.Next() {
+		var peer syncer.PeerInfo
+		if err := rows.Scan(&peer.Address, (*UnixTimeMS)(&peer.FirstSeen), (*UnixTimeMS)(&peer.LastConnect), (*Unsigned64)(&peer.SyncedBlocks), &peer.SyncDuration); err != nil {
+			return nil, fmt.Errorf("failed to scan peer: %w", err)
+		}
+		peers = append(peers, peer)
+	}
+	return peers, nil
+}
+
 func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
 	if len(scans) == 0 {
 		return nil
@@ -975,8 +1291,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
-		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry = CASE WHEN ? AND price_table_expiry IS NOT NULL AND ? > price_table_expiry THEN ? ELSE price_table_expiry END,
+		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
 		WHERE public_key = ?
@@ -996,9 +1312,9 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success,                      // recent_scan_failures
 			!scan.Success, scanTime, scanTime, // downtime
 			scan.Success, scanTime, scanTime, // uptime
-			scanTime,                              // last_scan
-			scan.Success, Settings(scan.Settings), // settings
-			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scanTime,                                  // last_scan
+			scan.Success, HostSettings(scan.Settings), // settings
+			scan.Success, now, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
@@ -1100,7 +1416,7 @@ func ResetChainState(ctx context.Context, tx sql.Tx) error {
 func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error {
 	_, err := tx.Exec(ctx, "UPDATE hosts SET lost_sectors = 0 WHERE public_key = ?", PublicKey(hk))
 	if err != nil {
-		return fmt.Errorf("failed to reset lost sectors: %w", err)
+		return fmt.Errorf("failed to reset lost sectors for host %v: %w", hk, err)
 	}
 	return nil
 }
@@ -1256,7 +1572,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*Settings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked,
@@ -1323,12 +1639,63 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 	return hosts, nil
 }
 
+func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
+	var value string
+	err := tx.QueryRow(ctx, "SELECT value FROM settings WHERE `key` = ?", key).Scan((*BusSetting)(&value))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return "", api.ErrSettingNotFound
+	} else if err != nil {
+		return "", fmt.Errorf("failed to fetch setting '%s': %w", key, err)
+	}
+	return value, nil
+}
+
+func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
+	rows, err := tx.Query(ctx, "SELECT `key` FROM settings")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query settings: %w", err)
+	}
+	var settings []string
+	for rows.Next() {
+		var setting string
+		if err := rows.Scan(&setting); err != nil {
+			return nil, fmt.Errorf("failed to scan setting key")
+		}
+		settings = append(settings, setting)
+	}
+	return settings, nil
+}
+
 func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
 	if err != nil {
 		return fmt.Errorf("failed to set unclean shutdown: %w", err)
 	}
 	return err
+}
+
+func SlabBuffers(ctx context.Context, tx sql.Tx) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT buffered_slabs.filename, cs.name
+		FROM buffered_slabs
+		INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
+		INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sets")
+	}
+	defer rows.Close()
+
+	fileNameToContractSet := make(map[string]string)
+	for rows.Next() {
+		var fileName string
+		var contractSetName string
+		if err := rows.Scan(&fileName, &contractSetName); err != nil {
+			return nil, fmt.Errorf("failed to scan contract set: %w", err)
+		}
+		fileNameToContractSet[fileName] = contractSetName
+	}
+	return fileNameToContractSet, nil
 }
 
 func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
@@ -1360,18 +1727,49 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 	return nil
 }
 
-func UpdateObjectHealth(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, `
-		UPDATE objects SET health = (
-			SELECT MIN(slabs.health)
-			FROM slabs
-			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-		) WHERE health != (
-			SELECT MIN(slabs.health)
-			FROM slabs
-			INNER JOIN slices ON slices.db_slab_id = slabs.id AND slices.db_object_id = objects.id
-		)`)
-	return err
+func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer.PeerInfo)) error {
+	info, err := PeerInfo(ctx, tx, addr)
+	if err != nil {
+		return err
+	}
+	fn(&info)
+
+	res, err := tx.Exec(ctx, "UPDATE syncer_peers SET last_connect = ?, synced_blocks = ?, sync_duration = ? WHERE address = ?",
+		UnixTimeMS(info.LastConnect),
+		Unsigned64(info.SyncedBlocks),
+		info.SyncDuration,
+		addr,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update peer info: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return syncer.ErrPeerNotFound
+	}
+
+	return nil
+}
+
+func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
+	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	var whs []webhooks.Webhook
+	for rows.Next() {
+		var webhook webhooks.Webhook
+		var headers string
+		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL, &headers); err != nil {
+			return nil, fmt.Errorf("failed to scan webhook: %w", err)
+		} else if err := json.Unmarshal([]byte(headers), &webhook.Headers); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+		}
+		whs = append(whs, webhook)
+	}
+	return whs, nil
 }
 
 func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {
@@ -1537,5 +1935,160 @@ func scanStateElement(s scanner) (types.StateElement, error) {
 		ID:          types.Hash256(id),
 		LeafIndex:   leafIndex,
 		MerkleProof: merkleProof.Hashes,
+	}, nil
+}
+
+func scanObjectMetadata(s scanner) (api.ObjectMetadata, error) {
+	var md api.ObjectMetadata
+	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag); err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
+	}
+	return md, nil
+}
+
+func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// filter by bucket
+	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
+	whereArgs := []any{bucket}
+
+	// apply prefix
+	if prefix != "" {
+		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
+		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
+	}
+
+	// apply sorting
+	dir2SQL := map[string]string{
+		api.ObjectSortDirAsc:  "ASC",
+		api.ObjectSortDirDesc: "DESC",
+	}
+	if _, ok := dir2SQL[strings.ToLower(sortDir)]; !ok {
+		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortDir: %v", sortDir)
+	}
+	var orderByExprs []string
+	switch strings.ToLower(sortBy) {
+	case "", api.ObjectSortByName:
+		orderByExprs = append(orderByExprs, "o.object_id "+dir2SQL[strings.ToLower(sortDir)])
+	case api.ObjectSortByHealth:
+		orderByExprs = append(orderByExprs, "o.health "+dir2SQL[strings.ToLower(sortDir)])
+	case api.ObjectSortBySize:
+		orderByExprs = append(orderByExprs, "o.size "+dir2SQL[strings.ToLower(sortDir)])
+	default:
+		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortBy: %v", sortBy)
+	}
+
+	// always sort by object_id as well if we aren't explicitly
+	if sortBy != api.ObjectSortByName {
+		orderByExprs = append(orderByExprs, "o.object_id ASC")
+	}
+
+	// apply marker
+	queryMarker := func(dst any, marker, col string) error {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+		`, col), bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	}
+	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
+	if marker != "" {
+		switch strings.ToLower(sortBy) {
+		case api.ObjectSortByName:
+			if desc {
+				whereExprs = append(whereExprs, "o.object_id < ?")
+			} else {
+				whereExprs = append(whereExprs, "o.object_id > ?")
+			}
+			whereArgs = append(whereArgs, marker)
+		case api.ObjectSortByHealth:
+			var markerHealth float64
+			if err := queryMarker(&markerHealth, marker, "health"); err != nil {
+				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
+			} else if desc {
+				whereExprs = append(whereExprs, "((o.health <= ? AND o.object_id >?) OR o.health < ?)")
+				whereArgs = append(whereArgs, markerHealth, marker, markerHealth)
+			} else {
+				whereExprs = append(whereExprs, "(o.health > ? OR (o.health >= ? AND object_id > ?))")
+				whereArgs = append(whereArgs, markerHealth, markerHealth, marker)
+			}
+		case api.ObjectSortBySize:
+			var markerSize int64
+			if err := queryMarker(&markerSize, marker, "size"); err != nil {
+				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
+			} else if desc {
+				whereExprs = append(whereExprs, "((o.size <= ? AND o.object_id >?) OR o.size < ?)")
+				whereArgs = append(whereArgs, markerSize, marker, markerSize)
+			} else {
+				whereExprs = append(whereExprs, "(o.size > ? OR (o.size >= ? AND object_id > ?))")
+				whereArgs = append(whereArgs, markerSize, markerSize, marker)
+			}
+		default:
+			return api.ObjectsListResponse{}, fmt.Errorf("invalid marker: %v", marker)
+		}
+	}
+
+	// apply limit
+	whereArgs = append(whereArgs, limit)
+
+	// run query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		FROM objects o
+		WHERE %s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		strings.Join(whereExprs, " AND "),
+		strings.Join(orderByExprs, ", ")),
+		whereArgs...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := scanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Name
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
 	}, nil
 }
