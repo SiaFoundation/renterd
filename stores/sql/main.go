@@ -209,81 +209,19 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	var rows *sql.LoggedRows
-	var err error
+	var whereExprs []string
+	var whereArgs []any
 	if opts.ContractSet != "" {
-		// if we filter by contract set, we fetch the set first to check if it
-		// exists and then fetch the contracts. Knowing that the contracts are
-		// part of at least one set allows us to use INNER JOINs.
 		var contractSetID int64
-		err = tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
+		err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
 			Scan(&contractSetID)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return nil, api.ErrContractSetNotFound
 		}
-		rows, err = tx.Query(ctx, `
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
-			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
-			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			cs.name, h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
-			FROM (
-				SELECT contracts.*
-				FROM contracts
-				INNER JOIN contract_set_contracts csc ON csc.db_contract_id = contracts.id
-				INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-				WHERE cs.id = ?
-			) AS c
-			INNER JOIN hosts h ON h.id = c.host_id
-			INNER JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-			INNER JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			ORDER BY c.id ASC`, contractSetID)
-	} else {
-		// if we don't filter, we need to left join here to ensure we don't miss
-		// contracts that are not part of any set
-		rows, err = tx.Query(ctx, `
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
-			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
-			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
-			FROM contracts AS c
-			INNER JOIN hosts h ON h.id = c.host_id
-			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			ORDER BY c.id ASC`)
+		whereExprs = append(whereExprs, "cs.id = ?")
+		whereArgs = append(whereArgs, contractSetID)
 	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var scannedRows []ContractRow
-	for rows.Next() {
-		var r ContractRow
-		if err := r.Scan(rows); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		scannedRows = append(scannedRows, r)
-	}
-
-	if len(scannedRows) == 0 {
-		return nil, nil
-	}
-
-	// merge 'Host', 'Name' and 'Contract' into dbContracts
-	var contracts []api.ContractMetadata
-	current, scannedRows := scannedRows[0].ContractMetadata(), scannedRows[1:]
-	for {
-		if len(scannedRows) == 0 {
-			contracts = append(contracts, current)
-			break
-		} else if current.ID != types.FileContractID(scannedRows[0].FCID) {
-			contracts = append(contracts, current)
-		} else if scannedRows[0].ContractSet != "" {
-			current.ContractSets = append(current.ContractSets, scannedRows[0].ContractSet)
-		}
-		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
-	}
-	return contracts, nil
+	return QueryContracts(ctx, tx, whereExprs, whereArgs)
 }
 
 func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
@@ -923,6 +861,153 @@ func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 	return buckets, nil
 }
 
+func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// filter by bucket
+	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
+	whereArgs := []any{bucket}
+
+	// apply prefix
+	if prefix != "" {
+		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
+		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
+	}
+
+	// apply sorting
+	dir2SQL := map[string]string{
+		api.ObjectSortDirAsc:  "ASC",
+		api.ObjectSortDirDesc: "DESC",
+	}
+	if _, ok := dir2SQL[strings.ToLower(sortDir)]; !ok {
+		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortDir: %v", sortDir)
+	}
+	var orderByExprs []string
+	switch strings.ToLower(sortBy) {
+	case "", api.ObjectSortByName:
+		orderByExprs = append(orderByExprs, "o.object_id "+dir2SQL[strings.ToLower(sortDir)])
+	case api.ObjectSortByHealth:
+		orderByExprs = append(orderByExprs, "o.health "+dir2SQL[strings.ToLower(sortDir)])
+	case api.ObjectSortBySize:
+		orderByExprs = append(orderByExprs, "o.size "+dir2SQL[strings.ToLower(sortDir)])
+	default:
+		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortBy: %v", sortBy)
+	}
+
+	// always sort by object_id as well if we aren't explicitly
+	if sortBy != api.ObjectSortByName {
+		orderByExprs = append(orderByExprs, "o.object_id ASC")
+	}
+
+	// apply marker
+	queryMarker := func(dst any, marker, col string) error {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+		`, col), bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	}
+	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
+	if marker != "" {
+		switch strings.ToLower(sortBy) {
+		case api.ObjectSortByName:
+			if desc {
+				whereExprs = append(whereExprs, "o.object_id < ?")
+			} else {
+				whereExprs = append(whereExprs, "o.object_id > ?")
+			}
+			whereArgs = append(whereArgs, marker)
+		case api.ObjectSortByHealth:
+			var markerHealth float64
+			if err := queryMarker(&markerHealth, marker, "health"); err != nil {
+				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
+			} else if desc {
+				whereExprs = append(whereExprs, "((o.health <= ? AND o.object_id >?) OR o.health < ?)")
+				whereArgs = append(whereArgs, markerHealth, marker, markerHealth)
+			} else {
+				whereExprs = append(whereExprs, "(o.health > ? OR (o.health >= ? AND object_id > ?))")
+				whereArgs = append(whereArgs, markerHealth, markerHealth, marker)
+			}
+		case api.ObjectSortBySize:
+			var markerSize int64
+			if err := queryMarker(&markerSize, marker, "size"); err != nil {
+				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
+			} else if desc {
+				whereExprs = append(whereExprs, "((o.size <= ? AND o.object_id >?) OR o.size < ?)")
+				whereArgs = append(whereArgs, markerSize, marker, markerSize)
+			} else {
+				whereExprs = append(whereExprs, "(o.size > ? OR (o.size >= ? AND object_id > ?))")
+				whereArgs = append(whereArgs, markerSize, markerSize, marker)
+			}
+		default:
+			return api.ObjectsListResponse{}, fmt.Errorf("invalid marker: %v", marker)
+		}
+	}
+
+	// apply limit
+	whereArgs = append(whereArgs, limit)
+
+	// run query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		FROM objects o
+		WHERE %s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		strings.Join(whereExprs, " AND "),
+		strings.Join(orderByExprs, ", ")),
+		whereArgs...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := scanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Name
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
+	}, nil
+}
+
 func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.MultipartUpload, error) {
 	resp, err := scanMultipartUpload(tx.QueryRow(ctx, "SELECT b.name, mu.key, mu.object_id, mu.upload_id, mu.created_at FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id WHERE mu.upload_id = ?", uploadID))
 	if err != nil {
@@ -1405,6 +1490,14 @@ func RecordPriceTables(ctx context.Context, tx sql.Tx, priceTableUpdates []api.H
 	return nil
 }
 
+func RemoveContractSet(ctx context.Context, tx sql.Tx, contractSet string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM contract_sets WHERE name = ?", contractSet)
+	if err != nil {
+		return fmt.Errorf("failed to delete contract set: %w", err)
+	}
+	return nil
+}
+
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts
 	rows, err := tx.Query(ctx, `
@@ -1441,6 +1534,69 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
+			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
+			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
+			COALESCE(cs.name, ""), h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
+			FROM contracts AS c
+			INNER JOIN hosts h ON h.id = c.host_id
+			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
+			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+			%s
+			ORDER BY c.id ASC`, whereExpr),
+		whereArgs...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scannedRows []ContractRow
+	for rows.Next() {
+		var r ContractRow
+		if err := r.Scan(rows); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		scannedRows = append(scannedRows, r)
+	}
+
+	if len(scannedRows) == 0 {
+		return nil, nil
+	}
+
+	// merge 'Host', 'Name' and 'Contract' into dbContracts
+	var contracts []api.ContractMetadata
+	current, scannedRows := scannedRows[0].ContractMetadata(), scannedRows[1:]
+	for {
+		if len(scannedRows) == 0 {
+			contracts = append(contracts, current)
+			break
+		} else if current.ID != types.FileContractID(scannedRows[0].FCID) {
+			contracts = append(contracts, current)
+		} else if scannedRows[0].ContractSet != "" {
+			current.ContractSets = append(current.ContractSets, scannedRows[0].ContractSet)
+		}
+		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
+	}
+	return contracts, nil
+}
+
+func RenewedContract(ctx context.Context, tx sql.Tx, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+	contracts, err := QueryContracts(ctx, tx, []string{"c.renewed_from = ?"}, []any{FileContractID(renewedFrom)})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to query renewed contract: %w", err)
+	} else if len(contracts) == 0 {
+		return api.ContractMetadata{}, api.ErrContractNotFound
+	}
+	return contracts[0], nil
 }
 
 func ResetChainState(ctx context.Context, tx sql.Tx) error {
@@ -1989,151 +2145,4 @@ func scanObjectMetadata(s scanner) (api.ObjectMetadata, error) {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
 	}
 	return md, nil
-}
-
-func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else {
-		limit++
-	}
-
-	// establish sane defaults for sorting
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
-	}
-
-	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
-	whereArgs := []any{bucket}
-
-	// apply prefix
-	if prefix != "" {
-		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
-		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
-	}
-
-	// apply sorting
-	dir2SQL := map[string]string{
-		api.ObjectSortDirAsc:  "ASC",
-		api.ObjectSortDirDesc: "DESC",
-	}
-	if _, ok := dir2SQL[strings.ToLower(sortDir)]; !ok {
-		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortDir: %v", sortDir)
-	}
-	var orderByExprs []string
-	switch strings.ToLower(sortBy) {
-	case "", api.ObjectSortByName:
-		orderByExprs = append(orderByExprs, "o.object_id "+dir2SQL[strings.ToLower(sortDir)])
-	case api.ObjectSortByHealth:
-		orderByExprs = append(orderByExprs, "o.health "+dir2SQL[strings.ToLower(sortDir)])
-	case api.ObjectSortBySize:
-		orderByExprs = append(orderByExprs, "o.size "+dir2SQL[strings.ToLower(sortDir)])
-	default:
-		return api.ObjectsListResponse{}, fmt.Errorf("invalid sortBy: %v", sortBy)
-	}
-
-	// always sort by object_id as well if we aren't explicitly
-	if sortBy != api.ObjectSortByName {
-		orderByExprs = append(orderByExprs, "o.object_id ASC")
-	}
-
-	// apply marker
-	queryMarker := func(dst any, marker, col string) error {
-		err := tx.QueryRow(ctx, fmt.Sprintf(`
-			SELECT o.%s
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-		`, col), bucket, marker).Scan(dst)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return api.ErrMarkerNotFound
-		} else {
-			return err
-		}
-	}
-	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
-	if marker != "" {
-		switch strings.ToLower(sortBy) {
-		case api.ObjectSortByName:
-			if desc {
-				whereExprs = append(whereExprs, "o.object_id < ?")
-			} else {
-				whereExprs = append(whereExprs, "o.object_id > ?")
-			}
-			whereArgs = append(whereArgs, marker)
-		case api.ObjectSortByHealth:
-			var markerHealth float64
-			if err := queryMarker(&markerHealth, marker, "health"); err != nil {
-				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
-			} else if desc {
-				whereExprs = append(whereExprs, "((o.health <= ? AND o.object_id >?) OR o.health < ?)")
-				whereArgs = append(whereArgs, markerHealth, marker, markerHealth)
-			} else {
-				whereExprs = append(whereExprs, "(o.health > ? OR (o.health >= ? AND object_id > ?))")
-				whereArgs = append(whereArgs, markerHealth, markerHealth, marker)
-			}
-		case api.ObjectSortBySize:
-			var markerSize int64
-			if err := queryMarker(&markerSize, marker, "size"); err != nil {
-				return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch health marker: %w", err)
-			} else if desc {
-				whereExprs = append(whereExprs, "((o.size <= ? AND o.object_id >?) OR o.size < ?)")
-				whereArgs = append(whereArgs, markerSize, marker, markerSize)
-			} else {
-				whereExprs = append(whereExprs, "(o.size > ? OR (o.size >= ? AND object_id > ?))")
-				whereArgs = append(whereArgs, markerSize, markerSize, marker)
-			}
-		default:
-			return api.ObjectsListResponse{}, fmt.Errorf("invalid marker: %v", marker)
-		}
-	}
-
-	// apply limit
-	whereArgs = append(whereArgs, limit)
-
-	// run query
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
-		FROM objects o
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?
-	`,
-		strings.Join(whereExprs, " AND "),
-		strings.Join(orderByExprs, ", ")),
-		whereArgs...)
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := scanObjectMetadata(rows)
-		if err != nil {
-			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-
-	var hasMore bool
-	var nextMarker string
-	if len(objects) == limit {
-		objects = objects[:len(objects)-1]
-		if len(objects) > 0 {
-			hasMore = true
-			nextMarker = objects[len(objects)-1].Name
-		}
-	}
-
-	return api.ObjectsListResponse{
-		HasMore:    hasMore,
-		NextMarker: nextMarker,
-		Objects:    objects,
-	}, nil
 }
