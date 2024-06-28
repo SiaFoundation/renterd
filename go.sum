@@ -227,10 +227,10 @@ gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130/go.mod 
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.etcd.io/bbolt v1.3.10 h1:+BqfJTcCzTItrop8mq/lbzL8wSGtj94UO/3U31shqG0=
 go.etcd.io/bbolt v1.3.10/go.mod h1:bK3UQLPJZly7IlNmV7uVHJDxfe5aK9Ll93e/74Y9oEQ=
-go.sia.tech/core v0.2.8 h1:NQZw8gz9XWlkw9zr7HrLIA3xQnoatp8lYzyONS0IXJg=
-go.sia.tech/core v0.2.8/go.mod h1:BMgT/reXtgv6XbDgUYTCPY7wSMbspDRDs7KMi1vL6Iw=
-go.sia.tech/coreutils v0.0.7 h1:+4nAMevcItpVUi7IMffvpU/O4D47pjDNF3LOv4y8Y/E=
-go.sia.tech/coreutils v0.0.7/go.mod h1:Cke5eNMbvpjt+dX1u+m7/z1Du8jpwUaTGFafEMm0ZqE=
+go.sia.tech/core v0.3.0 h1:PDfAQh9z8PYD+oeVS7rS9SEnTMOZzwwFfAH45yktmko=
+go.sia.tech/core v0.3.0/go.mod h1:BMgT/reXtgv6XbDgUYTCPY7wSMbspDRDs7KMi1vL6Iw=
+go.sia.tech/coreutils v0.1.0 h1:WQL7iT+jK1BiMx87bASXrZJZf4N2fbQkIOW8rS7wkh4=
+go.sia.tech/coreutils v0.1.0/go.mod h1:ybaFgewKXrlxFW71LqsyQlxjG6yWL6BSePrbZYnrprU=
 go.sia.tech/gofakes3 v0.0.4 h1:Kvo8j5cVdJRBXvV1KBJ69bocY23twG8ao/HCdwuPMeI=
 go.sia.tech/gofakes3 v0.0.4/go.mod h1:6hh4lETCMbyFFNWp3FRE838geY6vh1Aeas7LtYDpQdc=
 go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272 h1:RJmZ1Y9PoqpHjYHT5nr6Vmo6tTUpB2AIyd8zFge2JAs=
@@ -243,8 +243,8 @@ go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca h1:aZMg2AKevn7jKx+wlusWQf
 go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca/go.mod h1:h/1afFwpxzff6/gG5i1XdAgPK7dEY6FaibhK7N5F86Y=
 go.sia.tech/web v0.0.0-20240610131903-5611d44a533e h1:oKDz6rUExM4a4o6n/EXDppsEka2y/+/PgFOZmHWQRSI=
 go.sia.tech/web v0.0.0-20240610131903-5611d44a533e/go.mod h1:4nyDlycPKxTlCqvOeRO0wUfXxyzWCEE7+2BRrdNqvWk=
-go.sia.tech/web/renterd v0.54.1 h1:5NWEwE/YenSXyTbKqLrNEZNKVmVGrhfCP6NxLtHbv3I=
-go.sia.tech/web/renterd v0.54.1/go.mod h1:SWwKoAJvLxiHjTXsNPKX3RLiQzJb/vxwcpku3F78MO8=
+go.sia.tech/web/renterd v0.55.0 h1:xjHF0TudolsrQbguNR6+J/OPeXVf+ekodVtLB3y/dyU=
+go.sia.tech/web/renterd v0.55.0/go.mod h1:SWwKoAJvLxiHjTXsNPKX3RLiQzJb/vxwcpku3F78MO8=
 go.uber.org/atomic v1.4.0/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
 go.uber.org/atomic v1.7.0/go.mod h1:fEN4uk6kAWBTFdckzkM89CLk9XfWZrxpCo0nPH17wJc=
 go.uber.org/goleak v1.1.11/go.mod h1:cwTWslyiVhfpKIDGSZEM2HlOvcqm+tG4zioyIeLoqMQ=

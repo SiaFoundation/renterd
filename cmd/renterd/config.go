@@ -204,6 +204,11 @@ func setSeedPhrase() {
 // setAPIPassword prompts the user to enter an API password if one is not
 // already set via environment variable or config file.
 func setAPIPassword() {
+	// return early if the password is already set
+	if len(cfg.HTTP.Password) >= 4 {
+		return
+	}
+
 	// retry until a valid API password is entered
 	for {
 		fmt.Println("Please choose a password for the renterd admin UI.")

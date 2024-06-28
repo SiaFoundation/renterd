@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/siad/modules"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -141,6 +142,10 @@ type (
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
 
+		// InitConsensusInfo initializes the consensus info in the database or
+		// returns the latest one.
+		InitConsensusInfo(ctx context.Context) (types.ChainIndex, modules.ConsensusChangeID, error)
+
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
@@ -210,6 +215,10 @@ type (
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
+
+		// ResetConsenusSubscription resets the consensus subscription in the
+		// database.
+		ResetConsensusSubscription(ctx context.Context) (types.ChainIndex, error)
 
 		// ResetLostSectors resets the lost sector count for the given host.
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error

@@ -13,14 +13,14 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.2.8
-	go.sia.tech/coreutils v0.0.7
+	go.sia.tech/core v0.3.0
+	go.sia.tech/coreutils v0.1.0
 	go.sia.tech/gofakes3 v0.0.4
 	go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272
 	go.sia.tech/jape v0.11.2-0.20240306154058-9832414a5385
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
-	go.sia.tech/web/renterd v0.54.1
+	go.sia.tech/web/renterd v0.55.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.24.0
 	golang.org/x/sys v0.21.0
