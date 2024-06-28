@@ -12,6 +12,7 @@ var (
 	ErrConnectionRefused     = errors.New("connection refused")
 	ErrConnectionTimedOut    = errors.New("connection timed out")
 	ErrConnectionResetByPeer = errors.New("connection reset by peer")
+	ErrIOTimeout             = errors.New("i/o timeout")
 )
 
 // IsErr can be used to compare an error to a target and also works when used on

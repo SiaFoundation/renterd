@@ -85,6 +85,9 @@ overview of all settings configurable through the CLI.
 | `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
 | `Worker.AllowUnauthenticatedDownloads` | Allows unauthenticated downloads                    | -                                 | `--worker.unauthenticatedDownloads` | `RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS` | `worker.allowUnauthenticatedDownloads` |
 | `Worker.ExternalAddress`              | Address of the worker on the network, only necessary when the bus is remote | -                                 | -                                | `RENTERD_WORKER_EXTERNAL_ADDR`                     | `worker.externalAddress`                   |
+| `Worker.RemoteAddrs`                 | List of remote worker addresses (semicolon delimited) | -                                | -                                | `RENTERD_WORKER_REMOTE_ADDRS`                     | `worker.remotes`                    |
+| `Worker.RemotePassword`               | API password for the remote workers                 | -                                | -                                | `RENTERD_WORKER_API_PASSWORD`                     | `worker.remotes`              |
+| `Autopilot.Enabled`					| Enables/disables autopilot							| `true`							| `--autopilot.enabled`			| `RENTERD_AUTOPILOT_ENABLED`						| `autopilot.enabled`					|
 | `Autopilot.AccountsRefillInterval`   | Interval for refilling workers' account balances     | `24h`                             | `--autopilot.accountRefillInterval` | -                                              | `autopilot.accountsRefillInterval`  |
 | `Autopilot.Heartbeat`                | Interval for autopilot loop execution                | `30m`                             | `--autopilot.heartbeat`            | -                                              | `autopilot.heartbeat`               |
 | `Autopilot.MigrationHealthCutoff`    | Threshold for migrating slabs based on health        | `0.75`                            | `--autopilot.migrationHealthCutoff` | -                                              | `autopilot.migrationHealthCutoff`   |
@@ -99,6 +102,113 @@ overview of all settings configurable through the CLI.
 | `S3.HostBucketBases`       | Enables bucket rewriting in the router for the provided bases  | -                                 | `--s3.hostBucketBases`           | `RENTERD_S3_HOST_BUCKET_BASES`               | `s3.hostBucketBases`              |
 | `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
 | `S3.KeypairsV4 (DEPRECATED)`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
+
+### Single-Node Setup
+
+A single-node setup involves running all components (bus, worker, and autopilot)
+on the same machine. This is ideal for testing, development, or small-scale
+deployments. This setup is the default when running `renterd` without any flags.
+
+### Cluster Setup
+
+In a cluster setup, the bus, worker, and autopilot run on separate nodes. This
+setup is ideal for large-scale deployments where you want to horizontally scale
+your renter. The worker nodes can be spread across multiple machines, and the
+autopilot can be run on a separate machine.
+
+#### Bus Node Configuration
+
+The bus is the only node that exposes the UI. To run the bus separately, the
+autopilot and worker have to be disabled using the `--autopilot.enabled` and
+`--worker.enabled` flags. The only other requirement to run a bus is the (walet)
+seed.
+
+#### Worker Node Configuration
+
+To configure the worker as a standalone node, the autopilot has to be disabled
+using the `--autopilot.enabled` flag, and the bus has to be disabled. There's no
+flag to explicitly disable the `bus`, it's implied by configuring a remote
+address for the bus using the `--bus.remoteAddr` and `--bus.remotePassword`
+flags. When the bus is remote, the worker has to be configured with an external
+address of the form `http://<worker-ip>:<port>`, on localhost however this can be
+the same as the worker's HTTP address. The worker needs to know its location on
+the network because it relies on some webhooks it needs to register with the
+bus, which in turn needs to know how to reach the worker when certain events
+occur. Therefor it is important to start the worker after the bus is reachable.
+
+#### Autopilot Node Configuration
+
+To run the autopilot separately, the worker has to be disabled using the
+`--worker.enabled` flag. Similar to the worker, the autopilot has to be
+configured with a remote bus for the node not to start a bus itself. Alongside
+with knowing where the bus is located, the autopilot also has to be aware of the
+workers. These remote workers can be configured through yaml under the option
+`worker.remotes`, or through environment variables
+(`RENTERD_WORKER_REMOTE_ADDRS` and `RENTERD_WORKER_API_PASSWORD`).
+
+#### Example docker-compose with minimal configuration
+
+```yaml
+version: '3.9'
+
+services:
+  bus:
+    image: ghcr.io/siafoundation/renterd:master
+    container_name: renterd_bus
+    environment:
+      - RENTERD_SEED=<enter seed here>
+      - RENTERD_API_PASSWORD=bus-pass
+    ports:
+      - "9980:9980"
+      - "9981:9981"
+
+  worker-1:
+    image: ghcr.io/siafoundation/renterd:master
+    container_name: renterd_worker-1
+    environment:
+      - RENTERD_AUTOPILOT_ENABLED=false
+      - RENTERD_SEED=<enter seed here>
+      - RENTERD_API_PASSWORD=worker-pass
+      - RENTERD_BUS_API_PASSWORD=bus-pass
+      - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
+      - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-1:9980/api/worker
+    ports:
+      - "9982:9980"
+      - "8082:8080"
+    depends_on:
+      - bus
+
+  worker-2:
+    image: ghcr.io/siafoundation/renterd:master
+    container_name: renterd_worker-2
+    environment:
+      - RENTERD_SEED=<enter seed here>
+      - RENTERD_API_PASSWORD=worker-pass
+      - RENTERD_BUS_API_PASSWORD=bus-pass
+      - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
+      - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-2:9980/api/worker
+    ports:
+      - "9983:9980"
+      - "8083:8080"
+    depends_on:
+      - bus
+
+  autopilot:
+    image: ghcr.io/siafoundation/renterd:master
+    container_name: renterd_autopilot
+    environment:
+      - RENTERD_API_PASSWORD=autopilot-pass
+      - RENTERD_BUS_API_PASSWORD=bus-pass
+      - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
+      - RENTERD_WORKER_API_PASSWORD=<worker-password>
+      - RENTERD_WORKER_REMOTE_ADDRS=http://worker-1:9980/api/worker;http://worker-2:9980/api/worker
+    ports:
+      - "9984:9980"
+    depends_on:
+      - bus
+      - worker-1
+      - worker-2
+```
 
 ## Tweaking Performance
 

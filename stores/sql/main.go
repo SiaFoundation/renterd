@@ -304,6 +304,45 @@ func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
 	return sets, nil
 }
 
+func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api.ContractSize, error) {
+	// the following query consists of two parts:
+	// 1. fetch all contracts that have no sectors and consider their size as
+	//    prunable
+	// 2. fetch all contracts that have sectors and calculate the prunable size
+	//    based on the number of sectors
+	rows, err := tx.Query(ctx, `
+		SELECT c.fcid, c.size, c.size
+		FROM contracts c
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM contract_sectors cs
+			WHERE cs.db_contract_id = c.id
+		)
+		UNION ALL
+		SELECT fcid, size, CASE WHEN contract_size > sector_size THEN contract_size - sector_size ELSE 0 END
+		FROM (
+			SELECT c.fcid, c.size, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size
+			FROM contracts c
+			INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+			GROUP BY c.fcid
+		) i
+	`, rhpv2.SectorSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract sizes: %w", err)
+	}
+
+	sizes := make(map[types.FileContractID]api.ContractSize)
+	for rows.Next() {
+		var fcid types.FileContractID
+		var cs api.ContractSize
+		if err := rows.Scan((*FileContractID)(&fcid), &cs.Size, &cs.Prunable); err != nil {
+			return nil, fmt.Errorf("failed to scan contract size: %w", err)
+		}
+		sizes[fcid] = cs
+	}
+	return sizes, nil
+}
+
 func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
@@ -1294,7 +1333,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
-		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
+		subnets = CASE WHEN ? THEN ? ELSE subnets END
 		WHERE public_key = ?
 	`)
 	if err != nil {
@@ -1318,6 +1358,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
+			len(scan.Subnets) > 0, strings.Join(scan.Subnets, ","),
 			PublicKey(scan.HostKey),
 		)
 		if err != nil {
@@ -1555,7 +1596,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
 			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
-			h.scanned, %s
+			h.scanned, h.subnets, %s
 		FROM hosts h
 		%s
 		%s
@@ -1570,17 +1611,21 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var h api.Host
 		var hostID int64
 		var pte dsql.NullTime
+		var subnets string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &h.Blocked,
+			&h.Scanned, &subnets, &h.Blocked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
+		if subnets != "" {
+			h.Subnets = strings.Split(subnets, ",")
+		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[hostID]
 		hosts = append(hosts, h)

@@ -176,13 +176,19 @@ var (
 				},
 			},
 			{
-				ID: "00011_peer_store",
+				ID: "00011_host_subnets",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00011_host_subnets", log)
+				},
+			},
+			{
+				ID: "00012_peer_store",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00011_peer_store", log)
 				},
 			},
 			{
-				ID: "00012_coreutils_wallet",
+				ID: "00013_coreutils_wallet",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00012_coreutils_wallet", log)
 				},

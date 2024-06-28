@@ -40,26 +40,6 @@ func (ctx *mCtx) ApID() string {
 	return ctx.state.AP.ID
 }
 
-func (ctx *mCtx) Deadline() (deadline time.Time, ok bool) {
-	return ctx.ctx.Deadline()
-}
-
-func (ctx *mCtx) Done() <-chan struct{} {
-	return ctx.ctx.Done()
-}
-
-func (ctx *mCtx) Err() error {
-	return ctx.ctx.Err()
-}
-
-func (ctx *mCtx) Value(key interface{}) interface{} {
-	return ctx.ctx.Value(key)
-}
-
-func (ctx *mCtx) AllowRedundantIPs() bool {
-	return ctx.state.AP.Config.Hosts.AllowRedundantIPs
-}
-
 func (ctx *mCtx) Allowance() types.Currency {
 	return ctx.state.Allowance()
 }
@@ -76,16 +56,24 @@ func (ctx *mCtx) ContractSet() string {
 	return ctx.state.AP.Config.Contracts.Set
 }
 
+func (ctx *mCtx) Deadline() (deadline time.Time, ok bool) {
+	return ctx.ctx.Deadline()
+}
+
+func (ctx *mCtx) Done() <-chan struct{} {
+	return ctx.ctx.Done()
+}
+
 func (ctx *mCtx) EndHeight() uint64 {
 	return ctx.state.AP.EndHeight()
 }
 
-func (ctx *mCtx) GougingChecker(cs api.ConsensusState) worker.GougingChecker {
-	return worker.NewGougingChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.Period(), ctx.RenewWindow())
+func (ctx *mCtx) Err() error {
+	return ctx.ctx.Err()
 }
 
-func (ctx *mCtx) WantedContracts() uint64 {
-	return ctx.state.AP.Config.Contracts.Amount
+func (ctx *mCtx) GougingChecker(cs api.ConsensusState) worker.GougingChecker {
+	return worker.NewGougingChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.Period(), ctx.RenewWindow())
 }
 
 func (ctx *mCtx) Period() uint64 {
@@ -94,6 +82,18 @@ func (ctx *mCtx) Period() uint64 {
 
 func (ctx *mCtx) RenewWindow() uint64 {
 	return ctx.state.AP.Config.Contracts.RenewWindow
+}
+
+func (ctx *mCtx) ShouldFilterRedundantIPs() bool {
+	return !ctx.state.AP.Config.Hosts.AllowRedundantIPs
+}
+
+func (ctx *mCtx) Value(key interface{}) interface{} {
+	return ctx.ctx.Value(key)
+}
+
+func (ctx *mCtx) WantedContracts() uint64 {
+	return ctx.state.AP.Config.Contracts.Amount
 }
 
 func (state *MaintenanceState) Allowance() types.Currency {

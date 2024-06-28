@@ -11,7 +11,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -309,7 +308,7 @@ func (s *scanner) launchScanWorkers(ctx context.Context, w scanWorker, reqs chan
 				scan, err := w.RHPScan(ctx, req.hostKey, req.hostIP, s.currentTimeout())
 				if err != nil {
 					break // abort
-				} else if !utils.IsErr(errors.New(scan.ScanError), contractor.ErrIOTimeout) && scan.Ping > 0 {
+				} else if !utils.IsErr(errors.New(scan.ScanError), utils.ErrIOTimeout) && scan.Ping > 0 {
 					s.tracker.addDataPoint(time.Duration(scan.Ping))
 				}
 

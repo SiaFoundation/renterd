@@ -27,6 +27,10 @@ var (
 	// be scanned since it is on a private network.
 	ErrHostOnPrivateNetwork = errors.New("host is on a private network")
 
+	// ErrHostTooManyAddresses is returned by the worker API when a host has
+	// more than two addresses of the same type.
+	ErrHostTooManyAddresses = errors.New("host has more than two addresses, or two of the same type")
+
 	// ErrMultiRangeNotSupported is returned by the worker API when a request
 	// tries to download multiple ranges at once.
 	ErrMultiRangeNotSupported = errors.New("multipart ranges are not supported")
