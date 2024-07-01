@@ -151,9 +151,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		return nil, fmt.Errorf("failed to create main database: %v", mainErr)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	dbName, dbVersion, err := dbMain.Version(ctx)
+	dbName, dbVersion, err := dbMain.Version(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch db version: %v", err)
 	}
