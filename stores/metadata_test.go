@@ -30,6 +30,7 @@ import (
 
 func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string) error {
 	ts := time.Now()
+	time.Sleep(time.Millisecond)
 	if err := s.RemoveObject(ctx, bucket, path); err != nil {
 		return err
 	}
@@ -38,6 +39,7 @@ func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string
 
 func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix string) error {
 	ts := time.Now()
+	time.Sleep(time.Millisecond)
 	if err := s.RemoveObjects(ctx, bucket, prefix); err != nil {
 		return err
 	}
@@ -46,6 +48,7 @@ func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix str
 
 func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
 	ts := time.Now()
+	time.Sleep(time.Millisecond)
 	if err := s.RenameObject(ctx, bucket, keyOld, keyNew, force); err != nil {
 		return err
 	}
@@ -54,6 +57,7 @@ func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, key
 
 func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
 	ts := time.Now()
+	time.Sleep(time.Millisecond)
 	if err := s.RenameObjects(ctx, bucket, prefixOld, prefixNew, force); err != nil {
 		return err
 	}
@@ -65,6 +69,7 @@ func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, contr
 	_, err := s.Object(ctx, bucket, path)
 	if err == nil {
 		ts = time.Now()
+		time.Sleep(time.Millisecond)
 	}
 	if err := s.UpdateObject(ctx, bucket, path, contractSet, eTag, mimeType, metadata, o); err != nil {
 		return err
