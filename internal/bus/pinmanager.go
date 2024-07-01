@@ -301,7 +301,7 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		if err != nil {
 			pm.logger.Warnw("failed to convert max storage price to currency", zap.Error(err))
 		}
-		update := maxStorageCurr.Div64(1 << 40).Div64(144 * 30) // convert from SC/TiB/month to SC/byte/block
+		update := maxStorageCurr.Div64(1e12).Div64(144 * 30) // convert from SC/TB/month to SC/byte/block
 		if !gs.MaxStoragePrice.Equals(update) {
 			bkp := gs.MaxStoragePrice
 			gs.MaxStoragePrice = update
