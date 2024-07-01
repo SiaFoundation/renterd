@@ -9,7 +9,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/build"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 const (
@@ -273,7 +273,7 @@ func versionScore(settings rhpv2.HostSettings, minVersion string) float64 {
 	}
 	weight := 1.0
 	for _, v := range versions {
-		if build.VersionCmp(settings.Version, v.version) < 0 {
+		if utils.VersionCmp(settings.Version, v.version) < 0 {
 			weight *= v.penalty
 		}
 	}

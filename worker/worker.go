@@ -1443,7 +1443,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// resolves to more than two addresses of the same type, if it fails for
 	// another reason the host scan won't have subnets
 	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
-	if errors.Is(err, api.ErrHostTooManyAddresses) {
+	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !w.allowPrivateIPs {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork

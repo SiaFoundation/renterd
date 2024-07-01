@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/siad/crypto"
 	"go.uber.org/zap"
 )
 
@@ -298,7 +297,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 	ctx, cancel := timeoutCtx()
 	defer cancel()
 	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, h.fcid)
-	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
+	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err) || isPriceTableGouging(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
 	} else if err == nil {
 		return rev, nil
@@ -308,7 +307,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 	ctx, cancel = timeoutCtx()
 	defer cancel()
 	rev, err = h.fetchRevisionWithContract(ctx, h.hk, h.siamuxAddr, h.fcid)
-	if err != nil && !isInsufficientFunds(err) {
+	if err != nil && !(isInsufficientFunds(err) || isPriceTableGouging(err)) {
 		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with contract: %v", err)
 	} else if err == nil {
 		return rev, nil
@@ -794,16 +793,15 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	}
 	cost = resp.TotalCost
 
-	// build proof
-	proof := make([]crypto.Hash, len(resp.Proof))
-	for i, h := range resp.Proof {
-		proof[i] = crypto.Hash(h)
-	}
-
 	// verify proof
-	proofStart := int(offset) / crypto.SegmentSize
-	proofEnd := int(offset+length) / crypto.SegmentSize
-	if !crypto.VerifyRangeProof(resp.Output, proof, proofStart, proofEnd, crypto.Hash(merkleRoot)) {
+	proofStart := uint64(offset) / rhpv2.LeafSize
+	proofEnd := uint64(offset+length) / rhpv2.LeafSize
+	verifier := rhpv2.NewRangeProofVerifier(proofStart, proofEnd)
+	_, err = verifier.ReadFrom(bytes.NewReader(resp.Output))
+	if err != nil {
+		err = fmt.Errorf("failed to read proof: %w", err)
+		return
+	} else if !verifier.Verify(resp.Proof, merkleRoot) {
 		err = errors.New("proof verification failed")
 		return
 	}

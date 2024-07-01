@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/modules"
 )
 
 const (
@@ -28,7 +27,6 @@ type (
 	AutopilotConfig api.AutopilotConfig
 	BigInt          big.Int
 	BusSetting      string
-	CCID            modules.ConsensusChangeID
 	Currency        types.Currency
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
@@ -52,7 +50,6 @@ var (
 	_ scannerValuer = (*AutopilotConfig)(nil)
 	_ scannerValuer = (*BigInt)(nil)
 	_ scannerValuer = (*BusSetting)(nil)
-	_ scannerValuer = (*CCID)(nil)
 	_ scannerValuer = (*Currency)(nil)
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
@@ -105,22 +102,6 @@ func (b *BigInt) Scan(value interface{}) error {
 // Value returns a BigInt value, implements driver.Valuer interface.
 func (b BigInt) Value() (driver.Value, error) {
 	return (*big.Int)(&b).String(), nil
-}
-
-// Scan scan value into CCID, implements sql.Scanner interface.
-func (c *CCID) Scan(value interface{}) error {
-	switch value := value.(type) {
-	case []byte:
-		copy(c[:], value)
-	default:
-		return fmt.Errorf("failed to unmarshal CCID value: %v %t", value, value)
-	}
-	return nil
-}
-
-// Value returns a publicKey value, implements driver.Valuer interface.
-func (c CCID) Value() (driver.Value, error) {
-	return c[:], nil
 }
 
 // Scan scan value into Currency, implements sql.Scanner interface.

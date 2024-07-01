@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/siad/build"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 const (
@@ -131,7 +131,7 @@ type (
 func (c AutopilotConfig) Validate() error {
 	if c.Hosts.MaxDowntimeHours > 99*365*24 {
 		return ErrMaxDowntimeHoursTooHigh
-	} else if c.Hosts.MinProtocolVersion != "" && !build.IsVersion(c.Hosts.MinProtocolVersion) {
+	} else if c.Hosts.MinProtocolVersion != "" && !utils.IsVersion(c.Hosts.MinProtocolVersion) {
 		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
 	}
 	return nil

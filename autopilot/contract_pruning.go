@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/siad/build"
 	"go.uber.org/zap"
 )
 
@@ -238,7 +237,7 @@ func humanReadableSize(b int) string {
 }
 
 func shouldSendPruneAlert(err error, version, release string) bool {
-	oldHost := (build.VersionCmp(version, "1.6.0") < 0 || version == "1.6.0" && release == "")
+	oldHost := (utils.VersionCmp(version, "1.6.0") < 0 || version == "1.6.0" && release == "")
 	sectorRootsIssue := utils.IsErr(err, errInvalidSectorRootsRange) && oldHost
 	merkleRootIssue := utils.IsErr(err, errInvalidMerkleProof) && oldHost
 	return err != nil && !(sectorRootsIssue || merkleRootIssue ||
