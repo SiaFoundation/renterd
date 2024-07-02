@@ -265,15 +265,9 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		if err != nil {
 			pm.logger.Warn("failed to convert max download price to currency")
 		} else if !gs.MaxDownloadPrice.Equals(update) {
-			bkp := gs.MaxDownloadPrice
 			gs.MaxDownloadPrice = update
-			if err := gs.Validate(); err != nil {
-				pm.logger.Warn("failed to update gouging setting, new download price makes the setting invalid", zap.Error(err))
-				gs.MaxDownloadPrice = bkp
-			} else {
-				pm.logger.Infow("updating max download price", "old", bkp, "new", gs.MaxDownloadPrice, "rate", rate)
-				updated = true
-			}
+			pm.logger.Infow("updating max download price", "old", gs.MaxDownloadPrice, "new", update, "rate", rate)
+			updated = true
 		}
 	}
 
@@ -283,15 +277,9 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		if err != nil {
 			pm.logger.Warnw("failed to convert max RPC price to currency", zap.Error(err))
 		} else if !gs.MaxRPCPrice.Equals(update) {
-			bkp := gs.MaxRPCPrice
+			pm.logger.Infow("updating max RPC price", "old", gs.MaxRPCPrice, "new", update, "rate", rate)
 			gs.MaxRPCPrice = update
-			if err := gs.Validate(); err != nil {
-				pm.logger.Warnw("failed to update gouging setting, new RPC price makes the setting invalid", zap.Error(err))
-				gs.MaxRPCPrice = bkp
-			} else {
-				pm.logger.Infow("updating max RPC price", "old", bkp, "new", gs.MaxRPCPrice, "rate", rate)
-				updated = true
-			}
+			updated = true
 		}
 	}
 
@@ -300,18 +288,10 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		maxStorageCurr, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxStorage.Value), rate)
 		if err != nil {
 			pm.logger.Warnw("failed to convert max storage price to currency", zap.Error(err))
-		}
-		update := maxStorageCurr.Div64(1e12).Div64(144 * 30) // convert from SC/TB/month to SC/byte/block
-		if !gs.MaxStoragePrice.Equals(update) {
-			bkp := gs.MaxStoragePrice
+		} else if update := maxStorageCurr.Div64(1e12).Div64(144 * 30); !gs.MaxStoragePrice.Equals(update) { // convert from SC/TB/month to SC/byte/block
+			pm.logger.Infow("updating max storage price", "old", gs.MaxStoragePrice, "new", update, "rate", rate)
 			gs.MaxStoragePrice = update
-			if err := gs.Validate(); err != nil {
-				pm.logger.Warnw("failed to update gouging setting, new storage price makes the setting invalid", zap.Error(err))
-				gs.MaxStoragePrice = bkp
-			} else {
-				pm.logger.Infow("updating max storage price", "old", bkp, "new", gs.MaxStoragePrice, "rate", rate)
-				updated = true
-			}
+			updated = true
 		}
 	}
 
@@ -321,15 +301,9 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		if err != nil {
 			pm.logger.Warnw("failed to convert max upload price to currency", zap.Error(err))
 		} else if !gs.MaxUploadPrice.Equals(update) {
-			bkp := gs.MaxUploadPrice
+			pm.logger.Infow("updating max upload price", "old", gs.MaxUploadPrice, "new", update, "rate", rate)
 			gs.MaxUploadPrice = update
-			if err := gs.Validate(); err != nil {
-				pm.logger.Warnw("failed to update gouging setting, new upload price makes the setting invalid", zap.Error(err))
-				gs.MaxUploadPrice = bkp
-			} else {
-				pm.logger.Infow("updating max upload price", "old", bkp, "new", gs.MaxUploadPrice, "rate", rate)
-				updated = true
-			}
+			updated = true
 		}
 	}
 
