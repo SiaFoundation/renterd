@@ -1965,6 +1965,88 @@ func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 	return err
 }
 
+func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
+	ec, err := key.MarshalBinary()
+	if err != nil {
+		return object.Slab{}, fmt.Errorf("failed to marshal encryption key: %w", err)
+	}
+
+	// fetch slab
+	var slabID int64
+	slab := object.Slab{Key: key}
+	err = tx.QueryRow(ctx, `
+		SELECT id, health, min_shards 
+		FROM slabs sla
+		WHERE sla.key = ?
+	`, SecretKey(ec)).Scan(&slabID, &slab.Health, &slab.MinShards)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return object.Slab{}, api.ErrSlabNotFound
+	} else if err != nil {
+		return object.Slab{}, fmt.Errorf("failed to fetch slab: %w", err)
+	}
+
+	// fetch sectors
+	rows, err := tx.Query(ctx, `
+		SELECT id, latest_host, root
+		FROM sectors s
+		WHERE s.db_slab_id = ?
+		ORDER BY s.slab_index
+	`, slabID)
+	if err != nil {
+		return object.Slab{}, fmt.Errorf("failed to fetch sectors: %w", err)
+	}
+	defer rows.Close()
+
+	var sectorIDs []int64
+	for rows.Next() {
+		var sectorID int64
+		var sector object.Sector
+		if err := rows.Scan(&sectorID, (*PublicKey)(&sector.LatestHost), (*Hash256)(&sector.Root)); err != nil {
+			return object.Slab{}, fmt.Errorf("failed to scan sector: %w", err)
+		}
+		slab.Shards = append(slab.Shards, sector)
+		sectorIDs = append(sectorIDs, sectorID)
+	}
+
+	// fetch contracts for each sector
+	stmt, err := tx.Prepare(ctx, `
+		SELECT h.public_key, c.fcid
+		FROM contract_sectors cs
+		INNER JOIN contracts c ON c.id = cs.db_contract_id
+		INNER JOIN hosts h ON h.id = c.host_id
+		WHERE cs.db_sector_id = ?
+		ORDER BY c.id
+	`)
+	if err != nil {
+		return object.Slab{}, fmt.Errorf("failed to prepare statement to fetch contracts: %w", err)
+	}
+	defer stmt.Close()
+
+	for i, sectorID := range sectorIDs {
+		rows, err := stmt.Query(ctx, sectorID)
+		if err != nil {
+			return object.Slab{}, fmt.Errorf("failed to fetch contracts: %w", err)
+		}
+		if err := func() error {
+			defer rows.Close()
+
+			slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
+			for rows.Next() {
+				var pk types.PublicKey
+				var fcid types.FileContractID
+				if err := rows.Scan((*PublicKey)(&pk), (*FileContractID)(&fcid)); err != nil {
+					return fmt.Errorf("failed to scan contract: %w", err)
+				}
+				slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
+			}
+			return nil
+		}(); err != nil {
+			return object.Slab{}, err
+		}
+	}
+	return slab, nil
+}
+
 func SlabBuffers(ctx context.Context, tx sql.Tx) (map[string]string, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT buffered_slabs.filename, cs.name

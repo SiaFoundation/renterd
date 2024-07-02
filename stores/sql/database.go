@@ -290,6 +290,9 @@ type (
 		// Settings returns all available settings from the database.
 		Settings(ctx context.Context) ([]string, error)
 
+		// Slab returns the slab with the given ID or api.ErrSlabNotFound.
+		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+
 		// SlabBuffers returns the filenames and associated contract sets of all
 		// slab buffers.
 		SlabBuffers(ctx context.Context) (map[string]string, error)

@@ -1289,19 +1289,12 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 	return nil
 }
 
-func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
-	k, err := key.MarshalBinary()
-	if err != nil {
-		return object.Slab{}, err
-	}
-	var slab dbSlab
-	tx := s.db.Where(&dbSlab{Key: k}).
-		Preload("Shards.Contracts.Host").
-		Take(&slab)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return object.Slab{}, api.ErrSlabNotFound
-	}
-	return slab.convert()
+func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		slab, err = tx.Slab(ctx, key)
+		return err
+	})
+	return
 }
 
 func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {

@@ -737,6 +737,10 @@ func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
+	return ssql.Slab(ctx, tx, key)
+}
+
 func (tx *MainDatabaseTx) SlabBuffers(ctx context.Context) (map[string]string, error) {
 	return ssql.SlabBuffers(ctx, tx)
 }
