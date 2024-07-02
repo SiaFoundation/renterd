@@ -360,36 +360,6 @@ func (c dbContract) convert() api.ContractMetadata {
 	}
 }
 
-// convert turns a dbObject into a object.Slab.
-func (s dbSlab) convert() (slab object.Slab, err error) {
-	// unmarshal key
-	err = slab.Key.UnmarshalBinary(s.Key)
-	if err != nil {
-		return
-	}
-
-	// set health
-	slab.Health = s.Health
-
-	// set shards
-	slab.MinShards = s.MinShards
-	slab.Shards = make([]object.Sector, len(s.Shards))
-
-	// hydrate shards
-	for i, shard := range s.Shards {
-		slab.Shards[i].LatestHost = types.PublicKey(shard.LatestHost)
-		slab.Shards[i].Root = *(*types.Hash256)(shard.Root)
-		for _, c := range shard.Contracts {
-			if slab.Shards[i].Contracts == nil {
-				slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
-			}
-			slab.Shards[i].Contracts[types.PublicKey(c.Host.PublicKey)] = append(slab.Shards[i].Contracts[types.PublicKey(c.Host.PublicKey)], types.FileContractID(c.FCID))
-		}
-	}
-
-	return
-}
-
 func (raw rawObjectMetadata) convert() api.ObjectMetadata {
 	return newObjectMetadata(
 		raw.ObjectName,
@@ -1691,30 +1661,6 @@ func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSl
 		return "", fmt.Errorf("failed to create shards: %w", err)
 	}
 	return fileName, nil
-}
-
-// contract retrieves a contract from the store.
-func contract(tx *gorm.DB, id fileContractID) (contract dbContract, err error) {
-	err = tx.
-		Where(&dbContract{ContractCommon: ContractCommon{FCID: id}}).
-		Joins("Host").
-		Take(&contract).
-		Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = api.ErrContractNotFound
-	}
-	return
-}
-
-// contractsForHost retrieves all contracts for the given host
-func contractsForHost(tx *gorm.DB, host dbHost) (contracts []dbContract, err error) {
-	err = tx.
-		Where(&dbContract{HostID: host.ID}).
-		Joins("Host").
-		Find(&contracts).
-		Error
-	return
 }
 
 func (s *SQLStore) pruneSlabsLoop() {
