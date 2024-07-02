@@ -710,29 +710,12 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 	return
 }
 
-func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	}
-
-	var objects []api.ObjectMetadata
-	err := s.db.
-		WithContext(ctx).
-		Select("o.object_id as Name, o.size as Size, o.health as Health, o.mime_type as MimeType, o.etag as ETag, o.created_at as ModTime").
-		Model(&dbObject{}).
-		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Where("INSTR(o.object_id, ?) > 0 AND b.name = ?", substring, bucket).
-		Order("o.object_id ASC").
-		Offset(offset).
-		Limit(limit).
-		Scan(&objects).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return objects, nil
+func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) (objects []api.ObjectMetadata, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		objects, err = tx.SearchObjects(ctx, bucket, substring, offset, limit)
+		return err
+	})
+	return
 }
 
 func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
