@@ -287,6 +287,10 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 	return ssql.Contracts(ctx, tx, opts)
 }
 
+func (tx *MainDatabaseTx) ContractSetID(ctx context.Context, contractSet string) (int64, error) {
+	return ssql.ContractSetID(ctx, tx, contractSet)
+}
+
 func (tx *MainDatabaseTx) ContractSets(ctx context.Context) ([]string, error) {
 	return ssql.ContractSets(ctx, tx)
 }

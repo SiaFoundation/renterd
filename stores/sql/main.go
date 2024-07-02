@@ -241,6 +241,17 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	return QueryContracts(ctx, tx, whereExprs, whereArgs)
 }
 
+func ContractSetID(ctx context.Context, tx sql.Tx, contractSet string) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE name = ?", contractSet).Scan(&id)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, api.ErrContractSetNotFound
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+	return id, nil
+}
+
 func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
 	rows, err := tx.Query(ctx, "SELECT name FROM contract_sets")
 	if err != nil {

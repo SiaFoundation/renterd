@@ -93,6 +93,12 @@ type (
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 
+		// ContractSetID returns the ID of the contract set with the given name.
+		// NOTE: Our locking strategy requires that the contract set ID is
+		// unique. So even after a contract set was deleted, the ID must not be
+		// reused.
+		ContractSetID(ctx context.Context, contractSet string) (int64, error)
+
 		// ContractSets returns the names of all contract sets.
 		ContractSets(ctx context.Context) ([]string, error)
 

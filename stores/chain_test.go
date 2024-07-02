@@ -77,15 +77,15 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// assert contract was updated successfully
 	var we uint64
-	if c, err := ss.contract(context.Background(), fileContractID(fcid)); err != nil {
+	if c, err := ss.Contract(context.Background(), fcid); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if c.RevisionHeight != 1 {
 		t.Fatal("unexpected revision height", c.RevisionHeight)
-	} else if c.RevisionNumber != "2" {
+	} else if c.RevisionNumber != 2 {
 		t.Fatal("unexpected revision number", c.RevisionNumber)
 	} else if c.Size != 3 {
 		t.Fatal("unexpected size", c.Size)
-	} else if c.State.String() != api.ContractStateActive {
+	} else if c.State != api.ContractStateActive {
 		t.Fatal("unexpected state", c.State)
 	} else {
 		we = c.WindowEnd
@@ -97,11 +97,11 @@ func TestProcessChainUpdate(t *testing.T) {
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
-	if c, err := ss.contract(context.Background(), fileContractID(fcid)); err != nil {
+	if c, err := ss.Contract(context.Background(), fcid); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if c.RevisionHeight != 2 {
 		t.Fatal("unexpected revision height", c.RevisionHeight)
-	} else if c.RevisionNumber != "2" {
+	} else if c.RevisionNumber != 2 {
 		t.Fatal("unexpected revision number", c.RevisionNumber)
 	} else if c.Size != 3 {
 		t.Fatal("unexpected size", c.Size)
@@ -113,9 +113,9 @@ func TestProcessChainUpdate(t *testing.T) {
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
-	if c, err := ss.contract(context.Background(), fileContractID(fcid)); err != nil {
+	if c, err := ss.Contract(context.Background(), fcid); err != nil {
 		t.Fatal("unexpected error", err)
-	} else if c.State.String() != api.ContractStateFailed {
+	} else if c.State != api.ContractStateFailed {
 		t.Fatal("unexpected state", c.State)
 	}
 

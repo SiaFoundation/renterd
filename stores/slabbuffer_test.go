@@ -32,7 +32,7 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 	minShards := uint8(1)
 	totalShards := uint8(2)
 	maxSize := bufferedSlabSize(minShards)
-	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(maxSize-100), minShards, totalShards, set.ID)
+	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(maxSize-100), minShards, totalShards, set.Name)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mgr.completeBuffers[gid]) != 1 {
@@ -52,7 +52,7 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 
 	// add a slab that should fit in the buffer but since the first buffer is
 	// complete we ignore it
-	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), minShards, totalShards, set.ID)
+	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), minShards, totalShards, set.Name)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mgr.completeBuffers[gid]) != 1 {
@@ -82,7 +82,7 @@ func TestMarkBufferCompleteTwice(t *testing.T) {
 	gid := bufferGID(1, 2, uint32(set.ID))
 
 	// create an incomplete buffer
-	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), 1, 2, set.ID)
+	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), 1, 2, set.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
