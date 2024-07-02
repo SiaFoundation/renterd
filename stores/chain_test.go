@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -136,8 +137,9 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update host is successful
+	ts := time.Now().Truncate(time.Second).Add(-time.Minute).UTC()
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
-		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "foo"}, 1, types.BlockID{}, types.CurrentTimestamp())
+		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "foo"}, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
@@ -145,6 +147,38 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	} else if h.NetAddress != "foo" {
 		t.Fatal("unexpected net address", h.NetAddress)
+	} else if !h.LastAnnouncement.Truncate(time.Second).Equal(ts) {
+		t.Fatalf("unexpected last announcement %v != %v", h.LastAnnouncement, ts)
+	}
+
+	// record 2 scans for the host to give it some uptime
+	err = ss.RecordHostScans(context.Background(), []api.HostScan{
+		{HostKey: hks[0], Success: true, Timestamp: time.Now()},
+		{HostKey: hks[0], Success: true, Timestamp: time.Now().Add(time.Minute)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if h, err := ss.Host(context.Background(), hks[0]); err != nil {
+		t.Fatal(err)
+	} else if h.Interactions.Uptime < time.Minute || h.Interactions.Uptime > time.Minute+time.Second {
+		t.Fatalf("unexpected uptime %v", h.Interactions.Uptime)
+	}
+
+	// reannounce the host and make sure the uptime is the same
+	ts = ts.Add(time.Minute)
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "fooNew"}, 1, types.BlockID{}, ts)
+	}); err != nil {
+		t.Fatal("unexpected error", err)
+	}
+	if h, err := ss.Host(context.Background(), hks[0]); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if h.Interactions.Uptime < time.Minute || h.Interactions.Uptime > time.Minute+time.Second {
+		t.Fatalf("unexpected uptime %v", h.Interactions.Uptime)
+	} else if h.NetAddress != "fooNew" {
+		t.Fatal("unexpected net address", h.NetAddress)
+	} else if !h.LastAnnouncement.Equal(ts) {
+		t.Fatalf("unexpected last announcement %v != %v", h.LastAnnouncement, ts)
 	}
 
 	// assert passing empty function is successful
