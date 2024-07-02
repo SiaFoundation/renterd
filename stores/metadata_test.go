@@ -705,6 +705,7 @@ func TestRenewedContract(t *testing.T) {
 			ParentID:         fcid1Renewed,
 			UnlockConditions: uc,
 			FileContract: types.FileContract{
+				Filesize:           2 * rhpv2.SectorSize,
 				MissedProofOutputs: []types.SiacoinOutput{},
 				ValidProofOutputs:  []types.SiacoinOutput{},
 			},
@@ -764,7 +765,7 @@ func TestRenewedContract(t *testing.T) {
 		HostKey:     hk,
 		StartHeight: newContractStartHeight,
 		RenewedFrom: fcid1,
-		Size:        rhpv2.SectorSize,
+		Size:        2 * rhpv2.SectorSize,
 		State:       api.ContractStatePending,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
@@ -772,6 +773,7 @@ func TestRenewedContract(t *testing.T) {
 			FundAccount: types.ZeroCurrency,
 		},
 		ContractPrice: types.NewCurrency64(2),
+		ContractSets:  []string{"test"},
 		TotalCost:     newContractTotal,
 	}
 	if !reflect.DeepEqual(newContract, expected) {
@@ -880,14 +882,15 @@ func TestAncestorsContracts(t *testing.T) {
 	}
 	for i := 0; i < len(contracts)-1; i++ {
 		expected := api.ArchivedContract{
-			ID:          fcids[len(fcids)-2-i],
-			HostKey:     hk,
-			RenewedTo:   fcids[len(fcids)-1-i],
-			StartHeight: 2,
-			Size:        4096,
-			State:       api.ContractStatePending,
-			WindowStart: 400,
-			WindowEnd:   500,
+			ID:             fcids[len(fcids)-2-i],
+			HostKey:        hk,
+			RenewedTo:      fcids[len(fcids)-1-i],
+			RevisionNumber: 200,
+			StartHeight:    2,
+			Size:           4096,
+			State:          api.ContractStatePending,
+			WindowStart:    400,
+			WindowEnd:      500,
 		}
 		if !reflect.DeepEqual(contracts[i], expected) {
 			t.Log(cmp.Diff(contracts[i], expected))
@@ -2601,7 +2604,12 @@ func TestObjectsStats(t *testing.T) {
 	}
 	var newContractID types.FileContractID
 	frand.Read(newContractID[:])
-	c, err := ss.addTestContract(newContractID, types.PublicKey{})
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk := hks[0]
+	c, err := ss.addTestContract(newContractID, hk)
 	if err != nil {
 		t.Fatal(err)
 	}

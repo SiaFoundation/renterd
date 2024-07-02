@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -71,6 +72,10 @@ type (
 		// duplicates but can contain gaps.
 		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
 
+		// Contract returns the metadata of the contract with the given ID or
+		// ErrContractNotFound.
+		Contract(ctx context.Context, id types.FileContractID) (cm api.ContractMetadata, err error)
+
 		// ContractRoots returns the roots of the contract with the given ID.
 		ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error)
 
@@ -98,11 +103,24 @@ type (
 		// the bucket already exists, api.ErrBucketExists is returned.
 		CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error
 
+		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
+		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
+		// api.ErrBucketNotFound.
+		DeleteBucket(ctx context.Context, bucket string) error
+
 		// DeleteHostSector deletes all contract sector links that a host has
 		// with the given root incrementing the lost sector count in the
 		// process. If another contract with a different host exists that
 		// contains the root, latest_host is updated to that host.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
+
+		// DeleteObject deletes an object from the database and returns true if
+		// the requested object was actually deleted.
+		DeleteObject(ctx context.Context, bucket, key string) (bool, error)
+
+		// DeleteObjects deletes a batch of objects starting with the given
+		// prefix and returns 'true' if any object was deleted.
+		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
 		// DeleteSettings deletes the settings with the given key.
 		DeleteSettings(ctx context.Context, key string) error
@@ -118,6 +136,9 @@ type (
 		// that was created.
 		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
+		// InsertContract inserts a new contract into the database.
+		InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
@@ -125,19 +146,6 @@ type (
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.
 		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
-
-		// DeleteBucket deletes a bucket. If the bucket isn't empty, it returns
-		// api.ErrBucketNotEmpty. If the bucket doesn't exist, it returns
-		// api.ErrBucketNotFound.
-		DeleteBucket(ctx context.Context, bucket string) error
-
-		// DeleteObject deletes an object from the database and returns true if
-		// the requested object was actually deleted.
-		DeleteObject(ctx context.Context, bucket, key string) (bool, error)
-
-		// DeleteObjects deletes a batch of objects starting with the given
-		// prefix and returns 'true' if any object was deleted.
-		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
 		// HostAllowlist returns the list of public keys of hosts on the
 		// allowlist.
@@ -224,8 +232,14 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
+		// RenewContract renews the contract in the database. That means the
+		// contract with the ID of 'renewedFrom' will be moved to the archived
+		// contracts and the new contract will overwrite the existing one,
+		// inheriting its sectors.
+		RenewContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
+
 		// RenewedContract returns the metadata of the contract that was renewed
-		// fro mthe specified contract or ErrContractNotFound otherwise.
+		// from the specified contract or ErrContractNotFound otherwise.
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
 		// ResetConsenusSubscription resets the consensus subscription in the
