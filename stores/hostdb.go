@@ -10,20 +10,14 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/hostdb"
 	sql "go.sia.tech/renterd/stores/sql"
-	"go.sia.tech/siad/modules"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 const (
-	// announcementBatchSoftLimit is the limit above which
-	// threadedProcessAnnouncements will stop merging batches of
-	// announcements and apply them to the db.
-	announcementBatchSoftLimit = 1000
-
 	// consensusInfoID defines the primary key of the entry in the consensusInfo
 	// table.
 	consensusInfoID = 1
@@ -128,7 +122,6 @@ type (
 
 	dbConsensusInfo struct {
 		Model
-		CCID    []byte
 		Height  uint64
 		BlockID hash256
 	}
@@ -147,8 +140,11 @@ type (
 
 	// announcement describes an announcement for a single host.
 	announcement struct {
-		hostKey      publicKey
-		announcement hostdb.Announcement
+		chain.HostAnnouncement
+		blockHeight uint64
+		blockID     types.BlockID
+		hk          types.PublicKey
+		timestamp   time.Time
 	}
 )
 
@@ -280,7 +276,7 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 	if err != nil {
 		return api.Host{}, err
 	} else if len(hosts) == 0 {
-		return api.Host{}, api.ErrHostNotFound
+		return api.Host{}, fmt.Errorf("%w %v", api.ErrHostNotFound, hostKey)
 	} else {
 		return hosts[0], nil
 	}
@@ -299,6 +295,15 @@ func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time,
 		return err
 	})
 	return
+}
+
+func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
+		return tx.Model(&dbHost{}).
+			Where("public_key", publicKey(hk)).
+			Update("lost_sectors", 0).
+			Error
+	})
 }
 
 func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
@@ -376,59 +381,20 @@ func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []ap
 	})
 }
 
-func (ss *SQLStore) processConsensusChangeHostDB(cc modules.ConsensusChange) {
-	height := uint64(cc.InitialHeight())
-	for range cc.RevertedBlocks {
-		height--
-	}
-
-	var newAnnouncements []announcement
-	for _, sb := range cc.AppliedBlocks {
-		var b types.Block
-		convertToCore(sb, (*types.V1Block)(&b))
-
-		// Process announcements, but only if they are not too old.
-		if b.Timestamp.After(time.Now().Add(-ss.announcementMaxAge)) {
-			hostdb.ForEachAnnouncement(types.Block(b), height, func(hostKey types.PublicKey, ha hostdb.Announcement) {
-				newAnnouncements = append(newAnnouncements, announcement{
-					hostKey:      publicKey(hostKey),
-					announcement: ha,
-				})
-				ss.unappliedHostKeys[hostKey] = struct{}{}
-			})
-		}
-		height++
-	}
-
-	ss.unappliedAnnouncements = append(ss.unappliedAnnouncements, newAnnouncements...)
-}
-
-func updateCCID(tx *gorm.DB, newCCID modules.ConsensusChangeID, newTip types.ChainIndex) error {
-	return tx.Model(&dbConsensusInfo{}).Where(&dbConsensusInfo{
-		Model: Model{
-			ID: consensusInfoID,
-		},
-	}).Updates(map[string]interface{}{
-		"CCID":     newCCID[:],
-		"height":   newTip.Height,
-		"block_id": hash256(newTip.ID),
-	}).Error
-}
-
 func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	var hosts []dbHost
 	var announcements []dbAnnouncement
 	for _, a := range as {
 		hosts = append(hosts, dbHost{
-			PublicKey:        a.hostKey,
-			LastAnnouncement: a.announcement.Timestamp.UTC(),
-			NetAddress:       a.announcement.NetAddress,
+			PublicKey:        publicKey(a.hk),
+			LastAnnouncement: a.timestamp.UTC(),
+			NetAddress:       a.NetAddress,
 		})
 		announcements = append(announcements, dbAnnouncement{
-			HostKey:     a.hostKey,
-			BlockHeight: a.announcement.Index.Height,
-			BlockID:     a.announcement.Index.ID.String(),
-			NetAddress:  a.announcement.NetAddress,
+			HostKey:     publicKey(a.hk),
+			BlockHeight: a.blockHeight,
+			BlockID:     a.blockID.String(),
+			NetAddress:  a.NetAddress,
 		})
 	}
 	if err := tx.Create(&announcements).Error; err != nil {
@@ -437,82 +403,22 @@ func insertAnnouncements(tx *gorm.DB, as []announcement) error {
 	return tx.Create(&hosts).Error
 }
 
-func applyRevisionUpdate(db *gorm.DB, fcid types.FileContractID, rev revisionUpdate) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"revision_height": rev.height,
-		"revision_number": fmt.Sprint(rev.number),
-		"size":            rev.size,
-	})
-}
-
-func updateContractState(db *gorm.DB, fcid types.FileContractID, cs contractState) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"state": cs,
-	})
-}
-
-func markFailedContracts(db *gorm.DB, height uint64) error {
-	if err := db.Model(&dbContract{}).
-		Where("state = ? AND ? > window_end", contractStateActive, height).
-		Update("state", contractStateFailed).Error; err != nil {
-		return fmt.Errorf("failed to mark failed contracts: %w", err)
-	}
-	return nil
-}
-
-func updateProofHeight(db *gorm.DB, fcid types.FileContractID, blockHeight uint64) error {
-	return updateActiveAndArchivedContract(db, fcid, map[string]interface{}{
-		"proof_height": blockHeight,
-	})
-}
-
-func updateActiveAndArchivedContract(tx *gorm.DB, fcid types.FileContractID, updates map[string]interface{}) error {
-	err1 := tx.Model(&dbContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Updates(updates).Error
-	err2 := tx.Model(&dbArchivedContract{}).
-		Where("fcid = ?", fileContractID(fcid)).
-		Updates(updates).Error
-	if err1 != nil || err2 != nil {
-		return fmt.Errorf("%s; %s", err1, err2)
-	}
-	return nil
-}
-
-func updateBlocklist(tx *gorm.DB, hk types.PublicKey, allowlist []dbAllowlistEntry, blocklist []dbBlocklistEntry) error {
-	// fetch the host
-	var host dbHost
+func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) {
+	var allowlist []dbAllowlistEntry
 	if err := tx.
-		Model(&dbHost{}).
-		Where("public_key = ?", publicKey(hk)).
-		First(&host).
+		Model(&dbAllowlistEntry{}).
+		Find(&allowlist).
 		Error; err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	// update host allowlist
-	var dbAllowlist []dbAllowlistEntry
-	for _, entry := range allowlist {
-		if entry.Entry == host.PublicKey {
-			dbAllowlist = append(dbAllowlist, entry)
-		}
-	}
-	if err := tx.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
-		return err
+	var blocklist []dbBlocklistEntry
+	if err := tx.
+		Model(&dbBlocklistEntry{}).
+		Find(&blocklist).
+		Error; err != nil {
+		return nil, nil, err
 	}
 
-	// update host blocklist
-	var dbBlocklist []dbBlocklistEntry
-	for _, entry := range blocklist {
-		if entry.blocks(host) {
-			dbBlocklist = append(dbBlocklist, entry)
-		}
-	}
-	return tx.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
-}
-
-func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.ResetLostSectors(ctx, hk)
-	})
+	return allowlist, blocklist, nil
 }

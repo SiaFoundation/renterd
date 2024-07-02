@@ -2,11 +2,10 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
-
-	"go.sia.tech/renterd/api"
 )
 
 const (
@@ -16,6 +15,10 @@ const (
 
 var (
 	privateSubnets []*net.IPNet
+
+	// ErrHostTooManyAddresses is returned by the worker API when a host has
+	// more than two addresses of the same type.
+	ErrHostTooManyAddresses = errors.New("host has more than two addresses, or two of the same type")
 )
 
 func init() {
@@ -46,7 +49,7 @@ func ResolveHostIP(ctx context.Context, hostIP string) (subnets []string, privat
 
 	// filter out hosts associated with more than two addresses or two of the same type
 	if len(addrs) > 2 || (len(addrs) == 2) && (len(addrs[0].IP) == len(addrs[1].IP)) {
-		return nil, false, api.ErrHostTooManyAddresses
+		return nil, false, ErrHostTooManyAddresses
 	}
 
 	// parse out subnets

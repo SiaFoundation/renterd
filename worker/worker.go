@@ -29,7 +29,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 )
@@ -454,7 +453,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil && !isErrDuplicateTransactionSet(err) {
+	if err != nil {
 		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
 	}
 
@@ -492,6 +491,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	if jc.Check("could not fetch revision", err) != nil {
 		return
 	}
+
 	// Create txn with revision.
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{rev.Revision},
@@ -658,7 +658,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 
 	// broadcast the transaction set
 	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil && !isErrDuplicateTransactionSet(err) {
+	if err != nil {
 		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
 	}
 
@@ -1443,7 +1443,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// resolves to more than two addresses of the same type, if it fails for
 	// another reason the host scan won't have subnets
 	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
-	if errors.Is(err, api.ErrHostTooManyAddresses) {
+	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !w.allowPrivateIPs {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
@@ -1503,7 +1503,7 @@ func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn typ
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	if dErr := bus.WalletDiscard(ctx, txn); dErr != nil {
 		l.Errorf("%v: %s, failed to discard txn: %v", *err, errContext, dErr)
 	}
@@ -1519,10 +1519,6 @@ func isErrHostUnreachable(err error) bool {
 		utils.IsErr(err, errors.New("connection refused")) ||
 		utils.IsErr(err, errors.New("unknown port")) ||
 		utils.IsErr(err, errors.New("cannot assign requested address"))
-}
-
-func isErrDuplicateTransactionSet(err error) bool {
-	return utils.IsErr(err, modules.ErrDuplicateTransactionSet)
 }
 
 func (w *worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.ObjectsResponse, error) {

@@ -7,10 +7,12 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
-	"go.sia.tech/siad/modules"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -43,6 +45,9 @@ type (
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
+		// AddPeer adds a peer to the store.
+		AddPeer(ctx context.Context, addr string) error
+
 		// AddWebhook adds a new webhook to the database. If the webhook already
 		// exists, it is updated.
 		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
@@ -61,6 +66,11 @@ type (
 
 		// Autopilots returns all autopilots.
 		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+
+		// BanPeer temporarily bans one or more IPs. The addr should either be a
+		// single IP with port (e.g. 1.2.3.4:5678) or a CIDR subnet (e.g.
+		// 1.2.3.4/16).
+		BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error
 
 		// Bucket returns the bucket with the given name. If the bucket doesn't
 		// exist, it returns api.ErrBucketNotFound.
@@ -154,10 +164,6 @@ type (
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
 
-		// InitConsensusInfo initializes the consensus info in the database or
-		// returns the latest one.
-		InitConsensusInfo(ctx context.Context) (types.ChainIndex, modules.ConsensusChangeID, error)
-
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
@@ -187,6 +193,19 @@ type (
 
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
+
+		// PeerBanned returns true if the peer is banned.
+		PeerBanned(ctx context.Context, addr string) (bool, error)
+
+		// PeerInfo returns the metadata for the specified peer or
+		// ErrPeerNotFound if the peer wasn't found in the store.
+		PeerInfo(ctx context.Context, addr string) (syncer.PeerInfo, error)
+
+		// Peers returns the set of known peers.
+		Peers(ctx context.Context) ([]syncer.PeerInfo, error)
+
+		// ProcessChainUpdate applies the given chain update to the database.
+		ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error
 
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
@@ -242,9 +261,8 @@ type (
 		// from the specified contract or ErrContractNotFound otherwise.
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 
-		// ResetConsenusSubscription resets the consensus subscription in the
-		// database.
-		ResetConsensusSubscription(ctx context.Context) (types.ChainIndex, error)
+		// ResetChainState deletes all chain data in the database.
+		ResetChainState(ctx context.Context) error
 
 		// ResetLostSectors resets the lost sector count for the given host.
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
@@ -270,6 +288,12 @@ type (
 		// slab buffers.
 		SlabBuffers(ctx context.Context) (map[string]string, error)
 
+		// Tip returns the sync height.
+		Tip(ctx context.Context) (types.ChainIndex, error)
+
+		// UnspentSiacoinElements returns all wallet outputs in the database.
+		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
+
 		// UpdateAutopilot updates the autopilot with the provided one or
 		// creates a new one if it doesn't exist yet.
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
@@ -286,6 +310,9 @@ type (
 
 		// UpdateHostCheck updates the host check for the given host.
 		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
+
+		// UpdatePeerInfo updates the metadata for the specified peer.
+		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error
 
 		// UpdateSetting updates the setting with the given key to the given
 		// value.
@@ -304,6 +331,12 @@ type (
 		// between 'minValidity' and 'maxValidity' is used to determine the time
 		// the health of the updated slabs becomes invalid
 		UpdateSlabHealth(ctx context.Context, limit int64, minValidity, maxValidity time.Duration) (int64, error)
+
+		// WalletEvents returns all wallet events in the database.
+		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
+
+		// WalletEventCount returns the total number of events in the database.
+		WalletEventCount(ctx context.Context) (uint64, error)
 
 		// Webhooks returns all registered webhooks.
 		Webhooks(ctx context.Context) ([]webhooks.Webhook, error)

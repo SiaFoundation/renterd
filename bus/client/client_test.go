@@ -68,9 +68,9 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 		return nil, nil, nil, err
 	}
 
-	// create client
-	client := client.New("http://"+l.Addr().String(), "test")
-	b, _, cleanup, err := node.NewBus(node.BusConfig{
+	// create bus
+	network, genesis := build.Network()
+	b, _, shutdown, _, _, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
@@ -78,15 +78,19 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 			UsedUTXOExpiry:                time.Minute,
 			SlabBufferCompletionThreshold: 0,
 		},
+		Network: network,
+		Genesis: genesis,
 		DatabaseLog: config.DatabaseLog{
 			SlowThreshold: 100 * time.Millisecond,
 		},
-		Miner:  node.NewMiner(client),
 		Logger: zap.NewNop(),
 	}, filepath.Join(dir, "bus"), types.GeneratePrivateKey(), zap.New(zapcore.NewNopCore()))
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	// create client
+	client := client.New("http://"+l.Addr().String(), "test")
 
 	// create server
 	server := http.Server{Handler: jape.BasicAuth("test")(b)}
@@ -101,7 +105,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 
 	shutdownFn := func(ctx context.Context) error {
 		server.Shutdown(ctx)
-		return cleanup(ctx)
+		return shutdown(ctx)
 	}
 	return client, serveFn, shutdownFn, nil
 }

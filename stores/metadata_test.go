@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -294,7 +293,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(hk, newTestHostDBAnnouncement("address"))
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +389,7 @@ func TestSQLContractStore(t *testing.T) {
 		Size:          c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
-		t.Fatal("contract mismatch")
+		t.Fatal("contract mismatch", cmp.Diff(returned, expected))
 	}
 
 	// Look it up again.
@@ -585,11 +584,11 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	err = ss.insertTestAnnouncement(hk, newTestHostDBAnnouncement("address"))
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.insertTestAnnouncement(hk2, newTestHostDBAnnouncement("address2"))
+	_, err = ss.announceHost(hk2, "address2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,6 +896,14 @@ func TestAncestorsContracts(t *testing.T) {
 			t.Fatal("wrong contract", i, contracts[i])
 		}
 	}
+
+	// Fetch the ancestors with startHeight >= 3. That should return 0 contracts.
+	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 3)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatalf("should have 0 contracts but got %v", len(contracts))
+	}
 }
 
 func TestArchiveContracts(t *testing.T) {
@@ -1139,9 +1146,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	// incremented due to the object and slab being overwritten.
 	two := uint(2)
 	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 1
+	expectedObj.Slabs[0].DBSlabID = 3
 	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 2
+	expectedObj.Slabs[1].DBSlabID = 4
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
 	}
@@ -1163,7 +1170,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   1,
+				DBSlabID:   3,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[0].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
@@ -1203,7 +1210,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		TotalShards:     1,
 		Shards: []dbSector{
 			{
-				DBSlabID:   2,
+				DBSlabID:   4,
 				SlabIndex:  1,
 				Root:       obj1.Slabs[1].Shards[0].Root[:],
 				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
@@ -2346,7 +2353,7 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	err = ss.insertTestAnnouncement(hk, newTestHostDBAnnouncement("address"))
+	_, err = ss.announceHost(hk, "address")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3117,12 +3124,6 @@ func TestContractSizes(t *testing.T) {
 	// assert there's no data to be pruned
 	if n := prunableData(nil); n != 0 {
 		t.Fatal("expected no prunable data", n)
-	}
-
-	// assert passing a non-existent fcid returns an error
-	_, err = ss.ContractSize(context.Background(), types.FileContractID{9})
-	if err != api.ErrContractNotFound {
-		t.Fatal(err)
 	}
 }
 
@@ -4586,102 +4587,6 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			t.Fatal("invalid contract id")
 		} else if cs.DBSectorID != uint(i+1) {
 			t.Fatal("invalid sector id")
-		}
-	}
-}
-
-func TestTypeCurrency(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// prepare the table
-	if isSQLite(ss.db) {
-		if err := ss.db.Exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);").Error; err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		if err := ss.db.Exec("CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);").Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// insert currencies in random order
-	if err := ss.db.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch currencies and assert they're sorted
-	var currencies []bCurrency
-	if err := ss.db.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
-		t.Fatal(err)
-	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
-		return types.Currency(currencies[i]).Cmp(types.Currency(currencies[j])) < 0
-	}) {
-		t.Fatal("currencies not sorted", currencies)
-	}
-
-	// convenience variables
-	c0 := currencies[0]
-	c1 := currencies[1]
-	cM := currencies[2]
-
-	tests := []struct {
-		a   bCurrency
-		b   bCurrency
-		cmp string
-	}{
-		{
-			a:   c0,
-			b:   c1,
-			cmp: "<",
-		},
-		{
-			a:   c1,
-			b:   c0,
-			cmp: ">",
-		},
-		{
-			a:   c0,
-			b:   c1,
-			cmp: "!=",
-		},
-		{
-			a:   c1,
-			b:   c1,
-			cmp: "=",
-		},
-		{
-			a:   c0,
-			b:   cM,
-			cmp: "<",
-		},
-		{
-			a:   cM,
-			b:   c0,
-			cmp: ">",
-		},
-		{
-			a:   cM,
-			b:   cM,
-			cmp: "=",
-		},
-	}
-	for i, test := range tests {
-		var result bool
-		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
-		if !isSQLite(ss.db) {
-			query = strings.ReplaceAll(query, "?", "HEX(?)")
-		}
-		if err := ss.db.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
-			t.Fatal(err)
-		} else if !result {
-			t.Errorf("unexpected result in case %d/%d: expected %v %s %v to be true", i+1, len(tests), types.Currency(test.a).String(), test.cmp, types.Currency(test.b).String())
-		} else if test.cmp == "<" && types.Currency(test.a).Cmp(types.Currency(test.b)) >= 0 {
-			t.Fatal("invalid result")
-		} else if test.cmp == ">" && types.Currency(test.a).Cmp(types.Currency(test.b)) <= 0 {
-			t.Fatal("invalid result")
-		} else if test.cmp == "=" && types.Currency(test.a).Cmp(types.Currency(test.b)) != 0 {
-			t.Fatal("invalid result")
 		}
 	}
 }

@@ -31,7 +31,7 @@ func TestGouging(t *testing.T) {
 	tt := cluster.tt
 
 	// mine enough blocks for the current period to become > period
-	cluster.MineBlocks(int(cfg.Period) + 1)
+	cluster.MineBlocks(cfg.Period + 1)
 
 	// add hosts
 	tt.OKAll(cluster.AddHostsBlocking(int(test.AutopilotConfig.Contracts.Amount)))

@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -533,7 +532,6 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 		return api.ContractMetadata{}, fmt.Errorf("failed to add contract: %w", err)
 	}
 
-	s.addKnownContract(types.FileContractID(contract.ID))
 	return contract, nil
 }
 
@@ -558,7 +556,6 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to add renewed contract: %w", err)
 	}
-	s.addKnownContract(c.ID())
 	return
 }
 
@@ -622,10 +619,6 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (cm ap
 }
 
 func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
-	if !s.isKnownContract(id) {
-		return nil, api.ErrContractNotFound
-	}
-
 	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		roots, err = tx.ContractRoots(ctx, id)
 		return err
@@ -650,9 +643,6 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (sizes map[types.FileContr
 }
 
 func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (cs api.ContractSize, err error) {
-	if !s.isKnownContract(id) {
-		return api.ContractSize{}, api.ErrContractNotFound
-	}
 	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		cs, err = tx.ContractSize(ctx, id)
 		return
@@ -1021,7 +1011,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
 			var contract dbContract
 			err := tx.Model(&dbContract{}).
-				Where("fcid = ?", fileContractID(fcid)).
+				Where("fcid", fileContractID(fcid)).
 				Joins("Host").
 				Take(&contract).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1067,29 +1057,19 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			}
 			updates["revision_number"] = latestValues[fcid].revision
 			updates["size"] = latestValues[fcid].size
-			return tx.Model(&contract).Updates(updates).Error
+			err = tx.Model(&contract).Updates(updates).Error
+			return err
 		})
 		if err != nil {
 			return err
 		}
 	}
-	if err := s.RecordContractMetric(ctx, metrics...); err != nil {
-		s.logger.Errorw("failed to record contract metrics", zap.Error(err))
+	if len(metrics) > 0 {
+		if err := s.RecordContractMetric(ctx, metrics...); err != nil {
+			s.logger.Errorw("failed to record contract metrics", zap.Error(err))
+		}
 	}
 	return nil
-}
-
-func (s *SQLStore) addKnownContract(fcid types.FileContractID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.knownContracts[fcid] = struct{}{}
-}
-
-func (s *SQLStore) isKnownContract(fcid types.FileContractID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, found := s.knownContracts[fcid]
-	return found
 }
 
 func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
@@ -1867,95 +1847,6 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		return err
 	})
 	return
-}
-
-func (ss *SQLStore) processConsensusChangeContracts(cc modules.ConsensusChange) {
-	height := uint64(cc.InitialHeight())
-	for _, sb := range cc.RevertedBlocks {
-		var b types.Block
-		convertToCore(sb, (*types.V1Block)(&b))
-
-		// revert contracts that got reorged to "pending".
-		for _, txn := range b.Transactions {
-			// handle contracts
-			for i := range txn.FileContracts {
-				fcid := txn.FileContractID(i)
-				if ss.isKnownContract(fcid) {
-					ss.unappliedContractState[fcid] = contractStatePending // revert from 'active' to 'pending'
-					ss.logger.Infow("contract state changed: active -> pending",
-						"fcid", fcid,
-						"reason", "contract reverted")
-				}
-			}
-			// handle contract revision
-			for _, rev := range txn.FileContractRevisions {
-				if ss.isKnownContract(rev.ParentID) {
-					if rev.RevisionNumber == math.MaxUint64 && rev.Filesize == 0 {
-						ss.unappliedContractState[rev.ParentID] = contractStateActive // revert from 'complete' to 'active'
-						ss.logger.Infow("contract state changed: complete -> active",
-							"fcid", rev.ParentID,
-							"reason", "final revision reverted")
-					}
-				}
-			}
-			// handle storage proof
-			for _, sp := range txn.StorageProofs {
-				if ss.isKnownContract(sp.ParentID) {
-					ss.unappliedContractState[sp.ParentID] = contractStateActive // revert from 'complete' to 'active'
-					ss.logger.Infow("contract state changed: complete -> active",
-						"fcid", sp.ParentID,
-						"reason", "storage proof reverted")
-				}
-			}
-		}
-		height--
-	}
-
-	for _, sb := range cc.AppliedBlocks {
-		var b types.Block
-		convertToCore(sb, (*types.V1Block)(&b))
-
-		// Update RevisionHeight and RevisionNumber for our contracts.
-		for _, txn := range b.Transactions {
-			// handle contracts
-			for i := range txn.FileContracts {
-				fcid := txn.FileContractID(i)
-				if ss.isKnownContract(fcid) {
-					ss.unappliedContractState[fcid] = contractStateActive // 'pending' -> 'active'
-					ss.logger.Infow("contract state changed: pending -> active",
-						"fcid", fcid,
-						"reason", "contract confirmed")
-				}
-			}
-			// handle contract revision
-			for _, rev := range txn.FileContractRevisions {
-				if ss.isKnownContract(rev.ParentID) {
-					ss.unappliedRevisions[types.FileContractID(rev.ParentID)] = revisionUpdate{
-						height: height,
-						number: rev.RevisionNumber,
-						size:   rev.Filesize,
-					}
-					if rev.RevisionNumber == math.MaxUint64 && rev.Filesize == 0 {
-						ss.unappliedContractState[rev.ParentID] = contractStateComplete // renewed: 'active' -> 'complete'
-						ss.logger.Infow("contract state changed: active -> complete",
-							"fcid", rev.ParentID,
-							"reason", "final revision confirmed")
-					}
-				}
-			}
-			// handle storage proof
-			for _, sp := range txn.StorageProofs {
-				if ss.isKnownContract(sp.ParentID) {
-					ss.unappliedProofs[sp.ParentID] = height
-					ss.unappliedContractState[sp.ParentID] = contractStateComplete // storage proof: 'active' -> 'complete'
-					ss.logger.Infow("contract state changed: active -> complete",
-						"fcid", sp.ParentID,
-						"reason", "storage proof confirmed")
-				}
-			}
-		}
-		height++
-	}
 }
 
 func validateSort(sortBy, sortDir string) error {

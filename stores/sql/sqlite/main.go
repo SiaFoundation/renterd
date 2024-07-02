@@ -13,12 +13,14 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
-	"go.sia.tech/siad/modules"
 	"lukechampine.com/frand"
 
 	"go.uber.org/zap"
@@ -92,6 +94,10 @@ func (tx *MainDatabaseTx) Accounts(ctx context.Context) ([]api.Account, error) {
 	return ssql.Accounts(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+}
+
 func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
 	// fetch contract set
 	var csID int64
@@ -136,8 +142,16 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
 }
 
-func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
+	_, err := tx.Exec(ctx,
+		"INSERT OR IGNORE INTO syncer_peers (address, first_seen, last_connect, synced_blocks, sync_duration) VALUES (?, ?, ?, ?, ?)",
+		addr,
+		ssql.UnixTimeMS(time.Now()),
+		ssql.UnixTimeMS(time.Time{}),
+		0,
+		0,
+	)
+	return err
 }
 
 func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
@@ -171,6 +185,22 @@ func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopil
 
 func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
 	return ssql.Autopilots(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
+	cidr, err := ssql.NormalizePeer(addr)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		"INSERT INTO syncer_bans (created_at, net_cidr, expiration, reason) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET expiration = EXCLUDED.expiration, reason = EXCLUDED.reason",
+		time.Now(),
+		cidr,
+		ssql.UnixTimeMS(time.Now().Add(duration)),
+		reason,
+	)
+	return err
 }
 
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
@@ -358,10 +388,6 @@ func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time
 	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
 
-func (tx *MainDatabaseTx) InitConsensusInfo(ctx context.Context) (types.ChainIndex, modules.ConsensusChangeID, error) {
-	return ssql.InitConsensusInfo(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// get bucket id
 	var bucketID int64
@@ -491,6 +517,26 @@ func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, 
 
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	return ssql.ObjectsStats(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) PeerBanned(ctx context.Context, addr string) (bool, error) {
+	return ssql.PeerBanned(ctx, tx, addr)
+}
+
+func (tx *MainDatabaseTx) PeerInfo(ctx context.Context, addr string) (syncer.PeerInfo, error) {
+	return ssql.PeerInfo(ctx, tx, addr)
+}
+
+func (tx *MainDatabaseTx) Peers(ctx context.Context) ([]syncer.PeerInfo, error) {
+	return ssql.Peers(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(chain.ChainUpdateTx) error) (err error) {
+	return fn(&ChainUpdateTx{
+		ctx: ctx,
+		tx:  tx,
+		l:   tx.log.Named("ProcessChainUpdate"),
+	})
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
@@ -632,8 +678,8 @@ func (tx *MainDatabaseTx) RenewedContract(ctx context.Context, renwedFrom types.
 	return ssql.RenewedContract(ctx, tx, renwedFrom)
 }
 
-func (tx *MainDatabaseTx) ResetConsensusSubscription(ctx context.Context) (types.ChainIndex, error) {
-	return ssql.ResetConsensusSubscription(ctx, tx)
+func (tx *MainDatabaseTx) ResetChainState(ctx context.Context) error {
+	return ssql.ResetChainState(ctx, tx.Tx)
 }
 
 func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
@@ -689,6 +735,14 @@ func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
 
 func (tx *MainDatabaseTx) SlabBuffers(ctx context.Context) (map[string]string, error) {
 	return ssql.SlabBuffers(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
+	return ssql.Tip(ctx, tx.Tx)
+}
+
+func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {
+	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
 
 func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
@@ -849,6 +903,10 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	return nil
 }
 
+func (tx *MainDatabaseTx) UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error {
+	return ssql.UpdatePeerInfo(ctx, tx, addr, fn)
+}
+
 func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) error {
 	_, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
 		time.Now(), key, value)
@@ -994,6 +1052,14 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
+	return ssql.WalletEvents(ctx, tx.Tx, offset, limit)
+}
+
+func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, err error) {
+	return ssql.WalletEventCount(ctx, tx.Tx)
 }
 
 func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {

@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
 )
@@ -86,7 +87,7 @@ func (m *chainManager) Synced() bool {
 func (m *chainManager) BlockAtHeight(height uint64) (types.Block, bool) {
 	sb, ok := m.cs.BlockAtHeight(stypes.BlockHeight(height))
 	var c types.Block
-	convertToCore(sb, (*types.V1Block)(&c))
+	utils.ConvertToCore(sb, (*types.V1Block)(&c))
 	return types.Block(c), ok
 }
 
@@ -118,7 +119,7 @@ func (m *chainManager) TipState() consensus.State {
 // AcceptBlock adds b to the consensus set.
 func (m *chainManager) AcceptBlock(b types.Block) error {
 	var sb stypes.Block
-	convertToSiad(types.V1Block(b), &sb)
+	utils.ConvertToSiad(types.V1Block(b), &sb)
 	return m.cs.AcceptBlock(sb)
 }
 

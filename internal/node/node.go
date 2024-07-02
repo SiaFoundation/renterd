@@ -13,29 +13,31 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/chain"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/stores/sql/mysql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
-	"go.sia.tech/siad/modules"
-	mconsensus "go.sia.tech/siad/modules/consensus"
-	"go.sia.tech/siad/modules/gateway"
-	"go.sia.tech/siad/modules/transactionpool"
-	"go.sia.tech/siad/sync"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"moul.io/zapgorm2"
 )
+
+// TODOs:
+// - add wallet metrics
+// - add UPNP support
 
 type Bus interface {
 	worker.Bus
@@ -44,11 +46,14 @@ type Bus interface {
 
 type BusConfig struct {
 	config.Bus
-	Database    config.Database
-	DatabaseLog config.DatabaseLog
-	Network     *consensus.Network
-	Logger      *zap.Logger
-	Miner       *Miner
+	Database                    config.Database
+	DatabaseLog                 config.DatabaseLog
+	Genesis                     types.Block
+	Logger                      *zap.Logger
+	Network                     *consensus.Network
+	RetryTxIntervals            []time.Duration
+	SyncerSyncInterval          time.Duration
+	SyncerPeerDiscoveryInterval time.Duration
 }
 
 type AutopilotConfig struct {
@@ -65,41 +70,7 @@ type (
 
 var NoopFn = func(context.Context) error { return nil }
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (http.Handler, BusSetupFn, ShutdownFn, error) {
-	gatewayDir := filepath.Join(dir, "gateway")
-	if err := os.MkdirAll(gatewayDir, 0700); err != nil {
-		return nil, nil, nil, err
-	}
-	g, err := gateway.New(cfg.GatewayAddr, cfg.Bootstrap, gatewayDir)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	consensusDir := filepath.Join(dir, "consensus")
-	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, nil, err
-	}
-	cs, errCh := mconsensus.New(g, cfg.Bootstrap, consensusDir)
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	default:
-		go func() {
-			if err := <-errCh; err != nil {
-				log.Println("WARNING: consensus initialization returned an error:", err)
-			}
-		}()
-	}
-	tpoolDir := filepath.Join(dir, "transactionpool")
-	if err := os.MkdirAll(tpoolDir, 0700); err != nil {
-		return nil, nil, nil, err
-	}
-	tp, err := transactionpool.New(cs, g, tpoolDir)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, BusSetupFn, ShutdownFn, *chain.Manager, *chain.ChainSubscriber, error) {
 	// create database connections
 	var dbConn gorm.Dialector
 	var dbMetrics sql.MetricsDatabase
@@ -118,17 +89,17 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 			cfg.Database.MySQL.MetricsDatabase,
 		)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = mysql.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
 	} else {
 		// create database directory
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 
 		// create SQLite connections
@@ -136,11 +107,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 
 		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, l.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
 	}
 
@@ -155,91 +126,113 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, l *zap.Logger) (ht
 	}
 
 	alertsMgr := alerts.NewManager()
-	walletAddr := wallet.StandardAddress(seed.PublicKey())
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
-	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	sqlStore, ccid, err := stores.NewSQLStore(stores.Config{
+	sqlStore, err := stores.NewSQLStore(stores.Config{
 		Conn:                          dbConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
 		DBMetrics:                     dbMetrics,
 		PartialSlabDir:                sqlStoreDir,
 		Migrate:                       true,
-		AnnouncementMaxAge:            announcementMaxAge,
-		PersistInterval:               cfg.PersistInterval,
-		WalletAddress:                 walletAddr,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
-		Logger:                        l.Sugar(),
+		Logger:                        logger.Sugar(),
 		GormLogger:                    dbLogger,
-		RetryTransactionIntervals:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second, 10 * time.Second},
+		RetryTransactionIntervals:     cfg.RetryTxIntervals,
+		WalletAddress:                 types.StandardUnlockHash(seed.PublicKey()),
 		LongQueryDuration:             cfg.DatabaseLog.SlowThreshold,
 		LongTxDuration:                cfg.DatabaseLog.SlowThreshold,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	hooksMgr, err := webhooks.NewManager(l.Named("webhooks").Sugar(), sqlStore)
+
+	// create webhooks manager
+	wh, err := webhooks.NewManager(sqlStore, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
-	// Hook up webhooks to alerts.
-	alertsMgr.RegisterWebhookBroadcaster(hooksMgr)
+	// hookup webhooks <-> alerts
+	alertsMgr.RegisterWebhookBroadcaster(wh)
 
-	cancelSubscribe := make(chan struct{})
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	// create consensus directory
+	consensusDir := filepath.Join(dir, "consensus")
+	if err := os.MkdirAll(consensusDir, 0700); err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	// migrate consensus database
+	oldConsensus, err := os.Stat(filepath.Join(consensusDir, "consensus.db"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, nil, nil, nil, err
+	} else if err == nil {
+		logger.Warn("found old consensus.db, indicating a migration is necessary")
+
+		// reset chain state
+		logger.Warn("Resetting chain state...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-
-		subscribeErr := cs.ConsensusSetSubscribe(sqlStore, ccid, cancelSubscribe)
-		if errors.Is(subscribeErr, modules.ErrInvalidConsensusChangeID) {
-			l.Warn("Invalid consensus change ID detected - resyncing consensus")
-			// Reset the consensus state within the database and rescan.
-			if err := sqlStore.ResetConsensusSubscription(ctx); err != nil {
-				l.Fatal(fmt.Sprintf("Failed to reset consensus subscription of SQLStore: %v", err))
-				return
-			}
-			// Subscribe from the beginning.
-			subscribeErr = cs.ConsensusSetSubscribe(sqlStore, modules.ConsensusChangeBeginning, cancelSubscribe)
+		if err := sqlStore.ResetChainState(ctx); err != nil {
+			return nil, nil, nil, nil, nil, err
 		}
-		if subscribeErr != nil && !errors.Is(subscribeErr, sync.ErrStopped) {
-			l.Fatal(fmt.Sprintf("ConsensusSetSubscribe returned an error: %v", err))
-		}
-	}()
+		logger.Warn("Chain state was successfully reset.")
 
-	w := wallet.NewSingleAddressWallet(seed, sqlStore, cfg.UsedUTXOExpiry, zap.NewNop().Sugar())
-	tp.TransactionPoolSubscribe(w)
-	if err := cs.ConsensusSetSubscribe(w, modules.ConsensusChangeRecent, nil); err != nil {
-		return nil, nil, nil, err
+		// remove consensus.db and consensus.log file
+		logger.Warn("Removing consensus database...")
+		_ = os.RemoveAll(filepath.Join(consensusDir, "consensus.log")) // ignore error
+		if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
+		logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	}
 
-	if m := cfg.Miner; m != nil {
-		if err := cs.ConsensusSetSubscribe(m, ccid, nil); err != nil {
-			return nil, nil, nil, err
-		}
-		tp.TransactionPoolSubscribe(m)
-	}
-
-	cm, err := NewChainManager(cs, NewTransactionPool(tp), cfg.Network)
+	// create chain database
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "blockchain.db"))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}
 
-	b, err := bus.New(syncer{g, tp}, alertsMgr, hooksMgr, cm, NewTransactionPool(tp), w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, l)
+	// create chain manager
+	store, state, err := chain.NewDBStore(bdb, cfg.Network, cfg.Genesis)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
+	}
+	cm := chain.NewManager(store, state)
+
+	// create chain subscriber
+	cs, err := chain.NewChainSubscriber(wh, cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	// create syncer
+	s, err := NewSyncer(cfg, cm, sqlStore, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	b, err := bus.New(alertsMgr, wh, cm, sqlStore, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
-		close(cancelSubscribe)
 		return errors.Join(
-			g.Close(),
 			cs.Close(),
-			tp.Close(),
+			s.Close(),
+			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
+			bdb.Close(),
 		)
 	}
-	return b.Handler(), b.Setup, shutdownFn, nil
+	return b.Handler(), b.Setup, shutdownFn, cm, cs, nil
 }
 
 func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, WorkerSetupFn, ShutdownFn, error) {

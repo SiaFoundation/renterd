@@ -15,8 +15,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/siad/build"
-	"go.sia.tech/siad/crypto"
 	"lukechampine.com/frand"
 )
 
@@ -358,7 +356,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 		With("fcid", rev.ID()).
 		With("revisionNumber", rev.Revision.RevisionNumber).
 		Named("deleteContractRoots")
-	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), humanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
+	logger.Infow(fmt.Sprintf("deleting %d contract roots (%v)", len(indices), utils.HumanReadableSize(len(indices)*rhpv2.SectorSize)), "hk", rev.HostKey(), "fcid", rev.ID())
 
 	// return early
 	if len(indices) == 0 {
@@ -374,7 +372,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 	// hosts we use a much smaller batch size to ensure we nibble away at the
 	// problem rather than outright failing or timing out
 	batchSize := int(batchSizeDeleteSectors)
-	if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+	if utils.VersionCmp(settings.Version, "1.6.0") < 0 {
 		batchSize = 100
 	}
 
@@ -438,7 +436,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			//
 			// TODO: remove once host network is updated, or once we include the
 			// host release in the scoring and stop using old hosts
-			proofSize := (128 + uint64(len(actions))) * crypto.HashSize
+			proofSize := (128 + uint64(len(actions))) * rhpv2.LeafSize
 			compatCost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
 			if cost.Cmp(compatCost) < 0 {
 				cost = compatCost
@@ -564,10 +562,10 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		cost, _ := settings.RPCSectorRootsCost(offset, n).Total()
 
 		// TODO: remove once host network is updated
-		if build.VersionCmp(settings.Version, "1.6.0") < 0 {
+		if utils.VersionCmp(settings.Version, "1.6.0") < 0 {
 			// calculate the response size
 			proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
-			responseSize := (proofSize + n) * crypto.HashSize
+			responseSize := (proofSize + n) * 32
 			if responseSize < minMessageSize {
 				responseSize = minMessageSize
 			}
@@ -723,18 +721,4 @@ func (w *worker) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, h
 	}
 
 	return fn(t, rev, settings)
-}
-
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }

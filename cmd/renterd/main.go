@@ -112,7 +112,6 @@ var (
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     true,
 			GatewayAddr:                   build.DefaultGatewayAddress,
-			PersistInterval:               time.Minute,
 			UsedUTXOExpiry:                24 * time.Hour,
 			SlabBufferCompletionThreshold: 1 << 12,
 		},
@@ -265,7 +264,7 @@ func main() {
 	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
 	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "Bootstraps gateway and consensus modules")
 	flag.StringVar(&cfg.Bus.GatewayAddr, "bus.gatewayAddr", cfg.Bus.GatewayAddr, "Address for Sia peer connections (overrides with RENTERD_BUS_GATEWAY_ADDR)")
-	flag.DurationVar(&cfg.Bus.PersistInterval, "bus.persistInterval", cfg.Bus.PersistInterval, "Interval for persisting consensus updates")
+	flag.DurationVar(&cfg.Bus.PersistInterval, "bus.persistInterval", cfg.Bus.PersistInterval, "(deprecated) Interval for persisting consensus updates")
 	flag.DurationVar(&cfg.Bus.UsedUTXOExpiry, "bus.usedUTXOExpiry", cfg.Bus.UsedUTXOExpiry, "Expiry for used UTXOs in transactions")
 	flag.Int64Var(&cfg.Bus.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", cfg.Bus.SlabBufferCompletionThreshold, "Threshold for slab buffer upload (overrides with RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD)")
 
@@ -454,13 +453,22 @@ func main() {
 		cfg.Log.Database.Level = cfg.Log.Level
 	}
 
-	network, _ := build.Network()
+	network, genesis := build.Network()
 	busCfg := node.BusConfig{
 		Bus:         cfg.Bus,
 		Database:    cfg.Database,
 		DatabaseLog: cfg.Log.Database,
 		Logger:      logger,
 		Network:     network,
+		Genesis:     genesis,
+		RetryTxIntervals: []time.Duration{
+			200 * time.Millisecond,
+			500 * time.Millisecond,
+			time.Second,
+			3 * time.Second,
+			10 * time.Second,
+			10 * time.Second,
+		},
 	}
 
 	type shutdownFnEntry struct {
@@ -508,7 +516,7 @@ func main() {
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	setupBusFn := node.NoopFn
 	if cfg.Bus.RemoteAddr == "" {
-		b, setupFn, shutdownFn, err := node.NewBus(busCfg, cfg.Directory, pk, logger)
+		b, setupFn, shutdownFn, _, _, err := node.NewBus(busCfg, cfg.Directory, pk, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}

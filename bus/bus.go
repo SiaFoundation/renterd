@@ -14,9 +14,12 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -24,8 +27,8 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
@@ -52,23 +55,17 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
-	// A ChainManager manages blockchain state.
+	// ChainManager tracks multiple blockchains and identifies the best valid
+	// chain.
 	ChainManager interface {
-		AcceptBlock(types.Block) error
-		BlockAtHeight(height uint64) (types.Block, bool)
-		IndexAtHeight(height uint64) (types.ChainIndex, error)
-		LastBlockTime() time.Time
-		Subscribe(s modules.ConsensusSetSubscriber, ccID modules.ConsensusChangeID, cancel <-chan struct{}) error
-		Synced() bool
+		AddBlocks(blocks []types.Block) error
+		AddPoolTransactions(txns []types.Transaction) (bool, error)
+		Block(id types.BlockID) (types.Block, bool)
+		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
+		PoolTransactions() []types.Transaction
+		RecommendedFee() types.Currency
 		TipState() consensus.State
-	}
-
-	// A Syncer can connect to other peers and synchronize the blockchain.
-	Syncer interface {
-		BroadcastTransaction(txn types.Transaction, dependsOn []types.Transaction)
-		Connect(addr string) error
-		Peers() []string
-		SyncerAddress(ctx context.Context) (string, error)
+		UnconfirmedParents(txn types.Transaction) []types.Transaction
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
@@ -79,19 +76,6 @@ type (
 		Subscribe(subscriber modules.TransactionPoolSubscriber)
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
-	}
-
-	// A Wallet can spend and receive siacoins.
-	Wallet interface {
-		Address() types.Address
-		Balance() (spendable, confirmed, unconfirmed types.Currency, _ error)
-		FundTransaction(cs consensus.State, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, error)
-		Height() uint64
-		Redistribute(cs consensus.State, outputs int, amount, feePerByte types.Currency, pool []types.Transaction) ([]types.Transaction, []types.Hash256, error)
-		ReleaseInputs(txn ...types.Transaction)
-		SignTransaction(cs consensus.State, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
-		Transactions(before, since time.Time, offset, limit int) ([]wallet.Transaction, error)
-		UnspentOutputs() ([]wallet.SiacoinElement, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -179,6 +163,11 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
+	// A ChainStore stores chain information.
+	ChainStore interface {
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+	}
+
 	// A SettingStore stores settings.
 	SettingStore interface {
 		DeleteSetting(ctx context.Context, key string) error
@@ -211,32 +200,63 @@ type (
 
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 	}
+
+	Syncer interface {
+		Addr() string
+		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastTransactionSet([]types.Transaction)
+		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
+		Peers() []*syncer.Peer
+	}
+
+	Wallet interface {
+		Address() types.Address
+		Balance() (wallet.Balance, error)
+		Close() error
+		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
+		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
+		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
+		SpendableOutputs() ([]types.SiacoinElement, error)
+		Tip() (types.ChainIndex, error)
+		UnconfirmedTransactions() ([]wallet.Event, error)
+		Events(offset, limit int) ([]wallet.Event, error)
+	}
+
+	WebhookManager interface {
+		webhooks.Broadcaster
+		Close() error
+		Delete(context.Context, webhooks.Webhook) error
+		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
+		Register(context.Context, webhooks.Webhook) error
+	}
 )
 
 type bus struct {
 	startTime time.Time
 
+	alerts      alerts.Alerter
+	alertMgr    *alerts.Manager
+	pinMgr      ibus.PinManager
+	webhooksMgr *webhooks.Manager
+
 	cm ChainManager
 	s  Syncer
-	tp TransactionPool
+	w  Wallet
 
 	as    AutopilotStore
+	cs    ChainStore
 	eas   EphemeralAccountStore
 	hdb   HostDB
 	ms    MetadataStore
 	ss    SettingStore
 	mtrcs MetricsStore
-	w     Wallet
 
 	accounts         *accounts
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
-	alerts      alerts.Alerter
-	alertMgr    *alerts.Manager
-	pinMgr      ibus.PinManager
-	webhooksMgr *webhooks.Manager
-	logger      *zap.SugaredLogger
+	logger *zap.SugaredLogger
 }
 
 // Handler returns an HTTP handler that serves the bus API.
@@ -417,32 +437,47 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	if jc.Decode(&block) != nil {
 		return
 	}
-	if jc.Check("failed to accept block", b.cm.AcceptBlock(block)) != nil {
+
+	if jc.Check("failed to accept block", b.cm.AddBlocks([]types.Block{block})) != nil {
 		return
+	}
+
+	if block.V2 == nil {
+		b.s.BroadcastHeader(gateway.BlockHeader{
+			ParentID:   block.ParentID,
+			Nonce:      block.Nonce,
+			Timestamp:  block.Timestamp,
+			MerkleRoot: block.MerkleRoot(),
+		})
 	}
 }
 
 func (b *bus) syncerAddrHandler(jc jape.Context) {
-	addr, err := b.s.SyncerAddress(jc.Request.Context())
-	if jc.Check("failed to fetch syncer's address", err) != nil {
-		return
-	}
-	jc.Encode(addr)
+	jc.Encode(b.s.Addr())
 }
 
 func (b *bus) syncerPeersHandler(jc jape.Context) {
-	jc.Encode(b.s.Peers())
+	var peers []string
+	for _, p := range b.s.Peers() {
+		peers = append(peers, p.String())
+	}
+	jc.Encode(peers)
 }
 
 func (b *bus) syncerConnectHandler(jc jape.Context) {
 	var addr string
 	if jc.Decode(&addr) == nil {
-		jc.Check("couldn't connect to peer", b.s.Connect(addr))
+		_, err := b.s.Connect(jc.Request.Context(), addr)
+		jc.Check("couldn't connect to peer", err)
 	}
 }
 
 func (b *bus) consensusStateHandler(jc jape.Context) {
-	jc.Encode(b.consensusState())
+	cs, err := b.consensusState(jc.Request.Context())
+	if jc.Check("couldn't fetch consensus state", err) != nil {
+		return
+	}
+	jc.Encode(cs)
 }
 
 func (b *bus) consensusNetworkHandler(jc jape.Context) {
@@ -452,19 +487,25 @@ func (b *bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *bus) txpoolFeeHandler(jc jape.Context) {
-	fee := b.tp.RecommendedFee()
-	jc.Encode(fee)
+	jc.Encode(b.cm.RecommendedFee())
 }
 
 func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
-	jc.Encode(b.tp.Transactions())
+	jc.Encode(b.cm.PoolTransactions())
 }
 
 func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
-	if jc.Decode(&txnSet) == nil {
-		jc.Check("couldn't broadcast transaction set", b.tp.AcceptTransactionSet(txnSet))
+	if jc.Decode(&txnSet) != nil {
+		return
 	}
+
+	_, err := b.cm.AddPoolTransactions(txnSet)
+	if jc.Check("couldn't broadcast transaction set", err) != nil {
+		return
+	}
+
+	b.s.BroadcastTransactionSet(txnSet)
 }
 
 func (b *bus) bucketsHandlerGET(jc jape.Context) {
@@ -531,39 +572,129 @@ func (b *bus) bucketHandlerGET(jc jape.Context) {
 
 func (b *bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
-	spendable, confirmed, unconfirmed, err := b.w.Balance()
+	balance, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
 		return
 	}
+
+	tip, err := b.w.Tip()
+	if jc.Check("couldn't fetch wallet scan height", err) != nil {
+		return
+	}
+
 	jc.Encode(api.WalletResponse{
-		ScanHeight:  b.w.Height(),
+		ScanHeight:  tip.Height,
 		Address:     address,
-		Confirmed:   confirmed,
-		Spendable:   spendable,
-		Unconfirmed: unconfirmed,
+		Confirmed:   balance.Confirmed,
+		Spendable:   balance.Spendable,
+		Unconfirmed: balance.Unconfirmed,
+		Immature:    balance.Immature,
 	})
 }
 
 func (b *bus) walletTransactionsHandler(jc jape.Context) {
-	var before, since time.Time
 	offset := 0
 	limit := -1
-	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
-		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil ||
-		jc.DecodeForm("offset", &offset) != nil ||
+	if jc.DecodeForm("offset", &offset) != nil ||
 		jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-	txns, err := b.w.Transactions(before, since, offset, limit)
-	if jc.Check("couldn't load transactions", err) == nil {
-		jc.Encode(txns)
+
+	// TODO: deprecate these parameters when moving to v2.0.0
+	var before, since time.Time
+	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
+		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil {
+		return
 	}
+
+	// convertToTransaction converts wallet event data to a Transaction.
+	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
+		ok = true
+		switch kind {
+		case wallet.EventTypeMinerPayout,
+			wallet.EventTypeFoundationSubsidy,
+			wallet.EventTypeSiafundClaim:
+			payout, _ := data.(wallet.EventPayout)
+			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
+		case wallet.EventTypeV1Transaction:
+			v1Txn, _ := data.(wallet.EventV1Transaction)
+			txn = types.Transaction(v1Txn)
+		case wallet.EventTypeV1ContractResolution:
+			fce, _ := data.(wallet.EventV1ContractResolution)
+			txn = types.Transaction{
+				FileContracts:  []types.FileContract{fce.Parent.FileContract},
+				SiacoinOutputs: []types.SiacoinOutput{fce.SiacoinElement.SiacoinOutput},
+			}
+		default:
+			ok = false
+		}
+		return
+	}
+
+	// convertToTransactions converts wallet events to API transactions.
+	convertToTransactions := func(events []wallet.Event) []api.Transaction {
+		var transactions []api.Transaction
+		for _, e := range events {
+			if txn, ok := convertToTransaction(e.Type, e.Data); ok {
+				transactions = append(transactions, api.Transaction{
+					Raw:       txn,
+					Index:     e.Index,
+					ID:        types.TransactionID(e.ID),
+					Inflow:    e.Inflow,
+					Outflow:   e.Outflow,
+					Timestamp: e.Timestamp,
+				})
+			}
+		}
+		return transactions
+	}
+
+	if before.IsZero() && since.IsZero() {
+		events, err := b.w.Events(offset, limit)
+		if jc.Check("couldn't load transactions", err) == nil {
+			jc.Encode(convertToTransactions(events))
+		}
+		return
+	}
+
+	// TODO: remove this when 'before' and 'since' are deprecated, until then we
+	// fetch all transactions and paginate manually if either is specified
+	events, err := b.w.Events(0, -1)
+	if jc.Check("couldn't load transactions", err) != nil {
+		return
+	}
+	filtered := events[:0]
+	for _, txn := range events {
+		if (before.IsZero() || txn.Timestamp.Before(before)) &&
+			(since.IsZero() || txn.Timestamp.After(since)) {
+			filtered = append(filtered, txn)
+		}
+	}
+	events = filtered
+	if limit == 0 || limit == -1 {
+		jc.Encode(convertToTransactions(events[offset:]))
+	} else {
+		jc.Encode(convertToTransactions(events[offset : offset+limit]))
+	}
+	return
 }
 
 func (b *bus) walletOutputsHandler(jc jape.Context) {
-	utxos, err := b.w.UnspentOutputs()
+	utxos, err := b.w.SpendableOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
-		jc.Encode(utxos)
+		// convert to siacoin elements
+		elements := make([]api.SiacoinElement, len(utxos))
+		for i, sce := range utxos {
+			elements[i] = api.SiacoinElement{
+				ID: sce.StateElement.ID,
+				SiacoinOutput: types.SiacoinOutput{
+					Value:   sce.SiacoinOutput.Value,
+					Address: sce.SiacoinOutput.Address,
+				},
+				MaturityHeight: sce.MaturityHeight,
+			}
+		}
+		jc.Encode(elements)
 	}
 }
 
@@ -573,24 +704,22 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		return
 	}
 	txn := wfr.Transaction
+
 	if len(txn.MinerFees) == 0 {
 		// if no fees are specified, we add some
-		fee := b.tp.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
+		fee := b.cm.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
 		txn.MinerFees = []types.Currency{fee}
 	}
-	toSign, err := b.w.FundTransaction(b.cm.TipState(), &txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
+
+	toSign, err := b.w.FundTransaction(&txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
-	parents, err := b.tp.UnconfirmedParents(txn)
-	if jc.Check("couldn't load transaction dependencies", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
+
 	jc.Encode(api.WalletFundResponse{
 		Transaction: txn,
 		ToSign:      toSign,
-		DependsOn:   parents,
+		DependsOn:   b.cm.UnconfirmedParents(txn),
 	})
 }
 
@@ -599,10 +728,8 @@ func (b *bus) walletSignHandler(jc jape.Context) {
 	if jc.Decode(&wsr) != nil {
 		return
 	}
-	err := b.w.SignTransaction(b.cm.TipState(), &wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
-	if jc.Check("couldn't sign transaction", err) == nil {
-		jc.Encode(wsr.Transaction)
-	}
+	b.w.SignTransaction(&wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
+	jc.Encode(wsr.Transaction)
 }
 
 func (b *bus) walletRedistributeHandler(jc jape.Context) {
@@ -615,8 +742,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	cs := b.cm.TipState()
-	txns, toSign, err := b.w.Redistribute(cs, wfr.Outputs, wfr.Amount, b.tp.RecommendedFee(), b.tp.Transactions())
+	txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
 	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 		return
 	}
@@ -628,16 +754,13 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 	}
 
 	for i := 0; i < len(txns); i++ {
-		err = b.w.SignTransaction(cs, &txns[i], toSign, types.CoveredFields{WholeTransaction: true})
-		if jc.Check("couldn't sign the transaction", err) != nil {
-			b.w.ReleaseInputs(txns...)
-			return
-		}
+		b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
 		ids = append(ids, txns[i].ID())
 	}
 
-	if jc.Check("couldn't broadcast the transaction", b.tp.AcceptTransactionSet(txns)) != nil {
-		b.w.ReleaseInputs(txns...)
+	_, err = b.cm.AddPoolTransactions(txns)
+	if jc.Check("couldn't broadcast the transaction", err) != nil {
+		b.w.ReleaseInputs(txns, nil)
 		return
 	}
 
@@ -647,7 +770,7 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 func (b *bus) walletDiscardHandler(jc jape.Context) {
 	var txn types.Transaction
 	if jc.Decode(&txn) == nil {
-		b.w.ReleaseInputs(txn)
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
 }
 
@@ -671,23 +794,15 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 	}
-	txn.MinerFees = []types.Currency{b.tp.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
-	toSign, err := b.w.FundTransaction(cs, &txn, cost.Add(txn.MinerFees[0]), true)
+	txn.MinerFees = []types.Currency{b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
+	toSign, err := b.w.FundTransaction(&txn, cost.Add(txn.MinerFees[0]), true)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
-	cf := wallet.ExplicitCoveredFields(txn)
-	err = b.w.SignTransaction(cs, &txn, toSign, cf)
-	if jc.Check("couldn't sign transaction", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
-	parents, err := b.tp.UnconfirmedParents(txn)
-	if jc.Check("couldn't load transaction dependencies", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
-	jc.Encode(append(parents, txn))
+
+	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
+
+	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
 
 func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
@@ -735,21 +850,15 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	// Fund the txn. We are not signing it yet since it's not complete. The host
 	// still needs to complete it and the revision + contract are signed with
 	// the renter key by the worker.
-	toSign, err := b.w.FundTransaction(cs, &txn, cost, true)
+	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if jc.Check("couldn't fund transaction", err) != nil {
 		return
 	}
 
-	// Add any required parents.
-	parents, err := b.tp.UnconfirmedParents(txn)
-	if jc.Check("couldn't load transaction dependencies", err) != nil {
-		b.w.ReleaseInputs(txn)
-		return
-	}
 	jc.Encode(api.WalletPrepareRenewResponse{
 		FundAmount:     cost,
 		ToSign:         toSign,
-		TransactionSet: append(parents, txn),
+		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
 	})
 }
 
@@ -769,7 +878,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 		return false
 	}
 
-	txns := b.tp.Transactions()
+	txns := b.cm.PoolTransactions()
 	relevant := txns[:0]
 	for _, txn := range txns {
 		if isRelevant(txn) {
@@ -1798,12 +1907,23 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
-func (b *bus) consensusState() api.ConsensusState {
-	return api.ConsensusState{
-		BlockHeight:   b.cm.TipState().Index.Height,
-		LastBlockTime: api.TimeRFC3339(b.cm.LastBlockTime()),
-		Synced:        b.cm.Synced(),
+func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
+	index, err := b.cs.ChainIndex(ctx)
+	if err != nil {
+		return api.ConsensusState{}, err
 	}
+
+	var synced bool
+	block, found := b.cm.Block(index.ID)
+	if found {
+		synced = chain.IsSynced(block)
+	}
+
+	return api.ConsensusState{
+		BlockHeight:   index.Height,
+		LastBlockTime: api.TimeRFC3339(block.Timestamp),
+		Synced:        synced,
+	}, nil
 }
 
 func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
@@ -1829,13 +1949,16 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
-	cs := b.consensusState()
+	cs, err := b.consensusState(ctx)
+	if err != nil {
+		return api.GougingParams{}, err
+	}
 
 	return api.GougingParams{
 		ConsensusState:     cs,
 		GougingSettings:    gs,
 		RedundancySettings: rs,
-		TransactionFee:     b.tp.RecommendedFee(),
+		TransactionFee:     b.cm.RecommendedFee(),
 	}, nil
 }
 
@@ -2455,26 +2578,12 @@ func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) ProcessConsensusChange(cc modules.ConsensusChange) {
-	if cc.Synced {
-		b.broadcastAction(webhooks.Event{
-			Module: api.ModuleConsensus,
-			Event:  api.EventUpdate,
-			Payload: api.EventConsensusUpdate{
-				ConsensusState: b.consensusState(),
-				TransactionFee: b.tp.RecommendedFee(),
-				Timestamp:      time.Now().UTC(),
-			},
-		})
-	}
-}
-
 // New returns a new Bus.
-func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, tp TransactionPool, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
 	b := &bus{
 		s:                s,
 		cm:               cm,
-		tp:               tp,
+		cs:               cs,
 		w:                w,
 		hdb:              hdb,
 		as:               as,
@@ -2578,8 +2687,5 @@ func New(s Syncer, am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, t
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
 
-	if err := cm.Subscribe(b, modules.ConsensusChangeRecent, nil); err != nil {
-		return nil, fmt.Errorf("failed to subscribe to consensus changes: %w", err)
-	}
 	return b, nil
 }

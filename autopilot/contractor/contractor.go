@@ -13,11 +13,10 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	cwallet "go.sia.tech/coreutils/wallet"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 )
@@ -89,6 +88,7 @@ type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
+	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -625,6 +625,7 @@ func (c *Contractor) runContractChecks(ctx *mCtx, hostChecks map[types.PublicKey
 			"toArchive", len(toArchive),
 			"toRefresh", len(toRefresh),
 			"toRenew", len(toRenew),
+			"bh", bh,
 		)
 	}()
 
@@ -660,7 +661,7 @@ LOOP:
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
 		} else if contract.RevisionNumber == math.MaxUint64 {
 			toArchive[fcid] = errContractMaxRevisionNumber.Error()
-		} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > contractConfirmationDeadline {
+		} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > ContractConfirmationDeadline {
 			toArchive[fcid] = errContractNotConfirmed.Error()
 		}
 		if _, archived := toArchive[fcid]; archived {
@@ -996,7 +997,7 @@ func (c *Contractor) runContractRenewals(ctx *mCtx, w Worker, toRenew []contract
 		if err != nil {
 			// don't register an alert for hosts that are out of funds since the
 			// user can't do anything about it
-			if !(worker.IsErrHost(err) && utils.IsErr(err, cwallet.ErrNotEnoughFunds)) {
+			if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
 				c.alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !proceed, err))
 			}
 			c.logger.With(zap.Error(err)).
@@ -1280,7 +1281,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, ci contractInfo, budget 
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if utils.IsErr(err, wallet.ErrInsufficientBalance) && !worker.IsErrHost(err) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1364,7 +1365,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, ci contractInfo, budge
 			return api.ContractMetadata{}, true, err
 		}
 		log.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if utils.IsErr(err, wallet.ErrInsufficientBalance) && !worker.IsErrHost(err) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -1429,7 +1430,7 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		if strings.Contains(err.Error(), wallet.ErrInsufficientBalance.Error()) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err

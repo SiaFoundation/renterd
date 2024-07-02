@@ -14,11 +14,12 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/modules"
 )
 
 const (
+	proofHashSize = 32
 	secretKeySize = 32
 )
 
@@ -29,15 +30,16 @@ var (
 type (
 	AutopilotConfig api.AutopilotConfig
 	BigInt          big.Int
-	CCID            modules.ConsensusChangeID
+	BusSetting      string
 	Currency        types.Currency
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
-	BusSetting      string
+	MerkleProof     struct{ Hashes []types.Hash256 }
 	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
 	SecretKey       []byte
+	Uint64Str       uint64
 	UnixTimeMS      time.Time
 	UnixTimeNS      time.Time
 	Unsigned64      uint64
@@ -52,10 +54,10 @@ var (
 	_ scannerValuer = (*AutopilotConfig)(nil)
 	_ scannerValuer = (*BigInt)(nil)
 	_ scannerValuer = (*BusSetting)(nil)
-	_ scannerValuer = (*CCID)(nil)
 	_ scannerValuer = (*Currency)(nil)
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
+	_ scannerValuer = (*MerkleProof)(nil)
 	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
@@ -104,22 +106,6 @@ func (b *BigInt) Scan(value interface{}) error {
 // Value returns a BigInt value, implements driver.Valuer interface.
 func (b BigInt) Value() (driver.Value, error) {
 	return (*big.Int)(&b).String(), nil
-}
-
-// Scan scan value into CCID, implements sql.Scanner interface.
-func (c *CCID) Scan(value interface{}) error {
-	switch value := value.(type) {
-	case []byte:
-		copy(c[:], value)
-	default:
-		return fmt.Errorf("failed to unmarshal CCID value: %v %t", value, value)
-	}
-	return nil
-}
-
-// Value returns a publicKey value, implements driver.Valuer interface.
-func (c CCID) Value() (driver.Value, error) {
-	return c[:], nil
 }
 
 // Scan scan value into Currency, implements sql.Scanner interface.
@@ -228,6 +214,31 @@ func (pk PublicKey) Value() (driver.Value, error) {
 	return pk[:], nil
 }
 
+// Scan scans value into a MerkleProof, implements sql.Scanner interface.
+func (mp *MerkleProof) Scan(value interface{}) error {
+	b, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal MerkleProof value:", value))
+	} else if len(b)%proofHashSize != 0 {
+		return fmt.Errorf("failed to unmarshal MerkleProof value due to invalid number of bytes %v: %v", len(b), value)
+	}
+
+	mp.Hashes = make([]types.Hash256, len(b)/proofHashSize)
+	for i := range mp.Hashes {
+		copy(mp.Hashes[i][:], b[i*proofHashSize:])
+	}
+	return nil
+}
+
+// Value returns a MerkleProof value, implements driver.Valuer interface.
+func (mp MerkleProof) Value() (driver.Value, error) {
+	b := make([]byte, len(mp.Hashes)*proofHashSize)
+	for i, h := range mp.Hashes {
+		copy(b[i*proofHashSize:], h[:])
+	}
+	return b, nil
+}
+
 // String implements fmt.Stringer to prevent the key from getting leaked in
 // logs.
 func (k SecretKey) String() string {
@@ -332,6 +343,52 @@ func (u *UnixTimeNS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u UnixTimeNS) Value() (driver.Value, error) {
 	return time.Time(u).UnixNano(), nil
+}
+
+// Scan scan value into Uint64, implements sql.Scanner interface.
+func (u *Uint64Str) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal Uint64 value: %v %t", value, value)
+	}
+	var val uint64
+	_, err := fmt.Sscan(s, &val)
+	if err != nil {
+		return fmt.Errorf("failed to scan Uint64 value: %v", err)
+	}
+	*u = Uint64Str(val)
+	return nil
+}
+
+// Value returns a Uint64 value, implements driver.Valuer interface.
+func (u Uint64Str) Value() (driver.Value, error) {
+	return fmt.Sprint(u), nil
+}
+
+func UnmarshalEventData(b []byte, t string) (dst wallet.EventData, err error) {
+	switch t {
+	case wallet.EventTypeMinerPayout,
+		wallet.EventTypeSiafundClaim,
+		wallet.EventTypeFoundationSubsidy:
+		dst = new(wallet.EventPayout)
+	case wallet.EventTypeV1ContractResolution:
+		dst = new(wallet.EventV1ContractResolution)
+	case wallet.EventTypeV2ContractResolution:
+		dst = new(wallet.EventV2ContractResolution)
+	case wallet.EventTypeV1Transaction:
+		dst = new(wallet.EventV1Transaction)
+	case wallet.EventTypeV2Transaction:
+		dst = new(wallet.EventV2Transaction)
+	default:
+		return nil, fmt.Errorf("unknown event type %v", t)
+	}
+	err = json.Unmarshal(b, dst)
+	return
 }
 
 // Scan scan value into Unsigned64, implements sql.Scanner interface.

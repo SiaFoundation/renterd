@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -86,7 +85,7 @@ type Bus interface {
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
+	WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
@@ -256,9 +255,7 @@ func (ap *Autopilot) Run() error {
 			// initiate a host scan - no need to be synced or configured for scanning
 			ap.s.tryUpdateTimeout()
 			ap.s.tryPerformHostScan(ap.shutdownCtx, w, forceScan)
-
-			// reset forceScan
-			forceScan = false
+			forceScan = false // reset forceScan
 
 			// block until consensus is synced
 			if synced, blocked, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
