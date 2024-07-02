@@ -217,7 +217,10 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	if err := c.tx.QueryRow(c.ctx, `
 	INSERT INTO hosts (created_at, public_key, settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(public_key) DO NOTHING RETURNING id`,
+	ON CONFLICT(public_key) DO UPDATE SET
+		last_announcement = EXCLUDED.last_announcement,
+		net_address = EXCLUDED.net_address
+	RETURNING id`,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
 		ssql.HostSettings{},
