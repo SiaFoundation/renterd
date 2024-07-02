@@ -137,7 +137,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update host is successful
-	ts := time.Now().Add(-time.Minute)
+	ts := time.Now().Truncate(time.Second).Add(-time.Minute).UTC()
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
 		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "foo"}, 1, types.BlockID{}, ts)
 	}); err != nil {
@@ -147,7 +147,7 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	} else if h.NetAddress != "foo" {
 		t.Fatal("unexpected net address", h.NetAddress)
-	} else if !h.LastAnnouncement.Equal(ts) {
+	} else if !h.LastAnnouncement.Truncate(time.Second).Equal(ts) {
 		t.Fatalf("unexpected last announcement %v != %v", h.LastAnnouncement, ts)
 	}
 
