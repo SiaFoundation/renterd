@@ -1142,11 +1142,7 @@ func (s *SQLStore) FetchPartialSlab(ctx context.Context, ec object.EncryptionKey
 }
 
 func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.SlabSlice, int64, error) {
-	var contractSetID uint
-	if err := s.db.Raw("SELECT id FROM contract_sets WHERE name = ?", contractSet).Scan(&contractSetID).Error; err != nil {
-		return nil, 0, err
-	}
-	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSetID)
+	return s.slabBufferMgr.AddPartialSlab(ctx, data, minShards, totalShards, contractSet)
 }
 
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
@@ -1330,14 +1326,6 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 }
 
 func (s *SQLStore) RefreshHealth(ctx context.Context) error {
-	var nSlabs int64
-	if err := s.db.Model(&dbSlab{}).Count(&nSlabs).Error; err != nil {
-		return err
-	}
-	if nSlabs == 0 {
-		return nil // nothing to do
-	}
-
 	for {
 		// update slabs
 		var rowsAffected int64
@@ -1585,21 +1573,11 @@ func (s *SQLStore) objectRaw(txn *gorm.DB, bucket string, path string) (rows raw
 	return
 }
 
-// contract retrieves a contract from the store.
-func (s *SQLStore) contract(ctx context.Context, id fileContractID) (dbContract, error) {
-	return contract(s.db.WithContext(ctx), id)
-}
-
 // PackedSlabsForUpload returns up to 'limit' packed slabs that are ready for
 // uploading. They are locked for 'lockingDuration' time before being handed out
 // again.
 func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error) {
-	var contractSetID uint
-	if err := s.db.WithContext(ctx).Raw("SELECT id FROM contract_sets WHERE name = ?", set).
-		Scan(&contractSetID).Error; err != nil {
-		return nil, err
-	}
-	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, contractSetID, limit)
+	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, set, limit)
 }
 
 func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {

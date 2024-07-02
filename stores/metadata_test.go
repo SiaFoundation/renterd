@@ -2621,14 +2621,8 @@ func TestObjectsStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	totalUploadedSize += c.Size
-	newContract, err := ss.contract(context.Background(), fileContractID(newContractID))
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, contractSector := range contractSectors {
-		contractSector.DBContractID = newContract.ID
-		err = ss.db.Create(&contractSector).Error
-		if err != nil {
+		if _, err := ss.DB().Exec(context.Background(), "INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES ((SELECT id FROM contracts WHERE fcid = ?), ?)", sql.FileContractID(newContractID), contractSector.DBSectorID); err != nil {
 			t.Fatal(err)
 		}
 	}
