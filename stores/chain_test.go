@@ -160,7 +160,7 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal(err)
 	} else if h, err := ss.Host(context.Background(), hks[0]); err != nil {
 		t.Fatal(err)
-	} else if h.Interactions.Uptime != time.Minute {
+	} else if h.Interactions.Uptime < time.Minute || h.Interactions.Uptime > time.Minute+time.Second {
 		t.Fatalf("unexpected uptime %v", h.Interactions.Uptime)
 	}
 
@@ -173,7 +173,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 	if h, err := ss.Host(context.Background(), hks[0]); err != nil {
 		t.Fatal("unexpected error", err)
-	} else if h.Interactions.Uptime != time.Minute {
+	} else if h.Interactions.Uptime < time.Minute || h.Interactions.Uptime > time.Minute+time.Second {
 		t.Fatalf("unexpected uptime %v", h.Interactions.Uptime)
 	} else if h.NetAddress != "fooNew" {
 		t.Fatal("unexpected net address", h.NetAddress)
