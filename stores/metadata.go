@@ -1428,39 +1428,12 @@ func (s *SQLStore) objectHydrate(tx *gorm.DB, bucket, path string, obj rawObject
 }
 
 // ObjectMetadata returns an object's metadata
-func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
-	var resp api.Object
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var obj dbObject
-		err := tx.Model(&dbObject{}).
-			Joins("INNER JOIN buckets b ON objects.db_bucket_id = b.id").
-			Where("b.name", bucket).
-			Where("object_id", path).
-			Take(&obj).
-			Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return api.ErrObjectNotFound
-		} else if err != nil {
-			return err
-		}
-		oum, err := s.objectMetadata(tx, bucket, path)
-		if err != nil {
-			return err
-		}
-		resp = api.Object{
-			ObjectMetadata: newObjectMetadata(
-				obj.ObjectID,
-				obj.Etag,
-				obj.MimeType,
-				obj.Health,
-				obj.CreatedAt,
-				obj.Size,
-			),
-			Metadata: oum,
-		}
-		return nil
+func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj api.Object, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		obj, err = tx.ObjectMetadata(ctx, bucket, path)
+		return err
 	})
-	return resp, err
+	return
 }
 
 func (s *SQLStore) objectMetadata(tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {

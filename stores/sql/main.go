@@ -1293,6 +1293,59 @@ func NormalizePeer(peer string) (string, error) {
 	return normalized.String(), nil
 }
 
+func ObjectMetadata(ctx context.Context, tx sql.Tx, bucket, key string) (api.Object, error) {
+	// fetch object id
+	var objID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT o.id
+		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
+		WHERE o.object_id = ? AND b.name = ?
+	`, key, bucket).Scan(&objID); errors.Is(err, dsql.ErrNoRows) {
+		return api.Object{}, api.ErrObjectNotFound
+	} else if err != nil {
+		return api.Object{}, fmt.Errorf("failed to fetch object id: %w", err)
+	}
+
+	// fetch metadata
+	om, err := scanObjectMetadata(tx.QueryRow(ctx, `
+		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		FROM objects o
+		WHERE o.id = ?
+	`, objID))
+	if err != nil {
+		return api.Object{}, fmt.Errorf("failed to fetch object metadata: %w", err)
+	}
+
+	// fetch user metadata
+	rows, err := tx.Query(ctx, `
+		SELECT oum.key, oum.value
+		FROM object_user_metadata oum
+		WHERE oum.db_object_id = ?
+		ORDER BY oum.id ASC
+	`, objID)
+	if err != nil {
+		return api.Object{}, fmt.Errorf("failed to fetch user metadata: %w", err)
+	}
+	defer rows.Close()
+
+	// build object
+	metadata := make(api.ObjectUserMetadata)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return api.Object{}, fmt.Errorf("failed to scan user metadata: %w", err)
+		}
+		metadata[key] = value
+	}
+
+	return api.Object{
+		Metadata:       metadata,
+		ObjectMetadata: om,
+		Object:         nil, // only return metadata
+	}, nil
+}
+
 func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	var args []any
 	var bucketExpr string

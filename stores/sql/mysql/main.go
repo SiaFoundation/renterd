@@ -522,6 +522,10 @@ func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, 
 	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
 }
 
+func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
+	return ssql.ObjectMetadata(ctx, tx, bucket, path)
+}
+
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	return ssql.ObjectsStats(ctx, tx, opts)
 }

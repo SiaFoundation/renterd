@@ -37,13 +37,13 @@ type (
 	DatabaseTx interface {
 		// AbortMultipartUpload aborts a multipart upload and deletes it from
 		// the database.
-		AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error
+		AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error
 
 		// Accounts returns all accounts from the db.
 		Accounts(ctx context.Context) ([]api.Account, error)
 
 		// AddMultipartPart adds a part to an unfinished multipart upload.
-		AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
+		AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
 		// AddPeer adds a peer to the store.
 		AddPeer(ctx context.Context, addr string) error
@@ -196,6 +196,9 @@ type (
 
 		// MultipartUploads returns a list of all multipart uploads.
 		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error)
+
+		// ObjectMetadata returns an object's metadata.
+		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
 
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
