@@ -484,46 +484,6 @@ func TestSQLContractStore(t *testing.T) {
 	}
 }
 
-func TestContractsForHost(t *testing.T) {
-	// create a SQL store
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// add 2 hosts
-	hks, err := ss.addTestHosts(2)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// add 2 contracts
-	_, _, err = ss.addTestContracts(hks)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch raw hosts
-	var hosts []dbHost
-	if err := ss.db.
-		Model(&dbHost{}).
-		Find(&hosts).
-		Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 2 {
-		t.Fatal("unexpected number of hosts")
-	}
-
-	contracts, _ := contractsForHost(ss.db, hosts[0])
-	if len(contracts) != 1 || types.PublicKey(contracts[0].Host.PublicKey).String() != types.PublicKey(hosts[0].PublicKey).String() {
-		t.Fatal("unexpected", len(contracts), contracts)
-	}
-
-	contracts, _ = contractsForHost(ss.db, hosts[1])
-	if len(contracts) != 1 || types.PublicKey(contracts[0].Host.PublicKey).String() != types.PublicKey(hosts[1].PublicKey).String() {
-		t.Fatalf("unexpected contracts, %+v", contracts)
-	}
-}
-
 // TestContractRoots tests the ContractRoots function on the store.
 func TestContractRoots(t *testing.T) {
 	// create a SQL store
