@@ -63,12 +63,11 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, r
 		var currRevisionHeight, currSize uint64
 		var currRevisionNumber Uint64Str
 		err := tx.
-			QueryRow(ctx, fmt.Sprintf("SELECT revision_height, revision_number, size FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
+			QueryRow(ctx, fmt.Sprintf("SELECT revision_height, revision_number, COALESCE(size, 0) FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
 			Scan(&currRevisionHeight, &currRevisionNumber, &currSize)
-		if err != nil {
-			if errors.Is(err, dsql.ErrNoRows) {
-				continue
-			}
+		if errors.Is(err, dsql.ErrNoRows) {
+			continue
+		} else if err != nil {
 			return fmt.Errorf("failed to fetch '%s' info for %v: %w", table[:len(table)-1], fcid, err)
 		}
 
