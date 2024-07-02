@@ -2334,3 +2334,32 @@ func scanObjectMetadata(s scanner) (api.ObjectMetadata, error) {
 	}
 	return md, nil
 }
+
+func SearchObjects(ctx context.Context, tx sql.Tx, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
+	if limit <= -1 {
+		limit = math.MaxInt
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		FROM objects o
+		INNER JOIN buckets b ON o.db_bucket_id = b.id
+		WHERE INSTR(o.object_id, ?) > 0 AND b.name = ?
+		ORDER BY o.object_id ASC
+		LIMIT ? OFFSET ?
+	`, substring, bucket, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := scanObjectMetadata(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+	return objects, nil
+}
