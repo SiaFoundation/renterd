@@ -1137,13 +1137,13 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	}
 	minScore := lowestScore / minAllowedScoreLeeway
 
-	// make sure the min score allows for 'numContracts' contracts to be formed
+	// make sure the min score allows for 'randSetSize' contracts to be formed
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].score > candidates[j].score
 	})
-	if len(candidates) < int(numContracts) {
+	if len(candidates) < int(randSetSize) {
 		return minValidScore
-	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
+	} else if cutoff := candidates[randSetSize-1].score; minScore > cutoff {
 		minScore = cutoff
 	}
 
