@@ -46,6 +46,16 @@ type (
 		Etag       string
 		Size       int64
 	}
+
+	// Tx is an interface that allows for injecting custom methods into helpers
+	// to avoid duplicating code.
+	Tx interface {
+		sql.Tx
+
+		CharLengthExpr() string
+		SelectObjectMetadataExpr() string
+		ScanObjectMetadata(s Scanner) (md api.ObjectMetadata, err error)
+	}
 )
 
 func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, uploadID string) error {
@@ -999,7 +1009,7 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	return orderByExprs, nil
 }
 
-func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func ListObjects(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -1056,12 +1066,13 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 
 	// run query
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		SELECT %s
 		FROM objects o
 		WHERE %s
 		ORDER BY %s
 		LIMIT ?
 	`,
+		tx.SelectObjectMetadataExpr(),
 		strings.Join(whereExprs, " AND "),
 		strings.Join(orderByExprs, ", ")),
 		whereArgs...)
@@ -1072,7 +1083,7 @@ func ListObjects(ctx context.Context, tx sql.Tx, bucket, prefix, sortBy, sortDir
 
 	var objects []api.ObjectMetadata
 	for rows.Next() {
-		om, err := scanObjectMetadata(rows)
+		om, err := tx.ScanObjectMetadata(rows)
 		if err != nil {
 			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
 		}
@@ -1335,7 +1346,7 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 	return id, nil
 }
 
-func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int, charLenExpr string) ([]api.ObjectMetadata, bool, error) {
+func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
 		panic("path must end in /")
@@ -1417,7 +1428,7 @@ func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy,
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
 			WHERE b.name = ? AND d.name = ?
 			GROUP BY d.id
-		`, col, groupFn, col, charLenExpr), bucket, marker, bucket, marker).Scan(dst)
+		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -1444,7 +1455,7 @@ func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy,
 	// 1. fetch all objects in requested directory
 	// 2. fetch all sub-directories
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		SELECT %s
 		FROM (
 			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
@@ -1452,7 +1463,7 @@ func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy,
 			UNION ALL
 			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, LENGTH(d.name)) = d.name %s
+			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
 			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
 			AND o.object_id LIKE ?
 			AND SUBSTR(o.object_id, 1, ?) = ?
@@ -1463,7 +1474,9 @@ func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy,
 		ORDER BY %s
 		LIMIT ? OFFSET ?
 	`,
+		tx.SelectObjectMetadataExpr(),
 		prefixExpr,
+		tx.CharLengthExpr(),
 		prefixExpr,
 		whereExpr,
 		strings.Join(orderByExprs, ", "),
@@ -1475,7 +1488,7 @@ func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy,
 
 	var objects []api.ObjectMetadata
 	for rows.Next() {
-		om, err := scanObjectMetadata(rows)
+		om, err := tx.ScanObjectMetadata(rows)
 		if err != nil {
 			return nil, false, fmt.Errorf("failed to scan object metadata: %w", err)
 		}
@@ -1492,7 +1505,7 @@ func ObjectEntries(ctx context.Context, tx sql.Tx, bucket, path, prefix, sortBy,
 	return objects, hasMore, nil
 }
 
-func ObjectMetadata(ctx context.Context, tx sql.Tx, bucket, key string) (api.Object, error) {
+func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {
 	// fetch object id
 	var objID int64
 	if err := tx.QueryRow(ctx, `
@@ -1507,11 +1520,11 @@ func ObjectMetadata(ctx context.Context, tx sql.Tx, bucket, key string) (api.Obj
 	}
 
 	// fetch metadata
-	om, err := scanObjectMetadata(tx.QueryRow(ctx, `
-		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+	om, err := tx.ScanObjectMetadata(tx.QueryRow(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM objects o
 		WHERE o.id = ?
-	`, objID))
+	`, tx.SelectObjectMetadataExpr()), objID))
 	if err != nil {
 		return api.Object{}, fmt.Errorf("failed to fetch object metadata: %w", err)
 	}
@@ -2460,7 +2473,7 @@ func copyContractToArchive(ctx context.Context, tx sql.Tx, fcid types.FileContra
 	return err
 }
 
-func scanAutopilot(s scanner) (api.Autopilot, error) {
+func scanAutopilot(s Scanner) (api.Autopilot, error) {
 	var a api.Autopilot
 	if err := s.Scan(&a.ID, (*AutopilotConfig)(&a.Config), &a.CurrentPeriod); err != nil {
 		return api.Autopilot{}, err
@@ -2468,7 +2481,7 @@ func scanAutopilot(s scanner) (api.Autopilot, error) {
 	return a, nil
 }
 
-func scanBucket(s scanner) (api.Bucket, error) {
+func scanBucket(s Scanner) (api.Bucket, error) {
 	var createdAt time.Time
 	var name, policy string
 	err := s.Scan(&createdAt, &name, &policy)
@@ -2488,7 +2501,7 @@ func scanBucket(s scanner) (api.Bucket, error) {
 	}, nil
 }
 
-func scanMultipartUpload(s scanner) (resp api.MultipartUpload, _ error) {
+func scanMultipartUpload(s Scanner) (resp api.MultipartUpload, _ error) {
 	var key SecretKey
 	err := s.Scan(&resp.Bucket, &key, &resp.Path, &resp.UploadID, &resp.CreatedAt)
 	if errors.Is(err, dsql.ErrNoRows) {
@@ -2501,7 +2514,7 @@ func scanMultipartUpload(s scanner) (resp api.MultipartUpload, _ error) {
 	return
 }
 
-func scanWalletEvent(s scanner) (wallet.Event, error) {
+func scanWalletEvent(s Scanner) (wallet.Event, error) {
 	var blockID, eventID Hash256
 	var height, maturityHeight uint64
 	var inflow, outflow Currency
@@ -2541,7 +2554,7 @@ func scanWalletEvent(s scanner) (wallet.Event, error) {
 	}, nil
 }
 
-func scanSiacoinElement(s scanner) (el types.SiacoinElement, err error) {
+func scanSiacoinElement(s Scanner) (el types.SiacoinElement, err error) {
 	var id Hash256
 	var leafIndex, maturityHeight uint64
 	var merkleProof MerkleProof
@@ -2565,7 +2578,7 @@ func scanSiacoinElement(s scanner) (el types.SiacoinElement, err error) {
 	}, nil
 }
 
-func scanStateElement(s scanner) (types.StateElement, error) {
+func scanStateElement(s Scanner) (types.StateElement, error) {
 	var id Hash256
 	var leafIndex uint64
 	var merkleProof MerkleProof
@@ -2579,26 +2592,19 @@ func scanStateElement(s scanner) (types.StateElement, error) {
 	}, nil
 }
 
-func scanObjectMetadata(s scanner) (md api.ObjectMetadata, err error) {
-	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag); err != nil {
-		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
-	}
-	return md, nil
-}
-
-func SearchObjects(ctx context.Context, tx sql.Tx, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
+func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
 
-	rows, err := tx.Query(ctx, `
-		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM objects o
 		INNER JOIN buckets b ON o.db_bucket_id = b.id
 		WHERE INSTR(o.object_id, ?) > 0 AND b.name = ?
 		ORDER BY o.object_id ASC
 		LIMIT ? OFFSET ?
-	`, substring, bucket, limit, offset)
+	`, tx.SelectObjectMetadataExpr()), substring, bucket, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search objects: %w", err)
 	}
@@ -2606,7 +2612,7 @@ func SearchObjects(ctx context.Context, tx sql.Tx, bucket, substring string, off
 
 	var objects []api.ObjectMetadata
 	for rows.Next() {
-		om, err := scanObjectMetadata(rows)
+		om, err := tx.ScanObjectMetadata(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
 		}

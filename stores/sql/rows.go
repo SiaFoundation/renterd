@@ -6,7 +6,7 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-type scanner interface {
+type Scanner interface {
 	Scan(dest ...any) error
 }
 
@@ -38,7 +38,7 @@ type ContractRow struct {
 	SiamuxPort  string
 }
 
-func (r *ContractRow) Scan(s scanner) error {
+func (r *ContractRow) Scan(s Scanner) error {
 	return s.Scan(&r.FCID, &r.RenewedFrom, &r.ContractPrice, &r.State, &r.TotalCost, &r.ProofHeight,
 		&r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.WindowStart, &r.WindowEnd,
 		&r.UploadSpending, &r.DownloadSpending, &r.FundAccountSpending, &r.DeleteSpending, &r.ListSpending,
