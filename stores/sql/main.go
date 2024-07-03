@@ -2580,13 +2580,8 @@ func scanStateElement(s scanner) (types.StateElement, error) {
 }
 
 func scanObjectMetadata(s scanner) (md api.ObjectMetadata, err error) {
-	var createdAt string
-	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag); err != nil {
+	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
-	}
-	*(*time.Time)(&md.ModTime), err = time.Parse("2006-01-02 15:04:05.999999-07:00", createdAt)
-	if err != nil {
-		return api.ObjectMetadata{}, fmt.Errorf("failed to parse created at time: %w", err)
 	}
 	return md, nil
 }
