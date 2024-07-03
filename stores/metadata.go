@@ -7,7 +7,6 @@ import (
 	"math"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -17,7 +16,6 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"lukechampine.com/frand"
 )
 
@@ -31,10 +29,6 @@ const (
 	// health per db transaction. 10000 equals roughtly 1.2TiB of slabs at a
 	// 10/30 erasure coding and takes <1s to execute on an SSD in SQLite.
 	refreshHealthBatchSize = 10000
-
-	// sectorInsertionBatchSize is the number of sectors per batch when we
-	// upsert sectors.
-	sectorInsertionBatchSize = 500
 
 	// slabPruningBatchSize is the number of slabs per batch when we prune
 	// slabs. We limit this to 100 slabs which is 3000 sectors at default
@@ -719,212 +713,10 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 }
 
 func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
-	// sanity check we are passing a directory
-	if !strings.HasSuffix(path, "/") {
-		panic("path must end in /")
-	}
-
-	// convenience variables
-	usingMarker := marker != ""
-	usingOffset := offset > 0
-
-	// sanity check we are passing sane paging parameters
-	if usingMarker && usingOffset {
-		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
-	}
-
-	// sanity check we are passing sane sorting parameters
-	if err := validateSort(sortBy, sortDir); err != nil {
-		return nil, false, err
-	}
-
-	// sanitize sorting parameters
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
-	} else {
-		sortDir = strings.ToLower(sortDir)
-	}
-
-	// ensure marker is '/' prefixed
-	if usingMarker && !strings.HasPrefix(marker, "/") {
-		marker = fmt.Sprintf("/%s", marker)
-	}
-
-	// ensure limit is out of play
-	if limit <= -1 {
-		limit = math.MaxInt
-	}
-
-	// fetch one more to see if there are more entries
-	if limit != math.MaxInt {
-		limit += 1
-	}
-
-	// ensure offset is out of play
-	if usingMarker {
-		offset = 0
-	}
-
-	// fetch id of directory to query
-	dirID, err := s.dirID(s.db, path)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return []api.ObjectMetadata{}, false, nil
-	} else if err != nil {
-		return nil, false, err
-	}
-
-	// fetch bucket id
-	var dBucket dbBucket
-	if err := s.db.Select("id").
-		Where("name", bucket).
-		Take(&dBucket).Error; err != nil {
-		return nil, false, fmt.Errorf("failed to fetch bucket id: %w", err)
-	}
-
-	// build prefix expression
-	prefixExpr := "TRUE"
-	if prefix != "" {
-		prefixExpr = "SUBSTR(o.object_id, 1, ?) = ?"
-	}
-
-	lengthFn := "CHAR_LENGTH"
-	if isSQLite(s.db) {
-		lengthFn = "LENGTH"
-	}
-
-	// objectsQuery consists of 2 parts
-	// 1. fetch all objects in requested directory
-	// 2. fetch all sub-directories
-	objectsQuery := fmt.Sprintf(`
-SELECT o.etag as ETag, o.created_at as ModTime, o.object_id as ObjectName, o.size as Size, o.health as Health, o.mime_type as MimeType
-FROM objects o
-WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) AND %s
-UNION ALL
-SELECT '' as ETag, MAX(o.created_at) as ModTime, d.name as ObjectName, SUM(o.size) as Size, MIN(o.health) as Health, '' as MimeType
-FROM objects o
-INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name AND %s
-WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-AND o.object_id LIKE ?
-AND SUBSTR(o.object_id, 1, ?) = ?
-AND d.db_parent_id = ?
-GROUP BY d.id
-`, prefixExpr,
-		lengthFn,
-		prefixExpr)
-
-	// build query params
-	var objectsQueryParams []interface{}
-	if prefix != "" {
-		objectsQueryParams = []interface{}{
-			path,          // o.object_id != ?
-			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
-			utf8.RuneCountInString(path + prefix), path + prefix,
-			utf8.RuneCountInString(path + prefix), path + prefix,
-			bucket,                             // b.name = ?
-			path + "%",                         // o.object_id LIKE ?
-			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
-			dirID, // d.db_parent_id = ?
-		}
-	} else {
-		objectsQueryParams = []interface{}{
-			path,          // o.object_id != ?
-			dirID, bucket, // o.db_directory_id = ? AND b.name = ?
-			bucket,
-			path + "%",                         // o.object_id LIKE ?
-			utf8.RuneCountInString(path), path, // SUBSTR(o.object_id, 1, ?) = ?
-			dirID, // d.db_parent_id = ?
-		}
-	}
-
-	// build marker expr
-	markerExpr := "1 = 1"
-	var markerParams []interface{}
-	if usingMarker {
-		switch sortBy {
-		case api.ObjectSortByHealth:
-			var markerHealth float64
-			if err = s.db.
-				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Health FROM (SELECT * FROM (%s) h WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
-				Scan(&markerHealth).
-				Error; err != nil {
-				return
-			}
-
-			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(Health > ? OR (Health = ? AND ObjectName > ?))"
-				markerParams = []interface{}{markerHealth, markerHealth, marker}
-			} else {
-				markerExpr = "(Health = ? AND ObjectName > ?) OR Health < ?"
-				markerParams = []interface{}{markerHealth, marker, markerHealth}
-			}
-		case api.ObjectSortBySize:
-			var markerSize float64
-			if err = s.db.
-				WithContext(ctx).
-				Raw(fmt.Sprintf(`SELECT Size FROM (SELECT * FROM (%s) s WHERE ObjectName >= ? ORDER BY ObjectName LIMIT 1) as n`, objectsQuery), append(objectsQueryParams, marker)...).
-				Scan(&markerSize).
-				Error; err != nil {
-				return
-			}
-
-			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "(Size > ? OR (Size = ? AND ObjectName > ?))"
-				markerParams = []interface{}{markerSize, markerSize, marker}
-			} else {
-				markerExpr = "(Size = ? AND ObjectName > ?) OR Size < ?"
-				markerParams = []interface{}{markerSize, marker, markerSize}
-			}
-		case api.ObjectSortByName:
-			if sortDir == api.ObjectSortDirAsc {
-				markerExpr = "ObjectName > ?"
-			} else {
-				markerExpr = "ObjectName < ?"
-			}
-			markerParams = []interface{}{marker}
-		default:
-			panic("unhandled sortBy") // developer error
-		}
-	}
-
-	// build order clause
-	if sortBy == api.ObjectSortByName {
-		sortBy = "ObjectName"
-	}
-	orderByClause := fmt.Sprintf("%s %s", sortBy, sortDir)
-	if sortBy != "ObjectName" {
-		orderByClause += ", ObjectName"
-	}
-
-	var rows []rawObjectMetadata
-	query := fmt.Sprintf(`SELECT * FROM (%s ORDER BY %s) AS n WHERE %s LIMIT ? OFFSET ?`,
-		objectsQuery,
-		orderByClause,
-		markerExpr,
-	)
-	parameters := append(append(objectsQueryParams, markerParams...), limit, offset)
-
-	if err = s.db.
-		WithContext(ctx).
-		Raw(query, parameters...).
-		Scan(&rows).
-		Error; err != nil {
-		return
-	}
-
-	// trim last element if we have more
-	if len(rows) == limit {
-		hasMore = true
-		rows = rows[:len(rows)-1]
-	}
-
-	// convert rows into metadata
-	for _, row := range rows {
-		metadata = append(metadata, row.convert())
-	}
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		metadata, hasMore, err = tx.ObjectEntries(ctx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
+		return err
+	})
 	return
 }
 
@@ -1118,27 +910,6 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 		return err
 	})
 	return
-}
-
-func (s *SQLStore) dirID(tx *gorm.DB, dirPath string) (uint, error) {
-	if !strings.HasPrefix(dirPath, "/") {
-		return 0, fmt.Errorf("path must start with /")
-	} else if !strings.HasSuffix(dirPath, "/") {
-		return 0, fmt.Errorf("path must end with /")
-	}
-
-	if dirPath == "/" {
-		return 1, nil // root dir returned
-	}
-
-	var dir dbDirectory
-	if err := tx.Where("name", dirPath).
-		Select("id").
-		Take(&dir).
-		Error; err != nil {
-		return 0, fmt.Errorf("failed to fetch directory: %w", err)
-	}
-	return dir.ID, nil
 }
 
 func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
@@ -1720,54 +1491,4 @@ func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sort
 		return err
 	})
 	return
-}
-
-func validateSort(sortBy, sortDir string) error {
-	allowed := func(s string, allowed ...string) bool {
-		for _, a := range allowed {
-			if strings.EqualFold(s, a) {
-				return true
-			}
-		}
-		return false
-	}
-
-	if !allowed(sortDir, "", api.ObjectSortDirAsc, api.ObjectSortDirDesc) {
-		return fmt.Errorf("invalid dir '%v', allowed values are '%v' and '%v'; %w", sortDir, api.ObjectSortDirAsc, api.ObjectSortDirDesc, api.ErrInvalidObjectSortParameters)
-	}
-
-	if !allowed(sortBy, "", api.ObjectSortByHealth, api.ObjectSortByName, api.ObjectSortBySize) {
-		return fmt.Errorf("invalid sort by '%v', allowed values are '%v', '%v' and '%v'; %w", sortBy, api.ObjectSortByHealth, api.ObjectSortByName, api.ObjectSortBySize, api.ErrInvalidObjectSortParameters)
-	}
-	return nil
-}
-
-// upsertSectors creates a sector or updates it if it exists already. The
-// resulting ID is set on the input sector.
-func upsertSectors(tx *gorm.DB, sectors []dbSector) ([]uint, error) {
-	if len(sectors) == 0 {
-		return nil, nil // nothing to do
-	}
-	err := tx.
-		Clauses(clause.OnConflict{
-			UpdateAll: true,
-			Columns:   []clause.Column{{Name: "root"}},
-		}).
-		CreateInBatches(&sectors, sectorInsertionBatchSize).
-		Error
-	if err != nil {
-		return nil, err
-	}
-
-	sectorIDs := make([]uint, len(sectors))
-	for i := range sectors {
-		var id uint
-		if err := tx.Model(dbSector{}).
-			Where("root", sectors[i].Root).
-			Select("id").Take(&id).Error; err != nil {
-			return nil, err
-		}
-		sectorIDs[i] = id
-	}
-	return sectorIDs, nil
 }
