@@ -124,6 +124,11 @@ type (
 		shutdownCtxCancel context.CancelFunc
 	}
 
+	checkedHost struct {
+		scoredHost
+		*api.HostCheck
+	}
+
 	scoredHost struct {
 		host  api.Host
 		score float64
@@ -192,7 +197,7 @@ func (c *Contractor) Close() error {
 func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (string, bool) {
 	select {
 	case <-ctx.Done():
-		return "", true
+		return "interrupted", true
 	default:
 	}
 
@@ -218,6 +223,120 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {
 	return c.performContractMaintenance(newMaintenanceCtx(ctx, state), w)
+}
+
+func performContractMaintenanceNew(ctx *mCtx, bus Bus, w Worker, logger *zap.SugaredLogger) (bool, error) {
+	logger = logger.Named("performContractMaintenance").
+		With("contractSet", ctx.ContractSet())
+
+	// check if we want to run maintenance
+	if reason, skip := canSkipContractMaintenance(ctx, ctx.ContractsConfig()); skip {
+		logger.With("reason", reason).Info("skipping contract maintenance")
+		return false, nil
+	}
+	logger.Infow("performing contract maintenance")
+
+	// STEP 1: perform host maintenance
+	if err := func() error {
+		// fetch all hosts that are not blocked
+		hosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
+		if err != nil {
+			return fmt.Errorf("failed to fetch all hosts: %w", err)
+		}
+
+		var scoredHosts []scoredHost
+		for _, host := range hosts {
+			// filter out hosts that have never been scanned
+			if !host.Scanned {
+				continue
+			}
+			// score host
+			scoredHosts = append(scoredHosts, scoredHost{
+				host:  host,
+				score: ctx.HostScore(host),
+			})
+		}
+
+		// compute minimum score for usable hosts
+		minScore := calculateMinScore(scoredHosts, ctx.WantedContracts(), logger)
+
+		// run host checks using the latest consensus state
+		cs, err := bus.ConsensusState(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch consensus state: %w", err)
+		}
+		for _, h := range scoredHosts {
+			h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
+			hc := checkHost(ctx.GougingChecker(cs), h, minScore)
+			if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
+				return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
+			}
+		}
+		return nil
+	}(); err != nil {
+		return false, err
+	}
+
+	// STEP 2: perform contract maintenance
+	if err := func() error {
+		// fetch all contracts we already have
+		resp, err := w.Contracts(ctx, timeoutHostRevision)
+		if err != nil {
+			return err
+		}
+		contracts := resp.Contracts
+
+		// TODO: figure out remaining budget for this period
+
+		// sort them by whether they are in the current set and their size
+		inSet := func(c api.Contract) bool {
+			for _, set := range c.ContractSets {
+				if set == ctx.ContractSet() {
+					return true
+				}
+			}
+			return false
+		}
+		sort.SliceStable(contracts, func(i, j int) bool {
+			if inSet(contracts[i]) != inSet(contracts[j]) {
+				return inSet(contracts[i])
+			}
+			return contracts[i].FileSize() < contracts[j].FileSize()
+		})
+
+		// TODO: perform checks on contracts one-by-one renewing/refreshing
+		// contracts as necessary and filtering out contracts that should no
+		// longer be used
+
+		return nil
+	}(); err != nil {
+		return false, err
+	}
+
+	// STEP 3: perform contract formation
+	if err := func() error {
+		// TODO: get list of hosts which are not yet used and are good for
+		// forming contracts with.
+
+		// TODO: form contracts until the new set has the desired size
+	}
+
+	// STEP 4: perform other maintenance
+	if err := func() error {
+		// TODO: prune contract refresh failure map
+
+		// TODO: run revision broadcast
+
+		return nil
+	}(); err != nil {
+		return false, err
+	}
+
+	// TODO: persist contract set
+
+	// TODO: register relevant alerts
+
+	panic("not implemented")
 }
 
 func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, error) {
@@ -325,7 +444,7 @@ func (c *Contractor) performContractMaintenance(ctx *mCtx, w Worker) (bool, erro
 	// min score to pass checks
 	var minScore float64
 	if len(hosts) > 0 {
-		minScore = c.calculateMinScore(candidates, ctx.WantedContracts())
+		minScore = calculateMinScore(candidates, ctx.WantedContracts(), c.logger)
 	} else {
 		c.logger.Warn("could not calculate min score, no hosts found")
 	}
@@ -752,25 +871,6 @@ LOOP:
 	return toKeep, toArchive, toStopUsing, toRefresh, toRenew
 }
 
-func (c *Contractor) runHostChecks(ctx *mCtx, hosts []api.Host, minScore float64) (map[types.PublicKey]*api.HostCheck, error) {
-	// fetch consensus state
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// create gouging checker
-	gc := worker.NewGougingChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.state.Period(), ctx.RenewWindow())
-
-	// check all hosts
-	checks := make(map[types.PublicKey]*api.HostCheck)
-	for _, h := range hosts {
-		h.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
-		checks[h.PublicKey] = checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore)
-	}
-	return checks, nil
-}
-
 func (c *Contractor) runContractFormations(ctx *mCtx, w Worker, candidates scoredHosts, usedHosts map[types.PublicKey]struct{}, unusableHosts unusableHostsBreakdown, missing uint64, budget *types.Currency) (formed []api.ContractMetadata, _ error) {
 	select {
 	case <-c.shutdownCtx.Done():
@@ -1104,10 +1204,12 @@ func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, ci contract
 	return refreshAmountCapped
 }
 
-func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uint64) float64 {
+func calculateMinScore(candidates []scoredHost, numContracts uint64, logger *zap.SugaredLogger) float64 {
+	logger = logger.Named("calculateMinScore")
+
 	// return early if there's no hosts
 	if len(candidates) == 0 {
-		c.logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
+		logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
 		return minValidScore
 	}
 
@@ -1122,11 +1224,15 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 	for r := 0; r < 5; r++ {
 		lowestScore := math.MaxFloat64
 		for _, host := range scoredHosts(candidates).randSelectByScore(randSetSize) {
-			if host.score < lowestScore {
+			if host.score < lowestScore && host.score > 0 {
 				lowestScore = host.score
 			}
 		}
 		lowestScores = append(lowestScores, lowestScore)
+	}
+	if len(lowestScores) == 0 {
+		logger.Warn("min host score is set to the smallest non-zero float because the lowest score couldn't be determined")
+		return minValidScore
 	}
 
 	// compute the min score
@@ -1147,7 +1253,7 @@ func (c *Contractor) calculateMinScore(candidates []scoredHost, numContracts uin
 		minScore = cutoff
 	}
 
-	c.logger.Infow("finished computing minScore",
+	logger.Infow("finished computing minScore",
 		"candidates", len(candidates),
 		"minScore", minScore,
 		"numContracts", numContracts,
@@ -1208,7 +1314,7 @@ func (c *Contractor) candidateHosts(ctx *mCtx, hosts []api.Host, usedHosts map[t
 		// NOTE: ignore the pricetable's HostBlockHeight by setting it to our
 		// own blockheight
 		h.PriceTable.HostBlockHeight = cs.BlockHeight
-		hc := checkHost(ctx.AutopilotConfig(), ctx.state.RS, gc, h, minScore)
+		hc := checkHost(gc, scoreHost(h, ctx.AutopilotConfig(), ctx.state.RS.Redundancy()), minScore)
 		if hc.Usability.IsUsable() {
 			candidates = append(candidates, scoredHost{h, hc.Score.Score()})
 			continue
