@@ -236,10 +236,8 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64) *api.HostCheck {
-	if rs.Validate() != nil {
-		panic("invalid redundancy settings were supplied - developer error")
-	}
+func checkHost(gc worker.GougingChecker, sh scoredHost, minScore float64) *api.HostCheck {
+	h := sh.host
 
 	// prepare host breakdown fields
 	var gb api.HostGougingBreakdown
@@ -267,21 +265,12 @@ func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.Gou
 			ub.NotAcceptingContracts = true
 		}
 
-		// perform gouging checks
+		// perform gouging and score checks
 		gb = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
 		if gb.Gouging() {
 			ub.Gouging = true
-		} else if minScore > 0 {
-			// perform scoring checks
-			//
-			// NOTE: only perform these scoring checks if we know the host is
-			// not gouging, this because the core package does not have overflow
-			// checks in its cost calculations needed to calculate the period
-			// cost
-			sb = hostScore(cfg, h, rs.Redundancy())
-			if sb.Score() < minScore {
-				ub.LowScore = true
-			}
+		} else if minScore > 0 && !(sh.score > minScore) {
+			ub.LowScore = true
 		}
 	}
 
@@ -289,5 +278,12 @@ func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.Gou
 		Usability: ub,
 		Gouging:   gb,
 		Score:     sb,
+	}
+}
+
+func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
+	return scoredHost{
+		host:  h,
+		score: hostScore(cfg, h, expectedRedundancy).Score(),
 	}
 }

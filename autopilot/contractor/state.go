@@ -76,6 +76,16 @@ func (ctx *mCtx) GougingChecker(cs api.ConsensusState) worker.GougingChecker {
 	return worker.NewGougingChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.Period(), ctx.RenewWindow())
 }
 
+func (ctx *mCtx) HostScore(h api.Host) (score float64) {
+	// host settings that cause a panic should result in a score of 0
+	defer func() {
+		if r := recover(); r != nil {
+			score = 0
+		}
+	}()
+	return hostScore(ctx.state.AP.Config, h, ctx.state.RS.Redundancy()).Score()
+}
+
 func (ctx *mCtx) Period() uint64 {
 	return ctx.state.Period()
 }
