@@ -974,7 +974,9 @@ func calculateMinScore(candidates []scoredHost, numContracts uint64, logger *zap
 				lowestScore = score
 			}
 		}
-		lowestScores = append(lowestScores, lowestScore)
+		if lowestScore != math.MaxFloat64 {
+			lowestScores = append(lowestScores, lowestScore)
+		}
 	}
 	if len(lowestScores) == 0 {
 		logger.Warn("min host score is set to the smallest non-zero float because the lowest score couldn't be determined")
