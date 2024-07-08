@@ -498,6 +498,9 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// if the contract is not usable we ignore it
 			if !usable {
+				if inSet(c) {
+					logger.Info("contract is not usable, removing from set")
+				}
 				continue
 			}
 
