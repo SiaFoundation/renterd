@@ -5,7 +5,7 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) types.Currency {
+func currentPeriodSpending(contracts []api.ContractMetadata, currentPeriod uint64) types.Currency {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -15,7 +15,7 @@ func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	var filtered []api.ContractMetadata
 	for _, contract := range contracts {
 		if contract.WindowStart <= currentPeriod {
-			filtered = append(filtered, contract.ContractMetadata)
+			filtered = append(filtered, contract)
 		}
 	}
 
@@ -27,9 +27,9 @@ func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	return totalAllocated
 }
 
-func (c *Contractor) remainingFunds(contracts []api.Contract, state *MaintenanceState) types.Currency {
+func remainingFunds(contracts []api.ContractMetadata, state *MaintenanceState) types.Currency {
 	// find out how much we spent in the current period
-	spent := c.currentPeriodSpending(contracts, state.Period())
+	spent := currentPeriodSpending(contracts, state.Period())
 
 	// figure out remaining funds
 	var remaining types.Currency

@@ -19,13 +19,6 @@ type (
 	}
 )
 
-func (c *Contractor) newIPFilter() *ipFilter {
-	return &ipFilter{
-		logger:          c.logger,
-		subnetToHostKey: make(map[string]string),
-	}
-}
-
 func (f *ipFilter) HasRedundantIP(host api.Host) bool {
 	// validate host subnets
 	if len(host.Subnets) == 0 {
