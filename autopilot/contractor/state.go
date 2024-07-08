@@ -29,7 +29,7 @@ type (
 	}
 )
 
-func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
+func newMaintenanceCtx(ctx context.Context, revisionSubmissionBuffer uint64, state *MaintenanceState) *mCtx {
 	return &mCtx{
 		ctx:   ctx,
 		state: state,

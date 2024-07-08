@@ -21,9 +21,9 @@ var (
 	alertRenewalFailedID = alerts.RandomAlertID() // constant until restarted
 )
 
-func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bool, err error) alerts.Alert {
+func newContractRenewalFailedAlert(contract api.ContractMetadata, ourFault bool, err error) alerts.Alert {
 	severity := alerts.SeverityWarning
-	if interrupted {
+	if ourFault {
 		severity = alerts.SeverityCritical
 	}
 
@@ -32,10 +32,10 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, interrupted bo
 		Severity: severity,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
-			"error":               err.Error(),
-			"renewalsInterrupted": interrupted,
-			"contractID":          contract.ID.String(),
-			"hostKey":             contract.HostKey.String(),
+			"error":      err.Error(),
+			"ourFault":   ourFault,
+			"contractID": contract.ID.String(),
+			"hostKey":    contract.HostKey.String(),
 		},
 		Timestamp: time.Now(),
 	}
