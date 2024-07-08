@@ -271,11 +271,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				logger.With(zap.Error(err)).Info("failed to score host")
 				continue
 			}
-			scoredHosts = append(scoredHosts, scoredHost{
-				host:  host,
-				sb:    sb,
-				score: sb.Score(),
-			})
+			scoredHosts = append(scoredHosts, newScoredHost(host, sb))
 		}
 
 		// compute minimum score for usable hosts
@@ -563,10 +559,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				logger.Error("host has a score of 0")
 				continue
 			}
-			candidates = append(candidates, scoredHost{
-				host: host,
-				sb:   hc.Score,
-			})
+			candidates = append(candidates, newScoredHost(host, hc.Score))
 		}
 		logger = logger.With("candidates", len(candidates))
 
