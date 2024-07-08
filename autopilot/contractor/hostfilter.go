@@ -264,9 +264,14 @@ func checkHost(gc worker.GougingChecker, sh scoredHost, minScore float64) *api.H
 	}
 }
 
-func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
+func newScoredHost(h api.Host, sb api.HostScoreBreakdown) scoredHost {
 	return scoredHost{
-		host: h,
-		sb:   hostScore(cfg, h, expectedRedundancy),
+		host:  h,
+		sb:    sb,
+		score: sb.Score(),
 	}
+}
+
+func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
+	return newScoredHost(h, hostScore(cfg, h, expectedRedundancy))
 }
