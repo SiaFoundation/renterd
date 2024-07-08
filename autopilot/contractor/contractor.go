@@ -122,6 +122,7 @@ type (
 
 	scoredHost struct {
 		host  api.Host
+		sb    api.HostScoreBreakdown
 		score float64
 	}
 
@@ -265,9 +266,15 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				continue
 			}
 			// score host
+			sb, err := ctx.HostScore(host)
+			if err != nil {
+				logger.With(zap.Error(err)).Info("failed to score host")
+				continue
+			}
 			scoredHosts = append(scoredHosts, scoredHost{
 				host:  host,
-				score: ctx.HostScore(host),
+				sb:    sb,
+				score: sb.Score(),
 			})
 		}
 
@@ -532,17 +539,18 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		for _, c := range contracts {
 			usedHosts[c.HostKey] = struct{}{}
 		}
-		usableHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-			UsabilityMode: api.UsabilityFilterModeUsable,
+		allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
+			Limit:         -1,
+			FilterMode:    api.HostFilterModeAllowed,
+			UsabilityMode: api.UsabilityFilterModeAll,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to fetch usable hosts: %w", err)
 		}
-		logger = logger.With("usableHosts", len(usableHosts))
 
 		// filter them
 		var candidates scoredHosts
-		for _, host := range usableHosts {
+		for _, host := range allHosts {
 			logger := logger.With("hostKey", host.PublicKey)
 			hc, ok := host.Checks[ctx.ApID()]
 			if !ok {
@@ -556,8 +564,8 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				continue
 			}
 			candidates = append(candidates, scoredHost{
-				host:  host,
-				score: hc.Score.Score(),
+				host: host,
+				sb:   hc.Score,
 			})
 		}
 		logger = logger.With("candidates", len(candidates))
@@ -664,7 +672,11 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts: %w", err)
 		}
-		allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{UsabilityMode: api.UsabilityFilterModeAll})
+		allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
+			Limit:         -1,
+			FilterMode:    api.HostFilterModeAllowed,
+			UsabilityMode: api.UsabilityFilterModeAll,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to fetch all hosts: %w", err)
 		}
@@ -963,8 +975,8 @@ func calculateMinScore(candidates []scoredHost, numContracts uint64, logger *zap
 	for r := 0; r < 5; r++ {
 		lowestScore := math.MaxFloat64
 		for _, host := range scoredHosts(candidates).randSelectByScore(randSetSize) {
-			if host.score < lowestScore && host.score > 0 {
-				lowestScore = host.score
+			if score := host.score; score < lowestScore && score > 0 {
+				lowestScore = score
 			}
 		}
 		lowestScores = append(lowestScores, lowestScore)

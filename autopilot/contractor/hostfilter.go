@@ -225,7 +225,6 @@ func checkHost(gc worker.GougingChecker, sh scoredHost, minScore float64) *api.H
 
 	// prepare host breakdown fields
 	var gb api.HostGougingBreakdown
-	var sb api.HostScoreBreakdown
 	var ub api.HostUsabilityBreakdown
 
 	// blocked status does not influence what host info is calculated
@@ -261,13 +260,13 @@ func checkHost(gc worker.GougingChecker, sh scoredHost, minScore float64) *api.H
 	return &api.HostCheck{
 		Usability: ub,
 		Gouging:   gb,
-		Score:     sb,
+		Score:     sh.sb,
 	}
 }
 
 func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
 	return scoredHost{
-		host:  h,
-		score: hostScore(cfg, h, expectedRedundancy).Score(),
+		host: h,
+		sb:   hostScore(cfg, h, expectedRedundancy),
 	}
 }
