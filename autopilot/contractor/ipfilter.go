@@ -48,19 +48,11 @@ func (f *ipFilter) HasRedundantIP(host api.Host) bool {
 	if knownHost != "" {
 		return host.PublicKey.String() != knownHost
 	}
-
-	// otherwise register all the host'ssubnets
-	for _, subnet := range host.Subnets {
-		f.subnetToHostKey[subnet] = host.PublicKey.String()
-	}
-
 	return false
 }
 
-func (f *ipFilter) Remove(h api.Host) {
-	for k, v := range f.subnetToHostKey {
-		if v == h.PublicKey.String() {
-			delete(f.subnetToHostKey, k)
-		}
+func (f *ipFilter) Add(host api.Host) {
+	for _, subnet := range host.Subnets {
+		f.subnetToHostKey[subnet] = host.PublicKey.String()
 	}
 }
