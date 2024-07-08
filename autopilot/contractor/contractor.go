@@ -733,8 +733,10 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	renewalsFromTo := make(map[types.FileContractID]types.FileContractID)
 	renewalsToFrom := make(map[types.FileContractID]types.FileContractID)
 	for _, c := range allContracts {
-		renewalsFromTo[c.RenewedFrom] = c.ID
-		renewalsToFrom[c.ID] = c.RenewedFrom
+		if c.RenewedFrom != (types.FileContractID{}) {
+			renewalsFromTo[c.RenewedFrom] = c.ID
+			renewalsToFrom[c.ID] = c.RenewedFrom
+		}
 	}
 
 	// log added and removed contracts
