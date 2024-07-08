@@ -111,7 +111,7 @@ func TestShouldForgiveFailedRenewal(t *testing.T) {
 	}
 
 	// prune map
-	c.pruneContractRefreshFailures([]api.Contract{})
+	c.pruneContractRefreshFailures([]api.ContractMetadata{})
 	if len(c.firstRefreshFailure) != 0 {
 		t.Fatal("expected no failures")
 	}
