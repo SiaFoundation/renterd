@@ -174,16 +174,18 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	hpt, err = h.FetchPriceTable(ctx, rev)
 
 	// record it in the background
-	go func(hpt api.HostPriceTable, success bool) {
-		p.hs.RecordPriceTables(context.Background(), []api.HostPriceTableUpdate{
-			{
-				HostKey:    p.hk,
-				Success:    success,
-				Timestamp:  time.Now(),
-				PriceTable: hpt,
-			},
-		})
-	}(hpt, isSuccessfulInteraction(err))
+	if shouldRecordPriceTable(err) {
+		go func(hpt api.HostPriceTable, success bool) {
+			p.hs.RecordPriceTables(context.Background(), []api.HostPriceTableUpdate{
+				{
+					HostKey:    p.hk,
+					Success:    success,
+					Timestamp:  time.Now(),
+					PriceTable: hpt,
+				},
+			})
+		}(hpt, err == nil)
+	}
 
 	// handle error after recording
 	if err != nil {
