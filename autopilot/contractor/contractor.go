@@ -289,6 +289,12 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
 			}
 			usabilityBreakdown.track(hc.Usability)
+
+			if !hc.Usability.IsUsable() {
+				logger.With("hostKey", h.host.PublicKey).
+					With("reasons", strings.Join(hc.Usability.UnusableReasons(), ",")).
+					Debug("host is not usable")
+			}
 		}
 		return nil
 	}(); err != nil {
@@ -363,9 +369,9 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 					c.ID: reason.Error(),
 				}); err != nil {
 					logger.With(zap.Error(err)).Error("failed to archive contract")
-					continue
 				}
 				dropOutReasons[c.ID] = reason.Error()
+				continue
 			}
 
 			// fetch host
