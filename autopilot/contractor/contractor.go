@@ -331,8 +331,19 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		// perform checks on contracts one-by-one renewing/refreshing
 		// contracts as necessary and filtering out contracts that should no
 		// longer be used
+		logger.With("contracts", len(contracts)).Info("checking existing contracts")
 		for _, c := range contracts {
 			inSet := ctx.IsContractInSet(c)
+
+			logger := logger.With("contractID", c.ID).
+				With("inSet", inSet).
+				With("hostKey", c.HostKey).
+				With("revisionNumber", c.RevisionNumber).
+				With("size", c.FileSize()).
+				With("state", c.State).
+				With("revisionAvailable", c.Revision != nil)
+
+			logger.Debug("checking contract")
 
 			// abort if we have enough contracts
 			if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
@@ -353,15 +364,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				return fmt.Errorf("failed to fetch consensus state: %w", err)
 			}
 			bh := cs.BlockHeight
-
-			logger := logger.With("contractID", c.ID).
-				With("inSet", inSet).
-				With("hostKey", c.HostKey).
-				With("revisionNumber", c.RevisionNumber).
-				With("size", c.FileSize()).
-				With("state", c.State).
-				With("revisionAvailable", c.Revision != nil).
-				With("blockHeight", bh)
+			logger = logger.With("blockHeight", bh)
 
 			// check if contract is ready to be archived.
 			if reason := cc.shouldArchive(c, bh); reason != nil {
@@ -508,6 +511,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	}(); err != nil {
 		return false, err
 	}
+	logger.With("filteredContracts", len(filteredContracts)).Info("checking existing contracts done")
 
 	// check for interruption
 	select {
