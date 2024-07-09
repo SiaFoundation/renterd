@@ -208,6 +208,10 @@ func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket
 	return ssql.Bucket(ctx, tx, bucket)
 }
 
+func (tx *MainDatabaseTx) CharLengthExpr() string {
+	return "CHAR_LENGTH"
+}
+
 func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error) {
 	mpu, neededParts, size, eTag, err := ssql.MultipartUploadForCompletion(ctx, tx, bucket, key, uploadID, parts)
 	if err != nil {
@@ -522,6 +526,10 @@ func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, 
 	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
 }
 
+func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
+	return ssql.ObjectEntries(ctx, tx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
+}
+
 func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
 	return ssql.ObjectMetadata(ctx, tx, bucket, path)
 }
@@ -727,12 +735,23 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 	return nil
 }
 
+func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner) (md api.ObjectMetadata, err error) {
+	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag); err != nil {
+		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
+	}
+	return md, nil
+}
+
 func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
 	return ssql.SearchObjects(ctx, tx, bucket, substring, offset, limit)
+}
+
+func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
+	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag"
 }
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
