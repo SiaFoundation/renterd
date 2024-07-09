@@ -354,14 +354,16 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	var err error
 	var hpt api.HostPriceTable
 	defer func() {
-		w.bus.RecordPriceTables(jc.Request.Context(), []api.HostPriceTableUpdate{
-			{
-				HostKey:    rptr.HostKey,
-				Success:    isSuccessfulInteraction(err),
-				Timestamp:  time.Now(),
-				PriceTable: hpt,
-			},
-		})
+		if shouldRecordPriceTable(err) {
+			w.bus.RecordPriceTables(jc.Request.Context(), []api.HostPriceTableUpdate{
+				{
+					HostKey:    rptr.HostKey,
+					Success:    err == nil,
+					Timestamp:  time.Now(),
+					PriceTable: hpt,
+				},
+			})
+		}
 	}()
 
 	// apply timeout
@@ -1487,7 +1489,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 			HostKey:    hostKey,
 			PriceTable: pt,
 			Subnets:    subnets,
-			Success:    isSuccessfulInteraction(err),
+			Success:    err == nil,
 			Settings:   settings,
 			Timestamp:  time.Now(),
 		},
@@ -1495,6 +1497,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	if scanErr != nil {
 		logger.Errorw("failed to record host scan", zap.Error(scanErr))
 	}
+	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
 	return settings, pt, duration, err
 }
 
