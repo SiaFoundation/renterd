@@ -341,6 +341,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				With("revisionNumber", c.RevisionNumber).
 				With("size", c.FileSize()).
 				With("state", c.State).
+				With("remainingLeeway", remainingLeeway).
 				With("revisionAvailable", c.Revision != nil)
 
 			logger.Debug("checking contract")
@@ -348,6 +349,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 			// abort if we have enough contracts
 			if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
 				dropOutReasons[c.ID] = "truncated"
+				logger.Debug("ignoring contract since we have enough contracts")
 				continue
 			}
 
@@ -372,6 +374,8 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 					c.ID: reason.Error(),
 				}); err != nil {
 					logger.With(zap.Error(err)).Error("failed to archive contract")
+				} else {
+					logger.Debug("successfully archived contract")
 				}
 				dropOutReasons[c.ID] = reason.Error()
 				continue
@@ -422,6 +426,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 			// check if revision is available
 			if c.Revision == nil {
 				if !inSet || remainingLeeway == 0 {
+					logger.Debug("ignoring contract without revision")
 					dropOutReasons[c.ID] = errContractNoRevision.Error()
 				} else if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
 					logger.Debug("keeping contract due to leeway")
@@ -499,11 +504,14 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 			if !usable {
 				if inSet {
 					logger.Info("contract is not usable, removing from set")
+				} else {
+					logger.Debug("contract is not usable, remains out of set")
 				}
 				continue
 			}
 
 			// we keep the contract, add the host to the filter
+			logger.Debug("contract is usable and is added / stays in set")
 			ipFilter.Add(host)
 			filteredContracts = append(filteredContracts, contract)
 		}
@@ -524,6 +532,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	if err := func() error {
 		// early check to avoid fetching all candidates
 		if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
+			logger.Info("already have enough contracts, no need to form new ones")
 			return nil // nothing to do
 		}
 		wanted := ctx.WantedContracts() - uint64(len(filteredContracts))
@@ -591,7 +600,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// fetch a new price table if necessary
 			if err := refreshPriceTable(ctx, w, &candidate.host); err != nil {
-				logger.Errorf("failed to fetch price table for candidate host %v: %v", candidate.host.PublicKey, err)
+				logger.Warnf("failed to fetch price table for candidate host %v: %v", candidate.host.PublicKey, err)
 				continue
 			}
 
@@ -609,7 +618,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// perform gouging checks on the fly to ensure the host is not gouging its prices
 			if breakdown := gc.Check(nil, &candidate.host.PriceTable.HostPriceTable); breakdown.Gouging() {
-				logger.Info("candidate is price gouging", "reasons", breakdown.String())
+				logger.With("reasons", breakdown.String()).Info("candidate is price gouging")
 				continue
 			}
 

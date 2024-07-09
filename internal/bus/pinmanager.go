@@ -175,7 +175,7 @@ func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
 	exceeded := delta.GreaterThan(cur.Mul(pct))
 
 	// log the result
-	pm.logger.Debugw("rate exceeds threshold",
+	pm.logger.Debugw("checking if rate exceeds threshold",
 		"last", cur,
 		"average", avg,
 		"percentage", threshold,
