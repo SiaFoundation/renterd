@@ -107,6 +107,14 @@ func (ctx *mCtx) WantedContracts() uint64 {
 	return ctx.state.AP.Config.Contracts.Amount
 }
 
+func (ctx *mCtx) IsContractInSet(contract api.Contract) bool {
+	return ctx.state.ContractsConfig().IsContractInSet(contract)
+}
+
+func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {
+	ctx.state.ContractsConfig().SortContractsForMaintenance(contracts)
+}
+
 func (state *MaintenanceState) Allowance() types.Currency {
 	return state.AP.Config.Contracts.Allowance
 }

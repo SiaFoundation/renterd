@@ -317,20 +317,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		contracts := resp.Contracts
 
 		// sort them by whether they are in the current set and their size
-		inSet := func(c api.Contract) bool {
-			for _, set := range c.ContractSets {
-				if set == ctx.ContractSet() {
-					return true
-				}
-			}
-			return false
-		}
-		sort.SliceStable(contracts, func(i, j int) bool {
-			if inSet(contracts[i]) != inSet(contracts[j]) {
-				return inSet(contracts[i])
-			}
-			return contracts[i].FileSize() < contracts[j].FileSize()
-		})
+		ctx.SortContractsForMaintenance(contracts)
 
 		// allow for a leeway of 10% of the required contracts for special cases such as failing to fetch
 		remainingLeeway := addLeeway(ctx.WantedContracts(), 1-leewayPctRequiredContracts)
@@ -339,9 +326,12 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		// contracts as necessary and filtering out contracts that should no
 		// longer be used
 		for _, c := range contracts {
+			inSet := ctx.IsContractInSet(c)
+
 			// abort if we have enough contracts
 			if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
-				break
+				dropOutReasons[c.ID] = "truncated"
+				continue
 			}
 
 			// check for interruption
@@ -359,7 +349,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 			bh := cs.BlockHeight
 
 			logger := logger.With("contractID", c.ID).
-				With("inSet", inSet(c)).
+				With("inSet", inSet).
 				With("hostKey", c.HostKey).
 				With("revisionNumber", c.RevisionNumber).
 				With("size", c.FileSize()).
@@ -422,7 +412,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// check if revision is available
 			if c.Revision == nil {
-				if !inSet(c) || remainingLeeway == 0 {
+				if !inSet || remainingLeeway == 0 {
 					dropOutReasons[c.ID] = errContractNoRevision.Error()
 				} else if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
 					logger.Debug("keeping contract due to leeway")
@@ -432,7 +422,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 			}
 
 			// check if contract is usable
-			usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, inSet(c), bh, ipFilter)
+			usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, inSet, bh, ipFilter)
 
 			// extend logger
 			logger = logger.With("usable", usable).
@@ -498,7 +488,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// if the contract is not usable we ignore it
 			if !usable {
-				if inSet(c) {
+				if inSet {
 					logger.Info("contract is not usable, removing from set")
 				}
 				continue
