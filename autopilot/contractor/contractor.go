@@ -316,11 +316,23 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	var filteredContracts []api.ContractMetadata
 	if err := func() error {
 		// fetch all contracts we already have
+		logger.Info("fetching existing contracts")
+		start := time.Now()
 		resp, err := w.Contracts(ctx, timeoutHostRevision)
 		if err != nil {
 			return err
 		}
 		contracts := resp.Contracts
+		logger.With("elapsed", time.Since(start)).Info("done fetching existing contracts")
+
+		// print the reason for the missing revisions
+		for _, c := range contracts {
+			if c.Revision == nil {
+				logger.With("error", resp.Errors[c.HostKey]).
+					With("hostKey", c.HostKey).
+					With("contractID", c.ID).Debug("failed to fetch contract revision")
+			}
+		}
 
 		// sort them by whether they are in the current set and their size
 		ctx.SortContractsForMaintenance(contracts)
