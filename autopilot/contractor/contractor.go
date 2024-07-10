@@ -2,6 +2,7 @@ package contractor
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -19,6 +20,7 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -241,6 +243,7 @@ func (c *Contractor) shouldArchive(contract api.Contract, bh uint64) error {
 
 func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, w Worker, cc contractChecker, cr contractReviser, rb revisionBroadcaster, remaining types.Currency, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
+		Named(hex.EncodeToString(frand.Bytes(16))). // uuid for this iteration
 		With("contractSet", ctx.ContractSet())
 
 	// check if we want to run maintenance
@@ -354,7 +357,9 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 				With("size", c.FileSize()).
 				With("state", c.State).
 				With("remainingLeeway", remainingLeeway).
-				With("revisionAvailable", c.Revision != nil)
+				With("revisionAvailable", c.Revision != nil).
+				With("filteredContracts", len(filteredContracts)).
+				With("wantedContracts", ctx.WantedContracts())
 
 			logger.Debug("checking contract")
 
