@@ -2340,7 +2340,11 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	var id Hash256
 	var height uint64
 	if err := tx.QueryRow(ctx, "SELECT height, block_id FROM consensus_infos WHERE id = ?", sql.ConsensusInfoID).
-		Scan(&id, &height); err != nil {
+		Scan(&height, &id); errors.Is(err, dsql.ErrNoRows) {
+		// init
+		_, err = tx.Exec(ctx, "INSERT INTO consensus_infos (id, height, block_id) VALUES (?, ?, ?)", sql.ConsensusInfoID, 0, Hash256{})
+		return types.ChainIndex{}, err
+	} else if err != nil {
 		return types.ChainIndex{}, err
 	}
 	return types.ChainIndex{
