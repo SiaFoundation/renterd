@@ -2,12 +2,10 @@ package stores
 
 import (
 	"context"
-	"errors"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm"
 )
 
 var (
@@ -16,19 +14,12 @@ var (
 
 // Tip returns the consensus change ID and block height of the last wallet
 // change.
-func (s *SQLStore) Tip() (types.ChainIndex, error) {
-	var cs dbConsensusInfo
-	if err := s.db.
-		Model(&dbConsensusInfo{}).
-		First(&cs).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-		return types.ChainIndex{}, nil
-	} else if err != nil {
-		return types.ChainIndex{}, err
-	}
-	return types.ChainIndex{
-		Height: cs.Height,
-		ID:     types.BlockID(cs.BlockID),
-	}, nil
+func (s *SQLStore) Tip() (ci types.ChainIndex, err error) {
+	err = s.bMain.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		ci, err = tx.Tip(s.shutdownCtx)
+		return err
+	})
+	return
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs

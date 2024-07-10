@@ -17,12 +17,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const (
-	// consensusInfoID defines the primary key of the entry in the consensusInfo
-	// table.
-	consensusInfoID = 1
-)
-
 var (
 	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
@@ -120,12 +114,6 @@ type (
 		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
 
-	dbConsensusInfo struct {
-		Model
-		Height  uint64
-		BlockID hash256
-	}
-
 	// dbAnnouncement is a table used for storing all announcements. It
 	// doesn't have any relations to dbHost which means it won't
 	// automatically prune when a host is deleted.
@@ -150,9 +138,6 @@ type (
 
 // TableName implements the gorm.Tabler interface.
 func (dbAnnouncement) TableName() string { return "host_announcements" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbConsensusInfo) TableName() string { return "consensus_infos" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbHost) TableName() string { return "hosts" }
@@ -271,8 +256,8 @@ func (e *dbBlocklistEntry) blocks(h dbHost) bool {
 }
 
 // Host returns information about a host.
-func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
-	hosts, err := ss.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
+func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
+	hosts, err := s.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
 	if err != nil {
 		return api.Host{}, err
 	} else if len(hosts) == 0 {
@@ -282,15 +267,15 @@ func (ss *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host
 	}
 }
 
-func (ss *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+func (s *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, hc api.HostCheck) (err error) {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateHostCheck(ctx, autopilotID, hk, hc)
 	})
 }
 
 // HostsForScanning returns the address of hosts for scanning.
-func (ss *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []api.HostAddress, err error) {
-	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+func (s *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []api.HostAddress, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		hosts, err = tx.HostsForScanning(ctx, maxLastScan, offset, limit)
 		return err
 	})
@@ -306,9 +291,9 @@ func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) err
 	})
 }
 
-func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+func (s *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	var hosts []api.Host
-	err := ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 		return
 	})
@@ -316,16 +301,16 @@ func (ss *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, us
 }
 
 // Hosts returns non-blocked hosts at given offset and limit.
-func (ss *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
-	return ss.SearchHosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
+func (s *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
+	return s.SearchHosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 }
 
-func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
+func (s *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
 	// sanity check 'maxDowntime'
 	if maxDowntime < 0 {
 		return 0, ErrNegativeMaxDowntime
 	}
-	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		n, err := tx.RemoveOfflineHosts(ctx, minRecentFailures, maxDowntime)
 		removed = uint64(n)
 		return err
@@ -333,50 +318,50 @@ func (ss *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures ui
 	return
 }
 
-func (ss *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) (err error) {
+func (s *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) (err error) {
 	// nothing to do
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateHostAllowlistEntries(ctx, add, remove, clear)
 	})
 }
 
-func (ss *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) (err error) {
+func (s *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) (err error) {
 	// nothing to do
 	if len(add)+len(remove) == 0 && !clear {
 		return nil
 	}
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateHostBlocklistEntries(ctx, add, remove, clear)
 	})
 }
 
-func (ss *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
-	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+func (s *SQLStore) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		allowlist, err = tx.HostAllowlist(ctx)
 		return err
 	})
 	return
 }
 
-func (ss *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
-	err = ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+func (s *SQLStore) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		blocklist, err = tx.HostBlocklist(ctx)
 		return err
 	})
 	return
 }
 
-func (ss *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+func (s *SQLStore) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.RecordHostScans(ctx, scans)
 	})
 }
 
-func (ss *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+func (s *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.RecordPriceTables(ctx, priceTableUpdate)
 	})
 }

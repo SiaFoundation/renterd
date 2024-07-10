@@ -14,19 +14,12 @@ var (
 )
 
 // ChainIndex returns the last stored chain index.
-func (ss *SQLStore) ChainIndex(ctx context.Context) (types.ChainIndex, error) {
-	var ci dbConsensusInfo
-	if err := ss.db.
-		WithContext(ctx).
-		Where(&dbConsensusInfo{Model: Model{ID: consensusInfoID}}).
-		FirstOrCreate(&ci).
-		Error; err != nil {
-		return types.ChainIndex{}, err
-	}
-	return types.ChainIndex{
-		Height: ci.Height,
-		ID:     types.BlockID(ci.BlockID),
-	}, nil
+func (s *SQLStore) ChainIndex(ctx context.Context) (ci types.ChainIndex, err error) {
+	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		ci, err = tx.Tip(ctx)
+		return err
+	})
+	return
 }
 
 // ProcessChainUpdate returns a callback function that process a chain update

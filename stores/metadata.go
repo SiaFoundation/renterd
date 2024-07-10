@@ -1021,15 +1021,15 @@ func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (slab obj
 	return
 }
 
-func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
+func (s *SQLStore) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string) error {
 	// sanity check the shards don't contain an empty root
-	for _, s := range s.Shards {
-		if s.Root == (types.Hash256{}) {
+	for _, shard := range slab.Shards {
+		if shard.Root == (types.Hash256{}) {
 			return errors.New("shard root can never be the empty root")
 		}
 	}
 	// Sanity check input.
-	for i, shard := range s.Shards {
+	for i, shard := range slab.Shards {
 		// Verify that all hosts have a contract.
 		if len(shard.Contracts) == 0 {
 			return fmt.Errorf("missing hosts for slab %d", i)
@@ -1037,8 +1037,8 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	}
 
 	// Update slab.
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateSlab(ctx, s, contractSet, s.Contracts())
+	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateSlab(ctx, slab, contractSet, slab.Contracts())
 	})
 }
 
