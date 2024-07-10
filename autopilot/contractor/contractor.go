@@ -314,9 +314,15 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	// stats for later logging
 	var formed, refreshed, renewed int
 
+	// helper to add contracts to the set of contracts we keep for the new set
+	var filteredContracts []api.ContractMetadata
+	keepContract := func(c api.ContractMetadata, h api.Host) {
+		filteredContracts = append(filteredContracts, c)
+		ipFilter.Add(h)
+	}
+
 	// STEP 2: perform contract maintenance
 	dropOutReasons := make(map[types.FileContractID]string)
-	var filteredContracts []api.ContractMetadata
 	if err := func() error {
 		// fetch all contracts we already have
 		logger.Info("fetching existing contracts")
@@ -442,12 +448,13 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// check if revision is available
 			if c.Revision == nil {
-				if !inSet || remainingLeeway == 0 {
+				if inSet && remainingLeeway > 0 {
+					logger.Debug("keeping contract due to leeway")
+					keepContract(c.ContractMetadata, host)
+					remainingLeeway--
+				} else {
 					logger.Debug("ignoring contract without revision")
 					dropOutReasons[c.ID] = errContractNoRevision.Error()
-				} else if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
-					logger.Debug("keeping contract due to leeway")
-					filteredContracts = append(filteredContracts, c.ContractMetadata)
 				}
 				continue // no more checks without revision
 			}
@@ -529,8 +536,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 			// we keep the contract, add the host to the filter
 			logger.Debug("contract is usable and is added / stays in set")
-			ipFilter.Add(host)
-			filteredContracts = append(filteredContracts, contract)
+			keepContract(contract, host)
 		}
 		return nil
 	}(); err != nil {
@@ -656,8 +662,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 			}
 
 			// add new contract and host
-			filteredContracts = append(filteredContracts, formedContract)
-			ipFilter.Add(candidate.host)
+			keepContract(formedContract, candidate.host)
 			formed++
 		}
 
