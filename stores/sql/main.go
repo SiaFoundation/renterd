@@ -332,6 +332,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract sizes: %w", err)
 	}
+	defer rows.Close()
 
 	sizes := make(map[types.FileContractID]api.ContractSize)
 	for rows.Next() {
@@ -2211,6 +2212,7 @@ func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query settings: %w", err)
 	}
+	defer rows.Close()
 	var settings []string
 	for rows.Next() {
 		var setting string
