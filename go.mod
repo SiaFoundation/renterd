@@ -14,7 +14,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	go.sia.tech/core v0.3.0
-	go.sia.tech/coreutils v0.1.1
+	go.sia.tech/coreutils v0.1.2
 	go.sia.tech/gofakes3 v0.0.4
 	go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272
 	go.sia.tech/jape v0.12.0
