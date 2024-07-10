@@ -15,7 +15,7 @@ var (
 
 // ChainIndex returns the last stored chain index.
 func (s *SQLStore) ChainIndex(ctx context.Context) (ci types.ChainIndex, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		ci, err = tx.Tip(ctx)
 		return err
 	})
@@ -25,7 +25,7 @@ func (s *SQLStore) ChainIndex(ctx context.Context) (ci types.ChainIndex, err err
 // ProcessChainUpdate returns a callback function that process a chain update
 // inside a transaction.
 func (s *SQLStore) ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(ctx, applyFn)
 	})
 }
@@ -39,7 +39,7 @@ func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []cha
 
 // ResetChainState deletes all chain data in the database.
 func (s *SQLStore) ResetChainState(ctx context.Context) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.ResetChainState(ctx)
 	})
 }

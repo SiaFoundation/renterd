@@ -73,7 +73,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 
 	// Assert metadata was persisted and is linked to the multipart upload
 	var metadatas []dbObjectUserMetadata
-	if err := ss.db.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
+	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
 		t.Fatal(err)
 	} else if len(metadatas) != len(testMetadata) {
 		t.Fatal("expected metadata to be persisted")
@@ -87,13 +87,13 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	// Complete the upload. Check that the number of slices stays the same.
 	var nSlicesBefore int64
 	var nSlicesAfter int64
-	if err := ss.db.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
+	if err := ss.gormDB.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
 		t.Fatal(err)
 	} else if nSlicesBefore == 0 {
 		t.Fatal("expected some slices")
 	} else if _, err = ss.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts, api.CompleteMultipartOptions{}); err != nil {
 		t.Fatal(err)
-	} else if err := ss.db.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
+	} else if err := ss.gormDB.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
 		t.Fatal(err)
 	} else if nSlicesBefore != nSlicesAfter {
 		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
@@ -115,7 +115,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 
 	// Assert metadata was converted and the multipart upload id was nullified
-	if err := ss.db.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
+	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
 		t.Fatal(err)
 	} else if len(metadatas) != len(testMetadata) {
 		t.Fatal("expected metadata to be persisted")
