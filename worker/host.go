@@ -270,7 +270,11 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
+	// NOTE: we call 'fetch' here instead of h.priceTable to bypass the gouging
+	// check on the pricetable since we assume a cost of 1 hasting anyway. That
+	// way syncing the account balance doesn't neeedlessly fail on hosts that we
+	// just want to download from and therefore need to sync the account with.
+	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return err
 	}
