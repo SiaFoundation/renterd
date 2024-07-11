@@ -803,7 +803,7 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	}
 	for _, contract := range newSet {
 		_, existed := inOldSet[contract.ID]
-		_, renewed := renewalsToFrom[contract.ID]
+		_, renewed := inOldSet[renewalsToFrom[contract.ID]]
 		if !existed && !renewed {
 			if _, exists := setAdditions[contract.ID]; !exists {
 				setAdditions[contract.ID] = contractSetAdditions{
