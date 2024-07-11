@@ -105,6 +105,22 @@ type Worker interface {
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
+type contractChecker interface {
+	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract api.Contract, inSet bool, bh uint64, f *ipFilter) (usable, refresh, renew bool, reasons []string)
+	pruneContractRefreshFailures(contracts []api.ContractMetadata)
+	shouldArchive(c api.Contract, bh uint64) error
+}
+
+type contractReviser interface {
+	formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, ourFault bool, err error)
+	renewContract(ctx *mCtx, w Worker, c api.Contract, h api.Host, budget *types.Currency) (cm api.ContractMetadata, ourFault bool, err error)
+	refreshContract(ctx *mCtx, w Worker, c api.Contract, h api.Host, budget *types.Currency) (cm api.ContractMetadata, ourFault bool, err error)
+}
+
+type revisionBroadcaster interface {
+	runRevisionBroadcast(ctx context.Context, w Worker, contracts []api.ContractMetadata)
+}
+
 type (
 	Contractor struct {
 		alerter alerts.Alerter
@@ -175,6 +191,436 @@ func (c *Contractor) Close() error {
 	return nil
 }
 
+func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {
+	// figure out remaining budget for this period
+	contracts, err := c.bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch contracts: %w", err)
+	}
+	remainingFunds := remainingFunds(contracts, state)
+	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, w, c, c, c, remainingFunds, c.logger)
+}
+
+func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+	log := c.logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+
+	// convenience variables
+	hk := host.PublicKey
+
+	// fetch host settings
+	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
+	if err != nil {
+		log.Infow(err.Error(), "hk", hk)
+		return api.ContractMetadata{}, true, err
+	}
+
+	// fetch consensus state
+	cs, err := c.bus.ConsensusState(ctx)
+	if err != nil {
+		return api.ContractMetadata{}, false, err
+	}
+
+	// check our budget
+	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
+	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
+	if budget.Cmp(renterFunds) < 0 {
+		log.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, errors.New("insufficient budget")
+	}
+
+	// calculate the host collateral
+	endHeight := ctx.EndHeight()
+	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
+	hostCollateral := rhpv2.ContractFormationCollateral(ctx.Period(), expectedStorage, scan.Settings)
+
+	// form contract
+	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, ctx.state.Address, renterFunds, hostCollateral)
+	if err != nil {
+		// TODO: keep track of consecutive failures and break at some point
+		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
+			return api.ContractMetadata{}, false, err
+		}
+		return api.ContractMetadata{}, true, err
+	}
+
+	// update the budget
+	*budget = budget.Sub(renterFunds)
+
+	// persist contract in store
+	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
+	formedContract, err := c.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight, api.ContractStatePending)
+	if err != nil {
+		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
+		return api.ContractMetadata{}, true, err
+	}
+
+	log.Infow("formation succeeded",
+		"fcid", formedContract.ID,
+		"renterFunds", renterFunds.String(),
+		"collateral", hostCollateral.String(),
+	)
+	return formedContract, true, nil
+}
+
+func (c *Contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {
+	if !maxFunding.IsZero() && minFunding.Cmp(maxFunding) > 0 {
+		panic("given min is larger than max") // developer error
+	}
+
+	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
+	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
+		return minFunding
+	}
+	if !maxFunding.IsZero() && funding.Cmp(maxFunding) > 0 {
+		return maxFunding
+	}
+	return funding
+}
+
+func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetadata) {
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range contracts {
+		contractMap[contract.ID] = struct{}{}
+	}
+	for fcid := range c.firstRefreshFailure {
+		if _, ok := contractMap[fcid]; !ok {
+			delete(c.firstRefreshFailure, fcid)
+		}
+	}
+}
+
+func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract, host api.Host, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+	if contract.Revision == nil {
+		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
+	}
+	log := c.logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+
+	// convenience variables
+	settings := host.Settings
+	pt := host.PriceTable.HostPriceTable
+	fcid := contract.ID
+	hk := contract.HostKey
+	rev := contract.Revision
+
+	// fetch consensus state
+	cs, err := c.bus.ConsensusState(ctx)
+	if err != nil {
+		return api.ContractMetadata{}, false, err
+	}
+
+	// calculate the renter funds
+	var renterFunds types.Currency
+	if isOutOfFunds(ctx.AutopilotConfig(), pt, contract) {
+		renterFunds = c.refreshFundingEstimate(ctx.AutopilotConfig(), contract, host, ctx.state.Fee)
+	} else {
+		renterFunds = rev.ValidRenterPayout() // don't increase funds
+	}
+
+	// check our budget
+	if budget.Cmp(renterFunds) < 0 {
+		log.Warnw("insufficient budget for refresh", "hk", hk, "fcid", fcid, "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
+	}
+
+	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
+	unallocatedCollateral := contract.RemainingCollateral()
+
+	// a refresh should always result in a contract that has enough collateral
+	minNewCollateral := minRemainingCollateral(ctx.AutopilotConfig(), ctx.state.RS, renterFunds, settings, pt).Mul64(2)
+
+	// maxFundAmount is the remaining funds of the contract to refresh plus the
+	// budget since the previous contract was in the same period
+	maxFundAmount := budget.Add(rev.ValidRenterPayout())
+
+	// renew the contract
+	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
+	if err != nil {
+		if strings.Contains(err.Error(), "new collateral is too low") {
+			log.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
+				"hk", hk,
+				"fcid", fcid,
+				"unallocatedCollateral", unallocatedCollateral.String(),
+				"minNewCollateral", minNewCollateral.String(),
+			)
+			return api.ContractMetadata{}, true, err
+		}
+		log.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
+			return api.ContractMetadata{}, false, err
+		}
+		return api.ContractMetadata{}, true, err
+	}
+
+	// update the budget
+	*budget = budget.Sub(resp.FundAmount)
+
+	// persist the contract
+	refreshedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
+	if err != nil {
+		log.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
+		return api.ContractMetadata{}, false, err
+	}
+
+	// add to renewed set
+	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
+	log.Infow("refresh succeeded",
+		"fcid", refreshedContract.ID,
+		"renewedFrom", contract.ID,
+		"renterFunds", renterFunds.String(),
+		"minNewCollateral", minNewCollateral.String(),
+		"newCollateral", newCollateral.String(),
+	)
+	return refreshedContract, true, nil
+}
+
+func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, host api.Host, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
+	if contract.Revision == nil {
+		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
+	}
+	log := c.logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+
+	// convenience variables
+	settings := host.Settings
+	pt := host.PriceTable.HostPriceTable
+	fcid := contract.ID
+	rev := contract.Revision
+	hk := contract.HostKey
+
+	// fetch consensus state
+	cs, err := c.bus.ConsensusState(ctx)
+	if err != nil {
+		return api.ContractMetadata{}, false, err
+	}
+
+	// calculate the renter funds for the renewal a.k.a. the funds the renter will
+	// be able to spend
+	minRenterFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
+	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds(), log)
+
+	// check our budget
+	if budget.Cmp(renterFunds) < 0 {
+		log.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
+		return api.ContractMetadata{}, false, errors.New("insufficient budget")
+	}
+
+	// sanity check the endheight is not the same on renewals
+	endHeight := ctx.EndHeight()
+	if endHeight <= rev.EndHeight() {
+		log.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
+		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
+	}
+
+	// calculate the expected new storage
+	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, pt)
+
+	// renew the contract
+	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
+	if err != nil {
+		log.Errorw(
+			"renewal failed",
+			zap.Error(err),
+			"endHeight", endHeight,
+			"renterFunds", renterFunds,
+			"expectedNewStorage", expectedNewStorage,
+		)
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
+			return api.ContractMetadata{}, false, err
+		}
+		return api.ContractMetadata{}, true, err
+	}
+
+	// update the budget
+	*budget = budget.Sub(resp.FundAmount)
+
+	// persist the contract
+	renewedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
+	if err != nil {
+		log.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err))
+		return api.ContractMetadata{}, false, err
+	}
+
+	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
+	log.Infow(
+		"renewal succeeded",
+		"fcid", renewedContract.ID,
+		"renewedFrom", fcid,
+		"renterFunds", renterFunds.String(),
+		"newCollateral", newCollateral.String(),
+	)
+	return renewedContract, true, nil
+}
+
+// runRevisionBroadcast broadcasts contract revisions from the current set of
+// contracts. Since we are migrating away from all contracts not in the set and
+// are not uploading to those contracts anyway, we only worry about contracts in
+// the set.
+func (c *Contractor) runRevisionBroadcast(ctx context.Context, w Worker, contracts []api.ContractMetadata) {
+	if c.revisionBroadcastInterval == 0 {
+		return // not enabled
+	}
+
+	cs, err := c.bus.ConsensusState(ctx)
+	if err != nil {
+		c.logger.Warnf("revision broadcast failed to fetch blockHeight: %v", err)
+		return
+	}
+	bh := cs.BlockHeight
+
+	successful, failed := 0, 0
+	for _, contract := range contracts {
+		// check whether broadcasting is necessary
+		timeSinceRevisionHeight := targetBlockTime * time.Duration(bh-contract.RevisionHeight)
+		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
+		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval/broadcastRevisionRetriesPerInterval {
+			continue // nothing to do
+		}
+
+		// remember that we tried to broadcast this contract now
+		c.revisionLastBroadcast[contract.ID] = time.Now()
+
+		// broadcast revision
+		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
+		err := w.RHPBroadcast(ctx, contract.ID)
+		cancel()
+		if utils.IsErr(err, errors.New("transaction has a file contract with an outdated revision number")) {
+			continue // don't log - revision was already broadcasted
+		} else if err != nil {
+			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),
+				"hk", contract.HostKey,
+				"fcid", contract.ID)
+			failed++
+			delete(c.revisionLastBroadcast, contract.ID) // reset to try again
+			continue
+		}
+		successful++
+	}
+	c.logger.Infow("revision broadcast completed",
+		"successful", successful,
+		"failed", failed)
+
+	// prune revisionLastBroadcast
+	contractMap := make(map[types.FileContractID]struct{})
+	for _, contract := range contracts {
+		contractMap[contract.ID] = struct{}{}
+	}
+	for contractID := range c.revisionLastBroadcast {
+		if _, ok := contractMap[contractID]; !ok {
+			delete(c.revisionLastBroadcast, contractID)
+		}
+	}
+}
+
+func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, host api.Host, fee types.Currency) types.Currency {
+	// refresh with 1.2x the funds
+	refreshAmount := contract.TotalCost.Mul64(6).Div64(5)
+
+	// estimate the txn fee
+	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
+
+	// check for a sane minimum that is equal to the initial contract funding
+	// but without an upper cap.
+	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
+	minimum := c.initialContractFunding(host.Settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
+	refreshAmountCapped := refreshAmount
+	if refreshAmountCapped.Cmp(minimum) < 0 {
+		refreshAmountCapped = minimum
+	}
+	c.logger.Infow("refresh estimate",
+		"fcid", contract.ID,
+		"refreshAmount", refreshAmount,
+		"refreshAmountCapped", refreshAmountCapped)
+	return refreshAmountCapped
+}
+
+func (c *Contractor) shouldArchive(contract api.Contract, bh uint64) error {
+	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
+		return errContractExpired
+	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
+		return errContractMaxRevisionNumber
+	} else if contract.RevisionNumber == math.MaxUint64 {
+		return errContractMaxRevisionNumber
+	} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > ContractConfirmationDeadline {
+		return errContractNotConfirmed
+	}
+	return nil
+}
+
+func (c *Contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool {
+	lastFailure, exists := c.firstRefreshFailure[fcid]
+	if !exists {
+		lastFailure = time.Now()
+		c.firstRefreshFailure[fcid] = lastFailure
+	}
+	return time.Since(lastFailure) < failedRefreshForgivenessPeriod
+}
+
+func addLeeway(n uint64, pct float64) uint64 {
+	if pct < 0 {
+		panic("given leeway percent has to be positive")
+	}
+	return uint64(math.Ceil(float64(n) * pct))
+}
+
+func calculateMinScore(candidates []scoredHost, numContracts uint64, logger *zap.SugaredLogger) float64 {
+	logger = logger.Named("calculateMinScore")
+
+	// return early if there's no hosts
+	if len(candidates) == 0 {
+		logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
+		return minValidScore
+	}
+
+	// determine the number of random hosts we fetch per iteration when
+	// calculating the min score - it contains a constant factor in case the
+	// number of contracts is very low and a linear factor to make sure the
+	// number is relative to the number of contracts we want to form
+	randSetSize := 2*int(numContracts) + 50
+
+	// do multiple rounds to select the lowest score
+	var lowestScores []float64
+	for r := 0; r < 5; r++ {
+		lowestScore := math.MaxFloat64
+		for _, host := range scoredHosts(candidates).randSelectByScore(randSetSize) {
+			if score := host.score; score < lowestScore && score > 0 {
+				lowestScore = score
+			}
+		}
+		if lowestScore != math.MaxFloat64 {
+			lowestScores = append(lowestScores, lowestScore)
+		}
+	}
+	if len(lowestScores) == 0 {
+		logger.Warn("min host score is set to the smallest non-zero float because the lowest score couldn't be determined")
+		return minValidScore
+	}
+
+	// compute the min score
+	var lowestScore float64
+	lowestScore, err := stats.Float64Data(lowestScores).Median()
+	if err != nil {
+		panic("never fails since len(candidates) > 0 so len(lowestScores) > 0 as well")
+	}
+	minScore := lowestScore / minAllowedScoreLeeway
+
+	// make sure the min score allows for 'numContracts' contracts to be formed
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+	if len(candidates) < int(numContracts) {
+		return minValidScore
+	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
+		minScore = cutoff
+	}
+
+	logger.Infow("finished computing minScore",
+		"candidates", len(candidates),
+		"minScore", minScore,
+		"numContracts", numContracts,
+		"lowestScore", lowestScore)
+	return minScore
+}
+
 func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (string, bool) {
 	select {
 	case <-ctx.Done():
@@ -202,546 +648,7 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	return "", false
 }
 
-func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {
-	// figure out remaining budget for this period
-	contracts, err := c.bus.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
-		return false, fmt.Errorf("failed to fetch contracts: %w", err)
-	}
-	remainingFunds := remainingFunds(contracts, state)
-	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, w, c, c, c, remainingFunds, c.logger)
-}
-
-type contractChecker interface {
-	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract api.Contract, inSet bool, bh uint64, f *ipFilter) (usable, refresh, renew bool, reasons []string)
-	pruneContractRefreshFailures(contracts []api.ContractMetadata)
-	shouldArchive(c api.Contract, bh uint64) error
-}
-
-type contractReviser interface {
-	formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, ourFault bool, err error)
-	renewContract(ctx *mCtx, w Worker, c api.Contract, h api.Host, budget *types.Currency) (cm api.ContractMetadata, ourFault bool, err error)
-	refreshContract(ctx *mCtx, w Worker, c api.Contract, h api.Host, budget *types.Currency) (cm api.ContractMetadata, ourFault bool, err error)
-}
-
-type revisionBroadcaster interface {
-	runRevisionBroadcast(ctx context.Context, w Worker, contracts []api.ContractMetadata)
-}
-
-func (c *Contractor) shouldArchive(contract api.Contract, bh uint64) error {
-	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
-		return errContractExpired
-	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
-		return errContractMaxRevisionNumber
-	} else if contract.RevisionNumber == math.MaxUint64 {
-		return errContractMaxRevisionNumber
-	} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > ContractConfirmationDeadline {
-		return errContractNotConfirmed
-	}
-	return nil
-}
-
-func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, w Worker, cc contractChecker, cr contractReviser, rb revisionBroadcaster, remaining types.Currency, logger *zap.SugaredLogger) (bool, error) {
-	logger = logger.Named("performContractMaintenance").
-		Named(hex.EncodeToString(frand.Bytes(16))). // uuid for this iteration
-		With("contractSet", ctx.ContractSet())
-
-	// check if we want to run maintenance
-	if reason, skip := canSkipContractMaintenance(ctx, ctx.ContractsConfig()); skip {
-		logger.With("reason", reason).Info("skipping contract maintenance")
-		return false, nil
-	}
-	logger.Infow("performing contract maintenance")
-
-	// STEP 1: perform host maintenance
-	var usabilityBreakdown unusableHostsBreakdown
-	if err := func() error {
-		// fetch all hosts that are not blocked
-		hosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
-		if err != nil {
-			return fmt.Errorf("failed to fetch all hosts: %w", err)
-		}
-
-		var scoredHosts []scoredHost
-		for _, host := range hosts {
-			// filter out hosts that have never been scanned
-			if !host.Scanned {
-				continue
-			}
-			// score host
-			sb, err := ctx.HostScore(host)
-			if err != nil {
-				logger.With(zap.Error(err)).Info("failed to score host")
-				continue
-			}
-			scoredHosts = append(scoredHosts, newScoredHost(host, sb))
-		}
-
-		// compute minimum score for usable hosts
-		minScore := calculateMinScore(scoredHosts, ctx.WantedContracts(), logger)
-
-		// run host checks using the latest consensus state
-		cs, err := bus.ConsensusState(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to fetch consensus state: %w", err)
-		}
-		for _, h := range scoredHosts {
-			h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
-			hc := checkHost(ctx.GougingChecker(cs), h, minScore)
-			if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
-				return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
-			}
-			usabilityBreakdown.track(hc.Usability)
-
-			if !hc.Usability.IsUsable() {
-				logger.With("hostKey", h.host.PublicKey).
-					With("reasons", strings.Join(hc.Usability.UnusableReasons(), ",")).
-					Debug("host is not usable")
-			}
-		}
-		return nil
-	}(); err != nil {
-		return false, err
-	}
-
-	logger.Infow("host maintenance completed", usabilityBreakdown.keysAndValues()...)
-
-	ipFilter := &ipFilter{
-		logger:          logger.Named("ipFilter"),
-		subnetToHostKey: make(map[string]string),
-	}
-
-	// stats for later logging
-	var formed, refreshed, renewed int
-
-	// helper to add contracts to the set of contracts we keep for the new set
-	var filteredContracts []api.ContractMetadata
-	keepContract := func(c api.ContractMetadata, h api.Host) {
-		filteredContracts = append(filteredContracts, c)
-		ipFilter.Add(h)
-	}
-
-	// STEP 2: perform contract maintenance
-	dropOutReasons := make(map[types.FileContractID]string)
-	if err := func() error {
-		// fetch all contracts we already have
-		logger.Info("fetching existing contracts")
-		start := time.Now()
-		resp, err := w.Contracts(ctx, timeoutHostRevision)
-		if err != nil {
-			return err
-		}
-		contracts := resp.Contracts
-		logger.With("elapsed", time.Since(start)).Info("done fetching existing contracts")
-
-		// print the reason for the missing revisions
-		for _, c := range contracts {
-			if c.Revision == nil {
-				logger.With("error", resp.Errors[c.HostKey]).
-					With("hostKey", c.HostKey).
-					With("contractID", c.ID).Debug("failed to fetch contract revision")
-			}
-		}
-
-		// sort them by whether they are in the current set and their size
-		ctx.SortContractsForMaintenance(contracts)
-
-		// allow for a leeway of 10% of the required contracts for special cases such as failing to fetch
-		remainingLeeway := addLeeway(ctx.WantedContracts(), 1-leewayPctRequiredContracts)
-
-		// perform checks on contracts one-by-one renewing/refreshing
-		// contracts as necessary and filtering out contracts that should no
-		// longer be used
-		logger.With("contracts", len(contracts)).Info("checking existing contracts")
-		for _, c := range contracts {
-			inSet := ctx.IsContractInSet(c)
-
-			logger := logger.With("contractID", c.ID).
-				With("inSet", inSet).
-				With("hostKey", c.HostKey).
-				With("revisionNumber", c.RevisionNumber).
-				With("size", c.FileSize()).
-				With("state", c.State).
-				With("remainingLeeway", remainingLeeway).
-				With("revisionAvailable", c.Revision != nil).
-				With("filteredContracts", len(filteredContracts)).
-				With("wantedContracts", ctx.WantedContracts())
-
-			logger.Debug("checking contract")
-
-			// abort if we have enough contracts
-			if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
-				dropOutReasons[c.ID] = "truncated"
-				logger.Debug("ignoring contract since we have enough contracts")
-				continue
-			}
-
-			// check for interruption
-			select {
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			default:
-			}
-
-			// fetch recent consensus state
-			cs, err := bus.ConsensusState(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to fetch consensus state: %w", err)
-			}
-			bh := cs.BlockHeight
-			logger = logger.With("blockHeight", bh)
-
-			// check if contract is ready to be archived.
-			if reason := cc.shouldArchive(c, bh); reason != nil {
-				if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
-					c.ID: reason.Error(),
-				}); err != nil {
-					logger.With(zap.Error(err)).Error("failed to archive contract")
-				} else {
-					logger.Debug("successfully archived contract")
-				}
-				dropOutReasons[c.ID] = reason.Error()
-				continue
-			}
-
-			// fetch host
-			host, err := bus.Host(ctx, c.HostKey)
-			if err != nil {
-				logger.With(zap.Error(err)).Warn("missing host")
-				dropOutReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
-				continue
-			}
-
-			// extend logger
-			logger = logger.With("subnets", host.Subnets).
-				With("blocked", host.Blocked)
-
-			// check if host is blocked
-			if host.Blocked {
-				logger.Info("host is blocked")
-				dropOutReasons[c.ID] = api.ErrUsabilityHostBlocked.Error()
-				continue
-			}
-
-			// check if host has a redundant ip
-			if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
-				logger.Info("host has redundant IP")
-				dropOutReasons[c.ID] = api.ErrUsabilityHostRedundantIP.Error()
-				continue
-			}
-
-			// get check
-			check, ok := host.Checks[ctx.ApID()]
-			if !ok {
-				logger.Warn("missing host check")
-				dropOutReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
-				continue
-			}
-
-			// check usability
-			if !check.Usability.IsUsable() {
-				reasons := strings.Join(check.Usability.UnusableReasons(), ",")
-				logger.With("reasons", reasons).Info("unusable host")
-				dropOutReasons[c.ID] = reasons
-				continue
-			}
-
-			// check if revision is available
-			if c.Revision == nil {
-				if inSet && remainingLeeway > 0 {
-					logger.Debug("keeping contract due to leeway")
-					keepContract(c.ContractMetadata, host)
-					remainingLeeway--
-				} else {
-					logger.Debug("ignoring contract without revision")
-					dropOutReasons[c.ID] = errContractNoRevision.Error()
-				}
-				continue // no more checks without revision
-			}
-
-			// check if contract is usable
-			usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, inSet, bh, ipFilter)
-
-			// extend logger
-			logger = logger.With("usable", usable).
-				With("needsRefresh", needsRefresh).
-				With("needsRenew", needsRenew).
-				With("reasons", reasons)
-
-				// remember reason for potential drop of contract
-			if len(reasons) > 0 {
-				dropOutReasons[c.ID] = strings.Join(reasons, ",")
-			}
-
-			contract := c.ContractMetadata
-
-			// renew/refresh as necessary
-			var ourFault bool
-			if needsRenew {
-				var renewedContract api.ContractMetadata
-				renewedContract, ourFault, err = cr.renewContract(ctx, w, c, host, &remaining)
-				if err != nil {
-					logger = logger.With(zap.Error(err)).With("ourFault", ourFault)
-
-					// don't register an alert for hosts that are out of funds since the
-					// user can't do anything about it
-					if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
-						alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
-					}
-					logger.Error("failed to renew contract")
-				} else {
-					logger.Info("successfully renewed contract")
-					alerter.DismissAlerts(ctx, alerts.IDForContract(alertRenewalFailedID, contract.ID))
-					contract = renewedContract
-					usable = true
-					renewed++
-				}
-			} else if needsRefresh {
-				var refreshedContract api.ContractMetadata
-				refreshedContract, ourFault, err = cr.refreshContract(ctx, w, c, host, &remaining)
-				if err != nil {
-					logger = logger.With(zap.Error(err)).With("ourFault", ourFault)
-
-					// don't register an alert for hosts that are out of funds since the
-					// user can't do anything about it
-					if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
-						alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
-					}
-					logger.Error("failed to refresh contract")
-				} else {
-					logger.Info("successfully refreshed contract")
-					alerter.DismissAlerts(ctx, alerts.IDForContract(alertRenewalFailedID, contract.ID))
-					contract = refreshedContract
-					usable = true
-					refreshed++
-				}
-			}
-
-			// if the renewal/refresh failing was our fault (e.g. we ran out of
-			// funds), we should not drop the contract
-			if !usable && ourFault {
-				logger.Info("keeping contract even though renewal/refresh failed")
-				usable = true
-			}
-
-			// if the contract is not usable we ignore it
-			if !usable {
-				if inSet {
-					logger.Info("contract is not usable, removing from set")
-				} else {
-					logger.Debug("contract is not usable, remains out of set")
-				}
-				continue
-			}
-
-			// we keep the contract, add the host to the filter
-			logger.Debug("contract is usable and is added / stays in set")
-			keepContract(contract, host)
-		}
-		return nil
-	}(); err != nil {
-		return false, err
-	}
-	logger.With("filteredContracts", len(filteredContracts)).Info("checking existing contracts done")
-
-	// check for interruption
-	select {
-	case <-ctx.Done():
-		return false, context.Cause(ctx)
-	default:
-	}
-
-	// STEP 3: perform contract formation
-	if err := func() error {
-		// early check to avoid fetching all candidates
-		if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
-			logger.Info("already have enough contracts, no need to form new ones")
-			return nil // nothing to do
-		}
-		wanted := ctx.WantedContracts() - uint64(len(filteredContracts))
-		logger.With("wanted", wanted).Info("trying to form more contracts to fill set")
-
-		// get list of hosts that we already have contracts with
-		contracts, err := bus.Contracts(ctx, api.ContractsOpts{})
-		if err != nil {
-			return fmt.Errorf("failed to fetch contracts: %w", err)
-		}
-		usedHosts := make(map[types.PublicKey]struct{})
-		for _, c := range contracts {
-			usedHosts[c.HostKey] = struct{}{}
-		}
-		allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-			Limit:         -1,
-			FilterMode:    api.HostFilterModeAllowed,
-			UsabilityMode: api.UsabilityFilterModeAll,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to fetch usable hosts: %w", err)
-		}
-
-		// filter them
-		var candidates scoredHosts
-		for _, host := range allHosts {
-			logger := logger.With("hostKey", host.PublicKey)
-			hc, ok := host.Checks[ctx.ApID()]
-			if !ok {
-				logger.Warn("missing host check")
-				continue
-			} else if _, used := usedHosts[host.PublicKey]; used {
-				logger.Debug("host already used")
-				continue
-			} else if score := hc.Score.Score(); score == 0 {
-				logger.Error("host has a score of 0")
-				continue
-			}
-			candidates = append(candidates, newScoredHost(host, hc.Score))
-		}
-		logger = logger.With("candidates", len(candidates))
-
-		// select hosts, since we already have all of them in memory we select
-		// len(candidates)
-		candidates = candidates.randSelectByScore(len(candidates))
-		if uint64(len(candidates)) < wanted {
-			logger.Warn("not enough candidates to form new contracts")
-		}
-
-		// calculate min/max contract funds
-		minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(ctx.AutopilotConfig())
-
-		// form contracts until the new set has the desired size
-		for _, candidate := range candidates {
-			if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
-				return nil // done
-			}
-
-			// break if the autopilot is stopped
-			select {
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			default:
-			}
-
-			// fetch a new price table if necessary
-			if err := refreshPriceTable(ctx, w, &candidate.host); err != nil {
-				logger.Warnf("failed to fetch price table for candidate host %v: %v", candidate.host.PublicKey, err)
-				continue
-			}
-
-			// prepare gouging checker
-			cs, err := bus.ConsensusState(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to fetch consensus state: %w", err)
-			}
-			gc := ctx.GougingChecker(cs)
-
-			// prepare a gouging checker
-			logger := logger.With("hostKey", candidate.host.PublicKey).
-				With("remainingBudget", remaining).
-				With("subnets", candidate.host.Subnets)
-
-			// perform gouging checks on the fly to ensure the host is not gouging its prices
-			if breakdown := gc.Check(nil, &candidate.host.PriceTable.HostPriceTable); breakdown.Gouging() {
-				logger.With("reasons", breakdown.String()).Info("candidate is price gouging")
-				continue
-			}
-
-			// check if we already have a contract with a host on that subnet
-			if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
-				logger.Info("host has redundant IP")
-				continue
-			}
-
-			formedContract, proceed, err := cr.formContract(ctx, w, candidate.host, minInitialContractFunds, maxInitialContractFunds, &remaining)
-			if err != nil {
-				logger.With(zap.Error(err)).Error("failed to form contract")
-				continue
-			}
-			if !proceed {
-				logger.Error("not proceeding with contract formation")
-				break
-			}
-
-			// add new contract and host
-			keepContract(formedContract, candidate.host)
-			formed++
-		}
-
-		return nil
-	}(); err != nil {
-		return false, err
-	}
-
-	// STEP 4: update contract set
-	var newSetIDs []types.FileContractID
-	for _, contract := range filteredContracts {
-		newSetIDs = append(newSetIDs, contract.ID)
-	}
-
-	// fetch old set
-	oldSet, err := bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
-	if err != nil && !utils.IsErr(err, api.ErrContractSetNotFound) {
-		return false, fmt.Errorf("failed to fetch old contract set: %w", err)
-	}
-
-	// update contract set
-	if err := bus.SetContractSet(ctx, ctx.ContractSet(), newSetIDs); err != nil {
-		return false, fmt.Errorf("failed to update contract set: %w", err)
-	}
-
-	// STEP 5: perform other maintenance
-	if err := func() error {
-		// fetch some contract and host info
-		allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
-		if err != nil {
-			return fmt.Errorf("failed to fetch all contracts: %w", err)
-		}
-		setContracts, err := bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
-		if err != nil {
-			return fmt.Errorf("failed to fetch contracts: %w", err)
-		}
-		allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-			Limit:         -1,
-			FilterMode:    api.HostFilterModeAllowed,
-			UsabilityMode: api.UsabilityFilterModeAll,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to fetch all hosts: %w", err)
-		}
-		usedHosts := make(map[types.PublicKey]struct{})
-		for _, c := range allContracts {
-			usedHosts[c.HostKey] = struct{}{}
-		}
-
-		// run revision broadcast on contracts in the new set
-		rb.runRevisionBroadcast(ctx, w, setContracts)
-
-		// register alerts for used hosts with lost sectors
-		var toDismiss []types.Hash256
-		for _, h := range allHosts {
-			if _, used := usedHosts[h.PublicKey]; !used {
-				continue
-			} else if registerLostSectorsAlert(h.Interactions.LostSectors*rhpv2.SectorSize, h.StoredData) {
-				alerter.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, h.Interactions.LostSectors))
-			} else {
-				toDismiss = append(toDismiss, alerts.IDForHost(alertLostSectorsID, h.PublicKey))
-			}
-		}
-		if len(toDismiss) > 0 {
-			alerter.DismissAlerts(ctx, toDismiss...)
-		}
-
-		// prune refresh failures
-		cc.pruneContractRefreshFailures(allContracts)
-		return nil
-	}(); err != nil {
-		return false, err
-	}
-
-	// log changes and register alerts
-	return computeContractSetChanged(ctx, alerter, bus, churn, logger, oldSet, filteredContracts, formed, refreshed, renewed, dropOutReasons)
-}
-
-func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, logger *zap.SugaredLogger, oldSet, newSet []api.ContractMetadata, formed, refreshed, renewed int, toStopUsing map[types.FileContractID]string) (bool, error) {
+func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, logger *zap.SugaredLogger, oldSet, newSet []api.ContractMetadata, toStopUsing map[types.FileContractID]string) (bool, error) {
 	name := ctx.ContractSet()
 
 	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
@@ -854,9 +761,6 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	// log the contract set after maintenance
 	logFn(
 		"contractset after maintenance",
-		"formed", formed,
-		"renewed", renewed,
-		"refreshed", refreshed,
 		"contracts", len(newSet),
 		"added", len(setAdditions),
 		"removed", len(setRemovals),
@@ -885,392 +789,6 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 		alerter.RegisterAlert(ctx, churn.Alert(name))
 	}
 	return hasChanged, nil
-}
-
-// runRevisionBroadcast broadcasts contract revisions from the current set of
-// contracts. Since we are migrating away from all contracts not in the set and
-// are not uploading to those contracts anyway, we only worry about contracts in
-// the set.
-func (c *Contractor) runRevisionBroadcast(ctx context.Context, w Worker, contracts []api.ContractMetadata) {
-	if c.revisionBroadcastInterval == 0 {
-		return // not enabled
-	}
-
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		c.logger.Warnf("revision broadcast failed to fetch blockHeight: %v", err)
-		return
-	}
-	bh := cs.BlockHeight
-
-	successful, failed := 0, 0
-	for _, contract := range contracts {
-		// check whether broadcasting is necessary
-		timeSinceRevisionHeight := targetBlockTime * time.Duration(bh-contract.RevisionHeight)
-		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
-		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval/broadcastRevisionRetriesPerInterval {
-			continue // nothing to do
-		}
-
-		// remember that we tried to broadcast this contract now
-		c.revisionLastBroadcast[contract.ID] = time.Now()
-
-		// broadcast revision
-		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
-		err := w.RHPBroadcast(ctx, contract.ID)
-		cancel()
-		if utils.IsErr(err, errors.New("transaction has a file contract with an outdated revision number")) {
-			continue // don't log - revision was already broadcasted
-		} else if err != nil {
-			c.logger.Warnw(fmt.Sprintf("failed to broadcast contract revision: %v", err),
-				"hk", contract.HostKey,
-				"fcid", contract.ID)
-			failed++
-			delete(c.revisionLastBroadcast, contract.ID) // reset to try again
-			continue
-		}
-		successful++
-	}
-	c.logger.Infow("revision broadcast completed",
-		"successful", successful,
-		"failed", failed)
-
-	// prune revisionLastBroadcast
-	contractMap := make(map[types.FileContractID]struct{})
-	for _, contract := range contracts {
-		contractMap[contract.ID] = struct{}{}
-	}
-	for contractID := range c.revisionLastBroadcast {
-		if _, ok := contractMap[contractID]; !ok {
-			delete(c.revisionLastBroadcast, contractID)
-		}
-	}
-}
-
-func (c *Contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {
-	if !maxFunding.IsZero() && minFunding.Cmp(maxFunding) > 0 {
-		panic("given min is larger than max") // developer error
-	}
-
-	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
-	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
-		return minFunding
-	}
-	if !maxFunding.IsZero() && funding.Cmp(maxFunding) > 0 {
-		return maxFunding
-	}
-	return funding
-}
-
-func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, host api.Host, fee types.Currency) types.Currency {
-	// refresh with 1.2x the funds
-	refreshAmount := contract.TotalCost.Mul64(6).Div64(5)
-
-	// estimate the txn fee
-	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
-
-	// check for a sane minimum that is equal to the initial contract funding
-	// but without an upper cap.
-	minInitialContractFunds, _ := initialContractFundingMinMax(cfg)
-	minimum := c.initialContractFunding(host.Settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
-	refreshAmountCapped := refreshAmount
-	if refreshAmountCapped.Cmp(minimum) < 0 {
-		refreshAmountCapped = minimum
-	}
-	c.logger.Infow("refresh estimate",
-		"fcid", contract.ID,
-		"refreshAmount", refreshAmount,
-		"refreshAmountCapped", refreshAmountCapped)
-	return refreshAmountCapped
-}
-
-func calculateMinScore(candidates []scoredHost, numContracts uint64, logger *zap.SugaredLogger) float64 {
-	logger = logger.Named("calculateMinScore")
-
-	// return early if there's no hosts
-	if len(candidates) == 0 {
-		logger.Warn("min host score is set to the smallest non-zero float because there are no candidate hosts")
-		return minValidScore
-	}
-
-	// determine the number of random hosts we fetch per iteration when
-	// calculating the min score - it contains a constant factor in case the
-	// number of contracts is very low and a linear factor to make sure the
-	// number is relative to the number of contracts we want to form
-	randSetSize := 2*int(numContracts) + 50
-
-	// do multiple rounds to select the lowest score
-	var lowestScores []float64
-	for r := 0; r < 5; r++ {
-		lowestScore := math.MaxFloat64
-		for _, host := range scoredHosts(candidates).randSelectByScore(randSetSize) {
-			if score := host.score; score < lowestScore && score > 0 {
-				lowestScore = score
-			}
-		}
-		if lowestScore != math.MaxFloat64 {
-			lowestScores = append(lowestScores, lowestScore)
-		}
-	}
-	if len(lowestScores) == 0 {
-		logger.Warn("min host score is set to the smallest non-zero float because the lowest score couldn't be determined")
-		return minValidScore
-	}
-
-	// compute the min score
-	var lowestScore float64
-	lowestScore, err := stats.Float64Data(lowestScores).Median()
-	if err != nil {
-		panic("never fails since len(candidates) > 0 so len(lowestScores) > 0 as well")
-	}
-	minScore := lowestScore / minAllowedScoreLeeway
-
-	// make sure the min score allows for 'numContracts' contracts to be formed
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
-	})
-	if len(candidates) < int(numContracts) {
-		return minValidScore
-	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
-		minScore = cutoff
-	}
-
-	logger.Infow("finished computing minScore",
-		"candidates", len(candidates),
-		"minScore", minScore,
-		"numContracts", numContracts,
-		"lowestScore", lowestScore)
-	return minScore
-}
-
-func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, host api.Host, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
-	if contract.Revision == nil {
-		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
-	}
-	log := c.logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
-
-	// convenience variables
-	settings := host.Settings
-	pt := host.PriceTable.HostPriceTable
-	fcid := contract.ID
-	rev := contract.Revision
-	hk := contract.HostKey
-
-	// fetch consensus state
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		return api.ContractMetadata{}, false, err
-	}
-
-	// calculate the renter funds for the renewal a.k.a. the funds the renter will
-	// be able to spend
-	minRenterFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
-	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds(), log)
-
-	// check our budget
-	if budget.Cmp(renterFunds) < 0 {
-		log.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
-		return api.ContractMetadata{}, false, errors.New("insufficient budget")
-	}
-
-	// sanity check the endheight is not the same on renewals
-	endHeight := ctx.EndHeight()
-	if endHeight <= rev.EndHeight() {
-		log.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
-		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
-	}
-
-	// calculate the expected new storage
-	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, pt)
-
-	// renew the contract
-	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
-	if err != nil {
-		log.Errorw(
-			"renewal failed",
-			zap.Error(err),
-			"endHeight", endHeight,
-			"renterFunds", renterFunds,
-			"expectedNewStorage", expectedNewStorage,
-		)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
-			return api.ContractMetadata{}, false, err
-		}
-		return api.ContractMetadata{}, true, err
-	}
-
-	// update the budget
-	*budget = budget.Sub(resp.FundAmount)
-
-	// persist the contract
-	renewedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
-	if err != nil {
-		log.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err))
-		return api.ContractMetadata{}, false, err
-	}
-
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
-	log.Infow(
-		"renewal succeeded",
-		"fcid", renewedContract.ID,
-		"renewedFrom", fcid,
-		"renterFunds", renterFunds.String(),
-		"newCollateral", newCollateral.String(),
-	)
-	return renewedContract, true, nil
-}
-
-func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract, host api.Host, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
-	if contract.Revision == nil {
-		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
-	}
-	log := c.logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
-
-	// convenience variables
-	settings := host.Settings
-	pt := host.PriceTable.HostPriceTable
-	fcid := contract.ID
-	hk := contract.HostKey
-	rev := contract.Revision
-
-	// fetch consensus state
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		return api.ContractMetadata{}, false, err
-	}
-
-	// calculate the renter funds
-	var renterFunds types.Currency
-	if isOutOfFunds(ctx.AutopilotConfig(), pt, contract) {
-		renterFunds = c.refreshFundingEstimate(ctx.AutopilotConfig(), contract, host, ctx.state.Fee)
-	} else {
-		renterFunds = rev.ValidRenterPayout() // don't increase funds
-	}
-
-	// check our budget
-	if budget.Cmp(renterFunds) < 0 {
-		log.Warnw("insufficient budget for refresh", "hk", hk, "fcid", fcid, "budget", budget, "needed", renterFunds)
-		return api.ContractMetadata{}, false, fmt.Errorf("insufficient budget: %s < %s", budget.String(), renterFunds.String())
-	}
-
-	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
-	unallocatedCollateral := contract.RemainingCollateral()
-
-	// a refresh should always result in a contract that has enough collateral
-	minNewCollateral := minRemainingCollateral(ctx.AutopilotConfig(), ctx.state.RS, renterFunds, settings, pt).Mul64(2)
-
-	// maxFundAmount is the remaining funds of the contract to refresh plus the
-	// budget since the previous contract was in the same period
-	maxFundAmount := budget.Add(rev.ValidRenterPayout())
-
-	// renew the contract
-	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
-	if err != nil {
-		if strings.Contains(err.Error(), "new collateral is too low") {
-			log.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
-				"hk", hk,
-				"fcid", fcid,
-				"unallocatedCollateral", unallocatedCollateral.String(),
-				"minNewCollateral", minNewCollateral.String(),
-			)
-			return api.ContractMetadata{}, true, err
-		}
-		log.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
-			return api.ContractMetadata{}, false, err
-		}
-		return api.ContractMetadata{}, true, err
-	}
-
-	// update the budget
-	*budget = budget.Sub(resp.FundAmount)
-
-	// persist the contract
-	refreshedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
-	if err != nil {
-		log.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, false, err
-	}
-
-	// add to renewed set
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
-	log.Infow("refresh succeeded",
-		"fcid", refreshedContract.ID,
-		"renewedFrom", contract.ID,
-		"renterFunds", renterFunds.String(),
-		"minNewCollateral", minNewCollateral.String(),
-		"newCollateral", newCollateral.String(),
-	)
-	return refreshedContract, true, nil
-}
-
-func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds, maxInitialContractFunds types.Currency, budget *types.Currency) (cm api.ContractMetadata, proceed bool, err error) {
-	log := c.logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
-
-	// convenience variables
-	hk := host.PublicKey
-
-	// fetch host settings
-	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
-	if err != nil {
-		log.Infow(err.Error(), "hk", hk)
-		return api.ContractMetadata{}, true, err
-	}
-
-	// fetch consensus state
-	cs, err := c.bus.ConsensusState(ctx)
-	if err != nil {
-		return api.ContractMetadata{}, false, err
-	}
-
-	// check our budget
-	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
-	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds, maxInitialContractFunds)
-	if budget.Cmp(renterFunds) < 0 {
-		log.Infow("insufficient budget", "budget", budget, "needed", renterFunds)
-		return api.ContractMetadata{}, false, errors.New("insufficient budget")
-	}
-
-	// calculate the host collateral
-	endHeight := ctx.EndHeight()
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
-	hostCollateral := rhpv2.ContractFormationCollateral(ctx.Period(), expectedStorage, scan.Settings)
-
-	// form contract
-	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, ctx.state.Address, renterFunds, hostCollateral)
-	if err != nil {
-		// TODO: keep track of consecutive failures and break at some point
-		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
-			return api.ContractMetadata{}, false, err
-		}
-		return api.ContractMetadata{}, true, err
-	}
-
-	// update the budget
-	*budget = budget.Sub(renterFunds)
-
-	// persist contract in store
-	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
-	formedContract, err := c.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight, api.ContractStatePending)
-	if err != nil {
-		log.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		return api.ContractMetadata{}, true, err
-	}
-
-	log.Infow("formation succeeded",
-		"fcid", formedContract.ID,
-		"renterFunds", renterFunds.String(),
-		"collateral", hostCollateral.String(),
-	)
-	return formedContract, true, nil
-}
-
-func addLeeway(n uint64, pct float64) uint64 {
-	if pct < 0 {
-		panic("given leeway percent has to be positive")
-	}
-	return uint64(math.Ceil(float64(n) * pct))
 }
 
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {
@@ -1371,23 +889,535 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 	return expectedStorage.Big().Uint64()
 }
 
-func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetadata) {
-	contractMap := make(map[types.FileContractID]struct{})
-	for _, contract := range contracts {
-		contractMap[contract.ID] = struct{}{}
+// performContractChecks performs maintenance on existing contracts,
+// renewing/refreshing any that need it and filtering out contracts that should
+// no longer be used. The 'ipFilter' is updated to contain all hosts that we
+// keep contracts with and the 'dropOutReasons' map is updated with the reasons
+// for dropping out of the set. If a contract is refreshed or renewed, the
+// 'remainingFunds' are adjusted.
+func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker, cc contractChecker, cr contractReviser, ipFilter *ipFilter, dropOutReasons map[types.FileContractID]string, logger *zap.SugaredLogger, remainingFunds *types.Currency) ([]api.ContractMetadata, error) {
+	var filteredContracts []api.ContractMetadata
+	keepContract := func(c api.ContractMetadata, h api.Host) {
+		filteredContracts = append(filteredContracts, c)
+		ipFilter.Add(h)
 	}
-	for fcid := range c.firstRefreshFailure {
-		if _, ok := contractMap[fcid]; !ok {
-			delete(c.firstRefreshFailure, fcid)
+
+	// fetch all contracts we already have
+	logger.Info("fetching existing contracts")
+	start := time.Now()
+	resp, err := w.Contracts(ctx, timeoutHostRevision)
+	if err != nil {
+		return nil, err
+	}
+	contracts := resp.Contracts
+	logger.With("elapsed", time.Since(start)).Info("done fetching existing contracts")
+
+	// print the reason for the missing revisions
+	for _, c := range contracts {
+		if c.Revision == nil {
+			logger.With("error", resp.Errors[c.HostKey]).
+				With("hostKey", c.HostKey).
+				With("contractID", c.ID).Debug("failed to fetch contract revision")
 		}
 	}
+
+	// sort them by whether they are in the current set and their size
+	ctx.SortContractsForMaintenance(contracts)
+
+	// allow for a leeway of 10% of the required contracts for special cases such as failing to fetch
+	remainingLeeway := addLeeway(ctx.WantedContracts(), 1-leewayPctRequiredContracts)
+
+	// perform checks on contracts one-by-one renewing/refreshing
+	// contracts as necessary and filtering out contracts that should no
+	// longer be used
+	logger.With("contracts", len(contracts)).Info("checking existing contracts")
+	var renewed, refreshed int
+	for _, c := range contracts {
+		inSet := ctx.IsContractInSet(c)
+
+		logger := logger.With("contractID", c.ID).
+			With("inSet", inSet).
+			With("hostKey", c.HostKey).
+			With("revisionNumber", c.RevisionNumber).
+			With("size", c.FileSize()).
+			With("state", c.State).
+			With("remainingLeeway", remainingLeeway).
+			With("revisionAvailable", c.Revision != nil).
+			With("filteredContracts", len(filteredContracts)).
+			With("wantedContracts", ctx.WantedContracts())
+
+		logger.Debug("checking contract")
+
+		// abort if we have enough contracts
+		if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
+			dropOutReasons[c.ID] = "truncated"
+			logger.Debug("ignoring contract since we have enough contracts")
+			continue
+		}
+
+		// check for interruption
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		default:
+		}
+
+		// fetch recent consensus state
+		cs, err := bus.ConsensusState(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch consensus state: %w", err)
+		}
+		bh := cs.BlockHeight
+		logger = logger.With("blockHeight", bh)
+
+		// check if contract is ready to be archived.
+		if reason := cc.shouldArchive(c, bh); reason != nil {
+			if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
+				c.ID: reason.Error(),
+			}); err != nil {
+				logger.With(zap.Error(err)).Error("failed to archive contract")
+			} else {
+				logger.Debug("successfully archived contract")
+			}
+			dropOutReasons[c.ID] = reason.Error()
+			continue
+		}
+
+		// fetch host
+		host, err := bus.Host(ctx, c.HostKey)
+		if err != nil {
+			logger.With(zap.Error(err)).Warn("missing host")
+			dropOutReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
+			continue
+		}
+
+		// extend logger
+		logger = logger.With("subnets", host.Subnets).
+			With("blocked", host.Blocked)
+
+		// check if host is blocked
+		if host.Blocked {
+			logger.Info("host is blocked")
+			dropOutReasons[c.ID] = api.ErrUsabilityHostBlocked.Error()
+			continue
+		}
+
+		// check if host has a redundant ip
+		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
+			logger.Info("host has redundant IP")
+			dropOutReasons[c.ID] = api.ErrUsabilityHostRedundantIP.Error()
+			continue
+		}
+
+		// get check
+		check, ok := host.Checks[ctx.ApID()]
+		if !ok {
+			logger.Warn("missing host check")
+			dropOutReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
+			continue
+		}
+
+		// check usability
+		if !check.Usability.IsUsable() {
+			reasons := strings.Join(check.Usability.UnusableReasons(), ",")
+			logger.With("reasons", reasons).Info("unusable host")
+			dropOutReasons[c.ID] = reasons
+			continue
+		}
+
+		// check if revision is available
+		if c.Revision == nil {
+			if inSet && remainingLeeway > 0 {
+				logger.Debug("keeping contract due to leeway")
+				keepContract(c.ContractMetadata, host)
+				remainingLeeway--
+			} else {
+				logger.Debug("ignoring contract without revision")
+				dropOutReasons[c.ID] = errContractNoRevision.Error()
+			}
+			continue // no more checks without revision
+		}
+
+		// check if contract is usable
+		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, inSet, bh, ipFilter)
+
+		// extend logger
+		logger = logger.With("usable", usable).
+			With("needsRefresh", needsRefresh).
+			With("needsRenew", needsRenew).
+			With("reasons", reasons)
+
+			// remember reason for potential drop of contract
+		if len(reasons) > 0 {
+			dropOutReasons[c.ID] = strings.Join(reasons, ",")
+		}
+
+		contract := c.ContractMetadata
+
+		// renew/refresh as necessary
+		var ourFault bool
+		if needsRenew {
+			var renewedContract api.ContractMetadata
+			renewedContract, ourFault, err = cr.renewContract(ctx, w, c, host, remainingFunds)
+			if err != nil {
+				logger = logger.With(zap.Error(err)).With("ourFault", ourFault)
+
+				// don't register an alert for hosts that are out of funds since the
+				// user can't do anything about it
+				if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
+				}
+				logger.Error("failed to renew contract")
+			} else {
+				logger.Info("successfully renewed contract")
+				alerter.DismissAlerts(ctx, alerts.IDForContract(alertRenewalFailedID, contract.ID))
+				contract = renewedContract
+				usable = true
+				renewed++
+			}
+		} else if needsRefresh {
+			var refreshedContract api.ContractMetadata
+			refreshedContract, ourFault, err = cr.refreshContract(ctx, w, c, host, remainingFunds)
+			if err != nil {
+				logger = logger.With(zap.Error(err)).With("ourFault", ourFault)
+
+				// don't register an alert for hosts that are out of funds since the
+				// user can't do anything about it
+				if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
+				}
+				logger.Error("failed to refresh contract")
+			} else {
+				logger.Info("successfully refreshed contract")
+				alerter.DismissAlerts(ctx, alerts.IDForContract(alertRenewalFailedID, contract.ID))
+				contract = refreshedContract
+				usable = true
+				refreshed++
+			}
+		}
+
+		// if the renewal/refresh failing was our fault (e.g. we ran out of
+		// funds), we should not drop the contract
+		if !usable && ourFault {
+			logger.Info("keeping contract even though renewal/refresh failed")
+			usable = true
+		}
+
+		// if the contract is not usable we ignore it
+		if !usable {
+			if inSet {
+				logger.Info("contract is not usable, removing from set")
+			} else {
+				logger.Debug("contract is not usable, remains out of set")
+			}
+			continue
+		}
+
+		// we keep the contract, add the host to the filter
+		logger.Debug("contract is usable and is added / stays in set")
+		keepContract(contract, host)
+	}
+	logger.With("refreshed", refreshed).
+		With("renewed", renewed).
+		With("filteredContracts", len(filteredContracts)).
+		Info("checking existing contracts done")
+	return filteredContracts, nil
 }
 
-func (c *Contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool {
-	lastFailure, exists := c.firstRefreshFailure[fcid]
-	if !exists {
-		lastFailure = time.Now()
-		c.firstRefreshFailure[fcid] = lastFailure
+// performContracdtFormations forms up to 'wanted' new contracts with hosts. The
+// 'ipFilter' and 'remainingFunds' are updated with every new contract.
+func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser, ipFilter *ipFilter, logger *zap.SugaredLogger, remainingFunds *types.Currency, wanted int) ([]api.ContractMetadata, error) {
+	var formedContracts []api.ContractMetadata
+	addContract := func(c api.ContractMetadata, h api.Host) {
+		formedContracts = append(formedContracts, c)
+		wanted--
+		ipFilter.Add(h)
 	}
-	return time.Since(lastFailure) < failedRefreshForgivenessPeriod
+
+	// early check to avoid fetching all candidates
+	if wanted <= 0 {
+		logger.Info("already have enough contracts, no need to form new ones")
+		return formedContracts, nil // nothing to do
+	}
+	logger.With("wanted", wanted).Info("trying to form more contracts to fill set")
+
+	// get list of hosts that we already have contracts with
+	contracts, err := bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contracts: %w", err)
+	}
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, c := range contracts {
+		usedHosts[c.HostKey] = struct{}{}
+	}
+	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
+		Limit:         -1,
+		FilterMode:    api.HostFilterModeAllowed,
+		UsabilityMode: api.UsabilityFilterModeAll,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch usable hosts: %w", err)
+	}
+
+	// filter them
+	var candidates scoredHosts
+	for _, host := range allHosts {
+		logger := logger.With("hostKey", host.PublicKey)
+		hc, ok := host.Checks[ctx.ApID()]
+		if !ok {
+			logger.Warn("missing host check")
+			continue
+		} else if _, used := usedHosts[host.PublicKey]; used {
+			logger.Debug("host already used")
+			continue
+		} else if score := hc.Score.Score(); score == 0 {
+			logger.Error("host has a score of 0")
+			continue
+		}
+		candidates = append(candidates, newScoredHost(host, hc.Score))
+	}
+	logger = logger.With("candidates", len(candidates))
+
+	// select hosts, since we already have all of them in memory we select
+	// len(candidates)
+	candidates = candidates.randSelectByScore(len(candidates))
+	if len(candidates) < wanted {
+		logger.Warn("not enough candidates to form new contracts")
+	}
+
+	// calculate min/max contract funds
+	minInitialContractFunds, maxInitialContractFunds := initialContractFundingMinMax(ctx.AutopilotConfig())
+
+	// form contracts until the new set has the desired size
+	for _, candidate := range candidates {
+		if wanted == 0 {
+			return formedContracts, nil // done
+		}
+
+		// break if the autopilot is stopped
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		default:
+		}
+
+		// fetch a new price table if necessary
+		if err := refreshPriceTable(ctx, w, &candidate.host); err != nil {
+			logger.Warnf("failed to fetch price table for candidate host %v: %v", candidate.host.PublicKey, err)
+			continue
+		}
+
+		// prepare gouging checker
+		cs, err := bus.ConsensusState(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch consensus state: %w", err)
+		}
+		gc := ctx.GougingChecker(cs)
+
+		// prepare a gouging checker
+		logger := logger.With("hostKey", candidate.host.PublicKey).
+			With("remainingBudget", remainingFunds).
+			With("subnets", candidate.host.Subnets)
+
+		// perform gouging checks on the fly to ensure the host is not gouging its prices
+		if breakdown := gc.Check(nil, &candidate.host.PriceTable.HostPriceTable); breakdown.Gouging() {
+			logger.With("reasons", breakdown.String()).Info("candidate is price gouging")
+			continue
+		}
+
+		// check if we already have a contract with a host on that subnet
+		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
+			logger.Info("host has redundant IP")
+			continue
+		}
+
+		formedContract, proceed, err := cr.formContract(ctx, w, candidate.host, minInitialContractFunds, maxInitialContractFunds, remainingFunds)
+		if err != nil {
+			logger.With(zap.Error(err)).Error("failed to form contract")
+			continue
+		}
+		if !proceed {
+			logger.Error("not proceeding with contract formation")
+			break
+		}
+
+		// add new contract and host
+		addContract(formedContract, candidate.host)
+	}
+	logger.With("formedContractx", len(formedContracts)).Info("done forming contracts")
+	return formedContracts, nil
+}
+
+// performHostChecks performs scoring and usability checks on all hosts,
+// updating their state in the database.
+func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
+	var usabilityBreakdown unusableHostsBreakdown
+	// fetch all hosts that are not blocked
+	hosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
+	if err != nil {
+		return fmt.Errorf("failed to fetch all hosts: %w", err)
+	}
+
+	var scoredHosts []scoredHost
+	for _, host := range hosts {
+		// filter out hosts that have never been scanned
+		if !host.Scanned {
+			continue
+		}
+		// score host
+		sb, err := ctx.HostScore(host)
+		if err != nil {
+			logger.With(zap.Error(err)).Info("failed to score host")
+			continue
+		}
+		scoredHosts = append(scoredHosts, newScoredHost(host, sb))
+	}
+
+	// compute minimum score for usable hosts
+	minScore := calculateMinScore(scoredHosts, ctx.WantedContracts(), logger)
+
+	// run host checks using the latest consensus state
+	cs, err := bus.ConsensusState(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch consensus state: %w", err)
+	}
+	for _, h := range scoredHosts {
+		h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
+		hc := checkHost(ctx.GougingChecker(cs), h, minScore)
+		if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
+			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
+		}
+		usabilityBreakdown.track(hc.Usability)
+
+		if !hc.Usability.IsUsable() {
+			logger.With("hostKey", h.host.PublicKey).
+				With("reasons", strings.Join(hc.Usability.UnusableReasons(), ",")).
+				Debug("host is not usable")
+		}
+	}
+
+	logger.Infow("host checks completed", usabilityBreakdown.keysAndValues()...)
+	return nil
+}
+
+func performPostMaintenanceTasks(ctx *mCtx, bus Bus, w Worker, alerter alerts.Alerter, cc contractChecker, rb revisionBroadcaster) error {
+	// fetch some contract and host info
+	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch all contracts: %w", err)
+	}
+	setContracts, err := bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
+	if err != nil {
+		return fmt.Errorf("failed to fetch contracts: %w", err)
+	}
+	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
+		Limit:         -1,
+		FilterMode:    api.HostFilterModeAllowed,
+		UsabilityMode: api.UsabilityFilterModeAll,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to fetch all hosts: %w", err)
+	}
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, c := range allContracts {
+		usedHosts[c.HostKey] = struct{}{}
+	}
+
+	// run revision broadcast on contracts in the new set
+	rb.runRevisionBroadcast(ctx, w, setContracts)
+
+	// register alerts for used hosts with lost sectors
+	var toDismiss []types.Hash256
+	for _, h := range allHosts {
+		if _, used := usedHosts[h.PublicKey]; !used {
+			continue
+		} else if registerLostSectorsAlert(h.Interactions.LostSectors*rhpv2.SectorSize, h.StoredData) {
+			alerter.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, h.Interactions.LostSectors))
+		} else {
+			toDismiss = append(toDismiss, alerts.IDForHost(alertLostSectorsID, h.PublicKey))
+		}
+	}
+	if len(toDismiss) > 0 {
+		alerter.DismissAlerts(ctx, toDismiss...)
+	}
+
+	// prune refresh failures
+	cc.pruneContractRefreshFailures(allContracts)
+	return nil
+}
+
+func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, w Worker, cc contractChecker, cr contractReviser, rb revisionBroadcaster, remaining types.Currency, logger *zap.SugaredLogger) (bool, error) {
+	logger = logger.Named("performContractMaintenance").
+		Named(hex.EncodeToString(frand.Bytes(16))). // uuid for this iteration
+		With("contractSet", ctx.ContractSet())
+
+	// check if we want to run maintenance
+	if reason, skip := canSkipContractMaintenance(ctx, ctx.ContractsConfig()); skip {
+		logger.With("reason", reason).Info("skipping contract maintenance")
+		return false, nil
+	}
+	logger.Infow("performing contract maintenance")
+
+	// STEP 1: perform host maintenance
+	if err := performHostChecks(ctx, bus, logger); err != nil {
+		return false, err
+	}
+
+	// check for interruption
+	select {
+	case <-ctx.Done():
+		return false, context.Cause(ctx)
+	default:
+	}
+
+	// STEP 2: perform contract maintenance
+	ipFilter := &ipFilter{
+		logger:          logger.Named("ipFilter"),
+		subnetToHostKey: make(map[string]string),
+	}
+	dropOutReasons := make(map[types.FileContractID]string)
+	keptContracts, err := performContractChecks(ctx, alerter, bus, w, cc, cr, ipFilter, dropOutReasons, logger, &remaining)
+	if err != nil {
+		return false, err
+	}
+
+	// check for interruption
+	select {
+	case <-ctx.Done():
+		return false, context.Cause(ctx)
+	default:
+	}
+
+	// STEP 3: perform contract formation
+	formedContracts, err := performContractFormations(ctx, bus, w, cr, ipFilter, logger, &remaining, int(ctx.WantedContracts())-len(keptContracts))
+	if err != nil {
+		return false, err
+	}
+
+	// fetch old set
+	oldSet, err := bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
+	if err != nil && !utils.IsErr(err, api.ErrContractSetNotFound) {
+		return false, fmt.Errorf("failed to fetch old contract set: %w", err)
+	}
+
+	// STEP 4: update contract set
+	newSet := make([]api.ContractMetadata, 0, len(keptContracts)+len(formedContracts))
+	newSet = append(newSet, keptContracts...)
+	newSet = append(newSet, formedContracts...)
+	var newSetIDs []types.FileContractID
+	for _, contract := range newSet {
+		newSetIDs = append(newSetIDs, contract.ID)
+	}
+	if err := bus.SetContractSet(ctx, ctx.ContractSet(), newSetIDs); err != nil {
+		return false, fmt.Errorf("failed to update contract set: %w", err)
+	}
+
+	// STEP 5: perform minor maintenance such as cleanups and broadcasting
+	// revisions
+	if err := performPostMaintenanceTasks(ctx, bus, w, alerter, cc, rb); err != nil {
+		return false, err
+	}
+
+	// STEP 6: log changes and register alerts
+	return computeContractSetChanged(ctx, alerter, bus, churn, logger, oldSet, newSet, dropOutReasons)
 }
