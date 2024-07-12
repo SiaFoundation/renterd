@@ -217,7 +217,6 @@ OUTER:
 		if err := b.RefreshHealth(m.ap.shutdownCtx); err != nil {
 			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
 			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
-			return
 		}
 		m.logger.Infof("recomputed slab health in %v", time.Since(start))
 
