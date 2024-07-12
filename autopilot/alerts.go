@@ -170,7 +170,7 @@ func newRefreshHealthFailedAlert(err error) alerts.Alert {
 		Severity: alerts.SeverityCritical,
 		Message:  "Health refresh failed",
 		Data: map[string]interface{}{
-			"migrationsInterrupted": true,
+			"migrationsInterrupted": false,
 			"error":                 err.Error(),
 		},
 		Timestamp: time.Now(),
