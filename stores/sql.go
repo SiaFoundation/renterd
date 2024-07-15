@@ -50,11 +50,10 @@ type (
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
-		alerts   alerts.Alerter
-		db       *gorm.DB
-		bMain    sql.Database
-		bMetrics sql.MetricsDatabase
-		logger   *zap.SugaredLogger
+		alerts    alerts.Alerter
+		db        sql.Database
+		dbMetrics sql.MetricsDatabase
+		logger    *zap.SugaredLogger
 
 		walletAddress types.Address
 
@@ -76,6 +75,8 @@ type (
 		mu           sync.Mutex
 		lastPrunedAt time.Time
 		closed       bool
+
+		gormDB *gorm.DB // deprecated: don't use
 	}
 )
 
@@ -168,11 +169,11 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ss := &SQLStore{
-		alerts:   cfg.Alerts,
-		db:       db,
-		bMain:    dbMain,
-		bMetrics: dbMetrics,
-		logger:   l,
+		alerts:    cfg.Alerts,
+		gormDB:    db,
+		db:        dbMain,
+		dbMetrics: dbMetrics,
+		logger:    l,
 
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
@@ -215,7 +216,7 @@ func (s *SQLStore) initSlabPruning() error {
 	}()
 
 	// prune once to guarantee consistency on startup
-	return s.bMain.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
 		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
 		return err
 	})
@@ -230,11 +231,11 @@ func (s *SQLStore) Close() error {
 		return err
 	}
 
-	err = s.bMain.Close()
+	err = s.db.Close()
 	if err != nil {
 		return err
 	}
-	err = s.bMetrics.Close()
+	err = s.dbMetrics.Close()
 	if err != nil {
 		return err
 	}
@@ -246,7 +247,7 @@ func (s *SQLStore) Close() error {
 }
 
 func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
-	return retryTransaction(ctx, s.db, s.logger, s.retryTransactionIntervals, fc, s.retryAbortFn)
+	return retryTransaction(ctx, s.gormDB, s.logger, s.retryTransactionIntervals, fc, s.retryAbortFn)
 }
 
 func (s *SQLStore) retryAbortFn(err error) bool {

@@ -9,7 +9,7 @@ import (
 )
 
 func (s *SQLStore) Autopilots(ctx context.Context) (aps []api.Autopilot, _ error) {
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		aps, err = tx.Autopilots(ctx)
 		return
 	})
@@ -17,7 +17,7 @@ func (s *SQLStore) Autopilots(ctx context.Context) (aps []api.Autopilot, _ error
 }
 
 func (s *SQLStore) Autopilot(ctx context.Context, id string) (ap api.Autopilot, _ error) {
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		ap, err = tx.Autopilot(ctx, id)
 		return
 	})
@@ -32,7 +32,7 @@ func (s *SQLStore) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error 
 	if err := ap.Config.Validate(); err != nil {
 		return err
 	}
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateAutopilot(ctx, ap)
 	})
 }
