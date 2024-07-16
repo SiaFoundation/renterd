@@ -520,7 +520,11 @@ func main() {
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		setupBusFn = setupFn
+		setupBusFn = func(_ context.Context) error {
+			setupFn()
+			return nil
+		}
+
 		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
 			fn:   shutdownFn,

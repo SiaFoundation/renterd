@@ -14,6 +14,7 @@ import (
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
 	"go.sia.tech/hostd/host/settings/pin"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/webhooks"
@@ -24,6 +25,43 @@ const (
 	testAutopilotID    = "default"
 	testUpdateInterval = 100 * time.Millisecond
 )
+
+type mockAlerter struct {
+	mu     sync.Mutex
+	alerts []alerts.Alert
+}
+
+func (ma *mockAlerter) Alerts(ctx context.Context, opts alerts.AlertsOpts) (resp alerts.AlertsResponse, err error) {
+	ma.mu.Lock()
+	defer ma.mu.Unlock()
+	return alerts.AlertsResponse{Alerts: ma.alerts}, nil
+}
+
+func (ma *mockAlerter) RegisterAlert(_ context.Context, a alerts.Alert) error {
+	ma.mu.Lock()
+	defer ma.mu.Unlock()
+	for _, alert := range ma.alerts {
+		if alert.ID == a.ID {
+			return nil
+		}
+	}
+	ma.alerts = append(ma.alerts, a)
+	return nil
+}
+
+func (ma *mockAlerter) DismissAlerts(_ context.Context, ids ...types.Hash256) error {
+	ma.mu.Lock()
+	defer ma.mu.Unlock()
+	for _, id := range ids {
+		for i, a := range ma.alerts {
+			if a.ID == id {
+				ma.alerts = append(ma.alerts[:i], ma.alerts[i+1:]...)
+				break
+			}
+		}
+	}
+	return nil
+}
 
 type mockBroadcaster struct {
 	events []webhooks.Event
@@ -37,8 +75,9 @@ func (meb *mockBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Even
 type mockForexAPI struct {
 	s *httptest.Server
 
-	mu   sync.Mutex
-	rate float64
+	mu          sync.Mutex
+	rate        float64
+	unreachable bool
 }
 
 func newTestForexAPI() *mockForexAPI {
@@ -46,6 +85,10 @@ func newTestForexAPI() *mockForexAPI {
 	api.s = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.mu.Lock()
 		defer api.mu.Unlock()
+		if api.unreachable {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(api.rate)
 	}))
 	return api
@@ -55,10 +98,16 @@ func (api *mockForexAPI) Close() {
 	api.s.Close()
 }
 
-func (api *mockForexAPI) updateRate(rate float64) {
+func (api *mockForexAPI) setRate(rate float64) {
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	api.rate = rate
+}
+
+func (api *mockForexAPI) setUnreachable(unreachable bool) {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	api.unreachable = unreachable
 }
 
 type mockStore struct {
@@ -140,16 +189,15 @@ func TestPinManager(t *testing.T) {
 	// mock dependencies
 	ms := newTestStore()
 	eb := &mockBroadcaster{}
+	a := &mockAlerter{}
 
 	// mock forex api
 	forex := newTestForexAPI()
 	defer forex.Close()
 
-	// start a pinmanager
-	pm := NewPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
-	if err := pm.Run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	// create a pinmanager
+	pm := NewPinManager(a, eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
+	pm.Run()
 	defer func() {
 		if err := pm.Close(context.Background()); err != nil {
 			t.Fatal(err)
@@ -183,7 +231,7 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// update exchange rate and fetch current gouging settings
-	forex.updateRate(2.5)
+	forex.setRate(2.5)
 	gs := ms.gougingSettings()
 
 	// configure all pins but disable them for now
@@ -228,7 +276,7 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// increase rate so average isn't catching up to us
-	forex.updateRate(3)
+	forex.setRate(3)
 
 	// fetch autopilot
 	ap, _ := ms.Autopilot(context.Background(), testAutopilotID)
@@ -256,6 +304,26 @@ func TestPinManager(t *testing.T) {
 	// assert autopilot was updated
 	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
 		t.Fatalf("expected autopilot to be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
+	}
+
+	// make forex API return an error
+	forex.setUnreachable(true)
+
+	// assert alert was registered
+	ms.updatPinnedSettings(pps)
+	res, _ := a.Alerts(context.Background(), alerts.AlertsOpts{})
+	if len(res.Alerts) == 0 {
+		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
+	}
+
+	// make forex API return a valid response
+	forex.setUnreachable(false)
+
+	// assert alert was dismissed
+	ms.updatPinnedSettings(pps)
+	res, _ = a.Alerts(context.Background(), alerts.AlertsOpts{})
+	if len(res.Alerts) != 0 {
+		t.Fatalf("expected 0 alerts, got %d", len(a.alerts))
 	}
 }
 
