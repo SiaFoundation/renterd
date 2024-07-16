@@ -149,6 +149,7 @@ func TestWorkerCache(t *testing.T) {
 		{Module: api.ModuleConsensus, Event: api.EventUpdate, Payload: nil},
 		{Module: api.ModuleContract, Event: api.EventArchive, Payload: nil},
 		{Module: api.ModuleContract, Event: api.EventRenew, Payload: nil},
+		{Module: api.ModuleHost, Event: api.EventUpdate, Payload: nil},
 		{Module: api.ModuleSetting, Event: api.EventUpdate, Payload: nil},
 		{Module: api.ModuleSetting, Event: api.EventDelete, Payload: nil},
 	} {

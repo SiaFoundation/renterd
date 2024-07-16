@@ -170,6 +170,17 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 		for hk, ha := range hus {
 			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
+			} else if IsSynced(b) {
+				// broadcast host update
+				s.webhooksMgr.BroadcastAction(s.shutdownCtx, webhooks.Event{
+					Module: api.ModuleHost,
+					Event:  api.EventUpdate,
+					Payload: api.EventHostUpdate{
+						HostKey:   hk,
+						NetAddr:   ha.NetAddress,
+						Timestamp: time.Now().UTC(),
+					},
+				})
 			}
 		}
 	}
