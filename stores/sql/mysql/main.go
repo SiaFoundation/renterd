@@ -783,21 +783,14 @@ func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements 
 }
 
 func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
-	res, err := tx.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 		INSERT INTO autopilots (created_at, identifier, config, current_period)
 		VALUES (?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 		config = VALUES(config),
 		current_period = VALUES(current_period)
 	`, time.Now(), ap.ID, (*ssql.AutopilotConfig)(&ap.Config), ap.CurrentPeriod)
-	if err != nil {
-		return err
-	} else if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n != 1 && n != 2 { // 1 if inserted, 2 if updated
-		return fmt.Errorf("expected 1 row affected, got %v", n)
-	}
-	return nil
+	return err
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
