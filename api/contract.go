@@ -220,3 +220,13 @@ func (c Contract) RemainingCollateral() types.Currency {
 	}
 	return c.Revision.MissedHostPayout().Sub(c.ContractPrice)
 }
+
+// InSet returns whether the contract is in the given set.
+func (cm ContractMetadata) InSet(set string) bool {
+	for _, s := range cm.ContractSets {
+		if s == set {
+			return true
+		}
+	}
+	return false
+}

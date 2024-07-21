@@ -784,10 +784,12 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// fetch upload contracts
-	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
+	// filter upload contracts
+	var ulContracts []api.ContractMetadata
+	for _, c := range dlContracts {
+		if c.InSet(up.ContractSet) {
+			ulContracts = append(ulContracts, c)
+		}
 	}
 
 	// migrate the slab
