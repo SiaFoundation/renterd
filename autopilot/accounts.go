@@ -135,17 +135,14 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 		return
 	}
 
-	// fetch all contract set contracts
-	contractSetContracts, err := a.c.Contracts(ctx, api.ContractsOpts{ContractSet: cfg.Config.Contracts.Set})
-	if err != nil {
-		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
-		return
-	}
-
-	// build a map of contract set contracts
+	// filter all contract set contracts
+	var contractSetContracts []api.ContractMetadata
 	inContractSet := make(map[types.FileContractID]struct{})
-	for _, contract := range contractSetContracts {
-		inContractSet[contract.ID] = struct{}{}
+	for _, c := range contracts {
+		if c.InSet(cfg.Config.Contracts.Set) {
+			contractSetContracts = append(contractSetContracts, c)
+			inContractSet[c.ID] = struct{}{}
+		}
 	}
 
 	// refill accounts in separate goroutines
