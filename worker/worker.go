@@ -157,6 +157,7 @@ type (
 
 	WebhookStore interface {
 		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
+		UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
 
 	ConsensusState interface {
@@ -208,6 +209,7 @@ type worker struct {
 	masterKey       [32]byte
 	startTime       time.Time
 
+	eventManager    iworker.EventManager
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
 
@@ -1230,25 +1232,6 @@ func (w *worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
-func (w *worker) eventsHandler(jc jape.Context) {
-	var event webhooks.Event
-	if jc.Decode(&event) != nil {
-		return
-	} else if event.Event == webhooks.WebhookEventPing {
-		jc.ResponseWriter.WriteHeader(http.StatusOK)
-		return
-	}
-
-	err := w.cache.HandleEvent(event)
-	if errors.Is(err, api.ErrUnknownEvent) {
-		jc.ResponseWriter.WriteHeader(http.StatusAccepted)
-		return
-	} else if err != nil {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	}
-}
-
 func (w *worker) memoryGET(jc jape.Context) {
 	jc.Encode(api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
@@ -1301,13 +1284,13 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	}
 
 	l = l.Named("worker").Named(id)
-	cache := iworker.NewCache(b, l)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	w := &worker{
 		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
-		cache:                   cache,
+		cache:                   iworker.NewCache(b, l),
+		eventManager:            iworker.NewEventManager(b, l, 10*time.Second),
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
@@ -1335,7 +1318,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"POST   /events": w.eventsHandler,
+		"POST   /events": w.eventManager.Handler(),
 
 		"GET /memory": w.memoryGET,
 
@@ -1365,10 +1348,19 @@ func (w *worker) Handler() http.Handler {
 	})
 }
 
-// Setup initializes the worker cache.
+// Setup register event webhooks that enable the worker cache.
 func (w *worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
-	webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
-	return w.cache.Initialize(ctx, apiURL, webhookOpts...)
+	// run event manager in a goroutine
+	go func() {
+		eventsURL := fmt.Sprintf("%s/events", apiURL)
+		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
+		if err := w.eventManager.Run(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
+			w.logger.Errorw("failed to run event manager", zap.Error(err))
+		}
+	}()
+
+	// subscribe cache to the event manager
+	return w.cache.Subscribe(w.eventManager)
 }
 
 // Shutdown shuts down the worker.
@@ -1382,7 +1374,9 @@ func (w *worker) Shutdown(ctx context.Context) error {
 
 	// stop recorders
 	w.contractSpendingRecorder.Stop(ctx)
-	return nil
+
+	// shutdown event manager
+	return w.eventManager.Shutdown(ctx)
 }
 
 func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {

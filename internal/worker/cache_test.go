@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/webhooks"
@@ -26,7 +27,24 @@ func (m *mockBus) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.
 func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) {
 	return m.gougingParams, nil
 }
-func (m *mockBus) RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error {
+
+type mockEventManager struct {
+	readyChan chan struct{}
+}
+
+func (m *mockEventManager) AddSubscriber(id string, s EventSubscriber) (chan struct{}, error) {
+	return m.readyChan, nil
+}
+
+func (m *mockEventManager) Handler() jape.Handler {
+	return nil
+}
+
+func (m *mockEventManager) Run(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error {
+	return nil
+}
+
+func (m *mockEventManager) Shutdown(ctx context.Context) error {
 	return nil
 }
 
@@ -57,7 +75,13 @@ func TestWorkerCache(t *testing.T) {
 	// create mock bus and cache
 	c, b, mc := newTestCache(zap.New(observedZapCore))
 
-	// assert using cache before it's initialized prints a warning
+	// create mock event manager
+	m := &mockEventManager{readyChan: make(chan struct{})}
+
+	// subscribe cache to event manager
+	c.Subscribe(m)
+
+	// assert using cache before it's ready prints a warning
 	contracts, err := c.DownloadContracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -84,10 +108,8 @@ func TestWorkerCache(t *testing.T) {
 		t.Fatal("expected error message to contain 'cache is not ready yet', got", lines[0].Message)
 	}
 
-	// initialize the cache
-	if err := c.Initialize(context.Background(), ""); err != nil {
-		t.Fatal(err)
-	}
+	// close the ready channel
+	close(m.readyChan)
 
 	// fetch contracts & gouging params so they're cached
 	_, err = c.DownloadContracts(context.Background())
