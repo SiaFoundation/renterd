@@ -8,15 +8,15 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.4
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
-	github.com/klauspost/reedsolomon v1.12.2
-	github.com/minio/minio-go/v7 v7.0.73
+	github.com/klauspost/reedsolomon v1.12.3
+	github.com/minio/minio-go/v7 v7.0.74
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
-	go.sia.tech/core v0.3.0
-	go.sia.tech/coreutils v0.1.2
+	go.sia.tech/core v0.4.0
+	go.sia.tech/coreutils v0.2.0
 	go.sia.tech/gofakes3 v0.0.4
-	go.sia.tech/hostd v1.1.1-beta.1.0.20240618072747-b3f430b4d272
+	go.sia.tech/hostd v1.1.2
 	go.sia.tech/jape v0.12.0
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/siad v1.5.10-0.20230228235644-3059c0b930ca
@@ -28,15 +28,15 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/driver/sqlite v1.5.6
-	gorm.io/gorm v1.25.10
+	gorm.io/gorm v1.25.11
 	lukechampine.com/frand v1.4.2
 	moul.io/zapgorm2 v1.3.0
 )
 
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.54.6 // indirect
-	github.com/cloudflare/cloudflare-go v0.97.0 // indirect
+	github.com/aws/aws-sdk-go v1.54.16 // indirect
+	github.com/cloudflare/cloudflare-go v0.99.0 // indirect
 	github.com/dchest/threefish v0.0.0-20120919164726-3ecf4c494abf // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
