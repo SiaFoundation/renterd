@@ -1249,7 +1249,14 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 }
 
 func (w *worker) eventHandlerPOST(jc jape.Context) {
-	w.eventManager.Handler()(jc)
+	var event webhooks.Event
+	if jc.Decode(&event) != nil {
+		return
+	} else if event.Event == webhooks.WebhookEventPing {
+		jc.ResponseWriter.WriteHeader(http.StatusOK)
+	} else {
+		w.eventManager.HandleEvent(event)
+	}
 }
 
 func (w *worker) stateHandlerGET(jc jape.Context) {

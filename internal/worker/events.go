@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -17,7 +15,7 @@ import (
 type (
 	EventManager interface {
 		AddSubscriber(id string, s EventSubscriber) (chan struct{}, error)
-		Handler() jape.Handler
+		HandleEvent(event webhooks.Event)
 		Run(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error
 		Shutdown(context.Context) error
 	}
@@ -79,33 +77,21 @@ func (e *eventManager) AddSubscriber(id string, s EventSubscriber) (chan struct{
 	return readyChan, nil
 }
 
-func (e *eventManager) Handler() jape.Handler {
-	return func(jc jape.Context) {
-		// decode the event
-		var event webhooks.Event
-		if jc.Decode(&event) != nil {
-			return
-		} else if event.Event == webhooks.WebhookEventPing {
-			jc.ResponseWriter.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// handle the event
-		for id, s := range e.subs {
-			if err := s.HandleEvent(event); err != nil {
-				e.logger.Errorw("failed to handle event",
-					zap.Error(err),
-					zap.String("subscriber", id),
-					zap.String("module", event.Module),
-					zap.String("event", event.Event),
-				)
-			} else {
-				e.logger.Debugw("handled event",
-					zap.String("subscriber", id),
-					zap.String("module", event.Module),
-					zap.String("event", event.Event),
-				)
-			}
+func (e *eventManager) HandleEvent(event webhooks.Event) {
+	for id, s := range e.subs {
+		if err := s.HandleEvent(event); err != nil {
+			e.logger.Errorw("failed to handle event",
+				zap.Error(err),
+				zap.String("subscriber", id),
+				zap.String("module", event.Module),
+				zap.String("event", event.Event),
+			)
+		} else {
+			e.logger.Debugw("handled event",
+				zap.String("subscriber", id),
+				zap.String("module", event.Module),
+				zap.String("event", event.Event),
+			)
 		}
 	}
 }

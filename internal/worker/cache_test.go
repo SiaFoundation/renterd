@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/webhooks"
@@ -36,9 +35,7 @@ func (m *mockEventManager) AddSubscriber(id string, s EventSubscriber) (chan str
 	return m.readyChan, nil
 }
 
-func (m *mockEventManager) Handler() jape.Handler {
-	return nil
-}
+func (m *mockEventManager) HandleEvent(event webhooks.Event) {}
 
 func (m *mockEventManager) Run(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error {
 	return nil

@@ -106,7 +106,17 @@ func TestEventManager(t *testing.T) {
 	}
 
 	// setup a server
-	mux := jape.Mux(map[string]jape.Handler{"POST /event": e.Handler()})
+	mux := jape.Mux(map[string]jape.Handler{"POST /event": func(jc jape.Context) {
+		var event webhooks.Event
+		if jc.Decode(&event) != nil {
+			return
+		} else if event.Event == webhooks.WebhookEventPing {
+			jc.ResponseWriter.WriteHeader(http.StatusOK)
+			return
+		} else {
+			e.HandleEvent(event)
+		}
+	}})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
