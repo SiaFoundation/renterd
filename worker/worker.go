@@ -1248,6 +1248,10 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 	jc.Encode(account)
 }
 
+func (w *worker) eventHandlerPOST(jc jape.Context) {
+	w.eventManager.Handler()(jc)
+}
+
 func (w *worker) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.WorkerStateResponse{
 		ID:        w.id,
@@ -1318,7 +1322,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"POST   /events": w.eventManager.Handler(),
+		"POST   /event": w.eventHandlerPOST,
 
 		"GET /memory": w.memoryGET,
 
@@ -1352,7 +1356,7 @@ func (w *worker) Handler() http.Handler {
 func (w *worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
 	// run event manager in a goroutine
 	go func() {
-		eventsURL := fmt.Sprintf("%s/events", apiURL)
+		eventsURL := fmt.Sprintf("%s/event", apiURL)
 		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
 		if err := w.eventManager.Run(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
 			w.logger.Errorw("failed to run event manager", zap.Error(err))

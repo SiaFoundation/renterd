@@ -106,12 +106,12 @@ func TestEventManager(t *testing.T) {
 	}
 
 	// setup a server
-	mux := jape.Mux(map[string]jape.Handler{"POST /events": e.Handler()})
+	mux := jape.Mux(map[string]jape.Handler{"POST /event": e.Handler()})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	// run event manager
-	eventsURL := fmt.Sprintf("http://%v/events", srv.Listener.Addr().String())
+	eventsURL := fmt.Sprintf("http://%v/event", srv.Listener.Addr().String())
 	go func() {
 		if err := e.Run(context.Background(), eventsURL); err != nil {
 			t.Error(err)
