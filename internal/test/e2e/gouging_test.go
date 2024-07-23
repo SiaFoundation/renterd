@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -72,6 +73,7 @@ func TestGouging(t *testing.T) {
 	if err := b.UpdateSetting(context.Background(), api.SettingGouging, gs); err != nil {
 		t.Fatal(err)
 	}
+
 	// fetch current contract set
 	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: cfg.Set})
 	tt.OK(err)
@@ -132,6 +134,60 @@ func TestGouging(t *testing.T) {
 		_, err := w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{})
 		return err
 	})
+}
+
+// TestAccountFunding is a regression tests that verify we can fund an account
+// even if the host is considered gouging, this protects us from not being able
+// to download from certain critical hosts when we migrate away from them.
+func TestAccountFunding(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// run without autopilot
+	opts := clusterOptsDefault
+	opts.skipRunningAutopilot = true
+	opts.logger = newTestLoggerCustom(zapcore.ErrorLevel)
+
+	// create a new test cluster
+	cluster := newTestCluster(t, opts)
+	defer cluster.Shutdown()
+
+	// convenience variables
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// scan the host
+	_, err = w.RHPScan(context.Background(), h.PublicKey, h.NetAddress, 10*time.Second)
+	tt.OK(err)
+
+	// manually form a contract with the host
+	cs, _ := b.ConsensusState(context.Background())
+	wallet, _ := b.Wallet(context.Background())
+	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	tt.OK(err)
+	c, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	tt.OK(err)
+
+	// fund the account
+	tt.OK(w.RHPFund(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1).Div64(2)))
+
+	// update host so it's gouging
+	settings := hosts[0].settings.Settings()
+	settings.StoragePrice = types.Siacoins(1)
+	tt.OK(hosts[0].UpdateSettings(settings))
+
+	// ensure the price table expires so the worker is forced to fetch it
+	time.Sleep(defaultHostSettings.PriceTableValidity)
+
+	// fund the account again
+	tt.OK(w.RHPFund(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1)))
 }
 
 func TestHostMinVersion(t *testing.T) {
