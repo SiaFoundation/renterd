@@ -228,7 +228,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
 		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			// fetch pricetable
+			// fetch pricetable directly to bypass the gouging check
 			pt, err := h.priceTables.fetch(ctx, h.hk, rev)
 			if err != nil {
 				return err
@@ -277,14 +277,18 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 }
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	// NOTE: we call 'fetch' here instead of h.priceTable to bypass the gouging
-	// check on the pricetable since we assume a cost of 1 hasting anyway. That
-	// way syncing the account balance doesn't neeedlessly fail on hosts that we
-	// just want to download from and therefore need to sync the account with.
+	// fetch pricetable directly to bypass the gouging check
 	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return err
+	}
+
+	// check only the unused defaults
+	gc, err := GougingCheckerFromContext(ctx, false)
+	if err != nil {
+		return err
+	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
+		return fmt.Errorf("%w: %v", errPriceTableGouging, err)
 	}
 
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
