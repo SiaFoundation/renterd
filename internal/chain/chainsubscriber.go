@@ -43,6 +43,10 @@ type (
 		ProcessChainUpdate(ctx context.Context, applyFn ApplyChainUpdateFn) error
 	}
 
+	Wallet interface {
+		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
+	}
+
 	ApplyChainUpdateFn = func(ChainUpdateTx) error
 
 	ChainSubscriber struct {
@@ -52,7 +56,7 @@ type (
 		logger      *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
-		walletAddress      types.Address
+		wallet             Wallet
 
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelCauseFunc
@@ -81,7 +85,7 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be shut down by calling the Close method.
-func NewChainSubscriber(whm *webhooks.Manager, cm *chain.Manager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
+func NewChainSubscriber(whm *webhooks.Manager, cm *chain.Manager, cs ChainStore, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
 	if announcementMaxAge == 0 {
 		return nil, errors.New("announcementMaxAge must be non-zero")
 	}
@@ -95,7 +99,7 @@ func NewChainSubscriber(whm *webhooks.Manager, cm *chain.Manager, cs ChainStore,
 		logger:      logger.Sugar().Named("chainsubscriber"),
 
 		announcementMaxAge: announcementMaxAge,
-		walletAddress:      walletAddress,
+		wallet:             w,
 
 		shutdownCtx:       ctx,
 		shutdownCtxCancel: cancel,
@@ -297,7 +301,7 @@ func (s *ChainSubscriber) sync() error {
 func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, tip types.Block, _ error) {
 	if err := s.cs.ProcessChainUpdate(ctx, func(tx ChainUpdateTx) error {
 		// process wallet updates
-		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
+		if err := s.wallet.UpdateChainState(tx, crus, caus); err != nil {
 			return fmt.Errorf("failed to process wallet updates: %w", err)
 		}
 
