@@ -132,7 +132,7 @@ var (
 		},
 		Autopilot: config.Autopilot{
 			Enabled:                        true,
-			RevisionSubmissionBuffer:       144,
+			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
 			AccountsRefillInterval:         defaultAccountRefillInterval,
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
