@@ -233,9 +233,7 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, contract
 		rerr = wrapErr(fmt.Errorf("not refilling account since contract is too close to the proof window to be revised (%v > %v)", bh+revisionSubmissionBuffer, contract.WindowStart),
 			"accountID", account.ID,
 			"hostKey", contract.HostKey,
-			"bh", bh,
-			"revisionSubmissionBuffer", revisionSubmissionBuffer,
-			"contractWindowStart", contract.WindowStart,
+			"blockHeight", bh,
 		)
 		return
 	}
