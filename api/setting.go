@@ -101,8 +101,8 @@ type (
 		// pinned settings are updated based on the exchange rate at the time.
 		Threshold float64 `json:"threshold"`
 
-		// Autopilots contains the pinned settings for every autopilot.
-		Autopilots map[string]AutopilotPins `json:"autopilots,omitempty"`
+		// AutopilotPins contains the pinned settings for every autopilot.
+		AutopilotPins map[string]AutopilotPins `json:"autopilotPins,omitempty"`
 
 		// GougingSettingsPins contains the pinned settings for the gouging
 		// settings.
@@ -119,7 +119,7 @@ type (
 	// pinned.
 	GougingSettingsPins struct {
 		MaxDownload Pin `json:"maxDownload"`
-		MaxRPCPrice Pin `json:"maxRPCPrice"`
+		MaxRPC      Pin `json:"maxRPC"`
 		MaxStorage  Pin `json:"maxStorage"`
 		MaxUpload   Pin `json:"maxUpload"`
 	}

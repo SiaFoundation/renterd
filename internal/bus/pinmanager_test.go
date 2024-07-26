@@ -104,7 +104,7 @@ func (ms *mockStore) gougingSettings() api.GougingSettings {
 	return gs
 }
 
-func (ms *mockStore) updatPinnedSettings(pps api.PricePinSettings) {
+func (ms *mockStore) updatePinnedSettings(pps api.PricePinSettings) {
 	b, _ := json.Marshal(pps)
 	ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
 	time.Sleep(2 * testUpdateInterval)
@@ -175,7 +175,7 @@ func TestPinManager(t *testing.T) {
 	pps.Currency = "usd"
 	pps.Threshold = 0.5
 	pps.ForexEndpointURL = forex.s.URL
-	ms.updatPinnedSettings(pps)
+	ms.updatePinnedSettings(pps)
 
 	// assert price manager is running now
 	if cnt := len(rates()); cnt < 1 {
@@ -188,10 +188,10 @@ func TestPinManager(t *testing.T) {
 
 	// configure all pins but disable them for now
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MaxRPCPrice = api.Pin{Value: 3, Pinned: false}
+	pps.GougingSettingsPins.MaxRPC = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
-	ms.updatPinnedSettings(pps)
+	ms.updatePinnedSettings(pps)
 
 	// assert gouging settings are unchanged
 	if gss := ms.gougingSettings(); !reflect.DeepEqual(gs, gss) {
@@ -200,24 +200,24 @@ func TestPinManager(t *testing.T) {
 
 	// enable the max download pin, with the threshold at 0.5 it should remain unchanged
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	ms.updatPinnedSettings(pps)
+	ms.updatePinnedSettings(pps)
 	if gss := ms.gougingSettings(); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
 	// lower the threshold, gouging settings should be updated
 	pps.Threshold = 0.05
-	ms.updatPinnedSettings(pps)
+	ms.updatePinnedSettings(pps)
 	if gss := ms.gougingSettings(); gss.MaxContractPrice.Equals(gs.MaxDownloadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
 
 	// enable the rest of the pins
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	pps.GougingSettingsPins.MaxRPCPrice.Pinned = true
+	pps.GougingSettingsPins.MaxRPC.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
-	ms.updatPinnedSettings(pps)
+	ms.updatePinnedSettings(pps)
 
 	// assert they're all updated
 	if gss := ms.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
@@ -240,8 +240,8 @@ func TestPinManager(t *testing.T) {
 			Value:  2,
 		},
 	}
-	pps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
-	ms.updatPinnedSettings(pps)
+	pps.AutopilotPins = map[string]api.AutopilotPins{testAutopilotID: pins}
+	ms.updatePinnedSettings(pps)
 
 	// assert autopilot was not updated
 	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -250,8 +250,8 @@ func TestPinManager(t *testing.T) {
 
 	// enable the pin
 	pins.Allowance.Pinned = true
-	pps.Autopilots[testAutopilotID] = pins
-	ms.updatPinnedSettings(pps)
+	pps.AutopilotPins[testAutopilotID] = pins
+	ms.updatePinnedSettings(pps)
 
 	// assert autopilot was updated
 	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {

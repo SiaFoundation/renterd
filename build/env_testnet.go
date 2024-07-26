@@ -40,7 +40,9 @@ var (
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
 	DefaultPricePinSettings = api.PricePinSettings{
-		Enabled: false,
+		Enabled:          false,
+		Currency:         "usd",
+		ForexEndpointURL: "https://api.siascan.com/exchange-rate/siacoin",
 	}
 
 	// DefaultUploadPackingSettings define the default upload packing settings

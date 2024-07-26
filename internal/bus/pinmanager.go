@@ -272,8 +272,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	}
 
 	// update max RPC price
-	if pins.MaxRPCPrice.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxRPCPrice.Value), rate)
+	if pins.MaxRPC.IsPinned() {
+		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxRPC.Value), rate)
 		if err != nil {
 			pm.logger.Warnw("failed to convert max RPC price to currency", zap.Error(err))
 		} else if !gs.MaxRPCPrice.Equals(update) {
@@ -387,7 +387,7 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	}
 
 	// update autopilot settings
-	for ap, pins := range settings.Autopilots {
+	for ap, pins := range settings.AutopilotPins {
 		err = pm.updateAutopilotSettings(ctx, ap, pins, update)
 		if err != nil {
 			pm.logger.Warnw("failed to update autopilot settings", zap.String("autopilot", ap), zap.Error(err))
