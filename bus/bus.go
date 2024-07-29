@@ -402,8 +402,8 @@ func (b *bus) Handler() http.Handler {
 }
 
 // Setup starts the pin manager.
-func (b *bus) Setup(ctx context.Context) error {
-	return b.pinMgr.Run(ctx)
+func (b *bus) Setup() {
+	b.pinMgr.Run()
 }
 
 // Shutdown shuts down the bus.
@@ -2602,7 +2602,7 @@ func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainSto
 		startTime: time.Now(),
 	}
 
-	b.pinMgr = ibus.NewPinManager(whm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, b.logger.Desugar())
+	b.pinMgr = ibus.NewPinManager(b.alerts, whm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, b.logger.Desugar())
 
 	// ensure we don't hang indefinitely
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
