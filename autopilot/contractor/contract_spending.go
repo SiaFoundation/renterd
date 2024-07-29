@@ -1,6 +1,8 @@
 package contractor
 
 import (
+	"context"
+
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -27,7 +29,12 @@ func currentPeriodSpending(contracts []api.ContractMetadata, currentPeriod uint6
 	return totalAllocated
 }
 
-func remainingFunds(contracts []api.ContractMetadata, state *MaintenanceState) types.Currency {
+func remainingAllowance(ctx context.Context, bus Bus, state *MaintenanceState) (types.Currency, error) {
+	contracts, err := bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return types.Currency{}, err
+	}
+
 	// find out how much we spent in the current period
 	spent := currentPeriodSpending(contracts, state.Period())
 
@@ -36,5 +43,5 @@ func remainingFunds(contracts []api.ContractMetadata, state *MaintenanceState) t
 	if state.Allowance().Cmp(spent) > 0 {
 		remaining = state.Allowance().Sub(spent)
 	}
-	return remaining
+	return remaining, nil
 }

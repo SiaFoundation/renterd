@@ -138,19 +138,10 @@ func (c AutopilotConfig) Validate() error {
 	return nil
 }
 
-func (c ContractsConfig) IsContractInSet(contract Contract) bool {
-	for _, set := range contract.ContractSets {
-		if set == c.Set {
-			return true
-		}
-	}
-	return false
-}
-
 func (c ContractsConfig) SortContractsForMaintenance(contracts []Contract) {
 	sort.SliceStable(contracts, func(i, j int) bool {
-		iInSet := c.IsContractInSet(contracts[i])
-		jInSet := c.IsContractInSet(contracts[j])
+		iInSet := contracts[i].InSet(c.Set)
+		jInSet := contracts[j].InSet(c.Set)
 		if iInSet != jInSet {
 			return iInSet
 		}
