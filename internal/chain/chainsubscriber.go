@@ -485,7 +485,7 @@ func (s *ChainSubscriber) updateKnownContracts(fcid types.FileContractID, known 
 }
 
 func IsSynced(b types.Block) bool {
-	return time.Since(b.Timestamp) <= time.Hour
+	return time.Since(b.Timestamp) <= 3*time.Hour
 }
 
 func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) contractUpdate {

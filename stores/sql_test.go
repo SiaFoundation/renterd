@@ -180,7 +180,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 }
 
 func (s *testSQLStore) DB() *isql.DB {
-	switch db := s.bMain.(type) {
+	switch db := s.db.(type) {
 	case *sqlite.MainDatabase:
 		return db.DB()
 	case *mysql.MainDatabase:
@@ -192,7 +192,7 @@ func (s *testSQLStore) DB() *isql.DB {
 }
 
 func (s *testSQLStore) DBMetrics() *isql.DB {
-	switch db := s.bMetrics.(type) {
+	switch db := s.dbMetrics.(type) {
 	case *sqlite.MetricsDatabase:
 		return db.DB()
 	case *mysql.MetricsDatabase:
@@ -212,7 +212,7 @@ func (s *testSQLStore) Close() error {
 
 func (s *testSQLStore) DefaultBucketID() uint {
 	var b dbBucket
-	if err := s.db.
+	if err := s.gormDB.
 		Model(&dbBucket{}).
 		Where("name = ?", api.DefaultBucketName).
 		Take(&b).
@@ -297,7 +297,7 @@ func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID
 }
 
 func (s *SQLStore) contractsCount() (cnt int64, err error) {
-	err = s.db.
+	err = s.gormDB.
 		Model(&dbContract{}).
 		Count(&cnt).
 		Error
@@ -305,7 +305,7 @@ func (s *SQLStore) contractsCount() (cnt int64, err error) {
 }
 
 func (s *SQLStore) overrideSlabHealth(objectID string, health float64) (err error) {
-	err = s.db.Exec(fmt.Sprintf(`
+	err = s.gormDB.Exec(fmt.Sprintf(`
 	UPDATE slabs SET health = %v WHERE id IN (
 		SELECT * FROM (
 			SELECT sla.id
@@ -371,16 +371,16 @@ func TestQueryPlan(t *testing.T) {
 	}
 
 	for _, query := range queries {
-		if isSQLite(ss.db) {
+		if isSQLite(ss.gormDB) {
 			var explain sqliteQueryPlan
-			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error; err != nil {
+			if err := ss.gormDB.Raw(fmt.Sprintf("EXPLAIN QUERY PLAN %s;", query)).Scan(&explain).Error; err != nil {
 				t.Fatal(err)
 			} else if !explain.usesIndex() {
 				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
 			}
 		} else {
 			var explain mysqlQueryPlan
-			if err := ss.db.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&explain).Error; err != nil {
+			if err := ss.gormDB.Raw(fmt.Sprintf("EXPLAIN %s;", query)).Scan(&explain).Error; err != nil {
 				t.Fatal(err)
 			} else if !explain.usesIndex() {
 				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)

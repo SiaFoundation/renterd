@@ -228,10 +228,18 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
 		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			// fetch pricetable
-			pt, err := h.priceTable(ctx, rev)
+			// fetch pricetable directly to bypass the gouging check
+			pt, err := h.priceTables.fetch(ctx, h.hk, rev)
 			if err != nil {
 				return err
+			}
+
+			// check only the unused defaults
+			gc, err := GougingCheckerFromContext(ctx, false)
+			if err != nil {
+				return err
+			} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
+				return fmt.Errorf("%w: %v", errPriceTableGouging, err)
 			}
 
 			// check whether we have money left in the contract
@@ -269,10 +277,18 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 }
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
+	// fetch pricetable directly to bypass the gouging check
+	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return err
+	}
+
+	// check only the unused defaults
+	gc, err := GougingCheckerFromContext(ctx, false)
+	if err != nil {
+		return err
+	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
+		return fmt.Errorf("%w: %v", errPriceTableGouging, err)
 	}
 
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {

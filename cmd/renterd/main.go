@@ -132,7 +132,7 @@ var (
 		},
 		Autopilot: config.Autopilot{
 			Enabled:                        true,
-			RevisionSubmissionBuffer:       144,
+			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
 			AccountsRefillInterval:         defaultAccountRefillInterval,
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
@@ -520,7 +520,11 @@ func main() {
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		setupBusFn = setupFn
+		setupBusFn = func(_ context.Context) error {
+			setupFn()
+			return nil
+		}
+
 		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
 			fn:   shutdownFn,

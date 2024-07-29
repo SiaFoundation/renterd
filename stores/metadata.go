@@ -423,7 +423,7 @@ func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
 }
 
 func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		b, err = tx.Bucket(ctx, bucket)
 		return
 	})
@@ -431,25 +431,25 @@ func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err
 }
 
 func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.CreateBucket(ctx, bucket, policy)
 	})
 }
 
 func (s *SQLStore) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateBucketPolicy(ctx, bucket, policy)
 	})
 }
 
 func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.DeleteBucket(ctx, bucket)
 	})
 }
 
 func (s *SQLStore) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		buckets, err = tx.ListBuckets(ctx)
 		return
 	})
@@ -460,7 +460,7 @@ func (s *SQLStore) ListBuckets(ctx context.Context) (buckets []api.Bucket, err e
 // reduce locking and make sure all results are consistent, everything is done
 // within a single transaction.
 func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (resp api.ObjectsStatsResponse, _ error) {
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		resp, err = tx.ObjectsStats(ctx, opts)
 		return
 	})
@@ -470,7 +470,7 @@ func (s *SQLStore) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) 
 func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 	var err error
 	var fileNameToContractSet map[string]string
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		fileNameToContractSet, err = tx.SlabBuffers(ctx)
 		return err
 	})
@@ -488,7 +488,7 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (_ api.ContractMetadata, err error) {
 	var contract api.ContractMetadata
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		contract, err = tx.InsertContract(ctx, c, contractPrice, totalCost, startHeight, types.FileContractID{}, state)
 		return err
 	})
@@ -501,7 +501,7 @@ func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, co
 
 func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	var contracts []api.ContractMetadata
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		contracts, err = tx.Contracts(ctx, opts)
 		return
 	})
@@ -513,7 +513,7 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
 func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		renewed, err = tx.RenewContract(ctx, c, contractPrice, totalCost, startHeight, renewedFrom, state)
 		return err
 	})
@@ -524,7 +524,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 }
 
 func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
 		return err
 	})
@@ -549,7 +549,7 @@ func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.Fil
 
 		// archive the contract but don't interrupt the process if one contract
 		// fails
-		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 			return tx.ArchiveContract(ctx, fcid, reason)
 		}); err != nil {
 			errs = append(errs, fmt.Sprintf("%v: %v", fcid, err))
@@ -575,7 +575,7 @@ func (s *SQLStore) ArchiveAllContracts(ctx context.Context, reason string) error
 }
 
 func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (cm api.ContractMetadata, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		cm, err = tx.Contract(ctx, id)
 		return err
 	})
@@ -583,7 +583,7 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (cm ap
 }
 
 func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		roots, err = tx.ContractRoots(ctx, id)
 		return err
 	})
@@ -591,7 +591,7 @@ func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (
 }
 
 func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		sets, err = tx.ContractSets(ctx)
 		return err
 	})
@@ -599,7 +599,7 @@ func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) 
 }
 
 func (s *SQLStore) ContractSizes(ctx context.Context) (sizes map[types.FileContractID]api.ContractSize, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		sizes, err = tx.ContractSizes(ctx)
 		return err
 	})
@@ -607,7 +607,7 @@ func (s *SQLStore) ContractSizes(ctx context.Context) (sizes map[types.FileContr
 }
 
 func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (cs api.ContractSize, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		cs, err = tx.ContractSize(ctx, id)
 		return
 	})
@@ -691,13 +691,13 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 }
 
 func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.RemoveContractSet(ctx, name)
 	})
 }
 
 func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (cm api.ContractMetadata, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		cm, err = tx.RenewedContract(ctx, renewedFrom)
 		return err
 	})
@@ -705,7 +705,7 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 }
 
 func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) (objects []api.ObjectMetadata, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		objects, err = tx.SearchObjects(ctx, bucket, substring, offset, limit)
 		return err
 	})
@@ -713,7 +713,7 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 }
 
 func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		metadata, hasMore, err = tx.ObjectEntries(ctx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
 		return err
 	})
@@ -850,7 +850,7 @@ func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
 		dirID, err := tx.MakeDirsForPath(ctx, keyNew)
 		if err != nil {
@@ -868,7 +868,7 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 }
 
 func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
-	return s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
 		dirID, err := tx.MakeDirsForPath(ctx, prefixNew)
 		if err != nil {
@@ -891,7 +891,7 @@ func (s *SQLStore) AddPartialSlab(ctx context.Context, data []byte, minShards, t
 }
 
 func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (om api.ObjectMetadata, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		if srcBucket != dstBucket || srcPath != dstPath {
 			_, err = tx.DeleteObject(ctx, dstBucket, dstPath)
 			if err != nil {
@@ -905,7 +905,7 @@ func (s *SQLStore) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath
 }
 
 func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (deletedSectors int, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		deletedSectors, err = tx.DeleteHostSector(ctx, hk, root)
 		return err
 	})
@@ -925,7 +925,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 
 	// UpdateObject is ACID.
 	var prune bool
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// Try to delete. We want to get rid of the object and its slices if it
 		// exists.
 		//
@@ -966,7 +966,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 
 func (s *SQLStore) RemoveObject(ctx context.Context, bucket, path string) error {
 	var prune bool
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		prune, err = tx.DeleteObject(ctx, bucket, path)
 		return
 	})
@@ -986,7 +986,7 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 		start := time.Now()
 		var done bool
 		var duration time.Duration
-		if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 			deleted, err := tx.DeleteObjects(ctx, bucket, prefix, objectDeleteBatchSizes[batchSizeIdx])
 			if err != nil {
 				return err
@@ -1014,22 +1014,22 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 }
 
 func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		slab, err = tx.Slab(ctx, key)
 		return err
 	})
 	return
 }
 
-func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
+func (s *SQLStore) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string) error {
 	// sanity check the shards don't contain an empty root
-	for _, s := range s.Shards {
-		if s.Root == (types.Hash256{}) {
+	for _, shard := range slab.Shards {
+		if shard.Root == (types.Hash256{}) {
 			return errors.New("shard root can never be the empty root")
 		}
 	}
 	// Sanity check input.
-	for i, shard := range s.Shards {
+	for i, shard := range slab.Shards {
 		// Verify that all hosts have a contract.
 		if len(shard.Contracts) == 0 {
 			return fmt.Errorf("missing hosts for slab %d", i)
@@ -1037,8 +1037,8 @@ func (ss *SQLStore) UpdateSlab(ctx context.Context, s object.Slab, contractSet s
 	}
 
 	// Update slab.
-	return ss.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateSlab(ctx, s, contractSet, s.Contracts())
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateSlab(ctx, slab, contractSet, slab.Contracts())
 	})
 }
 
@@ -1046,7 +1046,7 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	for {
 		// update slabs
 		var rowsAffected int64
-		err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 			rowsAffected, err = tx.UpdateSlabHealth(ctx, refreshHealthBatchSize, refreshHealthMinHealthValidity, refreshHealthMaxHealthValidity)
 			return
 		})
@@ -1200,7 +1200,7 @@ func (s *SQLStore) objectHydrate(tx *gorm.DB, bucket, path string, obj rawObject
 
 // ObjectMetadata returns an object's metadata
 func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj api.Object, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		obj, err = tx.ObjectMetadata(ctx, bucket, path)
 		return err
 	})
@@ -1402,7 +1402,7 @@ func (s *SQLStore) pruneSlabsLoop() {
 		pruneSuccess := true
 		for {
 			var deleted int64
-			err := s.bMain.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
+			err := s.db.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
 				var err error
 				deleted, err = dt.PruneSlabs(s.shutdownCtx, slabPruningBatchSize)
 				return err
@@ -1430,7 +1430,7 @@ func (s *SQLStore) pruneSlabsLoop() {
 		}
 
 		// prune dirs
-		err := s.bMain.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
+		err := s.db.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
 			return dt.PruneEmptydirs(s.shutdownCtx)
 		})
 		if err != nil {
@@ -1469,7 +1469,7 @@ func (s *SQLStore) triggerSlabPruning() {
 func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID) error {
 	for {
 		var affected int64
-		err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 			affected, err = tx.InvalidateSlabHealthByFCID(ctx, fcids, refreshHealthBatchSize)
 			return
 		})
@@ -1486,7 +1486,7 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 // a delimiter for now (see backend.go) but it would be interesting to have
 // arbitrary 'delim' support in ListObjects.
 func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
 		return err
 	})

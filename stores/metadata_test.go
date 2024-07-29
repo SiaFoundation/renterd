@@ -168,11 +168,11 @@ func TestObjectBasic(t *testing.T) {
 
 	// delete a sector
 	var sectors []dbSector
-	if err := ss.db.Find(&sectors).Error; err != nil {
+	if err := ss.gormDB.Find(&sectors).Error; err != nil {
 		t.Fatal(err)
 	} else if len(sectors) != 2 {
 		t.Fatal("unexpected number of sectors")
-	} else if tx := ss.db.Delete(sectors[0]); tx.Error != nil || tx.RowsAffected != 1 {
+	} else if tx := ss.gormDB.Delete(sectors[0]); tx.Error != nil || tx.RowsAffected != 1 {
 		t.Fatal("unexpected number of sectors deleted", tx.Error, tx.RowsAffected)
 	}
 
@@ -261,7 +261,7 @@ func TestObjectMetadata(t *testing.T) {
 
 	// assert metadata CASCADE on object delete
 	var cnt int64
-	if err := ss.db.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
+	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
 		t.Fatal(err)
 	} else if cnt != 2 {
 		t.Fatal("unexpected number of metadata entries", cnt)
@@ -273,7 +273,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert records are gone
-	if err := ss.db.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
+	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
 		t.Fatal(err)
 	} else if cnt != 0 {
 		t.Fatal("unexpected number of metadata entries", cnt)
@@ -462,7 +462,7 @@ func TestSQLContractStore(t *testing.T) {
 	// Make sure the db was cleaned up properly through the CASCADE delete.
 	tableCountCheck := func(table interface{}, tblCount int64) error {
 		var count int64
-		if err := ss.db.Model(table).Count(&count).Error; err != nil {
+		if err := ss.gormDB.Model(table).Count(&count).Error; err != nil {
 			return err
 		}
 		if count != tblCount {
@@ -476,7 +476,7 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Check join table count as well.
 	var count int64
-	if err := ss.db.Table("contract_sectors").Count(&count).Error; err != nil {
+	if err := ss.gormDB.Table("contract_sectors").Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -741,7 +741,7 @@ func TestRenewedContract(t *testing.T) {
 
 	// Archived contract should exist.
 	var ac dbArchivedContract
-	err = ss.db.Model(&dbArchivedContract{}).
+	err = ss.gormDB.Model(&dbArchivedContract{}).
 		Where("fcid", fileContractID(fcid1)).
 		Take(&ac).
 		Error
@@ -905,7 +905,7 @@ func TestArchiveContracts(t *testing.T) {
 	ffcids[0] = fileContractID(fcids[1])
 	ffcids[1] = fileContractID(fcids[2])
 	var acs []dbArchivedContract
-	err = ss.db.Model(&dbArchivedContract{}).
+	err = ss.gormDB.Model(&dbArchivedContract{}).
 		Where("fcid IN (?)", ffcids).
 		Find(&acs).
 		Error
@@ -1243,7 +1243,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	countCheck := func(objCount, sliceCount, slabCount, sectorCount int64) error {
 		tableCountCheck := func(table interface{}, tblCount int64) error {
 			var count int64
-			if err := ss.db.Model(table).Count(&count).Error; err != nil {
+			if err := ss.gormDB.Model(table).Count(&count).Error; err != nil {
 				return err
 			}
 			if count != tblCount {
@@ -1486,7 +1486,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// update health of objects to match the overridden health of the slabs
-	if err := updateAllObjectsHealth(ss.db); err != nil {
+	if err := updateAllObjectsHealth(ss.gormDB); err != nil {
 		t.Fatal()
 	}
 
@@ -1921,7 +1921,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.db.Table("contract_sectors").Where("TRUE").Delete(&dbContractSector{}).Error; err != nil {
+	if err := ss.gormDB.Table("contract_sectors").Where("TRUE").Delete(&dbContractSector{}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -2060,7 +2060,7 @@ func TestContractSectors(t *testing.T) {
 
 	// Check the join table. Should be empty.
 	var css []dbContractSector
-	if err := ss.db.Find(&css).Error; err != nil {
+	if err := ss.gormDB.Find(&css).Error; err != nil {
 		t.Fatal(err)
 	}
 	if len(css) != 0 {
@@ -2084,10 +2084,10 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Delete the sector.
-	if err := ss.db.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
+	if err := ss.gormDB.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.db.Find(&css).Error; err != nil {
+	if err := ss.gormDB.Find(&css).Error; err != nil {
 		t.Fatal(err)
 	}
 	if len(css) != 0 {
@@ -2144,7 +2144,7 @@ func TestUpdateSlab(t *testing.T) {
 	// helper to fetch a slab from the database
 	fetchSlab := func() (slab dbSlab) {
 		t.Helper()
-		if err = ss.db.
+		if err = ss.gormDB.
 			Where(&dbSlab{Key: key}).
 			Preload("Shards.Contracts").
 			Take(&slab).
@@ -2227,7 +2227,7 @@ func TestUpdateSlab(t *testing.T) {
 
 	// assert there's still only one entry in the dbslab table
 	var cnt int64
-	if err := ss.db.Model(&dbSlab{}).Count(&cnt).Error; err != nil {
+	if err := ss.gormDB.Model(&dbSlab{}).Count(&cnt).Error; err != nil {
 		t.Fatal(err)
 	} else if cnt != 1 {
 		t.Fatalf("unexpected number of entries in dbslab, %v != 1", cnt)
@@ -2262,7 +2262,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	var s dbSlab
-	if err := ss.db.Where(&dbSlab{Key: key}).
+	if err := ss.gormDB.Where(&dbSlab{Key: key}).
 		Joins("DBContractSet").
 		Preload("Shards").
 		Take(&s).
@@ -2497,7 +2497,7 @@ func TestRenameObjects(t *testing.T) {
 	}
 	var directories []dbDirectory
 	test.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.db.Find(&directories).Error; err != nil {
+		if err := ss.gormDB.Find(&directories).Error; err != nil {
 			return err
 		} else if len(directories) != len(expectedDirs) {
 			return fmt.Errorf("unexpected number of directories, %v != %v", len(directories), len(expectedDirs))
@@ -2565,7 +2565,7 @@ func TestObjectsStats(t *testing.T) {
 	// Get all entries in contract_sectors and store them again with a different
 	// contract id. This should cause the uploaded size to double.
 	var contractSectors []dbContractSector
-	err = ss.db.Find(&contractSectors).Error
+	err = ss.gormDB.Find(&contractSectors).Error
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2717,7 +2717,7 @@ func TestPartialSlab(t *testing.T) {
 
 	var buffer bufferedSlab
 	sk, _ := slabs[0].Key.MarshalBinary()
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
+	if err := ss.gormDB.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	if buffer.Filename == "" {
@@ -2779,7 +2779,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	buffer = bufferedSlab{}
 	sk, _ = slabs[0].Key.MarshalBinary()
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
+	if err := ss.gormDB.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	assertBuffer(buffer1Name, 4194303, false, false)
@@ -2820,13 +2820,13 @@ func TestPartialSlab(t *testing.T) {
 	}
 	buffer = bufferedSlab{}
 	sk, _ = slabs[0].Key.MarshalBinary()
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
+	if err := ss.gormDB.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
 	buffer = bufferedSlab{}
 	sk, _ = slabs[1].Key.MarshalBinary()
-	if err := ss.db.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
+	if err := ss.gormDB.Joins("DBSlab").Take(&buffer, "DBSlab.key = ?", secretKey(sk)).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer2Name := buffer.Filename
@@ -2854,11 +2854,11 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer2Name, 1, false, false)
 
 	var foo []bufferedSlab
-	if err := ss.db.Find(&foo).Error; err != nil {
+	if err := ss.gormDB.Find(&foo).Error; err != nil {
 		t.Fatal(err)
 	}
 	buffer = bufferedSlab{}
-	if err := ss.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; err != nil {
+	if err := ss.gormDB.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -2877,7 +2877,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	buffer = bufferedSlab{}
-	if err := ss.db.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := ss.gormDB.Take(&buffer, "id = ?", packedSlabs[0].BufferID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
 	assertBuffer(buffer2Name, 1, false, false)
@@ -3084,7 +3084,7 @@ func TestContractSizes(t *testing.T) {
 // dbObject retrieves a dbObject from the store.
 func (s *SQLStore) dbObject(key string) (dbObject, error) {
 	var obj dbObject
-	tx := s.db.Where(&dbObject{ObjectID: key}).
+	tx := s.gormDB.Where(&dbObject{ObjectID: key}).
 		Preload("Slabs").
 		Take(&obj)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -3096,7 +3096,7 @@ func (s *SQLStore) dbObject(key string) (dbObject, error) {
 // dbSlab retrieves a dbSlab from the store.
 func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
 	var slab dbSlab
-	tx := s.db.Where(&dbSlab{Key: key}).
+	tx := s.gormDB.Where(&dbSlab{Key: key}).
 		Preload("Shards.Contracts.Host").
 		Take(&slab)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -3364,7 +3364,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// See if we can fetch the object by slab.
 	var ec object.EncryptionKey
-	if obj, err := ss.objectRaw(ss.db, b1, "/bar"); err != nil {
+	if obj, err := ss.objectRaw(ss.gormDB, b1, "/bar"); err != nil {
 		t.Fatal(err)
 	} else if err := ec.UnmarshalBinary(obj[0].SlabKey); err != nil {
 		t.Fatal(err)
@@ -3498,7 +3498,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 
 	var count int64
-	if err := ss.db.Model(&dbContractSector{}).Count(&count).Error; err != nil {
+	if err := ss.gormDB.Model(&dbContractSector{}).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	} else if count != 1 {
 		t.Fatal("expected 1 sector", count)
@@ -3549,7 +3549,7 @@ func TestListObjects(t *testing.T) {
 	}
 
 	// update health of objects to match the overridden health of the slabs
-	if err := updateAllObjectsHealth(ss.db); err != nil {
+	if err := updateAllObjectsHealth(ss.gormDB); err != nil {
 		t.Fatal()
 	}
 
@@ -3633,7 +3633,7 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// get all contracts
 	var dbContracts []dbContract
-	if err := ss.db.Model(&dbContract{}).Preload("Host").Find(&dbContracts).Error; err != nil {
+	if err := ss.gormDB.Model(&dbContract{}).Preload("Host").Find(&dbContracts).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -3654,13 +3654,13 @@ func TestDeleteHostSector(t *testing.T) {
 			},
 		},
 	}
-	if err := ss.db.Create(&slab).Error; err != nil {
+	if err := ss.gormDB.Create(&slab).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// Make sure 4 contractSector entries exist.
 	var n int64
-	if err := ss.db.Model(&dbContractSector{}).
+	if err := ss.gormDB.Model(&dbContractSector{}).
 		Count(&n).
 		Error; err != nil {
 		t.Fatal(err)
@@ -3676,7 +3676,7 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Make sure 2 contractSector entries exist.
-	if err := ss.db.Model(&dbContractSector{}).
+	if err := ss.gormDB.Model(&dbContractSector{}).
 		Count(&n).
 		Error; err != nil {
 		t.Fatal(err)
@@ -3686,7 +3686,7 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// Find the slab. It should have an invalid health.
 	var s dbSlab
-	if err := ss.db.Preload("Shards").Take(&s).Error; err != nil {
+	if err := ss.gormDB.Preload("Shards").Take(&s).Error; err != nil {
 		t.Fatal(err)
 	} else if s.HealthValid() {
 		t.Fatal("expected health to be invalid")
@@ -3696,7 +3696,7 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// Fetch the sector and assert the contracts association.
 	var sectors []dbSector
-	if err := ss.db.Model(&dbSector{}).Preload("Contracts").Find(&sectors).Preload("Contracts").Error; err != nil {
+	if err := ss.gormDB.Model(&dbSector{}).Preload("Contracts").Find(&sectors).Preload("Contracts").Error; err != nil {
 		t.Fatal(err)
 	} else if len(sectors) != 1 {
 		t.Fatal("expected 1 sector", len(sectors))
@@ -3738,7 +3738,7 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Fetch the sector and check the public key has the default value
-	if err := ss.db.Model(&dbSector{}).Find(&sectors).Error; err != nil {
+	if err := ss.gormDB.Model(&dbSector{}).Find(&sectors).Error; err != nil {
 		t.Fatal(err)
 	} else if len(sectors) != 1 {
 		t.Fatal("expected 1 sector", len(sectors))
@@ -3839,7 +3839,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		var slab dbSlab
 		if key, err := slabKey.MarshalBinary(); err != nil {
 			t.Fatal(err)
-		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
+		} else if err := ss.gormDB.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
 			t.Fatal(err)
 		} else if slab.HealthValid() != expected {
 			t.Fatal("unexpected health valid", slab.HealthValid(), slab.HealthValidUntil, time.Now(), time.Unix(slab.HealthValidUntil, 0))
@@ -3961,7 +3961,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	// assert the health validity is always updated to a random time in the future that matches the boundaries
 	for i := 0; i < 1e3; i++ {
 		// reset health validity
-		if tx := ss.db.Exec("UPDATE slabs SET health_valid_until = 0;"); tx.Error != nil {
+		if tx := ss.gormDB.Exec("UPDATE slabs SET health_valid_until = 0;"); tx.Error != nil {
 			t.Fatal(err)
 		}
 
@@ -3975,7 +3975,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		var slab dbSlab
 		if key, err := s1.MarshalBinary(); err != nil {
 			t.Fatal(err)
-		} else if err := ss.db.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
+		} else if err := ss.gormDB.Model(&dbSlab{}).Where(&dbSlab{Key: key}).Take(&slab).Error; err != nil {
 			t.Fatal(err)
 		}
 
@@ -4113,18 +4113,18 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create contract set
 	cs := dbContractSet{}
-	if err := ss.db.Create(&cs).Error; err != nil {
+	if err := ss.gormDB.Create(&cs).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// create buffered slab
 	bsID := uint(1)
-	if err := ss.db.Exec("INSERT INTO buffered_slabs (filename) VALUES ('foo');").Error; err != nil {
+	if err := ss.gormDB.Exec("INSERT INTO buffered_slabs (filename) VALUES ('foo');").Error; err != nil {
 		t.Fatal(err)
 	}
 
 	var dirID int64
-	err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+	err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
 		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
 		return err
@@ -4140,7 +4140,7 @@ func TestSlabCleanup(t *testing.T) {
 		DBBucketID:    ss.DefaultBucketID(),
 		Health:        1,
 	}
-	if err := ss.db.Create(&obj1).Error; err != nil {
+	if err := ss.gormDB.Create(&obj1).Error; err != nil {
 		t.Fatal(err)
 	}
 	obj2 := dbObject{
@@ -4149,7 +4149,7 @@ func TestSlabCleanup(t *testing.T) {
 		DBBucketID:    ss.DefaultBucketID(),
 		Health:        1,
 	}
-	if err := ss.db.Create(&obj2).Error; err != nil {
+	if err := ss.gormDB.Create(&obj2).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -4161,7 +4161,7 @@ func TestSlabCleanup(t *testing.T) {
 		Key:              secretKey(ek),
 		HealthValidUntil: 100,
 	}
-	if err := ss.db.Create(&slab).Error; err != nil {
+	if err := ss.gormDB.Create(&slab).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -4170,14 +4170,14 @@ func TestSlabCleanup(t *testing.T) {
 		DBObjectID: &obj1.ID,
 		DBSlabID:   slab.ID,
 	}
-	if err := ss.db.Create(&slice1).Error; err != nil {
+	if err := ss.gormDB.Create(&slice1).Error; err != nil {
 		t.Fatal(err)
 	}
 	slice2 := dbSlice{
 		DBObjectID: &obj2.ID,
 		DBSlabID:   slab.ID,
 	}
-	if err := ss.db.Create(&slice2).Error; err != nil {
+	if err := ss.gormDB.Create(&slice2).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -4189,7 +4189,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// check slice count
 	var slabCntr int64
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+	if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
 	} else if slabCntr != 1 {
 		t.Fatalf("expected 1 slabs, got %v", slabCntr)
@@ -4199,7 +4199,7 @@ func TestSlabCleanup(t *testing.T) {
 	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj2.ObjectID)
 	if err != nil {
 		t.Fatal(err)
-	} else if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+	} else if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
 	} else if slabCntr != 0 {
 		t.Fatalf("expected 0 slabs, got %v", slabCntr)
@@ -4214,7 +4214,7 @@ func TestSlabCleanup(t *testing.T) {
 		Key:              ek,
 		HealthValidUntil: 100,
 	}
-	if err := ss.db.Create(&bufferedSlab).Error; err != nil {
+	if err := ss.gormDB.Create(&bufferedSlab).Error; err != nil {
 		t.Fatal(err)
 	}
 	obj3 := dbObject{
@@ -4223,17 +4223,17 @@ func TestSlabCleanup(t *testing.T) {
 		DBBucketID:    ss.DefaultBucketID(),
 		Health:        1,
 	}
-	if err := ss.db.Create(&obj3).Error; err != nil {
+	if err := ss.gormDB.Create(&obj3).Error; err != nil {
 		t.Fatal(err)
 	}
 	slice := dbSlice{
 		DBObjectID: &obj3.ID,
 		DBSlabID:   bufferedSlab.ID,
 	}
-	if err := ss.db.Create(&slice).Error; err != nil {
+	if err := ss.gormDB.Create(&slice).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+	if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
 	} else if slabCntr != 1 {
 		t.Fatalf("expected 1 slabs, got %v", slabCntr)
@@ -4243,7 +4243,7 @@ func TestSlabCleanup(t *testing.T) {
 	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj3.ObjectID)
 	if err != nil {
 		t.Fatal(err)
-	} else if err := ss.db.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
+	} else if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
 	} else if slabCntr != 1 {
 		t.Fatalf("expected 1 slabs, got %v", slabCntr)
@@ -4306,7 +4306,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch the object
 	var dbObj dbObject
-	if err := ss.db.Where("db_bucket_id", ss.DefaultBucketID()).Take(&dbObj).Error; err != nil {
+	if err := ss.gormDB.Where("db_bucket_id", ss.DefaultBucketID()).Take(&dbObj).Error; err != nil {
 		t.Fatal(err)
 	} else if dbObj.ID != 1 {
 		t.Fatal("unexpected id", dbObj.ID)
@@ -4322,7 +4322,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch its slices
 	var dbSlices []dbSlice
-	if err := ss.db.Where("db_object_id", dbObj.ID).Find(&dbSlices).Error; err != nil {
+	if err := ss.gormDB.Where("db_object_id", dbObj.ID).Find(&dbSlices).Error; err != nil {
 		t.Fatal(err)
 	} else if len(dbSlices) != 2 {
 		t.Fatal("invalid number of slices", len(dbSlices))
@@ -4339,7 +4339,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		// fetch the slab
 		var dbSlab dbSlab
 		key, _ := obj.Slabs[i].Key.MarshalBinary()
-		if err := ss.db.Where("id", dbSlice.DBSlabID).Take(&dbSlab).Error; err != nil {
+		if err := ss.gormDB.Where("id", dbSlice.DBSlabID).Take(&dbSlab).Error; err != nil {
 			t.Fatal(err)
 		} else if dbSlab.ID != uint(i+1) {
 			t.Fatal("unexpected id", dbSlab.ID)
@@ -4359,7 +4359,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 		// fetch the sectors
 		var dbSectors []dbSector
-		if err := ss.db.Where("db_slab_id", dbSlab.ID).Find(&dbSectors).Error; err != nil {
+		if err := ss.gormDB.Where("db_slab_id", dbSlab.ID).Find(&dbSectors).Error; err != nil {
 			t.Fatal(err)
 		} else if len(dbSectors) != totalShards {
 			t.Fatal("invalid number of sectors", len(dbSectors))
@@ -4412,7 +4412,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch the object
 	var dbObj2 dbObject
-	if err := ss.db.Where("db_bucket_id", ss.DefaultBucketID()).
+	if err := ss.gormDB.Where("db_bucket_id", ss.DefaultBucketID()).
 		Where("object_id", "2").
 		Take(&dbObj2).Error; err != nil {
 		t.Fatal(err)
@@ -4424,7 +4424,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch its slices
 	var dbSlices2 []dbSlice
-	if err := ss.db.Where("db_object_id", dbObj2.ID).Find(&dbSlices2).Error; err != nil {
+	if err := ss.gormDB.Where("db_object_id", dbObj2.ID).Find(&dbSlices2).Error; err != nil {
 		t.Fatal(err)
 	} else if len(dbSlices2) != 2 {
 		t.Fatal("invalid number of slices", len(dbSlices))
@@ -4443,7 +4443,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	// fetch the slab
 	var dbSlab2 dbSlab
 	key, _ := obj2.Slabs[0].Key.MarshalBinary()
-	if err := ss.db.Where("id", dbSlice2.DBSlabID).Take(&dbSlab2).Error; err != nil {
+	if err := ss.gormDB.Where("id", dbSlice2.DBSlabID).Take(&dbSlab2).Error; err != nil {
 		t.Fatal(err)
 	} else if dbSlab2.ID != uint(len(dbSlices)+1) {
 		t.Fatal("unexpected id", dbSlab2.ID)
@@ -4455,7 +4455,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// fetch the sectors
 	var dbSectors2 []dbSector
-	if err := ss.db.Where("db_slab_id", dbSlab2.ID).Find(&dbSectors2).Error; err != nil {
+	if err := ss.gormDB.Where("db_slab_id", dbSlab2.ID).Find(&dbSectors2).Error; err != nil {
 		t.Fatal(err)
 	} else if len(dbSectors2) != totalShards {
 		t.Fatal("invalid number of sectors", len(dbSectors2))
@@ -4478,7 +4478,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	var contractSectors []dbContractSector
-	if err := ss.db.Find(&contractSectors).Error; err != nil {
+	if err := ss.gormDB.Find(&contractSectors).Error; err != nil {
 		t.Fatal(err)
 	} else if len(contractSectors) != 3*totalShards {
 		t.Fatal("invalid number of contract sectors", len(contractSectors))
@@ -4613,7 +4613,7 @@ func TestFetchUsedContracts(t *testing.T) {
 
 	// assert empty map returns no contracts
 	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	contracts, err := fetchUsedContracts(ss.db, usedContracts)
+	contracts, err := fetchUsedContracts(ss.gormDB, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
@@ -4625,7 +4625,7 @@ func TestFetchUsedContracts(t *testing.T) {
 	usedContracts[hk1][types.FileContractID{1}] = struct{}{}
 
 	// assert we get the used contract
-	contracts, err = fetchUsedContracts(ss.db, usedContracts)
+	contracts, err = fetchUsedContracts(ss.gormDB, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
@@ -4642,7 +4642,7 @@ func TestFetchUsedContracts(t *testing.T) {
 	}
 
 	// assert used contracts contains one entry and it points to the renewal
-	contracts, err = fetchUsedContracts(ss.db, usedContracts)
+	contracts, err = fetchUsedContracts(ss.gormDB, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
@@ -4658,7 +4658,7 @@ func TestFetchUsedContracts(t *testing.T) {
 
 	// assert used contracts now contains an entry for both contracts and both
 	// point to the renewed contract
-	contracts, err = fetchUsedContracts(ss.db, usedContracts)
+	contracts, err = fetchUsedContracts(ss.gormDB, usedContracts)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 2 {
@@ -4685,7 +4685,7 @@ func TestDirectories(t *testing.T) {
 
 	for _, o := range objects {
 		var dirID int64
-		err := ss.bMain.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
 			dirID, err = tx.MakeDirsForPath(context.Background(), o)
 			return err
@@ -4730,7 +4730,7 @@ func TestDirectories(t *testing.T) {
 	}
 
 	var dbDirs []dbDirectory
-	if err := ss.db.Find(&dbDirs).Error; err != nil {
+	if err := ss.gormDB.Find(&dbDirs).Error; err != nil {
 		t.Fatal(err)
 	} else if len(dbDirs) != len(expectedDirs) {
 		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), len(dbDirs))
@@ -4751,7 +4751,7 @@ func TestDirectories(t *testing.T) {
 	})
 
 	var n int64
-	if err := ss.db.Model(&dbDirectory{}).Count(&n).Error; err != nil {
+	if err := ss.gormDB.Model(&dbDirectory{}).Count(&n).Error; err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatal("expected 1 dir, got", n)

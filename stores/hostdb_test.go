@@ -56,7 +56,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Fetch the host
 	var h dbHost
-	tx := ss.db.Where("net_address = ?", "address").Find(&h)
+	tx := ss.gormDB.Where("net_address = ?", "address").Find(&h)
 	if tx.Error != nil {
 		t.Fatal(tx.Error)
 	} else if types.PublicKey(h.PublicKey) != hk {
@@ -321,7 +321,7 @@ func TestSearchHosts(t *testing.T) {
 
 	// assert there are currently 3 checks
 	var cnt int64
-	err = ss.db.Model(&dbHostCheck{}).Count(&cnt).Error
+	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
 	if err != nil {
 		t.Fatal(err)
 	} else if cnt != 3 {
@@ -397,11 +397,11 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert cascade delete on host
-	err = ss.db.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
+	err = ss.gormDB.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.db.Model(&dbHostCheck{}).Count(&cnt).Error
+	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
 	if err != nil {
 		t.Fatal(err)
 	} else if cnt != 2 {
@@ -409,11 +409,11 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert cascade delete on autopilot
-	err = ss.db.Exec("DELETE FROM autopilots WHERE identifier IN (?,?)", ap1, ap2).Error
+	err = ss.gormDB.Exec("DELETE FROM autopilots WHERE identifier IN (?,?)", ap1, ap2).Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.db.Model(&dbHostCheck{}).Count(&cnt).Error
+	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
 	if err != nil {
 		t.Fatal(err)
 	} else if cnt != 0 {
@@ -452,7 +452,7 @@ func TestRecordScan(t *testing.T) {
 	}
 
 	// Fetch the host directly to get the creation time.
-	h, err := hostByPubKey(ss.db, hk)
+	h, err := hostByPubKey(ss.gormDB, hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,11 +589,11 @@ func TestInsertAnnouncements(t *testing.T) {
 	ann3 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
 
 	// Insert the first one and check that all fields are set.
-	if err := insertAnnouncements(ss.db, []announcement{ann1}); err != nil {
+	if err := insertAnnouncements(ss.gormDB, []announcement{ann1}); err != nil {
 		t.Fatal(err)
 	}
 	var ann dbAnnouncement
-	if err := ss.db.Find(&ann).Error; err != nil {
+	if err := ss.gormDB.Find(&ann).Error; err != nil {
 		t.Fatal(err)
 	}
 	ann.Model = Model{} // ignore
@@ -607,12 +607,12 @@ func TestInsertAnnouncements(t *testing.T) {
 		t.Fatal("mismatch", cmp.Diff(ann, expectedAnn))
 	}
 	// Insert the first and second one.
-	if err := insertAnnouncements(ss.db, []announcement{ann1, ann2}); err != nil {
+	if err := insertAnnouncements(ss.gormDB, []announcement{ann1, ann2}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Insert the first one twice. The second one again and the third one.
-	if err := insertAnnouncements(ss.db, []announcement{ann1, ann2, ann1, ann3}); err != nil {
+	if err := insertAnnouncements(ss.gormDB, []announcement{ann1, ann2, ann1, ann3}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -627,7 +627,7 @@ func TestInsertAnnouncements(t *testing.T) {
 
 	// There should be 7 announcements total.
 	var announcements []dbAnnouncement
-	if err := ss.db.Find(&announcements).Error; err != nil {
+	if err := ss.gormDB.Find(&announcements).Error; err != nil {
 		t.Fatal(err)
 	}
 	if len(announcements) != 7 {
@@ -644,7 +644,7 @@ func TestInsertAnnouncements(t *testing.T) {
 	// Insert multiple announcements for host 1 - this asserts that the UNIQUE
 	// constraint on the blocklist table isn't triggered when inserting multiple
 	// announcements for a host that's on the blocklist
-	if err := insertAnnouncements(ss.db, []announcement{ann1, ann1}); err != nil {
+	if err := insertAnnouncements(ss.gormDB, []announcement{ann1, ann1}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -661,7 +661,7 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	// fetch the host and assert the recent downtime is zero
-	h, err := hostByPubKey(ss.db, hk)
+	h, err := hostByPubKey(ss.gormDB, hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +691,7 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	// fetch the host and assert the recent downtime is 30 minutes and he has 2 recent scan failures
-	h, err = hostByPubKey(ss.db, hk)
+	h, err = hostByPubKey(ss.gormDB, hk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +746,7 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	// assert host is removed from the database
-	if _, err = hostByPubKey(ss.db, hk); err != gorm.ErrRecordNotFound {
+	if _, err = hostByPubKey(ss.gormDB, hk); err != gorm.ErrRecordNotFound {
 		t.Fatal("expected record not found error")
 	}
 }
@@ -777,7 +777,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	numRelations := func() (cnt int64) {
 		t.Helper()
-		err := ss.db.Table("host_allowlist_entry_hosts").Count(&cnt).Error
+		err := ss.gormDB.Table("host_allowlist_entry_hosts").Count(&cnt).Error
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -883,7 +883,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 	}
 
 	// remove host 1
-	if err = ss.db.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk1)}).Delete(&dbHost{}).Error; err != nil {
+	if err = ss.gormDB.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk1)}).Delete(&dbHost{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if numHosts() != 0 {
@@ -949,7 +949,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	numAllowlistRelations := func() (cnt int64) {
 		t.Helper()
-		err := ss.db.Table("host_allowlist_entry_hosts").Count(&cnt).Error
+		err := ss.gormDB.Table("host_allowlist_entry_hosts").Count(&cnt).Error
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -958,7 +958,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	numBlocklistRelations := func() (cnt int64) {
 		t.Helper()
-		err := ss.db.Table("host_blocklist_entry_hosts").Count(&cnt).Error
+		err := ss.gormDB.Table("host_blocklist_entry_hosts").Count(&cnt).Error
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1067,7 +1067,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// delete host 2 and assert the delete cascaded properly
-	if err = ss.db.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk2)}).Delete(&dbHost{}).Error; err != nil {
+	if err = ss.gormDB.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk2)}).Delete(&dbHost{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if numHosts() != 2 {
@@ -1234,7 +1234,7 @@ func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 	}
 
 	// fetch blocklists
-	allowlist, blocklist, err := getBlocklists(s.db)
+	allowlist, blocklist, err := getBlocklists(s.gormDB)
 	if err != nil {
 		return err
 	}
@@ -1246,7 +1246,7 @@ func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 			dbAllowlist = append(dbAllowlist, entry)
 		}
 	}
-	if err := s.db.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
+	if err := s.gormDB.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
 		return err
 	}
 
@@ -1257,21 +1257,21 @@ func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
 			dbBlocklist = append(dbBlocklist, entry)
 		}
 	}
-	return s.db.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
+	return s.gormDB.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
 }
 
 // announceHost adds a host announcement to the database.
 func (s *SQLStore) announceHost(hk types.PublicKey, na string) (host dbHost, err error) {
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err = s.gormDB.Transaction(func(tx *gorm.DB) error {
 		host = dbHost{
 			PublicKey:        publicKey(hk),
 			LastAnnouncement: time.Now().UTC().Round(time.Second),
 			NetAddress:       na,
 		}
-		if err := s.db.Create(&host).Error; err != nil {
+		if err := s.gormDB.Create(&host).Error; err != nil {
 			return err
 		}
-		return s.db.Create(&dbAnnouncement{
+		return s.gormDB.Create(&dbAnnouncement{
 			HostKey:     publicKey(hk),
 			BlockHeight: 42,
 			BlockID:     types.BlockID{1, 2, 3}.String(),
@@ -1285,7 +1285,7 @@ func (s *SQLStore) announceHost(hk types.PublicKey, na string) (host dbHost, err
 // interactions for all hosts is expensive in production.
 func (db *SQLStore) hosts() ([]dbHost, error) {
 	var hosts []dbHost
-	tx := db.db.Find(&hosts)
+	tx := db.gormDB.Find(&hosts)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}

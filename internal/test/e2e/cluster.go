@@ -414,9 +414,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	// Finish bus setup.
-	if err := bSetupFn(ctx); err != nil {
-		tt.Fatalf("failed to setup bus, err: %v", err)
-	}
+	bSetupFn()
 
 	// Finish worker setup.
 	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {

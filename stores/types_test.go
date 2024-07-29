@@ -25,24 +25,24 @@ func TestTypeCurrency(t *testing.T) {
 	defer ss.Close()
 
 	// prepare the table
-	if isSQLite(ss.db) {
-		if err := ss.db.Exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);").Error; err != nil {
+	if isSQLite(ss.gormDB) {
+		if err := ss.gormDB.Exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);").Error; err != nil {
 			t.Fatal(err)
 		}
 	} else {
-		if err := ss.db.Exec("CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);").Error; err != nil {
+		if err := ss.gormDB.Exec("CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);").Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// insert currencies in random order
-	if err := ss.db.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
+	if err := ss.gormDB.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch currencies and assert they're sorted
 	var currencies []bCurrency
-	if err := ss.db.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
+	if err := ss.gormDB.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
 		t.Fatal(err)
 	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
 		return types.Currency(currencies[i]).Cmp(types.Currency(currencies[j])) < 0
@@ -99,10 +99,10 @@ func TestTypeCurrency(t *testing.T) {
 	for i, test := range tests {
 		var result bool
 		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
-		if !isSQLite(ss.db) {
+		if !isSQLite(ss.gormDB) {
 			query = strings.ReplaceAll(query, "?", "HEX(?)")
 		}
-		if err := ss.db.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
+		if err := ss.gormDB.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
 			t.Fatal(err)
 		} else if !result {
 			t.Errorf("unexpected result in case %d/%d: expected %v %s %v to be true", i+1, len(tests), types.Currency(test.a).String(), test.cmp, types.Currency(test.b).String())
@@ -121,13 +121,13 @@ func TestTypeMerkleProof(t *testing.T) {
 	defer ss.Close()
 
 	// prepare the table
-	if isSQLite(ss.db) {
-		if err := ss.db.Exec("CREATE TABLE merkle_proofs (id INTEGER PRIMARY KEY AUTOINCREMENT,merkle_proof BLOB);").Error; err != nil {
+	if isSQLite(ss.gormDB) {
+		if err := ss.gormDB.Exec("CREATE TABLE merkle_proofs (id INTEGER PRIMARY KEY AUTOINCREMENT,merkle_proof BLOB);").Error; err != nil {
 			t.Fatal(err)
 		}
 	} else {
-		ss.db.Exec("DROP TABLE IF EXISTS merkle_proofs;")
-		if err := ss.db.Exec("CREATE TABLE merkle_proofs (id INT AUTO_INCREMENT PRIMARY KEY, merkle_proof BLOB);").Error; err != nil {
+		ss.gormDB.Exec("DROP TABLE IF EXISTS merkle_proofs;")
+		if err := ss.gormDB.Exec("CREATE TABLE merkle_proofs (id INT AUTO_INCREMENT PRIMARY KEY, merkle_proof BLOB);").Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -135,13 +135,13 @@ func TestTypeMerkleProof(t *testing.T) {
 	// insert merkle proof
 	mp1 := merkleProof{proof: []types.Hash256{{3}, {1}, {2}}}
 	mp2 := merkleProof{proof: []types.Hash256{{4}}}
-	if err := ss.db.Exec("INSERT INTO merkle_proofs (merkle_proof) VALUES (?), (?);", mp1, mp2).Error; err != nil {
+	if err := ss.gormDB.Exec("INSERT INTO merkle_proofs (merkle_proof) VALUES (?), (?);", mp1, mp2).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch first proof
 	var first merkleProof
-	if err := ss.db.
+	if err := ss.gormDB.
 		Raw(`SELECT merkle_proof FROM merkle_proofs`).
 		Take(&first).
 		Error; err != nil {
@@ -152,7 +152,7 @@ func TestTypeMerkleProof(t *testing.T) {
 
 	// fetch both proofs
 	var both []merkleProof
-	if err := ss.db.
+	if err := ss.gormDB.
 		Raw(`SELECT merkle_proof FROM merkle_proofs`).
 		Scan(&both).
 		Error; err != nil {
