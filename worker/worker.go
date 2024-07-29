@@ -1489,9 +1489,14 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 			HostKey:    hostKey,
 			PriceTable: pt,
 			Subnets:    subnets,
-			Success:    err == nil,
-			Settings:   settings,
-			Timestamp:  time.Now(),
+
+			// NOTE: A scan is considered successful if both fetching the price
+			// table and the settings succeeded. Right now scanning can't fail
+			// due to a reason that is our fault unless we are offline. If that
+			// changes, we should adjust this code to account for that.
+			Success:   err == nil,
+			Settings:  settings,
+			Timestamp: time.Now(),
 		},
 	})
 	if scanErr != nil {
