@@ -102,11 +102,11 @@ type (
 		Threshold float64 `json:"threshold"`
 
 		// Autopilots contains the pinned settings for every autopilot.
-		Autopilots map[string]AutopilotPins `json:"autopilots,omitempty"`
+		Autopilots map[string]AutopilotPins `json:"autopilots"`
 
 		// GougingSettingsPins contains the pinned settings for the gouging
 		// settings.
-		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins,omitempty"`
+		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins"`
 	}
 
 	// AutopilotPins contains the available autopilot settings that can be
