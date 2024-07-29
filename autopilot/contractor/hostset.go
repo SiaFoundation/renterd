@@ -12,27 +12,27 @@ var (
 )
 
 type (
-	ipFilter struct {
+	hostSet struct {
 		subnetToHostKey map[string]string
 
 		logger *zap.SugaredLogger
 	}
 )
 
-func (f *ipFilter) HasRedundantIP(host api.Host) bool {
+func (hs *hostSet) HasRedundantIP(host api.Host) bool {
 	// validate host subnets
 	if len(host.Subnets) == 0 {
-		f.logger.Errorf("host %v has no subnet, treating its IP %v as redundant", host.PublicKey, host.NetAddress)
+		hs.logger.Errorf("host %v has no subnet, treating its IP %v as redundant", host.PublicKey, host.NetAddress)
 		return true
 	} else if len(host.Subnets) > 2 {
-		f.logger.Errorf("host %v has more than 2 subnets, treating its IP %v as redundant", host.PublicKey, errHostTooManySubnets)
+		hs.logger.Errorf("host %v has more than 2 subnets, treating its IP %v as redundant", host.PublicKey, errHostTooManySubnets)
 		return true
 	}
 
 	// check if we know about this subnet
 	var knownHost string
 	for _, subnet := range host.Subnets {
-		if knownHost = f.subnetToHostKey[subnet]; knownHost != "" {
+		if knownHost = hs.subnetToHostKey[subnet]; knownHost != "" {
 			break
 		}
 	}
@@ -44,8 +44,8 @@ func (f *ipFilter) HasRedundantIP(host api.Host) bool {
 	return false
 }
 
-func (f *ipFilter) Add(host api.Host) {
+func (hs *hostSet) Add(host api.Host) {
 	for _, subnet := range host.Subnets {
-		f.subnetToHostKey[subnet] = host.PublicKey.String()
+		hs.subnetToHostKey[subnet] = host.PublicKey.String()
 	}
 }

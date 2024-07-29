@@ -107,8 +107,8 @@ func (ctx *mCtx) WantedContracts() uint64 {
 	return ctx.state.AP.Config.Contracts.Amount
 }
 
-func (ctx *mCtx) IsContractInSet(contract api.Contract) bool {
-	return ctx.state.ContractsConfig().IsContractInSet(contract)
+func (ctx *mCtx) Set() string {
+	return ctx.state.ContractsConfig().Set
 }
 
 func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {

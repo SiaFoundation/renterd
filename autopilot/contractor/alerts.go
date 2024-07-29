@@ -33,7 +33,7 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, ourFault bool,
 		Message:  "Contract renewal failed",
 		Data: map[string]interface{}{
 			"error":      err.Error(),
-			"ourFault":   ourFault,
+			"hostError":  !ourFault,
 			"contractID": contract.ID.String(),
 			"hostKey":    contract.HostKey.String(),
 		},
