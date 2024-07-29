@@ -206,28 +206,20 @@ func (m *migrator) performMigrations(p *workerPool) {
 	default:
 	}
 
-OUTER:
-	for {
-		// fetch currently configured set
-		autopilot, err := m.ap.Config(m.ap.shutdownCtx)
-		if err != nil {
-			m.logger.Errorf("failed to fetch autopilot config: %w", err)
-			return
-		}
-		set := autopilot.Config.Contracts.Set
-		if set == "" {
-			m.logger.Error("could not perform migrations, no contract set configured")
-			return
-		}
+	// fetch currently configured set
+	autopilot, err := m.ap.Config(m.ap.shutdownCtx)
+	if err != nil {
+		m.logger.Errorf("failed to fetch autopilot config: %w", err)
+		return
+	}
+	set := autopilot.Config.Contracts.Set
+	if set == "" {
+		m.logger.Error("could not perform migrations, no contract set configured")
+		return
+	}
 
-		// recompute health.
-		start := time.Now()
-		if err := b.RefreshHealth(m.ap.shutdownCtx); err != nil {
-			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
-			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
-		}
-		m.logger.Infof("recomputed slab health in %v", time.Since(start))
-
+	// helper to update 'toMigrate'
+	updateToMigrate := func() {
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, set, migratorBatchSize)
 		if err != nil {
@@ -266,7 +258,19 @@ OUTER:
 		sort.Slice(newSlabs, func(i, j int) bool {
 			return newSlabs[i].Health < newSlabs[j].Health
 		})
-		migrateNewMap = nil // free map
+	}
+
+OUTER:
+	for {
+		// recompute health.
+		start := time.Now()
+		if err := b.RefreshHealth(m.ap.shutdownCtx); err != nil {
+			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
+			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
+		} else {
+			m.logger.Infof("recomputed slab health in %v", time.Since(start))
+			updateToMigrate()
+		}
 
 		// log the updated list of slabs to migrate
 		m.logger.Infof("%d slabs to migrate", len(toMigrate))
