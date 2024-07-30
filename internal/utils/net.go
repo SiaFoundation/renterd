@@ -49,7 +49,7 @@ func ResolveHostIP(ctx context.Context, hostIP string) (subnets []string, privat
 
 	// filter out hosts associated with more than two addresses or two of the same type
 	if len(addrs) > 2 || (len(addrs) == 2) && (len(addrs[0].IP) == len(addrs[1].IP)) {
-		return nil, false, ErrHostTooManyAddresses
+		return nil, false, fmt.Errorf("%w: %+v", ErrHostTooManyAddresses, addrs)
 	}
 
 	// parse out subnets
