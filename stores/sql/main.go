@@ -2380,6 +2380,7 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 		if err := ec.UnmarshalBinary(key); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal encryption key: %w", err)
 		}
+		slab.Key = ec
 		slabs = append(slabs, slab)
 	}
 	return slabs, nil
