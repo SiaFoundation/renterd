@@ -81,7 +81,7 @@ type (
 		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 		HandleEvent(event webhooks.Event) error
-		Subscribe(e EventManager) error
+		Subscribe(e EventSubscriber) error
 	}
 )
 
@@ -196,16 +196,16 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	return
 }
 
-func (c *cache) Subscribe(e EventManager) (err error) {
+func (c *cache) Subscribe(e EventSubscriber) (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.readyChan != nil {
 		return fmt.Errorf("already subscribed")
 	}
 
-	c.readyChan, err = e.AddSubscriber(c.logger.Desugar().Name(), c)
+	c.readyChan, err = e.AddEventHandler(c.logger.Desugar().Name(), c)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to event manager, error: %v", err)
+		return fmt.Errorf("failed to subscribe the worker cache, error: %v", err)
 	}
 	return nil
 }

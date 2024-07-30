@@ -21,7 +21,7 @@ import (
 
 const testRegisterInterval = 100 * time.Millisecond
 
-type mockSubscriber struct {
+type mockEventHandler struct {
 	id        string
 	readyChan chan struct{}
 
@@ -29,13 +29,13 @@ type mockSubscriber struct {
 	events []webhooks.Event
 }
 
-func (s *mockSubscriber) Events() []webhooks.Event {
+func (s *mockEventHandler) Events() []webhooks.Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.events
 }
 
-func (s *mockSubscriber) HandleEvent(event webhooks.Event) error {
+func (s *mockEventHandler) HandleEvent(event webhooks.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -49,8 +49,8 @@ func (s *mockSubscriber) HandleEvent(event webhooks.Event) error {
 	return nil
 }
 
-func (s *mockSubscriber) Subscribe(e EventManager) error {
-	s.readyChan, _ = e.AddSubscriber(s.id, s)
+func (s *mockEventHandler) Subscribe(e EventSubscriber) error {
+	s.readyChan, _ = e.AddEventHandler(s.id, s)
 	return nil
 }
 
@@ -89,24 +89,24 @@ func (m *mockWebhookManager) Webhooks() []webhooks.Webhook {
 	return m.registered
 }
 
-func TestEventManager(t *testing.T) {
+func TestEventSubscriber(t *testing.T) {
 	// observe logs
 	observedZapCore, observedLogs := observer.New(zap.DebugLevel)
 
 	// create mocks
 	w := &mockWebhookManager{blockChan: make(chan struct{})}
-	s := &mockSubscriber{id: t.Name()}
+	h := &mockEventHandler{id: t.Name()}
 
-	// create event manager
-	e := NewEventManager(w, zap.New(observedZapCore), testRegisterInterval)
+	// create event subscriber
+	s := NewEventSubscriber(w, zap.New(observedZapCore), testRegisterInterval)
 
-	// subscribe to event manager
-	if err := s.Subscribe(e); err != nil {
+	// subscribe the event handler
+	if err := h.Subscribe(s); err != nil {
 		t.Fatal(err)
 	}
 
 	// setup a server
-	mux := jape.Mux(map[string]jape.Handler{"POST /event": func(jc jape.Context) {
+	mux := jape.Mux(map[string]jape.Handler{"POST /events": func(jc jape.Context) {
 		var event webhooks.Event
 		if jc.Decode(&event) != nil {
 			return
@@ -114,16 +114,16 @@ func TestEventManager(t *testing.T) {
 			jc.ResponseWriter.WriteHeader(http.StatusOK)
 			return
 		} else {
-			e.HandleEvent(event)
+			s.ProcessEvent(event)
 		}
 	}})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// run event manager
-	eventsURL := fmt.Sprintf("http://%v/event", srv.Listener.Addr().String())
+	// register the subscriber
+	eventsURL := fmt.Sprintf("http://%v/events", srv.Listener.Addr().String())
 	go func() {
-		if err := e.Run(context.Background(), eventsURL); err != nil {
+		if err := s.Register(context.Background(), eventsURL); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -145,8 +145,8 @@ func TestEventManager(t *testing.T) {
 	time.Sleep(testRegisterInterval)
 
 	// assert webhook was registered
-	if webhooks := w.Webhooks(); len(webhooks) != 4 {
-		t.Fatal("expected 4 webhooks, got", len(webhooks))
+	if webhooks := w.Webhooks(); len(webhooks) != 5 {
+		t.Fatal("expected 5 webhooks, got", len(webhooks))
 	}
 
 	// send the same event again
@@ -162,12 +162,12 @@ func TestEventManager(t *testing.T) {
 	}
 
 	// assert the subscriber handled the event
-	if events := s.Events(); len(events) != 1 {
+	if events := h.Events(); len(events) != 1 {
 		t.Fatal("expected 1 event, got", len(events))
 	}
 
-	// shutdown event manager
-	err = e.Shutdown(context.Background())
+	// shutdown event subscriber
+	err = s.Shutdown(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -209,7 +209,7 @@ type worker struct {
 	masterKey       [32]byte
 	startTime       time.Time
 
-	eventManager    iworker.EventManager
+	eventSubscriber iworker.EventSubscriber
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
 
@@ -1252,14 +1252,14 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 	jc.Encode(account)
 }
 
-func (w *worker) eventHandlerPOST(jc jape.Context) {
+func (w *worker) eventsHandlerPOST(jc jape.Context) {
 	var event webhooks.Event
 	if jc.Decode(&event) != nil {
 		return
 	} else if event.Event == webhooks.WebhookEventPing {
 		jc.ResponseWriter.WriteHeader(http.StatusOK)
 	} else {
-		w.eventManager.HandleEvent(event)
+		w.eventSubscriber.ProcessEvent(event)
 	}
 }
 
@@ -1305,7 +1305,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		cache:                   iworker.NewCache(b, l),
-		eventManager:            iworker.NewEventManager(b, l, 10*time.Second),
+		eventSubscriber:         iworker.NewEventSubscriber(b, l, 10*time.Second),
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
@@ -1333,7 +1333,7 @@ func (w *worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"POST   /event": w.eventHandlerPOST,
+		"POST   /events": w.eventsHandlerPOST,
 
 		"GET /memory": w.memoryGET,
 
@@ -1365,17 +1365,15 @@ func (w *worker) Handler() http.Handler {
 
 // Setup register event webhooks that enable the worker cache.
 func (w *worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
-	// run event manager in a goroutine
 	go func() {
-		eventsURL := fmt.Sprintf("%s/event", apiURL)
+		eventsURL := fmt.Sprintf("%s/events", apiURL)
 		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
-		if err := w.eventManager.Run(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
-			w.logger.Errorw("failed to run event manager", zap.Error(err))
+		if err := w.eventSubscriber.Register(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
+			w.logger.Errorw("failed to register webhooks", zap.Error(err))
 		}
 	}()
 
-	// subscribe cache to the event manager
-	return w.cache.Subscribe(w.eventManager)
+	return w.cache.Subscribe(w.eventSubscriber)
 }
 
 // Shutdown shuts down the worker.
@@ -1390,8 +1388,8 @@ func (w *worker) Shutdown(ctx context.Context) error {
 	// stop recorders
 	w.contractSpendingRecorder.Stop(ctx)
 
-	// shutdown event manager
-	return w.eventManager.Shutdown(ctx)
+	// shutdown the subscriber
+	return w.eventSubscriber.Shutdown(ctx)
 }
 
 func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {

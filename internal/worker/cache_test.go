@@ -27,21 +27,21 @@ func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) 
 	return m.gougingParams, nil
 }
 
-type mockEventManager struct {
+type mockEventSubscriber struct {
 	readyChan chan struct{}
 }
 
-func (m *mockEventManager) AddSubscriber(id string, s EventSubscriber) (chan struct{}, error) {
+func (m *mockEventSubscriber) AddEventHandler(id string, h EventHandler) (chan struct{}, error) {
 	return m.readyChan, nil
 }
 
-func (m *mockEventManager) HandleEvent(event webhooks.Event) {}
+func (m *mockEventSubscriber) ProcessEvent(event webhooks.Event) {}
 
-func (m *mockEventManager) Run(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error {
+func (m *mockEventSubscriber) Register(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error {
 	return nil
 }
 
-func (m *mockEventManager) Shutdown(ctx context.Context) error {
+func (m *mockEventSubscriber) Shutdown(ctx context.Context) error {
 	return nil
 }
 
@@ -72,10 +72,10 @@ func TestWorkerCache(t *testing.T) {
 	// create mock bus and cache
 	c, b, mc := newTestCache(zap.New(observedZapCore))
 
-	// create mock event manager
-	m := &mockEventManager{readyChan: make(chan struct{})}
+	// create mock event subscriber
+	m := &mockEventSubscriber{readyChan: make(chan struct{})}
 
-	// subscribe cache to event manager
+	// subscribe cache to event subscriber
 	c.Subscribe(m)
 
 	// assert using cache before it's ready prints a warning

@@ -13,16 +13,16 @@ import (
 )
 
 type (
-	EventManager interface {
-		AddSubscriber(id string, s EventSubscriber) (chan struct{}, error)
-		HandleEvent(event webhooks.Event)
-		Run(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error
+	EventSubscriber interface {
+		AddEventHandler(id string, h EventHandler) (chan struct{}, error)
+		ProcessEvent(event webhooks.Event)
+		Register(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error
 		Shutdown(context.Context) error
 	}
 
-	EventSubscriber interface {
+	EventHandler interface {
 		HandleEvent(event webhooks.Event) error
-		Subscribe(e EventManager) error
+		Subscribe(e EventSubscriber) error
 	}
 
 	WebhookManager interface {
@@ -32,71 +32,70 @@ type (
 )
 
 type (
-	eventManager struct {
+	eventSubscriber struct {
 		webhooks WebhookManager
 		logger   *zap.SugaredLogger
 
 		registerInterval time.Duration
 
-		mu         sync.Mutex
-		subs       map[string]eventSubscriber
-		registered []webhooks.Webhook
-	}
-
-	eventSubscriber struct {
-		EventSubscriber
-		readyChan chan struct{}
+		mu             sync.Mutex
+		handlers       map[string]EventHandler
+		registered     []webhooks.Webhook
+		registeredChan chan struct{}
 	}
 )
 
-func NewEventManager(w WebhookManager, l *zap.Logger, registerInterval time.Duration) EventManager {
-	return &eventManager{
+func NewEventSubscriber(w WebhookManager, l *zap.Logger, registerInterval time.Duration) EventSubscriber {
+	return &eventSubscriber{
 		webhooks: w,
 		logger:   l.Sugar().Named("events"),
 
-		registerInterval: registerInterval,
+		registeredChan: make(chan struct{}),
 
-		subs: make(map[string]eventSubscriber),
+		handlers:         make(map[string]EventHandler),
+		registerInterval: registerInterval,
 	}
 }
 
-func (e *eventManager) AddSubscriber(id string, s EventSubscriber) (chan struct{}, error) {
+func (e *eventSubscriber) AddEventHandler(id string, h EventHandler) (chan struct{}, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	_, ok := e.subs[id]
+	_, ok := e.handlers[id]
 	if ok {
 		return nil, fmt.Errorf("subscriber with id %v already exists", id)
 	}
+	e.handlers[id] = h
 
-	readyChan := make(chan struct{})
-	if len(e.registered) > 0 {
-		close(readyChan)
-	}
-
-	e.subs[id] = eventSubscriber{s, readyChan}
-	return readyChan, nil
+	return e.registeredChan, nil
 }
 
-func (e *eventManager) HandleEvent(event webhooks.Event) {
-	for id, s := range e.subs {
+func (e *eventSubscriber) ProcessEvent(event webhooks.Event) {
+	log := e.logger.With(
+		zap.String("module", event.Module),
+		zap.String("event", event.Event),
+	)
+
+	for id, s := range e.handlers {
 		if err := s.HandleEvent(event); err != nil {
-			e.logger.Errorw("failed to handle event",
+			log.Errorw("failed to handle event",
 				zap.Error(err),
 				zap.String("subscriber", id),
-				zap.String("module", event.Module),
-				zap.String("event", event.Event),
 			)
 		} else {
-			e.logger.Debugw("handled event",
+			log.Debugw("handled event",
 				zap.String("subscriber", id),
-				zap.String("module", event.Module),
-				zap.String("event", event.Event),
 			)
 		}
 	}
 }
 
-func (e *eventManager) Run(ctx context.Context, eventsURL string, opts ...webhooks.HeaderOption) error {
+func (e *eventSubscriber) Register(ctx context.Context, eventsURL string, opts ...webhooks.HeaderOption) error {
+	select {
+	case <-e.registeredChan:
+		return fmt.Errorf("already registered") // developer error
+	default:
+	}
+
 	// prepare headers
 	headers := make(map[string]string)
 	for _, opt := range opts {
@@ -115,11 +114,7 @@ func (e *eventManager) Run(ctx context.Context, eventsURL string, opts ...webhoo
 	// try and register the webhooks in a loop
 	for {
 		if e.registerWebhooks(ctx, webhooks) {
-			e.mu.Lock()
-			for _, s := range e.subs {
-				close(s.readyChan)
-			}
-			e.mu.Unlock()
+			close(e.registeredChan)
 			break
 		}
 
@@ -135,7 +130,7 @@ func (e *eventManager) Run(ctx context.Context, eventsURL string, opts ...webhoo
 	return nil
 }
 
-func (e *eventManager) Shutdown(ctx context.Context) error {
+func (e *eventSubscriber) Shutdown(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -154,7 +149,7 @@ func (e *eventManager) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (e *eventManager) registerWebhooks(ctx context.Context, webhooks []webhooks.Webhook) bool {
+func (e *eventSubscriber) registerWebhooks(ctx context.Context, webhooks []webhooks.Webhook) bool {
 	for _, wh := range webhooks {
 		if err := e.webhooks.RegisterWebhook(ctx, wh); err != nil {
 			e.logger.Errorw("failed to register webhook",
