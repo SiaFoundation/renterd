@@ -289,7 +289,6 @@ func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
 	for i, contract := range contracts {
 		if contract.HostKey == e.HostKey {
 			contracts[i].HostIP = e.NetAddr
-			break
 		}
 	}
 
