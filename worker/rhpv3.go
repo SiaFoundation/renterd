@@ -58,10 +58,6 @@ var (
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
-	// errBalanceMaxExceeded occurs when a deposit would push the account's
-	// balance over the maximum allowed ephemeral account balance.
-	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
-
 	// errMaxRevisionReached occurs when trying to revise a contract that has
 	// already reached the highest possible revision number. Usually happens
 	// when trying to use a renewed contract.
@@ -96,7 +92,6 @@ func IsErrHost(err error) bool {
 }
 
 func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceInsufficient) }
-func isBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
 func isClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
@@ -323,26 +318,25 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 	return rev, nil
 }
 
-func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fcid types.FileContractID) (rev types.FileContractRevision, err error) {
-	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
-		var cost types.Currency
-		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
+func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fcid types.FileContractID) (rev types.FileContractRevision, _ error) {
+	var amount types.Currency
+	return rev, h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
+		if err := h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(ctx, t, fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-				pt, err := h.priceTable(ctx, nil)
+				pt, err := h.priceTable(ctx, nil, &amount)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
-				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's better to stay pessimistic
-				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
+				amount = amount.Add(pt.LatestRevisionCost)
+				payment := rhpv3.PayByEphemeralAccount(h.acc.id, amount, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
-			if err != nil {
-				return err
-			}
-			return nil
-		})
+			return
+		}); err != nil {
+			return types.ZeroCurrency, err
+		}
+		return amount, nil
 	})
-	return rev, err
 }
 
 // FetchRevisionWithContract fetches the latest revision of a contract and uses
@@ -350,12 +344,10 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-			// Fetch pt.
-			pt, err := h.priceTable(ctx, rev)
+			pt, err := h.priceTable(ctx, rev, nil)
 			if err != nil {
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 			}
-			// Pay for the revision.
 			payment, err := payByContract(rev, pt.LatestRevisionCost, h.acc.id, h.renterKey)
 			if err != nil {
 				return rhpv3.HostPriceTable{}, nil, err
@@ -382,17 +374,19 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		as  AccountStore
-		key types.PrivateKey
+		as     AccountStore
+		key    types.PrivateKey
+		logger *zap.SugaredLogger
 	}
 
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		as   AccountStore
-		id   rhpv3.Account
-		key  types.PrivateKey
-		host types.PublicKey
+		as     AccountStore
+		id     rhpv3.Account
+		key    types.PrivateKey
+		host   types.PublicKey
+		logger *zap.SugaredLogger
 	}
 )
 
@@ -401,8 +395,9 @@ func (w *Worker) initAccounts(as AccountStore) {
 		panic("accounts already initialized") // developer error
 	}
 	w.accounts = &accounts{
-		as:  as,
-		key: w.deriveSubKey("accountkey"),
+		as:     as,
+		key:    w.deriveSubKey("accountkey"),
+		logger: w.logger.Named("accounts"),
 	}
 }
 
@@ -418,10 +413,11 @@ func (w *Worker) initTransportPool() {
 func (a *accounts) ForHost(hk types.PublicKey) *account {
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 	return &account{
-		as:   a.as,
-		id:   accountID,
-		key:  a.key,
-		host: hk,
+		as:     a.as,
+		id:     accountID,
+		key:    a.key,
+		host:   hk,
+		logger: a.logger.With("account", accountID).With("host", hk),
 	}
 }
 
@@ -533,10 +529,11 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 }
 
 // priceTable fetches a price table from the host. If a revision is provided, it
-// will be used to pay for the price table. The returned price table is
-// guaranteed to be safe to use.
-func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, error) {
-	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
+// will be used to pay for the price table. If not it will be paid for using an
+// ephemeral account, in which case the given amount parameter will get updated.
+// The returned price table is guaranteed to be safe to use.
+func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision, amount *types.Currency) (rhpv3.HostPriceTable, error) {
+	pt, err := h.priceTables.fetch(ctx, h.hk, rev, amount)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, err
 	}

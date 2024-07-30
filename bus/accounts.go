@@ -147,35 +147,43 @@ func (a *accounts) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
 }
 
 // SetBalance sets the balance of a given account to the provided amount. If the
-// account doesn't exist, it is created.
-// If an account hasn't been saved successfully upon the last shutdown, no drift
-// will be added upon the first call to SetBalance.
+// account doesn't exist, it is created. If an account hasn't been saved
+// successfully upon the last shutdown, no drift will be added upon the first
+// call to SetBalance.
 func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int) {
 	acc := a.account(id, hk)
 
-	// Update balance and drift.
 	acc.mu.Lock()
-	delta := new(big.Int).Sub(balance, acc.Balance)
-	balanceBefore := acc.Balance.String()
-	driftBefore := acc.Drift.String()
-	if acc.CleanShutdown {
-		acc.Drift = acc.Drift.Add(acc.Drift, delta)
-	}
-	acc.Balance.Set(balance)
-	acc.CleanShutdown = true
-	acc.RequiresSync = false // resetting the balance resets the sync field
-	balanceAfter := acc.Balance.String()
-	acc.mu.Unlock()
+	defer acc.mu.Unlock()
 
-	// Log resets.
+	// save previous values
+	prevBalance := new(big.Int).Set(acc.Balance)
+	prevDrift := new(big.Int).Set(acc.Drift)
+
+	// update balance
+	acc.Balance.Set(balance)
+
+	// update drift
+	drift := new(big.Int).Sub(balance, prevBalance)
+	if acc.CleanShutdown {
+		acc.Drift = acc.Drift.Add(acc.Drift, drift)
+	}
+
+	// reset fields
+	acc.CleanShutdown = true
+	acc.RequiresSync = false
+
+	// log account changes
 	a.logger.Infow("account balance was reset",
-		"account", acc.ID,
-		"host", acc.HostKey.String(),
-		"balanceBefore", balanceBefore,
-		"balanceAfter", balanceAfter,
-		"driftBefore", driftBefore,
-		"driftAfter", acc.Drift.String(),
-		"delta", delta.String())
+		zap.Stringer("account", acc.ID),
+		zap.Stringer("host", acc.HostKey),
+		zap.Stringer("balanceBefore", prevBalance),
+		zap.Stringer("balanceAfter", balance),
+		zap.Stringer("driftBefore", prevDrift),
+		zap.Stringer("driftAfter", acc.Drift),
+		zap.Bool("firstDrift", acc.Drift.Cmp(big.NewInt(0)) != 0 && prevDrift.Cmp(big.NewInt(0)) == 0),
+		zap.Bool("cleanshutdown", acc.CleanShutdown),
+		zap.Stringer("drift", drift))
 }
 
 // ScheduleSync sets the requiresSync flag of an account.
@@ -245,13 +253,24 @@ func (a *accounts) Accounts() []api.Account {
 // ResetDrift resets the drift on an account.
 func (a *accounts) ResetDrift(id rhpv3.Account) error {
 	a.mu.Lock()
-	account, exists := a.byID[id]
+	acc, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
 		return errAccountsNotFound
 	}
 	a.mu.Unlock()
-	account.resetDrift()
+
+	acc.mu.Lock()
+	driftBefore := acc.Drift.String()
+	acc.mu.Unlock()
+
+	acc.resetDrift()
+
+	a.logger.Infow("account drift was reset",
+		zap.Stringer("account", acc.ID),
+		zap.Stringer("host", acc.HostKey),
+		zap.String("driftBefore", driftBefore))
+
 	return nil
 }
 
@@ -280,7 +299,6 @@ func (a *accounts) account(id rhpv3.Account, hk types.PublicKey) *account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Create account if it doesn't exist.
 	acc, exists := a.byID[id]
 	if !exists {
 		acc = &account{
@@ -290,7 +308,7 @@ func (a *accounts) account(id rhpv3.Account, hk types.PublicKey) *account {
 				HostKey:       hk,
 				Balance:       big.NewInt(0),
 				Drift:         big.NewInt(0),
-				RequiresSync:  false,
+				RequiresSync:  true, // initial sync
 			},
 			locks: map[uint64]*accountLock{},
 		}

@@ -110,8 +110,8 @@ func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 	return rev, nil
 }
 
-func (h *testHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, error) {
-	return h.hptFn(), nil
+func (h *testHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
+	return h.hptFn(), types.ZeroCurrency, nil
 }
 
 func (h *testHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
@@ -122,8 +122,12 @@ func (h *testHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (
 	return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, nil
 }
 
-func (h *testHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
-	return nil
+func (h *testHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) (types.Currency, error) {
+	return types.ZeroCurrency, nil
+}
+
+func (h *testHost) AccountBalance(ctx context.Context, rev *types.FileContractRevision) (types.Currency, types.Currency, error) {
+	return types.ZeroCurrency, types.ZeroCurrency, nil
 }
 
 func TestHost(t *testing.T) {
