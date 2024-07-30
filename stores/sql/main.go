@@ -2355,6 +2355,36 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	}, nil
 }
 
+func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT sla.key, sla.health
+		FROM slabs sla
+		INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id
+		WHERE sla.health <= ? AND cs.name = ? AND sla.health_valid_until > ?
+		ORDER BY sla.health ASC
+		LIMIT ?
+	`, healthCutoff, set, time.Now().Unix(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
+	}
+	defer rows.Close()
+
+	var slabs []api.UnhealthySlab
+	for rows.Next() {
+		var slab api.UnhealthySlab
+		var key SecretKey
+		if err := rows.Scan(&key, &slab.Health); err != nil {
+			return nil, fmt.Errorf("failed to scan unhealthy slab: %w", err)
+		}
+		var ec object.EncryptionKey
+		if err := ec.UnmarshalBinary(key); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal encryption key: %w", err)
+		}
+		slabs = append(slabs, slab)
+	}
+	return slabs, nil
+}
+
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
 	policy, err := json.Marshal(bp)
 	if err != nil {

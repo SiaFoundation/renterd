@@ -779,6 +779,10 @@ func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
 	return ssql.Tip(ctx, tx.Tx)
 }
 
+func (tx *MainDatabaseTx) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
+	return ssql.UnhealthySlabs(ctx, tx, healthCutoff, set, limit)
+}
+
 func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {
 	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
