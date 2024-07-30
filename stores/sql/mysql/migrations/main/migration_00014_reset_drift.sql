@@ -1,0 +1,1 @@
+UPDATE ephemeral_accounts SET drift = "0";
