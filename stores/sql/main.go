@@ -2360,7 +2360,7 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 		SELECT sla.key, sla.health
 		FROM slabs sla
 		INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id
-		WHERE sla.health <= ? AND cs.name = ? AND sla.health_valid_until > ?
+		WHERE sla.health <= ? AND cs.name = ? AND sla.health_valid_until > ? AND sla.db_buffered_slab_id IS NULL
 		ORDER BY sla.health ASC
 		LIMIT ?
 	`, healthCutoff, set, time.Now().Unix(), limit)
