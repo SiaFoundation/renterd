@@ -30,7 +30,8 @@ type accounts struct {
 	l  *zap.SugaredLogger
 	w  *workerPool
 
-	refillInterval time.Duration
+	refillInterval           time.Duration
+	revisionSubmissionBuffer uint64
 
 	mu                sync.Mutex
 	inProgressRefills map[types.Hash256]struct{}
@@ -45,7 +46,7 @@ type ContractStore interface {
 	Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 }
 
-func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, l *zap.SugaredLogger, refillInterval time.Duration) *accounts {
+func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, l *zap.SugaredLogger, refillInterval time.Duration, revisionSubmissionBuffer uint64) *accounts {
 	return &accounts{
 		ap: ap,
 		a:  a,
@@ -53,8 +54,9 @@ func newAccounts(ap *Autopilot, a AccountStore, c ContractStore, w *workerPool, 
 		l:  l.Named("accounts"),
 		w:  w,
 
-		refillInterval:    refillInterval,
-		inProgressRefills: make(map[types.Hash256]struct{}),
+		refillInterval:           refillInterval,
+		revisionSubmissionBuffer: revisionSubmissionBuffer,
+		inProgressRefills:        make(map[types.Hash256]struct{}),
 	}
 }
 
@@ -110,6 +112,13 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 		return
 	}
 
+	// fetch consensus state
+	cs, err := a.ap.bus.ConsensusState(ctx)
+	if err != nil {
+		a.l.Errorw(fmt.Sprintf("failed to fetch consensus state for refill: %v", err))
+		return
+	}
+
 	// fetch worker id
 	workerID, err := w.ID(ctx)
 	if err != nil {
@@ -126,17 +135,14 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 		return
 	}
 
-	// fetch all contract set contracts
-	contractSetContracts, err := a.c.Contracts(ctx, api.ContractsOpts{ContractSet: cfg.Config.Contracts.Set})
-	if err != nil {
-		a.l.Errorw(fmt.Sprintf("failed to fetch contract set contracts: %v", err))
-		return
-	}
-
-	// build a map of contract set contracts
+	// filter all contract set contracts
+	var contractSetContracts []api.ContractMetadata
 	inContractSet := make(map[types.FileContractID]struct{})
-	for _, contract := range contractSetContracts {
-		inContractSet[contract.ID] = struct{}{}
+	for _, c := range contracts {
+		if c.InSet(cfg.Config.Contracts.Set) {
+			contractSetContracts = append(contractSetContracts, c)
+			inContractSet[c.ID] = struct{}{}
+		}
 	}
 
 	// refill accounts in separate goroutines
@@ -144,9 +150,11 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 		// launch refill if not already in progress
 		if a.markRefillInProgress(workerID, c.HostKey) {
 			go func(contract api.ContractMetadata) {
+				defer a.markRefillDone(workerID, contract.HostKey)
+
 				rCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				defer cancel()
-				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, contract)
+				accountID, refilled, rerr := refillWorkerAccount(rCtx, a.a, w, contract, cs.BlockHeight, a.revisionSubmissionBuffer)
 				if rerr != nil {
 					if rerr.Is(errMaxDriftExceeded) {
 						// register the alert if error is errMaxDriftExceeded
@@ -170,8 +178,6 @@ func (a *accounts) refillWorkerAccounts(ctx context.Context, w Worker) {
 						)
 					}
 				}
-
-				a.markRefillDone(workerID, contract.HostKey)
 			}(c)
 		}
 	}
@@ -193,7 +199,7 @@ func (err *refillError) Is(target error) bool {
 	return errors.Is(err.err, target)
 }
 
-func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, contract api.ContractMetadata) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
+func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, contract api.ContractMetadata, bh, revisionSubmissionBuffer uint64) (accountID rhpv3.Account, refilled bool, rerr *refillError) {
 	wrapErr := func(err error, keysAndValues ...interface{}) *refillError {
 		if err == nil {
 			return nil
@@ -214,6 +220,18 @@ func refillWorkerAccount(ctx context.Context, a AccountStore, w Worker, contract
 	account, err = a.Account(ctx, accountID, contract.HostKey)
 	if err != nil {
 		rerr = wrapErr(err)
+		return
+	}
+
+	// check if the contract is too close to the proof window to be revised,
+	// trying to refill the account would result in the host not returning the
+	// revision and returning an obfuscated error
+	if (bh + revisionSubmissionBuffer) > contract.WindowStart {
+		rerr = wrapErr(fmt.Errorf("not refilling account since contract is too close to the proof window to be revised (%v > %v)", bh+revisionSubmissionBuffer, contract.WindowStart),
+			"accountID", account.ID,
+			"hostKey", contract.HostKey,
+			"blockHeight", bh,
+		)
 		return
 	}
 

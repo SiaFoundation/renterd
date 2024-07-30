@@ -63,7 +63,7 @@ type AutopilotConfig struct {
 
 type (
 	RunFn         = func() error
-	BusSetupFn    = func(context.Context) error
+	BusSetupFn    = func()
 	WorkerSetupFn = func(context.Context, string, string) error
 	ShutdownFn    = func(context.Context) error
 )

@@ -27,6 +27,7 @@ type (
 		logger                    *zap.SugaredLogger
 		healthCutoff              float64
 		parallelSlabsPerWorker    uint64
+		signalConsensusNotSynced  chan struct{}
 		signalMaintenanceFinished chan struct{}
 		statsSlabMigrationSpeedMS *stats.DataPoints
 
@@ -67,6 +68,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uin
 		logger:                    ap.logger.Named("migrator"),
 		healthCutoff:              healthCutoff,
 		parallelSlabsPerWorker:    parallelSlabsPerWorker,
+		signalConsensusNotSynced:  make(chan struct{}, 1),
 		signalMaintenanceFinished: make(chan struct{}, 1),
 		statsSlabMigrationSpeedMS: stats.New(time.Hour),
 	}
@@ -157,8 +159,14 @@ func (m *migrator) performMigrations(p *workerPool) {
 						m.statsSlabMigrationSpeedMS.Track(float64(time.Since(start).Milliseconds()))
 						if err != nil {
 							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
-							skipAlert := utils.IsErr(err, api.ErrSlabNotFound)
-							if !skipAlert {
+							if utils.IsErr(err, api.ErrConsensusNotSynced) {
+								// interrupt migrations if consensus is not synced
+								select {
+								case m.signalConsensusNotSynced <- struct{}{}:
+								default:
+								}
+								return
+							} else if !utils.IsErr(err, api.ErrSlabNotFound) {
 								// fetch all object IDs for the slab we failed to migrate
 								var objectIds map[string][]string
 								if res, err := m.objectIDsForSlabKey(ctx, j.Key); err != nil {
@@ -198,29 +206,20 @@ func (m *migrator) performMigrations(p *workerPool) {
 	default:
 	}
 
-OUTER:
-	for {
-		// fetch currently configured set
-		autopilot, err := m.ap.Config(m.ap.shutdownCtx)
-		if err != nil {
-			m.logger.Errorf("failed to fetch autopilot config: %w", err)
-			return
-		}
-		set := autopilot.Config.Contracts.Set
-		if set == "" {
-			m.logger.Error("could not perform migrations, no contract set configured")
-			return
-		}
+	// fetch currently configured set
+	autopilot, err := m.ap.Config(m.ap.shutdownCtx)
+	if err != nil {
+		m.logger.Errorf("failed to fetch autopilot config: %w", err)
+		return
+	}
+	set := autopilot.Config.Contracts.Set
+	if set == "" {
+		m.logger.Error("could not perform migrations, no contract set configured")
+		return
+	}
 
-		// recompute health.
-		start := time.Now()
-		if err := b.RefreshHealth(m.ap.shutdownCtx); err != nil {
-			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
-			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
-			return
-		}
-		m.logger.Infof("recomputed slab health in %v", time.Since(start))
-
+	// helper to update 'toMigrate'
+	updateToMigrate := func() {
 		// fetch slabs for migration
 		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, set, migratorBatchSize)
 		if err != nil {
@@ -259,24 +258,38 @@ OUTER:
 		sort.Slice(newSlabs, func(i, j int) bool {
 			return newSlabs[i].Health < newSlabs[j].Health
 		})
-		migrateNewMap = nil // free map
+	}
+
+OUTER:
+	for {
+		// recompute health.
+		start := time.Now()
+		if err := b.RefreshHealth(m.ap.shutdownCtx); err != nil {
+			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
+			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
+		} else {
+			m.ap.DismissAlert(m.ap.shutdownCtx, alertHealthRefreshID)
+			m.logger.Infof("recomputed slab health in %v", time.Since(start))
+			updateToMigrate()
+		}
 
 		// log the updated list of slabs to migrate
 		m.logger.Infof("%d slabs to migrate", len(toMigrate))
-
-		// register an alert to notify users about ongoing migrations.
-		if len(toMigrate) > 0 {
-			m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
-		}
 
 		// return if there are no slabs to migrate
 		if len(toMigrate) == 0 {
 			return
 		}
 
+		// register an alert to notify users about ongoing migrations
+		m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
+
 		for i, slab := range toMigrate {
 			select {
 			case <-m.ap.shutdownCtx.Done():
+				return
+			case <-m.signalConsensusNotSynced:
+				m.logger.Info("migrations interrupted - consensus is not synced")
 				return
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")
@@ -284,8 +297,6 @@ OUTER:
 			case jobs <- job{slab, i, len(toMigrate), set, b}:
 			}
 		}
-
-		return
 	}
 }
 

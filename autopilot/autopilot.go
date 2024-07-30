@@ -154,7 +154,7 @@ func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat tim
 	ap.s = scanner
 	ap.c = contractor.New(bus, bus, ap.logger, revisionSubmissionBuffer, revisionBroadcastInterval)
 	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
+	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval, revisionSubmissionBuffer)
 
 	return ap, nil
 }

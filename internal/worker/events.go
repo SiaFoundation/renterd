@@ -108,6 +108,7 @@ func (e *eventManager) Run(ctx context.Context, eventsURL string, opts ...webhoo
 		api.WebhookConsensusUpdate(eventsURL, headers),
 		api.WebhookContractArchive(eventsURL, headers),
 		api.WebhookContractRenew(eventsURL, headers),
+		api.WebhookHostUpdate(eventsURL, headers),
 		api.WebhookSettingUpdate(eventsURL, headers),
 	}
 

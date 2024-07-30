@@ -2,6 +2,7 @@ package contractor
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -76,6 +77,16 @@ func (ctx *mCtx) GougingChecker(cs api.ConsensusState) worker.GougingChecker {
 	return worker.NewGougingChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.Period(), ctx.RenewWindow())
 }
 
+func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
+	// host settings that cause a panic should result in a score of 0
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("panic while scoring host")
+		}
+	}()
+	return hostScore(ctx.state.AP.Config, h, ctx.state.RS.Redundancy()), nil
+}
+
 func (ctx *mCtx) Period() uint64 {
 	return ctx.state.Period()
 }
@@ -94,6 +105,14 @@ func (ctx *mCtx) Value(key interface{}) interface{} {
 
 func (ctx *mCtx) WantedContracts() uint64 {
 	return ctx.state.AP.Config.Contracts.Amount
+}
+
+func (ctx *mCtx) Set() string {
+	return ctx.state.ContractsConfig().Set
+}
+
+func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {
+	ctx.state.ContractsConfig().SortContractsForMaintenance(contracts)
 }
 
 func (state *MaintenanceState) Allowance() types.Currency {

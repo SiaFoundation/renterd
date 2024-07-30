@@ -173,6 +173,9 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventContractRenew:
 		log = log.With("fcid", e.Renewal.ID, "renewedFrom", e.Renewal.RenewedFrom, "ts", e.Timestamp)
 		c.handleContractRenew(e)
+	case api.EventHostUpdate:
+		log = log.With("hk", e.HostKey, "ts", e.Timestamp)
+		c.handleHostUpdate(e)
 	case api.EventSettingUpdate:
 		log = log.With("key", e.Key, "ts", e.Timestamp)
 		err = c.handleSettingUpdate(e)
@@ -261,6 +264,24 @@ func (c *cache) handleContractRenew(event api.EventContractRenew) {
 		if contract.ID == event.Renewal.RenewedFrom {
 			contracts[i] = event.Renewal
 			break
+		}
+	}
+
+	c.cache.Set(cacheKeyDownloadContracts, contracts)
+}
+
+func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
+	// return early if the cache doesn't have contracts
+	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		return
+	}
+	contracts := value.([]api.ContractMetadata)
+
+	// update the host's IP in the cache
+	for i, contract := range contracts {
+		if contract.HostKey == e.HostKey {
+			contracts[i].HostIP = e.NetAddr
 		}
 	}
 
