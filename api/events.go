@@ -14,6 +14,7 @@ const (
 	ModuleConsensus   = "consensus"
 	ModuleContract    = "contract"
 	ModuleContractSet = "contract_set"
+	ModuleHost        = "host"
 	ModuleSetting     = "setting"
 
 	EventUpdate  = "update"
@@ -42,6 +43,12 @@ type (
 	EventContractRenew struct {
 		Renewal   ContractMetadata `json:"renewal"`
 		Timestamp time.Time        `json:"timestamp"`
+	}
+
+	EventHostUpdate struct {
+		HostKey   types.PublicKey `json:"hostKey"`
+		NetAddr   string          `json:"netAddr"`
+		Timestamp time.Time       `json:"timestamp"`
 	}
 
 	EventContractSetUpdate struct {
@@ -99,6 +106,15 @@ var (
 		}
 	}
 
+	WebhookHostUpdate = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventUpdate,
+			Headers: headers,
+			Module:  ModuleHost,
+			URL:     url,
+		}
+	}
+
 	WebhookSettingUpdate = func(url string, headers map[string]string) webhooks.Webhook {
 		return webhooks.Webhook{
 			Event:   EventUpdate,
@@ -150,6 +166,14 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 	case ModuleConsensus:
 		if event.Event == EventUpdate {
 			var e EventConsensusUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+	case ModuleHost:
+		if event.Event == EventUpdate {
+			var e EventHostUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}
