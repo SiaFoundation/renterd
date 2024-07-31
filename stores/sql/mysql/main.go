@@ -758,6 +758,57 @@ func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag"
 }
 
+func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
+	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
+	if err != nil {
+		return fmt.Errorf("failed to insert contract set: %w", err)
+	}
+
+	csID, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+
+	// handle empty set
+	if len(contractIds) == 0 {
+		_, err := tx.Exec(ctx, "DELETE FROM contract_set_contracts WHERE db_contract_set_id = ?", csID)
+		return err
+	}
+
+	// prepare fcid args and query
+	fcidQuery := strings.Repeat("?, ", len(contractIds)-1) + "?"
+	fcidArgs := make([]interface{}, len(contractIds))
+	for i, fcid := range contractIds {
+		fcidArgs[i] = ssql.FileContractID(fcid)
+	}
+
+	// remove unwanted contracts
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+		DELETE contract_set_contracts
+		FROM contract_set_contracts csc
+		INNER JOIN contracts c ON c.id = csc.db_contract_id
+		WHERE c.fcid NOT IN (%s)
+	`, fcidQuery), fcidArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to delete contract set contracts: %w", err)
+	}
+
+	// add missing contracts
+	args := []interface{}{csID}
+	args = append(args, fcidArgs...)
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
+		SELECT ?, c.id
+		FROM contracts c
+		WHERE c.fcid IN (%s)
+		ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
+	`, fcidQuery), args...)
+	if err != nil {
+		return fmt.Errorf("failed to add contract set contracts: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
 }

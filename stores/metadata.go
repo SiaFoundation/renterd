@@ -603,49 +603,8 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 
 	var diff []types.FileContractID
 	var nContractsAfter int
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// fetch contract set
-		var cs dbContractSet
-		err := tx.
-			Where(dbContractSet{Name: name}).
-			Preload("Contracts").
-			FirstOrCreate(&cs).
-			Error
-		if err != nil {
-			return err
-		}
-
-		// fetch contracts
-		var dbContracts []dbContract
-		err = tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", wantedIds).
-			Find(&dbContracts).
-			Error
-		if err != nil {
-			return err
-		}
-		nContractsAfter = len(dbContracts)
-
-		// add removals to the diff
-		for _, contract := range cs.Contracts {
-			if _, ok := wanted[contract.FCID]; !ok {
-				diff = append(diff, types.FileContractID(contract.FCID))
-			}
-			delete(wanted, contract.FCID)
-		}
-
-		// add additions to the diff
-		for fcid := range wanted {
-			diff = append(diff, types.FileContractID(fcid))
-		}
-
-		// update the association
-		if err := tx.Model(&cs).Association("Contracts").Replace(&dbContracts); err != nil {
-			return err
-		}
-
-		return nil
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.SetContractSet(ctx, name, contractIds)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set contract set: %w", err)

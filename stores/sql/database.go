@@ -298,6 +298,10 @@ type (
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
 
+		// SetContractSet creates the contract set with the given name and
+		// associates it with the provided contract IDs.
+		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
+
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
 
