@@ -19,6 +19,10 @@ import (
 
 const (
 	migratorBatchSize = math.MaxInt // TODO: change once we have a fix for the infinite loop
+
+	// migrationAlertRegisterInterval is the interval at which we update the
+	// ongoing migrations alert to indicate progress
+	migrationAlertRegisterInterval = 30 * time.Second
 )
 
 type (
@@ -260,6 +264,9 @@ func (m *migrator) performMigrations(p *workerPool) {
 		})
 	}
 
+	// unregister the migration alert when we're done
+	defer m.ap.alerts.DismissAlerts(m.ap.shutdownCtx, alertMigrationID)
+
 OUTER:
 	for {
 		// recompute health.
@@ -281,10 +288,14 @@ OUTER:
 			return
 		}
 
-		// register an alert to notify users about ongoing migrations
-		m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
-
+		var lastRegister time.Time
 		for i, slab := range toMigrate {
+			if time.Since(lastRegister) > migrationAlertRegisterInterval {
+				// register an alert to notify users about ongoing migrations
+				remaining := len(toMigrate) - i
+				m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(remaining, m.slabMigrationEstimate(remaining)))
+				lastRegister = time.Now()
+			}
 			select {
 			case <-m.ap.shutdownCtx.Done():
 				return
