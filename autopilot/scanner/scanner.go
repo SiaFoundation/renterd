@@ -9,7 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/stats"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +43,7 @@ type (
 		scanThreads   int
 		scanInterval  time.Duration
 
-		statsHostPingMS *stats.DataPoints
+		statsHostPingMS *utils.DataPoints
 
 		shutdownChan chan struct{}
 		wg           sync.WaitGroup
@@ -79,7 +79,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 		scanThreads:   int(scanThreads),
 		scanInterval:  scanMinInterval,
 
-		statsHostPingMS: stats.NoDecay(),
+		statsHostPingMS: utils.NewDataPoints(0),
 		logger:          logger.Named("scanner"),
 
 		interruptChan: make(chan struct{}),
