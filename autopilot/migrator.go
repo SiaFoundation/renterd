@@ -297,6 +297,9 @@ OUTER:
 			case jobs <- job{slab, i, len(toMigrate), set, b}:
 			}
 		}
+
+		// all slabs migrated
+		return
 	}
 }
 
