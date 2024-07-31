@@ -92,7 +92,6 @@ type (
 		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
 		UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
 
-		ResetDrift(ctx context.Context, id rhpv3.Account) error
 		SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
 		ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 	}

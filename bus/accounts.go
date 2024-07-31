@@ -142,6 +142,13 @@ func (a *accounts) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
 			"amt", amt.String(),
 			"balanceBefore", balanceBefore,
 			"balanceAfter", acc.Balance.String())
+	} else {
+		a.logger.Debugw("account balance was decreased",
+			"account", acc.ID,
+			"host", acc.HostKey.String(),
+			"amt", amt.String(),
+			"balanceBefore", balanceBefore,
+			"balanceAfter", acc.Balance.String())
 	}
 	acc.mu.Unlock()
 }
@@ -253,13 +260,24 @@ func (a *accounts) Accounts() []api.Account {
 // ResetDrift resets the drift on an account.
 func (a *accounts) ResetDrift(id rhpv3.Account) error {
 	a.mu.Lock()
-	account, exists := a.byID[id]
+	acc, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
 		return errAccountsNotFound
 	}
 	a.mu.Unlock()
-	account.resetDrift()
+
+	acc.mu.Lock()
+	driftBefore := acc.Drift.String()
+	acc.mu.Unlock()
+
+	acc.resetDrift()
+
+	a.logger.Infow("account drift was reset",
+		zap.Stringer("account", acc.ID),
+		zap.Stringer("host", acc.HostKey),
+		zap.String("driftBefore", driftBefore))
+
 	return nil
 }
 

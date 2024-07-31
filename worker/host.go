@@ -103,7 +103,8 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 		}
 	}()
 
-	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+	return h.acc.WithWithdrawal(ctx, "DownloadSector", func() (amount types.Currency, refund types.Currency, hostBalance types.Currency, hptt rhpv3.HostPriceTable, err error) {
+		hptt = hpt
 		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			cost, err := readSectorCost(hpt, uint64(length))
 			if err != nil {
@@ -111,12 +112,18 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 			}
 
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-			cost, refund, err := RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
+			cost, refund, err = RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
 			if err != nil {
 				return err
 			}
 
-			amount = cost.Sub(refund)
+			payment = rhpv3.PayByEphemeralAccount(h.acc.id, types.NewCurrency64(1), pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
+			hostBalance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
+			if err != nil {
+				return err
+			}
+
+			amount = cost.Add(types.NewCurrency64(1)).Sub(refund)
 			return nil
 		})
 		return
@@ -268,6 +275,27 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 
 			// record the spend
 			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: amount})
+
+			// create the payment to fetch the balance
+			payment, err = payByContract(rev, types.NewCurrency64(1), h.acc.id, h.renterKey)
+			if err != nil {
+				return err
+			}
+
+			// fetch the balance
+			accBalance, err := RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
+			if err != nil {
+				return err
+			}
+
+			h.logger.Debugw("account balance after funding",
+				"account", h.acc.id,
+				"host", h.hk,
+				"renterBalanceBefore", curr.ExactString(),
+				"deposit", deposit.ExactString(),
+				"cost", cost.ExactString(),
+				"paid", amount.ExactString(),
+				"hostBalance", accBalance.ExactString())
 			return nil
 		}); err != nil {
 			return types.ZeroCurrency, err
