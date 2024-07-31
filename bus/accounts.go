@@ -157,8 +157,8 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 	defer acc.mu.Unlock()
 
 	// save previous values
-	prevBalance := acc.Balance
-	prevDrift := acc.Drift
+	prevBalance := new(big.Int).Set(acc.Balance)
+	prevDrift := new(big.Int).Set(acc.Drift)
 
 	// update balance
 	acc.Balance.Set(balance)
