@@ -225,7 +225,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
 			cs.Close(),
-			s.Close(),
+			s.Close(ctx),
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),

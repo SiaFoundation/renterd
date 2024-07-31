@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
@@ -17,32 +18,37 @@ type Syncer interface {
 	Addr() string
 	BroadcastHeader(h gateway.BlockHeader)
 	BroadcastTransactionSet([]types.Transaction)
-	Close() error
+	Close(ctx context.Context) error
 	Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 	Peers() []*syncer.Peer
 }
 
-type nodeSyncer struct {
+type closeSyncer struct {
 	*syncer.Syncer
-	l net.Listener
+	l       net.Listener
+	errChan chan error
 }
 
-func (s *nodeSyncer) Close() error {
-	return s.l.Close()
+func (s *closeSyncer) Close(ctx context.Context) error {
+	if err := s.l.Close(); err != nil {
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-s.errChan:
+		return err
+	}
 }
 
 // NewSyncer creates a syncer using the given configuration. The syncer that is
 // returned is already running, closing it will close the underlying listener
 // causing the syncer to stop.
 func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (Syncer, error) {
-	// validate config
-	if cfg.Bootstrap && cfg.Network == nil {
-		return nil, errors.New("cannot bootstrap without a network")
-	}
-
-	// bootstrap the syncer
+	// bootstrap peers
 	if cfg.Bootstrap {
-		peers, err := peers(cfg.Network.Name)
+		peers, err := peers(cfg.Network)
 		if err != nil {
 			return nil, err
 		}
@@ -53,31 +59,32 @@ func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logge
 		}
 	}
 
-	// create syncer
+	// create the syncer, peers will reject us if our hostname is empty or
+	// unspecified, so use a loopback address if necessary
 	l, err := net.Listen("tcp", cfg.GatewayAddr)
 	if err != nil {
 		return nil, err
 	}
 	syncerAddr := l.Addr().String()
-
-	// peers will reject us if our hostname is empty or unspecified, so use loopback
 	host, port, _ := net.SplitHostPort(syncerAddr)
 	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
 		syncerAddr = net.JoinHostPort("127.0.0.1", port)
 	}
-
-	// create header
-	header := gateway.Header{
+	s := syncer.New(l, cm, ps, gateway.Header{
 		GenesisID:  cfg.Genesis.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
-	}
+	}, options(cfg, logger)...)
 
-	// start the syncer
-	s := syncer.New(l, cm, ps, header, options(cfg, logger)...)
-	go s.Run()
+	// wrap the syncer so we can gracefully close it by closing the underlying
+	// listener and waiting for the syncer to exit
+	cs := &closeSyncer{s, l, make(chan error, 1)}
+	go func() {
+		cs.errChan <- s.Run()
+		close(cs.errChan)
+	}()
 
-	return &nodeSyncer{s, l}, nil
+	return cs, nil
 }
 
 func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {
@@ -100,8 +107,12 @@ func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {
 	return
 }
 
-func peers(network string) ([]string, error) {
-	switch network {
+func peers(network *consensus.Network) ([]string, error) {
+	if network == nil {
+		return nil, errors.New("cannot bootstrap without a network")
+	}
+
+	switch network.Name {
 	case "mainnet":
 		return syncer.MainnetBootstrapPeers, nil
 	case "zen":
@@ -109,6 +120,6 @@ func peers(network string) ([]string, error) {
 	case "anagami":
 		return syncer.AnagamiBootstrapPeers, nil
 	default:
-		return nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", network)
+		return nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", network.Name)
 	}
 }
