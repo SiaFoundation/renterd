@@ -18,20 +18,20 @@ const (
 )
 
 type (
-	HostScanner interface {
-		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
-	}
-
 	HostStore interface {
 		HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
 
 	Scanner interface {
-		Scan(ctx context.Context, w HostScanner, force bool)
+		Scan(ctx context.Context, w WorkerRHPScan, force bool)
 		Shutdown(ctx context.Context) error
 		Status() (bool, time.Time)
 		UpdateHostsConfig(cfg api.HostsConfig)
+	}
+
+	WorkerRHPScan interface {
+		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	}
 )
 
@@ -87,7 +87,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	}, nil
 }
 
-func (s *scanner) Scan(ctx context.Context, w HostScanner, force bool) {
+func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
 	if s.canSkipScan(force) {
 		s.logger.Debug("host scan skipped")
 		return
@@ -194,7 +194,7 @@ func (s *scanner) fetchHosts(ctx context.Context, cutoff time.Time) chan scanJob
 	return jobsChan
 }
 
-func (s *scanner) scanHosts(ctx context.Context, w HostScanner, hosts chan scanJob) (scanned uint64) {
+func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, hosts chan scanJob) (scanned uint64) {
 	// define worker
 	worker := func() {
 		for h := range hosts {

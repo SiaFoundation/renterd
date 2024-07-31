@@ -64,14 +64,14 @@ func (hs *mockHostStore) state() ([]string, []string) {
 	return hs.scans, hs.removals
 }
 
-type mockHostScanner struct {
+type mockWorker struct {
 	blockChan chan struct{}
 
 	mu        sync.Mutex
 	scanCount int
 }
 
-func (w *mockHostScanner) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
+func (w *mockWorker) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
@@ -101,7 +101,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// initiate a host scan using a worker that blocks
-	w := &mockHostScanner{blockChan: make(chan struct{})}
+	w := &mockWorker{blockChan: make(chan struct{})}
 	s.Scan(context.Background(), w, false)
 
 	// assert it's scanning
