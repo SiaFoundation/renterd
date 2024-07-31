@@ -602,6 +602,7 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 	var diff []types.FileContractID
 	var nContractsAfter int
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		// build diff
 		prevContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
 		if err != nil && !errors.Is(err, api.ErrContractSetNotFound) {
 			return fmt.Errorf("failed to fetch contracts: %w", err)
@@ -617,7 +618,17 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		for fcid := range wanted {
 			diff = append(diff, fcid) // addition
 		}
-		return tx.SetContractSet(ctx, name, contractIds)
+		// update contract set
+		if err := tx.SetContractSet(ctx, name, contractIds); err != nil {
+			return fmt.Errorf("failed to set contract set: %w", err)
+		}
+		// fetch contracts after update
+		afterContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
+		if err != nil {
+			return fmt.Errorf("failed to fetch contracts after update: %w", err)
+		}
+		nContractsAfter = len(afterContracts)
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to set contract set: %w", err)
