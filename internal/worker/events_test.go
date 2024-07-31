@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -20,6 +22,14 @@ import (
 )
 
 const testRegisterInterval = 100 * time.Millisecond
+
+type mockAlerter struct{}
+
+func (a *mockAlerter) Alerts(ctx context.Context, opts alerts.AlertsOpts) (alerts.AlertsResponse, error) {
+	return alerts.AlertsResponse{}, nil
+}
+func (a *mockAlerter) RegisterAlert(ctx context.Context, alert alerts.Alert) error   { return nil }
+func (a *mockAlerter) DismissAlerts(ctx context.Context, ids ...types.Hash256) error { return nil }
 
 type mockEventHandler struct {
 	id        string
@@ -94,11 +104,12 @@ func TestEventSubscriber(t *testing.T) {
 	observedZapCore, observedLogs := observer.New(zap.DebugLevel)
 
 	// create mocks
+	a := &mockAlerter{}
 	w := &mockWebhookManager{blockChan: make(chan struct{})}
 	h := &mockEventHandler{id: t.Name()}
 
 	// create event subscriber
-	s := NewEventSubscriber(w, zap.New(observedZapCore), testRegisterInterval)
+	s := NewEventSubscriber(a, w, zap.New(observedZapCore), testRegisterInterval)
 
 	// subscribe the event handler
 	if err := h.Subscribe(s); err != nil {

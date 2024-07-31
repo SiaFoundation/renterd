@@ -7,9 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
+)
+
+var (
+	alertWebhookRegistrationFailedID = alerts.RandomAlertID() // constant until restarted
 )
 
 type (
@@ -33,6 +38,7 @@ type (
 
 type (
 	eventSubscriber struct {
+		alerts   alerts.Alerter
 		webhooks WebhookManager
 		logger   *zap.SugaredLogger
 
@@ -45,8 +51,9 @@ type (
 	}
 )
 
-func NewEventSubscriber(w WebhookManager, l *zap.Logger, registerInterval time.Duration) EventSubscriber {
+func NewEventSubscriber(a alerts.Alerter, w WebhookManager, l *zap.Logger, registerInterval time.Duration) EventSubscriber {
 	return &eventSubscriber{
+		alerts:   a,
 		webhooks: w,
 		logger:   l.Sugar().Named("events"),
 
@@ -113,13 +120,17 @@ func (e *eventSubscriber) Register(ctx context.Context, eventsURL string, opts .
 
 	// try and register the webhooks in a loop
 	for {
-		if e.registerWebhooks(ctx, webhooks) {
-			close(e.registeredChan)
+		err := e.registerWebhooks(ctx, webhooks)
+		if err == nil {
+			e.alerts.DismissAlerts(ctx, alertWebhookRegistrationFailedID)
 			break
 		}
 
-		// sleep for a bit before trying again
+		// alert on failure
+		e.alerts.RegisterAlert(ctx, newWebhookRegistrationFailedAlert(err))
 		e.logger.Warnf("failed to register webhooks, retrying in %v", e.registerInterval)
+
+		// sleep for a bit before trying again
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -149,14 +160,14 @@ func (e *eventSubscriber) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (e *eventSubscriber) registerWebhooks(ctx context.Context, webhooks []webhooks.Webhook) bool {
+func (e *eventSubscriber) registerWebhooks(ctx context.Context, webhooks []webhooks.Webhook) error {
 	for _, wh := range webhooks {
 		if err := e.webhooks.RegisterWebhook(ctx, wh); err != nil {
 			e.logger.Errorw("failed to register webhook",
 				zap.Error(err),
 				zap.Stringer("webhook", wh),
 			)
-			return false
+			return err
 		}
 	}
 
@@ -164,5 +175,20 @@ func (e *eventSubscriber) registerWebhooks(ctx context.Context, webhooks []webho
 	e.mu.Lock()
 	e.registered = webhooks
 	e.mu.Unlock()
-	return true
+
+	// signal that we're registered
+	close(e.registeredChan)
+	return nil
+}
+
+func newWebhookRegistrationFailedAlert(err error) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertWebhookRegistrationFailedID,
+		Severity: alerts.SeverityCritical,
+		Message:  "Worker failed to register webhooks",
+		Data: map[string]any{
+			"error": err.Error(),
+		},
+		Timestamp: time.Now(),
+	}
 }

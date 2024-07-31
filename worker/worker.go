@@ -1298,14 +1298,15 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
+	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id))
 	l = l.Named("worker").Named(id)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	w := &worker{
-		alerts:                  alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id)),
+		alerts:                  a,
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		cache:                   iworker.NewCache(b, l),
-		eventSubscriber:         iworker.NewEventSubscriber(b, l, 10*time.Second),
+		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
 		id:                      id,
 		bus:                     b,
 		masterKey:               masterKey,
