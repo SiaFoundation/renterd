@@ -531,6 +531,10 @@ func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path strin
 	return ssql.ObjectMetadata(ctx, tx, bucket, path)
 }
 
+func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
+	return ssql.ObjectsBySlabKey(ctx, tx, bucket, slabKey)
+}
+
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
 	return ssql.ObjectsStats(ctx, tx, opts)
 }

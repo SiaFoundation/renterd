@@ -234,16 +234,6 @@ type (
 		FCID    fileContractID
 		HostKey publicKey
 	}
-
-	// rawObjectMetadata is used for hydrating object metadata.
-	rawObjectMetadata struct {
-		ETag       string
-		Health     float64
-		MimeType   string
-		ModTime    datetime
-		ObjectName string
-		Size       int64
-	}
 )
 
 func (s *contractState) LoadString(state string) error {
@@ -352,17 +342,6 @@ func (c dbContract) convert() api.ContractMetadata {
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 	}
-}
-
-func (raw rawObjectMetadata) convert() api.ObjectMetadata {
-	return newObjectMetadata(
-		raw.ObjectName,
-		raw.ETag,
-		raw.MimeType,
-		raw.Health,
-		time.Time(raw.ModTime),
-		raw.Size,
-	)
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -1245,32 +1224,10 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 }
 
 func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
-	var rows []rawObjectMetadata
-	key, err := slabKey.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Raw(`
-SELECT DISTINCT obj.object_id as ObjectName, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
-FROM slabs sla
-INNER JOIN slices sli ON sli.db_slab_id = sla.id
-INNER JOIN objects obj ON sli.db_object_id = obj.id
-INNER JOIN buckets b ON obj.db_bucket_id = b.id AND b.name = ?
-WHERE sla.key = ?
-	`, bucket, key).
-			Scan(&rows).
-			Error
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		metadata, err = tx.ObjectsBySlabKey(ctx, bucket, slabKey)
+		return err
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	// convert rows
-	for _, row := range rows {
-		metadata = append(metadata, row.convert())
-	}
 	return
 }
 
