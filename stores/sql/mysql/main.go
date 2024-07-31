@@ -784,7 +784,7 @@ func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contr
 
 	// remove unwanted contracts
 	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		DELETE contract_set_contracts
+		DELETE csc
 		FROM contract_set_contracts csc
 		INNER JOIN contracts c ON c.id = csc.db_contract_id
 		WHERE c.fcid NOT IN (%s)
