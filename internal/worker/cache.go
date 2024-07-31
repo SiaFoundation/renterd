@@ -75,14 +75,13 @@ type (
 	Bus interface {
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
-		RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error
 	}
 
 	WorkerCache interface {
 		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 		HandleEvent(event webhooks.Event) error
-		Initialize(ctx context.Context, workerAPI string, opts ...webhooks.HeaderOption) error
+		Subscribe(e EventSubscriber) error
 	}
 )
 
@@ -92,8 +91,8 @@ type cache struct {
 	cache  *memoryCache
 	logger *zap.SugaredLogger
 
-	mu    sync.Mutex
-	ready bool
+	mu        sync.Mutex
+	readyChan chan struct{}
 }
 
 func NewCache(b Bus, logger *zap.Logger) WorkerCache {
@@ -197,33 +196,27 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	return
 }
 
-func (c *cache) Initialize(ctx context.Context, workerAPI string, webhookOpts ...webhooks.HeaderOption) error {
-	eventsURL := fmt.Sprintf("%s/events", workerAPI)
-	headers := make(map[string]string)
-	for _, opt := range webhookOpts {
-		opt(headers)
-	}
-	for _, wh := range []webhooks.Webhook{
-		api.WebhookConsensusUpdate(eventsURL, headers),
-		api.WebhookContractArchive(eventsURL, headers),
-		api.WebhookContractRenew(eventsURL, headers),
-		api.WebhookHostUpdate(eventsURL, headers),
-		api.WebhookSettingUpdate(eventsURL, headers),
-	} {
-		if err := c.b.RegisterWebhook(ctx, wh); err != nil {
-			return fmt.Errorf("failed to register webhook '%s', err: %v", wh, err)
-		}
-	}
+func (c *cache) Subscribe(e EventSubscriber) (err error) {
 	c.mu.Lock()
-	c.ready = true
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if c.readyChan != nil {
+		return fmt.Errorf("already subscribed")
+	}
+
+	c.readyChan, err = e.AddEventHandler(c.logger.Desugar().Name(), c)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe the worker cache, error: %v", err)
+	}
 	return nil
 }
 
 func (c *cache) isReady() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ready
+	select {
+	case <-c.readyChan:
+		return true
+	default:
+	}
+	return false
 }
 
 func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {

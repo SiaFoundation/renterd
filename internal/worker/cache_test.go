@@ -26,7 +26,22 @@ func (m *mockBus) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.
 func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) {
 	return m.gougingParams, nil
 }
-func (m *mockBus) RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error {
+
+type mockEventSubscriber struct {
+	readyChan chan struct{}
+}
+
+func (m *mockEventSubscriber) AddEventHandler(id string, h EventHandler) (chan struct{}, error) {
+	return m.readyChan, nil
+}
+
+func (m *mockEventSubscriber) ProcessEvent(event webhooks.Event) {}
+
+func (m *mockEventSubscriber) Register(ctx context.Context, eventURL string, opts ...webhooks.HeaderOption) error {
+	return nil
+}
+
+func (m *mockEventSubscriber) Shutdown(ctx context.Context) error {
 	return nil
 }
 
@@ -57,7 +72,13 @@ func TestWorkerCache(t *testing.T) {
 	// create mock bus and cache
 	c, b, mc := newTestCache(zap.New(observedZapCore))
 
-	// assert using cache before it's initialized prints a warning
+	// create mock event subscriber
+	m := &mockEventSubscriber{readyChan: make(chan struct{})}
+
+	// subscribe cache to event subscriber
+	c.Subscribe(m)
+
+	// assert using cache before it's ready prints a warning
 	contracts, err := c.DownloadContracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -84,10 +105,8 @@ func TestWorkerCache(t *testing.T) {
 		t.Fatal("expected error message to contain 'cache is not ready yet', got", lines[0].Message)
 	}
 
-	// initialize the cache
-	if err := c.Initialize(context.Background(), ""); err != nil {
-		t.Fatal(err)
-	}
+	// close the ready channel
+	close(m.readyChan)
 
 	// fetch contracts & gouging params so they're cached
 	_, err = c.DownloadContracts(context.Background())
