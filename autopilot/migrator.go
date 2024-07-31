@@ -268,6 +268,7 @@ OUTER:
 			m.ap.RegisterAlert(m.ap.shutdownCtx, newRefreshHealthFailedAlert(err))
 			m.logger.Errorf("failed to recompute cached health before migration: %v", err)
 		} else {
+			m.ap.DismissAlert(m.ap.shutdownCtx, alertHealthRefreshID)
 			m.logger.Infof("recomputed slab health in %v", time.Since(start))
 			updateToMigrate()
 		}
