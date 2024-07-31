@@ -594,16 +594,29 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (c
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	var wantedIds []fileContractID
-	wanted := make(map[fileContractID]struct{})
+	wanted := make(map[types.FileContractID]struct{})
 	for _, fcid := range contractIds {
-		wantedIds = append(wantedIds, fileContractID(fcid))
-		wanted[fileContractID(fcid)] = struct{}{}
+		wanted[types.FileContractID(fcid)] = struct{}{}
 	}
 
 	var diff []types.FileContractID
 	var nContractsAfter int
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		prevContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
+		if err != nil && !errors.Is(err, api.ErrContractSetNotFound) {
+			return fmt.Errorf("failed to fetch contracts: %w", err)
+		}
+		diff = nil // reset
+		for _, c := range prevContracts {
+			if _, exists := wanted[c.ID]; !exists {
+				diff = append(diff, c.ID) // removal
+			} else {
+				delete(wanted, c.ID)
+			}
+		}
+		for fcid := range wanted {
+			diff = append(diff, fcid) // addition
+		}
 		return tx.SetContractSet(ctx, name, contractIds)
 	})
 	if err != nil {
