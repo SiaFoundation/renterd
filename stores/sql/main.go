@@ -2657,3 +2657,36 @@ func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset,
 	}
 	return objects, nil
 }
+
+func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
+	key, err := slabKey.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal encryption key: %w", err)
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM objects o
+		INNER JOIN buckets b ON o.db_bucket_id = b.id
+		WHERE b.name = ? AND EXISTS (
+			SELECT 1
+			FROM objects o2
+			INNER JOIN slices sli ON sli.db_object_id = o2.id
+			INNER JOIN slabs sla ON sla.id = sli.db_slab_id
+			WHERE o2.id = o.id AND sla.key = ?
+		)
+	`, tx.SelectObjectMetadataExpr()), bucket, SecretKey(key))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := tx.ScanObjectMetadata(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+	return objects, nil
+}
