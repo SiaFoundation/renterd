@@ -310,6 +310,10 @@ type (
 		// Tip returns the sync height.
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
+		// UnhealthySlabs returns up to 'limit' slabs belonging to the contract
+		// set 'set' with a health smaller than or equal to 'healthCutoff'
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
+
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
 
