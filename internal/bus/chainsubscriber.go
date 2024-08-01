@@ -116,7 +116,9 @@ func (s *chainSubscriber) Close(ctx context.Context) error {
 	s.shutdownCtxCancel(errClosed)
 
 	// unsubscribe from the chain manager
-	s.unsubscribeFn()
+	if s.unsubscribeFn != nil {
+		s.unsubscribeFn()
+	}
 
 	// wait for sync loop to finish
 	waitChan := make(chan struct{})
