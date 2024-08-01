@@ -128,9 +128,18 @@ func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
 	return nil
 }
 
-func (m *Manager) Close() error {
+func (m *Manager) Close(ctx context.Context) error {
 	m.shutdownCtxCancel()
-	m.wg.Wait()
+	waitChan := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(waitChan)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waitChan:
+	}
 	return nil
 }
 

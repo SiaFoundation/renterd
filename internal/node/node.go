@@ -14,12 +14,12 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
@@ -70,7 +70,7 @@ type (
 
 var NoopFn = func(context.Context) error { return nil }
 
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, BusSetupFn, ShutdownFn, *chain.Manager, *chain.ChainSubscriber, error) {
+func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, BusSetupFn, ShutdownFn, *chain.Manager, error) {
 	// create database connections
 	var dbConn gorm.Dialector
 	var dbMetrics sql.MetricsDatabase
@@ -89,17 +89,17 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 			cfg.Database.MySQL.MetricsDatabase,
 		)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
 		dbMetrics, err = mysql.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
 	} else {
 		// create database directory
 		dbDir := filepath.Join(dir, "db")
 		if err := os.MkdirAll(dbDir, 0700); err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 
 		// create SQLite connections
@@ -107,11 +107,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 
 		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
 		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
 	}
 
@@ -142,13 +142,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		LongTxDuration:                cfg.DatabaseLog.SlowThreshold,
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create webhooks manager
 	wh, err := webhooks.NewManager(sqlStore, logger)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// hookup webhooks <-> alerts
@@ -157,13 +157,13 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	// create consensus directory
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// migrate consensus database
 	oldConsensus, err := os.Stat(filepath.Join(consensusDir, "consensus.db"))
 	if err != nil && !os.IsNotExist(err) {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	} else if err == nil {
 		logger.Warn("found old consensus.db, indicating a migration is necessary")
 
@@ -172,7 +172,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := sqlStore.ResetChainState(ctx); err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		logger.Warn("Chain state was successfully reset.")
 
@@ -180,7 +180,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		logger.Warn("Removing consensus database...")
 		_ = os.RemoveAll(filepath.Join(consensusDir, "consensus.log")) // ignore error
 		if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
 		logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
@@ -189,42 +189,35 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	// create chain database
 	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "blockchain.db"))
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}
 
 	// create chain manager
 	store, state, err := chain.NewDBStore(bdb, cfg.Network, cfg.Genesis)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	cm := chain.NewManager(store, state)
-
-	// create chain subscriber
-	cs, err := chain.NewChainSubscriber(wh, cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
 
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create syncer
 	s, err := NewSyncer(cfg, cm, sqlStore, logger)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
-	b, err := bus.New(alertsMgr, wh, cm, sqlStore, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
-			cs.Close(),
 			s.Close(),
 			w.Close(),
 			b.Shutdown(ctx),
@@ -232,7 +225,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 			bdb.Close(),
 		)
 	}
-	return b.Handler(), b.Setup, shutdownFn, cm, cs, nil
+	return b.Handler(), b.Setup, shutdownFn, cm, nil
 }
 
 func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, WorkerSetupFn, ShutdownFn, error) {

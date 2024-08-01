@@ -18,20 +18,11 @@ import (
 )
 
 type (
-	// An AutopilotStore stores autopilots.
 	AutopilotStore interface {
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
-	// PinManager is a service that manages price pinning.
-	PinManager interface {
-		Close(context.Context) error
-		Run()
-		TriggerUpdate()
-	}
-
-	// A SettingStore stores settings.
 	SettingStore interface {
 		Setting(ctx context.Context, key string) (string, error)
 		UpdateSetting(ctx context.Context, key, value string) error

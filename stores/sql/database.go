@@ -7,10 +7,10 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -18,6 +18,18 @@ import (
 // The database interfaces define all methods that a SQL database must implement
 // to be used by the SQLStore.
 type (
+	ChainUpdateTx interface {
+		ContractState(fcid types.FileContractID) (api.ContractState, error)
+		UpdateChainIndex(index types.ChainIndex) error
+		UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
+		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
+		UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error
+		UpdateFailedContracts(blockHeight uint64) error
+		UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
+
+		wallet.UpdateTx
+	}
+
 	Database interface {
 		io.Closer
 
@@ -217,7 +229,7 @@ type (
 		Peers(ctx context.Context) ([]syncer.PeerInfo, error)
 
 		// ProcessChainUpdate applies the given chain update to the database.
-		ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error
+		ProcessChainUpdate(ctx context.Context, applyFn func(ChainUpdateTx) error) error
 
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
