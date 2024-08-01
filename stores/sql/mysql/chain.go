@@ -17,6 +17,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	_ ssql.ChainUpdateTx = (*chainUpdateTx)(nil)
+)
+
 type chainUpdateTx struct {
 	ctx context.Context
 	tx  isql.Tx

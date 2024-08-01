@@ -52,10 +52,10 @@ type (
 	}
 
 	chainSubscriber struct {
-		cm          ChainManager
-		cs          ChainStore
-		webhooksMgr WebhookManager
-		logger      *zap.SugaredLogger
+		cm     ChainManager
+		cs     ChainStore
+		wm     WebhookManager
+		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
 		walletAddress      types.Address
@@ -91,10 +91,10 @@ type (
 func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	return &chainSubscriber{
-		cm:          cm,
-		cs:          cs,
-		webhooksMgr: whm,
-		logger:      logger.Sugar().Named("chainsubscriber"),
+		cm:     cm,
+		cs:     cs,
+		wm:     whm,
+		logger: logger.Sugar().Named("chainsubscriber"),
 
 		announcementMaxAge: announcementMaxAge,
 		walletAddress:      walletAddress,
@@ -183,7 +183,7 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 				return fmt.Errorf("failed to update host: %w", err)
 			} else if utils.IsSynced(b) {
 				// broadcast host update
-				s.webhooksMgr.BroadcastAction(s.shutdownCtx, webhooks.Event{
+				s.wm.BroadcastAction(s.shutdownCtx, webhooks.Event{
 					Module: api.ModuleHost,
 					Event:  api.EventUpdate,
 					Payload: api.EventHostUpdate{
@@ -292,7 +292,7 @@ func (s *chainSubscriber) sync() error {
 
 		// broadcast consensus update
 		if utils.IsSynced(block) {
-			s.webhooksMgr.BroadcastAction(s.shutdownCtx, webhooks.Event{
+			s.wm.BroadcastAction(s.shutdownCtx, webhooks.Event{
 				Module: api.ModuleConsensus,
 				Event:  api.EventUpdate,
 				Payload: api.EventConsensusUpdate{
