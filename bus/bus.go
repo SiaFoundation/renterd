@@ -255,7 +255,7 @@ type bus struct {
 	logger *zap.SugaredLogger
 }
 
-// New returns a new Bus.
+// New returns a new Bus
 func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*bus, error) {
 	l = l.Named("bus")
 	b := &bus{
@@ -279,12 +279,6 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 		startTime: time.Now(),
 	}
 
-	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
-
-	// create chain subscriber
-	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w.Address(), announcementMaxAge, l)
-
 	// init accounts
 	if err := b.initAccounts(ctx); err != nil {
 		return nil, err
@@ -294,6 +288,14 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
+
+	// create pin manager and start it
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr.Run()
+
+	// create chain subscriber and start it
+	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w.Address(), announcementMaxAge, l)
+	b.cs.Run()
 
 	return b, nil
 }
@@ -440,7 +442,7 @@ func (b *bus) Handler() http.Handler {
 	})
 }
 
-// Setup starts the pin manager.
+// Setup completes the setup of the bus.
 func (b *bus) Setup() {
 	b.pinMgr.Run()
 	b.cs.Run()

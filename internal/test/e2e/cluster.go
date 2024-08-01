@@ -309,7 +309,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bSetupFn, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -410,9 +410,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			cluster.wg.Done()
 		}()
 	}
-
-	// Finish bus setup.
-	bSetupFn()
 
 	// Finish worker setup.
 	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {

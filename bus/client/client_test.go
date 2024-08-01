@@ -70,7 +70,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 
 	// create bus
 	network, genesis := build.Network()
-	b, _, shutdown, _, err := node.NewBus(node.BusConfig{
+	b, shutdown, _, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
