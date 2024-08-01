@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
@@ -550,8 +549,8 @@ func (tx *MainDatabaseTx) Peers(ctx context.Context) ([]syncer.PeerInfo, error) 
 	return ssql.Peers(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn chain.ApplyChainUpdateFn) error {
-	return fn(&ChainUpdateTx{
+func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.ChainUpdateTx) error) error {
+	return fn(&chainUpdateTx{
 		ctx: ctx,
 		tx:  tx,
 		l:   tx.log.Named("ProcessChainUpdate"),

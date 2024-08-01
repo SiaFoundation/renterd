@@ -130,13 +130,11 @@ func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
 
 func (m *Manager) Close(ctx context.Context) error {
 	m.shutdownCtxCancel()
-
 	waitChan := make(chan struct{})
 	go func() {
 		m.wg.Wait()
 		close(waitChan)
 	}()
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

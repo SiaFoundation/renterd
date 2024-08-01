@@ -1,4 +1,4 @@
-package chain
+package bus
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -31,7 +32,6 @@ var (
 
 type (
 	ChainManager interface {
-		Block(id types.BlockID) (types.Block, bool)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		RecommendedFee() types.Currency
 		Tip() types.ChainIndex
@@ -40,30 +40,38 @@ type (
 
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
-		ProcessChainUpdate(ctx context.Context, applyFn ApplyChainUpdateFn) error
+		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
-	ApplyChainUpdateFn = func(ChainUpdateTx) error
+	WebhookManager interface {
+		webhooks.Broadcaster
+		Close(context.Context) error
+		Delete(context.Context, webhooks.Webhook) error
+		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
+		Register(context.Context, webhooks.Webhook) error
+	}
 
-	ChainSubscriber struct {
-		cm          ChainManager
-		cs          ChainStore
-		webhooksMgr *webhooks.Manager
-		logger      *zap.SugaredLogger
+	chainSubscriber struct {
+		cm     ChainManager
+		cs     ChainStore
+		wm     WebhookManager
+		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
 		walletAddress      types.Address
 
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelCauseFunc
-		unsubscribeFn     func()
 		syncSig           chan struct{}
 		wg                sync.WaitGroup
 
 		mu             sync.Mutex
 		knownContracts map[types.FileContractID]bool
+		unsubscribeFn  func()
 	}
+)
 
+type (
 	revision struct {
 		revisionNumber uint64
 		fileSize       uint64
@@ -80,19 +88,14 @@ type (
 
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
-// running and can be shut down by calling the Close method.
-func NewChainSubscriber(whm *webhooks.Manager, cm *chain.Manager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) (_ *ChainSubscriber, err error) {
-	if announcementMaxAge == 0 {
-		return nil, errors.New("announcementMaxAge must be non-zero")
-	}
-
-	// create subscriber
+// running and can be stopped by calling Close.
+func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	subscriber := &ChainSubscriber{
-		cm:          cm,
-		cs:          cs,
-		webhooksMgr: whm,
-		logger:      logger.Sugar().Named("chainsubscriber"),
+	subscriber := &chainSubscriber{
+		cm:     cm,
+		cs:     cs,
+		wm:     whm,
+		logger: logger.Sugar().Named("chainsubscriber"),
 
 		announcementMaxAge: announcementMaxAge,
 		walletAddress:      walletAddress,
@@ -105,59 +108,48 @@ func NewChainSubscriber(whm *webhooks.Manager, cm *chain.Manager, cs ChainStore,
 	}
 
 	// start the subscriber
-	unsubscribeFn, err := subscriber.Run()
-	if err != nil {
-		return nil, err
-	}
-	subscriber.unsubscribeFn = unsubscribeFn
+	subscriber.run()
 
-	return subscriber, nil
+	// trigger a sync on reorgs
+	subscriber.unsubscribeFn = cm.OnReorg(func(ci types.ChainIndex) {
+		select {
+		case subscriber.syncSig <- struct{}{}:
+			subscriber.logger.Debugw("reorg triggered", "height", ci.Height, "block_id", ci.ID)
+		default:
+		}
+	})
+
+	return subscriber
 }
 
-func (s *ChainSubscriber) Close() error {
+func (s *chainSubscriber) ChainIndex(ctx context.Context) (types.ChainIndex, error) {
+	return s.cs.ChainIndex(ctx)
+}
+
+func (s *chainSubscriber) Close(ctx context.Context) error {
 	// cancel shutdown context
 	s.shutdownCtxCancel(errClosed)
 
 	// unsubscribe from the chain manager
-	s.unsubscribeFn()
+	if s.unsubscribeFn != nil {
+		s.unsubscribeFn()
+	}
 
 	// wait for sync loop to finish
-	s.wg.Wait()
+	waitChan := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(waitChan)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waitChan:
+	}
 	return nil
 }
 
-func (s *ChainSubscriber) Run() (func(), error) {
-	// start sync loop in separate goroutine
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		for {
-			select {
-			case <-s.shutdownCtx.Done():
-				return
-			case <-s.syncSig:
-			}
-
-			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
-				return
-			} else if err != nil {
-				s.logger.Panicf("failed to sync: %v", err)
-			}
-		}
-	}()
-
-	// trigger a sync on reorgs
-	return s.cm.OnReorg(func(ci types.ChainIndex) {
-		select {
-		case s.syncSig <- struct{}{}:
-			s.logger.Debugw("reorg triggered", "height", ci.Height, "block_id", ci.ID)
-		default:
-		}
-	}), nil
-}
-
-func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpdate) error {
+func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.ApplyUpdate) error {
 	// apply host updates
 	b := cau.Block
 	if time.Since(b.Timestamp) <= s.announcementMaxAge {
@@ -170,9 +162,9 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 		for hk, ha := range hus {
 			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
-			} else if IsSynced(b) {
+			} else if utils.IsSynced(b) {
 				// broadcast host update
-				s.webhooksMgr.BroadcastAction(s.shutdownCtx, webhooks.Event{
+				s.wm.BroadcastAction(s.shutdownCtx, webhooks.Event{
 					Module: api.ModuleHost,
 					Event:  api.EventUpdate,
 					Payload: api.EventHostUpdate{
@@ -219,7 +211,7 @@ func (s *ChainSubscriber) applyChainUpdate(tx ChainUpdateTx, cau chain.ApplyUpda
 	return nil
 }
 
-func (s *ChainSubscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUpdate) error {
+func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.RevertUpdate) error {
 	// NOTE: host updates are not reverted
 
 	// v1 contracts
@@ -247,7 +239,28 @@ func (s *ChainSubscriber) revertChainUpdate(tx ChainUpdateTx, cru chain.RevertUp
 	return nil
 }
 
-func (s *ChainSubscriber) sync() error {
+func (s *chainSubscriber) run() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		for {
+			select {
+			case <-s.shutdownCtx.Done():
+				return
+			case <-s.syncSig:
+			}
+
+			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
+				return
+			} else if err != nil {
+				s.logger.Panicf("failed to sync: %v", err)
+			}
+		}
+	}()
+}
+
+func (s *chainSubscriber) sync() error {
 	start := time.Now()
 
 	// fetch current chain index
@@ -280,8 +293,8 @@ func (s *ChainSubscriber) sync() error {
 		cnt++
 
 		// broadcast consensus update
-		if IsSynced(block) {
-			s.webhooksMgr.BroadcastAction(s.shutdownCtx, webhooks.Event{
+		if utils.IsSynced(block) {
+			s.wm.BroadcastAction(s.shutdownCtx, webhooks.Event{
 				Module: api.ModuleConsensus,
 				Event:  api.EventUpdate,
 				Payload: api.EventConsensusUpdate{
@@ -305,8 +318,8 @@ func (s *ChainSubscriber) sync() error {
 	return nil
 }
 
-func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, tip types.Block, _ error) {
-	if err := s.cs.ProcessChainUpdate(ctx, func(tx ChainUpdateTx) error {
+func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, tip types.Block, _ error) {
+	if err := s.cs.ProcessChainUpdate(ctx, func(tx sql.ChainUpdateTx) error {
 		// process wallet updates
 		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
 			return fmt.Errorf("failed to process wallet updates: %w", err)
@@ -345,7 +358,7 @@ func (s *ChainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 	return
 }
 
-func (s *ChainSubscriber) updateContract(tx ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
+func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
 	// sanity check at least one is not nil
 	if prev == nil && curr == nil {
 		return errors.New("both prev and curr revisions are nil") // developer error
@@ -470,7 +483,7 @@ func (s *ChainSubscriber) updateContract(tx ChainUpdateTx, index types.ChainInde
 	return nil
 }
 
-func (s *ChainSubscriber) isClosed() bool {
+func (s *chainSubscriber) isClosed() bool {
 	select {
 	case <-s.shutdownCtx.Done():
 		return true
@@ -479,7 +492,7 @@ func (s *ChainSubscriber) isClosed() bool {
 	return false
 }
 
-func (s *ChainSubscriber) isKnownContract(fcid types.FileContractID) bool {
+func (s *chainSubscriber) isKnownContract(fcid types.FileContractID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	known, ok := s.knownContracts[fcid]
@@ -489,14 +502,10 @@ func (s *ChainSubscriber) isKnownContract(fcid types.FileContractID) bool {
 	return known
 }
 
-func (s *ChainSubscriber) updateKnownContracts(fcid types.FileContractID, known bool) {
+func (s *chainSubscriber) updateKnownContracts(fcid types.FileContractID, known bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.knownContracts[fcid] = known
-}
-
-func IsSynced(b types.Block) bool {
-	return time.Since(b.Timestamp) <= 3*time.Hour
 }
 
 func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) contractUpdate {
