@@ -438,12 +438,6 @@ func (b *bus) Handler() http.Handler {
 	})
 }
 
-// Setup completes the setup of the bus.
-func (b *bus) Setup() {
-	b.pinMgr.Run()
-	b.cs.Run()
-}
-
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
