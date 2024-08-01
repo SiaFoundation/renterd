@@ -87,10 +87,11 @@ type (
 )
 
 // NewChainSubscriber creates a new chain subscriber that will sync with the
-// given chain manager and chain store.
+// given chain manager and chain store. The returned subscriber is already
+// running and can be stopped by calling Close.
 func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	return &chainSubscriber{
+	subscriber := &chainSubscriber{
 		cm:     cm,
 		cs:     cs,
 		wm:     whm,
@@ -105,6 +106,20 @@ func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, wall
 
 		knownContracts: make(map[types.FileContractID]bool),
 	}
+
+	// start the subscriber
+	subscriber.run()
+
+	// trigger a sync on reorgs
+	subscriber.unsubscribeFn = cm.OnReorg(func(ci types.ChainIndex) {
+		select {
+		case subscriber.syncSig <- struct{}{}:
+			subscriber.logger.Debugw("reorg triggered", "height", ci.Height, "block_id", ci.ID)
+		default:
+		}
+	})
+
+	return subscriber
 }
 
 func (s *chainSubscriber) ChainIndex(ctx context.Context) (types.ChainIndex, error) {
@@ -132,40 +147,6 @@ func (s *chainSubscriber) Close(ctx context.Context) error {
 	case <-waitChan:
 	}
 	return nil
-}
-
-func (s *chainSubscriber) Run() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// start sync loop in separate goroutine
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		for {
-			select {
-			case <-s.shutdownCtx.Done():
-				return
-			case <-s.syncSig:
-			}
-
-			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
-				return
-			} else if err != nil {
-				s.logger.Panicf("failed to sync: %v", err)
-			}
-		}
-	}()
-
-	// trigger a sync on reorgs
-	s.unsubscribeFn = s.cm.OnReorg(func(ci types.ChainIndex) {
-		select {
-		case s.syncSig <- struct{}{}:
-			s.logger.Debugw("reorg triggered", "height", ci.Height, "block_id", ci.ID)
-		default:
-		}
-	})
 }
 
 func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.ApplyUpdate) error {
@@ -256,6 +237,27 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	}
 
 	return nil
+}
+
+func (s *chainSubscriber) run() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		for {
+			select {
+			case <-s.shutdownCtx.Done():
+				return
+			case <-s.syncSig:
+			}
+
+			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
+				return
+			} else if err != nil {
+				s.logger.Panicf("failed to sync: %v", err)
+			}
+		}
+	}()
 }
 
 func (s *chainSubscriber) sync() error {

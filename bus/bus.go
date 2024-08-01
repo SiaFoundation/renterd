@@ -65,7 +65,6 @@ type (
 	ChainSubscriber interface {
 		ChainIndex(context.Context) (types.ChainIndex, error)
 		Close(context.Context) error
-		Run()
 	}
 
 	ChainStore interface {
@@ -193,7 +192,6 @@ type (
 
 	PinManager interface {
 		Close(context.Context) error
-		Run()
 		TriggerUpdate()
 	}
 
@@ -289,13 +287,11 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 		return nil, err
 	}
 
-	// create pin manager and start it
+	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
-	b.pinMgr.Run()
 
-	// create chain subscriber and start it
+	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w.Address(), announcementMaxAge, l)
-	b.cs.Run()
 
 	return b, nil
 }
