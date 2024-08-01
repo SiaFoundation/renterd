@@ -61,7 +61,7 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as A
 		ss:          ss,
 		broadcaster: broadcaster,
 
-		logger: l.Sugar().Named("pricemanager"),
+		logger: l.Named("pricemanager").Sugar(),
 
 		updateInterval: updateInterval,
 		rateWindow:     rateWindow,

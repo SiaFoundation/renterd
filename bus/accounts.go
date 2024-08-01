@@ -54,18 +54,6 @@ func newAccounts(accs []api.Account, logger *zap.SugaredLogger) *accounts {
 	return a
 }
 
-func (b *bus) saveAccounts(ctx context.Context) error {
-	accounts := b.accounts.ToPersist()
-	err := b.eas.SaveAccounts(ctx, accounts)
-	if err != nil {
-		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
-		return err
-	}
-
-	b.logger.Infof("successfully saved %v accounts", len(accounts))
-	return nil
-}
-
 func (a *accounts) LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64) {
 	acc := a.account(id, hostKey)
 

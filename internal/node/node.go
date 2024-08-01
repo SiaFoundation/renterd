@@ -71,6 +71,10 @@ type (
 var NoopFn = func(context.Context) error { return nil }
 
 func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, BusSetupFn, ShutdownFn, *chain.Manager, error) {
+	// ensure we don't hang indefinitely
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	// create database connections
 	var dbConn gorm.Dialector
 	var dbMetrics sql.MetricsDatabase
@@ -169,8 +173,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 
 		// reset chain state
 		logger.Warn("Resetting chain state...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
 		if err := sqlStore.ResetChainState(ctx); err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -211,7 +213,9 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		return nil, nil, nil, nil, err
 	}
 
-	b, err := bus.New(alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, logger)
+	// create bus
+	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
+	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
