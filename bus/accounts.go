@@ -24,17 +24,6 @@ type accounts struct {
 	logger *zap.SugaredLogger
 }
 
-func (b *bus) saveAccounts(ctx context.Context) error {
-	accounts := b.accounts.ToPersist()
-	if err := b.eas.SaveAccounts(ctx, accounts); err != nil {
-		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
-		return err
-	}
-
-	b.logger.Infof("successfully saved %v accounts", len(accounts))
-	return nil
-}
-
 type account struct {
 	mu               sync.Mutex
 	locks            map[uint64]*accountLock

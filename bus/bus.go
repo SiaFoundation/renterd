@@ -246,6 +246,46 @@ type bus struct {
 	logger *zap.SugaredLogger
 }
 
+// New returns a new Bus.
+func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+	l = l.Named("bus")
+	b := &bus{
+		s:                s,
+		cm:               cm,
+		cs:               cs,
+		w:                w,
+		hdb:              hdb,
+		as:               as,
+		ms:               ms,
+		mtrcs:            mtrcs,
+		ss:               ss,
+		eas:              eas,
+		contractLocks:    newContractLocks(),
+		uploadingSectors: newUploadingSectorsCache(),
+
+		alerts:      alerts.WithOrigin(am, "bus"),
+		alertMgr:    am,
+		webhooksMgr: wm,
+		logger:      l.Sugar(),
+
+		startTime: time.Now(),
+	}
+
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
+
+	// init accounts
+	if err := b.initAccounts(ctx); err != nil {
+		return nil, err
+	}
+
+	// init settings
+	if err := b.initSettings(ctx); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
 // Handler returns an HTTP handler that serves the bus API.
 func (b *bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
@@ -402,36 +442,26 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	)
 }
 
-// New returns a new Bus.
-func New(am *alerts.Manager, wm WebhooksManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
-	b := &bus{
-		s:                s,
-		cm:               cm,
-		cs:               cs,
-		w:                w,
-		hdb:              hdb,
-		as:               as,
-		ms:               ms,
-		mtrcs:            mtrcs,
-		ss:               ss,
-		eas:              eas,
-		contractLocks:    newContractLocks(),
-		uploadingSectors: newUploadingSectorsCache(),
+// initAccounts loads the accounts into memory
+func (b *bus) initAccounts(ctx context.Context) error {
+	accounts, err := b.eas.Accounts(ctx)
+	if err != nil {
+		return err
+	}
+	b.accounts = newAccounts(accounts, b.logger)
 
-		alerts:      alerts.WithOrigin(am, "bus"),
-		alertMgr:    am,
-		webhooksMgr: wm,
-		logger:      l.Sugar().Named("bus"),
-
-		startTime: time.Now(),
+	// mark the shutdown as unclean, this will be overwritten when/if the
+	// accounts are saved on shutdown
+	if err := b.eas.SetUncleanShutdown(ctx); err != nil {
+		return fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
 
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, b.logger.Desugar())
+	return nil
+}
 
-	// ensure we don't hang indefinitely
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
+// initSettings loads the default settings if the setting is not already set and
+// ensures the settings are valid
+func (b *bus) initSettings(ctx context.Context) error {
 	// load default settings if the setting is not already set
 	for key, value := range map[string]interface{}{
 		api.SettingGouging:       build.DefaultGougingSettings,
@@ -443,7 +473,7 @@ func New(am *alerts.Manager, wm WebhooksManager, cm ChainManager, cs ChainStore,
 			if bytes, err := json.Marshal(value); err != nil {
 				panic("failed to marshal default settings") // should never happen
 			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
@@ -451,65 +481,64 @@ func New(am *alerts.Manager, wm WebhooksManager, cm ChainManager, cs ChainStore,
 	// check redundancy settings for validity
 	var rs api.RedundancySettings
 	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
-		return nil, err
+		return err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		return nil, err
+		return err
 	} else if err := rs.Validate(); err != nil {
-		l.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
+		b.logger.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
 		bytes, _ := json.Marshal(build.DefaultRedundancySettings)
 		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	// check gouging settings for validity
 	var gs api.GougingSettings
 	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
-		return nil, err
+		return err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		return nil, err
+		return err
 	} else if err := gs.Validate(); err != nil {
 		// compat: apply default EA gouging settings
 		gs.MinMaxEphemeralAccountBalance = build.DefaultGougingSettings.MinMaxEphemeralAccountBalance
 		gs.MinPriceTableValidity = build.DefaultGougingSettings.MinPriceTableValidity
 		gs.MinAccountExpiry = build.DefaultGougingSettings.MinAccountExpiry
 		if err := gs.Validate(); err == nil {
-			l.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
+			b.logger.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
 			bytes, _ := json.Marshal(gs)
 			if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-				return nil, err
+				return err
 			}
 		} else {
 			// compat: apply default host block leeway settings
 			gs.HostBlockHeightLeeway = build.DefaultGougingSettings.HostBlockHeightLeeway
 			if err := gs.Validate(); err == nil {
-				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
+				b.logger.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
 				bytes, _ := json.Marshal(gs)
 				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return nil, err
+					return err
 				}
 			} else {
-				l.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
+				b.logger.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
 				bytes, _ := json.Marshal(build.DefaultGougingSettings)
 				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		}
 	}
 
-	// load the accounts into memory, they're saved when the bus is stopped
-	accounts, err := eas.Accounts(ctx)
-	if err != nil {
-		return nil, err
-	}
-	b.accounts = newAccounts(accounts, b.logger)
+	return nil
+}
 
-	// mark the shutdown as unclean, this will be overwritten when/if the
-	// accounts are saved on shutdown
-	if err := eas.SetUncleanShutdown(ctx); err != nil {
-		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
+// saveAccounts saves the accounts to the db when the bus is stopped
+func (b *bus) saveAccounts(ctx context.Context) error {
+	accounts := b.accounts.ToPersist()
+	if err := b.eas.SaveAccounts(ctx, accounts); err != nil {
+		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
+		return err
 	}
 
-	return b, nil
+	b.logger.Infof("successfully saved %v accounts", len(accounts))
+	return nil
 }
