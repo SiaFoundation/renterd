@@ -172,7 +172,7 @@ func (a *accounts) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big
 
 	// update drift
 	drift := new(big.Int).Sub(balance, prevBalance)
-	if acc.CleanShutdown && prevBalance.Cmp(big.NewInt(0)) != 0 {
+	if acc.CleanShutdown {
 		acc.Drift = acc.Drift.Add(acc.Drift, drift)
 	}
 

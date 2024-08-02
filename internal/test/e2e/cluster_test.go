@@ -1110,32 +1110,56 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
+	// run without autopilot
+	opts := clusterOptsDefault
+	opts.skipRunningAutopilot = true
+
 	// create cluster
-	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
+	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
+
+	// convenience variables
+	b := cluster.Bus
+	w := cluster.Worker
 	tt := cluster.tt
 
-	// shut down the autopilot to prevent it from interfering with the test
-	cluster.ShutdownAutopilot(context.Background())
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// scan the host
+	_, err = w.RHPScan(context.Background(), h.PublicKey, h.NetAddress, 10*time.Second)
+	tt.OK(err)
+
+	// manually form a contract with the host
+	cs, _ := b.ConsensusState(context.Background())
+	wallet, _ := b.Wallet(context.Background())
+	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(10), types.Siacoins(1))
+	tt.OK(err)
+	c, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	tt.OK(err)
+
+	// fund the account
+	fundAmt := types.Siacoins(1)
+	tt.OK(w.RHPFund(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, fundAmt))
 
 	// fetch accounts
 	accounts, err := cluster.Bus.Accounts(context.Background())
 	tt.OK(err)
 
+	// assert account state
 	acc := accounts[0]
-
-	if acc.Balance.Cmp(new(big.Int)) == 0 {
-		t.Fatalf("expected non-zero balance, got %v", acc.Balance)
-	}
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
-	}
-	host := cluster.hosts[0]
-	if acc.HostKey != types.PublicKey(host.PublicKey()) {
+	} else if acc.CleanShutdown {
+		t.Fatal("account should indicate an unclean shutdown")
+	} else if !acc.RequiresSync {
+		t.Fatal("account should require a sync")
+	} else if acc.HostKey != h.PublicKey {
 		t.Fatal("wrong host")
-	}
-	if !acc.CleanShutdown {
-		t.Fatal("account should indicate a clean shutdown")
+	} else if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
+		t.Fatalf("wrong balance %v", acc.Balance)
 	}
 
 	// fetch account from bus directly
@@ -1149,20 +1173,11 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal("bus account doesn't match worker account")
 	}
 
-	// fetch contracts
-	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-	tt.OK(err)
-	if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
-	}
-	contract := contracts[0]
-
 	// check that the spending was recorded for the contract. The recorded
 	// spending should be > the fundAmt since it consists of the fundAmt plus
 	// fee.
-	fundAmt := types.Siacoins(1)
 	tt.Retry(10, testBusFlushInterval, func() error {
-		cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
+		cm, err := cluster.Bus.Contract(context.Background(), c.ID)
 		tt.OK(err)
 
 		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
@@ -1170,6 +1185,23 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 		return nil
 	})
+
+	// sync the account
+	tt.OK(w.RHPSync(context.Background(), c.ID, acc.HostKey, c.HostIP, c.SiamuxAddr))
+
+	// assert account state
+	accounts, err = cluster.Bus.Accounts(context.Background())
+	tt.OK(err)
+
+	// assert account state
+	acc = accounts[0]
+	if !acc.CleanShutdown {
+		t.Fatal("account should indicate a clean shutdown")
+	} else if acc.RequiresSync {
+		t.Fatal("account should not require a sync")
+	} else if acc.Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatalf("account shoult not have drift %v", acc.Drift)
+	}
 
 	// update the balance to create some drift
 	newBalance := fundAmt.Div64(2)

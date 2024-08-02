@@ -58,10 +58,6 @@ var (
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
-	// errBalanceMaxExceeded occurs when a deposit would push the account's
-	// balance over the maximum allowed ephemeral account balance.
-	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
-
 	// errMaxRevisionReached occurs when trying to revise a contract that has
 	// already reached the highest possible revision number. Usually happens
 	// when trying to use a renewed contract.
@@ -96,7 +92,6 @@ func IsErrHost(err error) bool {
 }
 
 func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceInsufficient) }
-func isBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
 func isClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
@@ -344,6 +339,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				return err
 			}
 
+			// fetch the balance (TODO: remove)
 			cost = cost.Add(types.NewCurrency64(1))
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, types.NewCurrency64(1), hpt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 			hostBalance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, hpt.UID)
@@ -509,7 +505,7 @@ func (a *account) WithWithdrawal(ctx context.Context, caller string, amtFn func(
 		// in case of an insufficient balance, we schedule a sync
 		if isBalanceInsufficient(err) {
 			hptb, _ := json.Marshal(hpt)
-			a.logger.Debugw("insufficient balance, scheduling sync", zap.Error(err), "amt", amt, "caller", caller, "hpt", string(hptb))
+			a.logger.Debugw("insufficient balance, scheduling sync", zap.Error(err), "amt", amt, "source", caller, "hpt", string(hptb))
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			err = errors.Join(err, a.as.ScheduleSync(ctx, a.id, a.host))
 			cancel()
@@ -523,7 +519,7 @@ func (a *account) WithWithdrawal(ctx context.Context, caller string, amtFn func(
 			a.logger.Debugw("updated host balance after withdrawal",
 				"account", a.id,
 				"host", a.host,
-				"caller", caller,
+				"source", caller,
 				"amt", amt.ExactString(),
 				"refund", refund.ExactString(),
 				"hostBalance", hostBalance.ExactString())

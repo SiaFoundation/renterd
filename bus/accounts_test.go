@@ -11,12 +11,6 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestDrift(t *testing.T) {
-	//	bb, _ := types.ParseCurrency("{"level":"debug","ts":"2024-08-01T18:48:44Z","logger":"bus.accounts","caller":"bus/accounts.go:146","msg":"account balance was decreased","account":"ed25519:9a265c8e8e5f7b1209076890822ca0fc7ddca3e5020681400062da6a73f053cd","host":"ed25519:cd6b9507dbc58fb3b86ad3ae32b61af77c13a54710a498a767a47276a8e2cd49","amt":"-4226968586485592227840","balanceBefore":"826603474175865442353108","balanceAfter":"822376505589379850125268"}
-	//
-	// {"level":"debug","ts":"2024-08-01T18:48:44Z","logger":"worker.worker.accounts","caller":"worker/rhpv3.go:515","msg":"updated host balance after withdrawal","account":"ed25519:9a265c8e8e5f7b1209076890822ca0fc7ddca3e5020681400062da6a73f053cd","host":"ed25519:cd6b9507dbc58fb3b86ad3ae32b61af77c13a54710a498a767a47276a8e2cd49","account":"ed25519:9a265c8e8e5f7b1209076890822ca0fc7ddca3e5020681400062da6a73f053cd","host":"ed25519:cd6b9507dbc58fb3b86ad3ae32b61af77c13a54710a498a767a47276a8e2cd49","balance":"678.300574858458215930196 mS"}")
-	// "2024-08-01T14:19:08Z"
-}
 func TestAccountLocking(t *testing.T) {
 	accounts := newAccounts(nil, zap.NewNop().Sugar())
 
