@@ -187,7 +187,7 @@ func TestAccountFunding(t *testing.T) {
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// fund the account again
-	tt.OK(w.RHPFund(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1)))
+	tt.OK(w.RHPFund(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1).Div64(2)))
 }
 
 func TestHostMinVersion(t *testing.T) {
