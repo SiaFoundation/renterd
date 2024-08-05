@@ -58,10 +58,6 @@ var (
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
-	// errBalanceMaxExceeded occurs when a deposit would push the account's
-	// balance over the maximum allowed ephemeral account balance.
-	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
-
 	// errMaxRevisionReached occurs when trying to revise a contract that has
 	// already reached the highest possible revision number. Usually happens
 	// when trying to use a renewed contract.
@@ -96,7 +92,6 @@ func IsErrHost(err error) bool {
 }
 
 func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceInsufficient) }
-func isBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
 func isClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
@@ -324,18 +319,30 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 }
 
 func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fcid types.FileContractID) (rev types.FileContractRevision, err error) {
-	err = h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
+	err = h.acc.WithWithdrawal(ctx, "fetchRevisionWithAccount", func() (types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, error) {
 		var cost types.Currency
-		return cost, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
+		var refund types.Currency
+		var hostBalance types.Currency
+		var hpt rhpv3.HostPriceTable
+		return cost, refund, hostBalance, hpt, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(ctx, t, fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				pt, err := h.priceTable(ctx, nil)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
+				hpt = pt
 				cost = pt.LatestRevisionCost.Add(pt.UpdatePriceTableCost) // add cost of fetching the pricetable since we might need a new one and it's better to stay pessimistic
 				payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 				return pt, &payment, nil
 			})
+			if err != nil {
+				return err
+			}
+
+			// fetch the balance (TODO: remove)
+			cost = cost.Add(types.NewCurrency64(1))
+			payment := rhpv3.PayByEphemeralAccount(h.acc.id, types.NewCurrency64(1), hpt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
+			hostBalance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, hpt.UID)
 			if err != nil {
 				return err
 			}
@@ -382,17 +389,19 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		as  AccountStore
-		key types.PrivateKey
+		as     AccountStore
+		key    types.PrivateKey
+		logger *zap.SugaredLogger
 	}
 
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		as   AccountStore
-		id   rhpv3.Account
-		key  types.PrivateKey
-		host types.PublicKey
+		as     AccountStore
+		id     rhpv3.Account
+		key    types.PrivateKey
+		host   types.PublicKey
+		logger *zap.SugaredLogger
 	}
 )
 
@@ -401,8 +410,9 @@ func (w *worker) initAccounts(as AccountStore) {
 		panic("accounts already initialized") // developer error
 	}
 	w.accounts = &accounts{
-		as:  as,
-		key: w.deriveSubKey("accountkey"),
+		as:     as,
+		key:    w.deriveSubKey("accountkey"),
+		logger: w.logger.Named("accounts"),
 	}
 }
 
@@ -418,10 +428,11 @@ func (w *worker) initTransportPool() {
 func (a *accounts) ForHost(hk types.PublicKey) *account {
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 	return &account{
-		as:   a.as,
-		id:   accountID,
-		key:  a.key,
-		host: hk,
+		as:     a.as,
+		id:     accountID,
+		key:    a.key,
+		host:   hk,
+		logger: a.logger.With("account", accountID).With("host", hk),
 	}
 }
 
@@ -476,7 +487,7 @@ func (a *account) WithSync(ctx context.Context, balanceFn func() (types.Currency
 // WithWithdrawal decreases the balance of an account by the amount returned by
 // amtFn. The amount is still withdrawn if amtFn returns an error since some
 // costs are non-refundable.
-func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Currency, error)) error {
+func (a *account) WithWithdrawal(ctx context.Context, caller string, amtFn func() (types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, error)) error {
 	return withAccountLock(ctx, a.as, a.id, a.host, false, func(account api.Account) error {
 		// return early if the account needs to sync
 		if account.RequiresSync {
@@ -489,10 +500,12 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 		}
 
 		// execute amtFn
-		amt, err := amtFn()
+		amt, refund, hostBalance, hpt, err := amtFn()
 
 		// in case of an insufficient balance, we schedule a sync
 		if isBalanceInsufficient(err) {
+			hptb, _ := json.Marshal(hpt)
+			a.logger.Debugw("insufficient balance, scheduling sync", zap.Error(err), "amt", amt, "source", caller, "hpt", string(hptb))
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			err = errors.Join(err, a.as.ScheduleSync(ctx, a.id, a.host))
 			cancel()
@@ -503,6 +516,13 @@ func (a *account) WithWithdrawal(ctx context.Context, amtFn func() (types.Curren
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			err = errors.Join(err, a.as.AddBalance(ctx, a.id, a.host, new(big.Int).Neg(amt.Big())))
 			cancel()
+			a.logger.Debugw("updated host balance after withdrawal",
+				"account", a.id,
+				"host", a.host,
+				"source", caller,
+				"amt", amt.ExactString(),
+				"refund", refund.ExactString(),
+				"hostBalance", hostBalance.ExactString())
 		}
 
 		return err
@@ -523,6 +543,7 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 	data = append(data, subKey[:]...)
 	data = append(data, hostKey[:]...)
 	data = append(data, index)
+	data = append(data, []byte("pj/drift-updates")...) // TODO: remove
 
 	seed := types.HashBytes(data)
 	pk := types.NewPrivateKeyFromSeed(seed[:])
