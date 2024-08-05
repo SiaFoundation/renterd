@@ -1226,14 +1226,15 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			}
 		}
 	}
-	var fileName string
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		for _, slab := range slabs {
-			var err error
-			fileName, err = s.markPackedSlabUploaded(tx, slab)
+	var fileNames []string
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		fileNames = make([]string, len(slabs))
+		for i, slab := range slabs {
+			fileName, err := tx.MarkPackedSlabUploaded(ctx, slab)
 			if err != nil {
 				return err
 			}
+			fileNames[i] = fileName
 		}
 		return nil
 	})
@@ -1242,66 +1243,8 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	}
 
 	// Delete buffer from disk.
-	s.slabBufferMgr.RemoveBuffers(fileName)
+	s.slabBufferMgr.RemoveBuffers(fileNames...)
 	return nil
-}
-
-func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab) (string, error) {
-	// collect all used contracts
-	usedContracts := slab.Contracts()
-	contracts, err := fetchUsedContracts(tx, usedContracts)
-	if err != nil {
-		return "", err
-	}
-
-	// find the slab
-	var sla dbSlab
-	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
-		Take(&sla).Error; err != nil {
-		return "", err
-	}
-
-	// update the slab
-	if err := tx.Model(&dbSlab{}).
-		Where("id", sla.ID).
-		Updates(map[string]interface{}{
-			"db_buffered_slab_id": nil,
-		}).Error; err != nil {
-		return "", fmt.Errorf("failed to set buffered slab NULL: %w", err)
-	}
-
-	// delete buffer
-	var fileName string
-	if err := tx.Raw("SELECT filename FROM buffered_slabs WHERE id = ?", slab.BufferID).
-		Scan(&fileName).Error; err != nil {
-		return "", err
-	}
-	if err := tx.Exec("DELETE FROM buffered_slabs WHERE id = ?", slab.BufferID).Error; err != nil {
-		return "", err
-	}
-
-	// add the shards to the slab
-	var shards []dbSector
-	for i := range slab.Shards {
-		sector := dbSector{
-			DBSlabID:   sla.ID,
-			SlabIndex:  i + 1,
-			LatestHost: publicKey(slab.Shards[i].LatestHost),
-			Root:       slab.Shards[i].Root[:],
-		}
-		for _, fcids := range slab.Shards[i].Contracts {
-			for _, fcid := range fcids {
-				if c, ok := contracts[fcid]; ok {
-					sector.Contracts = append(sector.Contracts, c)
-				}
-			}
-		}
-		shards = append(shards, sector)
-	}
-	if err := tx.Create(&shards).Error; err != nil {
-		return "", fmt.Errorf("failed to create shards: %w", err)
-	}
-	return fileName, nil
 }
 
 func (s *SQLStore) pruneSlabsLoop() {
