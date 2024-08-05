@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/hostd/host/registry"
 	"go.sia.tech/hostd/host/settings"
 	"go.sia.tech/hostd/host/storage"
+	"go.sia.tech/hostd/index"
 	"go.sia.tech/hostd/persist/sqlite"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
@@ -115,6 +116,7 @@ type Host struct {
 	wallet    *wallet.SingleAddressWallet
 	settings  *settings.ConfigManager
 	storage   *storage.VolumeManager
+	index     *index.Manager
 	registry  *registry.Manager
 	accounts  *accounts.AccountManager
 	contracts *contracts.Manager
@@ -151,6 +153,7 @@ func (h *Host) Close() error {
 	h.rhpv2.Close()
 	h.rhpv3.Close()
 	h.settings.Close()
+	h.index.Close()
 	h.wallet.Close()
 	h.contracts.Close()
 	h.storage.Close()
@@ -282,6 +285,11 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
 
+	idx, err := index.NewManager(db, cm, contracts, wallet, settings, storage, index.WithLog(log.Named("index")), index.WithBatchSize(0)) // off-by-one
+	if err != nil {
+		return nil, fmt.Errorf("failed to create index manager: %w", err)
+	}
+
 	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
@@ -309,6 +317,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		store:     db,
 		wallet:    wallet,
 		settings:  settings,
+		index:     idx,
 		storage:   storage,
 		registry:  registry,
 		accounts:  accounts,

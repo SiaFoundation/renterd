@@ -720,6 +720,16 @@ func (c *TestCluster) AddHost(h *Host) {
 	// Mine transaction.
 	c.MineBlocks(1)
 
+	// Wait for host's wallet to be funded
+	c.tt.Retry(100, 100*time.Millisecond, func() error {
+		balance, err := h.wallet.Balance()
+		c.tt.OK(err)
+		if balance.Confirmed.IsZero() {
+			return errors.New("host wallet not funded")
+		}
+		return nil
+	})
+
 	// Announce hosts.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
