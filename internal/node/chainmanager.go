@@ -9,7 +9,6 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/modules"
 	stypes "go.sia.tech/siad/types"
@@ -24,17 +23,29 @@ var (
 	ErrInvalidChangeID = errors.New("invalid change id")
 )
 
-type chainManager struct {
-	cs      modules.ConsensusSet
-	tp      bus.TransactionPool
-	network *consensus.Network
+type (
+	// A TransactionPool can validate and relay unconfirmed transactions.
+	TransactionPool interface {
+		AcceptTransactionSet(txns []types.Transaction) error
+		Close() error
+		RecommendedFee() types.Currency
+		Subscribe(subscriber modules.TransactionPoolSubscriber)
+		Transactions() []types.Transaction
+		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
+	}
 
-	close         chan struct{}
-	mu            sync.Mutex
-	lastBlockTime time.Time
-	tip           consensus.State
-	synced        bool
-}
+	chainManager struct {
+		cs      modules.ConsensusSet
+		tp      TransactionPool
+		network *consensus.Network
+
+		close         chan struct{}
+		mu            sync.Mutex
+		lastBlockTime time.Time
+		tip           consensus.State
+		synced        bool
+	}
+)
 
 // ProcessConsensusChange implements the modules.ConsensusSetSubscriber interface.
 func (m *chainManager) ProcessConsensusChange(cc modules.ConsensusChange) {
@@ -144,7 +155,7 @@ func synced(timestamp stypes.Timestamp) bool {
 }
 
 // NewManager creates a new chain manager.
-func NewChainManager(cs modules.ConsensusSet, tp bus.TransactionPool, network *consensus.Network) (*chainManager, error) {
+func NewChainManager(cs modules.ConsensusSet, tp TransactionPool, network *consensus.Network) (*chainManager, error) {
 	height := cs.Height()
 	block, ok := cs.BlockAtHeight(height)
 	if !ok {

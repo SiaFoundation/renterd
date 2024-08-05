@@ -27,7 +27,7 @@ import (
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.sia.tech/hostd/wallet"
 	"go.sia.tech/hostd/webhooks"
-	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/siad/modules"
 	mconsensus "go.sia.tech/siad/modules/consensus"
@@ -63,7 +63,7 @@ type Host struct {
 
 	g  modules.Gateway
 	cs modules.ConsensusSet
-	tp bus.TransactionPool
+	tp node.TransactionPool
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
@@ -147,7 +147,7 @@ func unconfirmedParents(txn types.Transaction, pool []types.Transaction) []types
 	return parents
 }
 
-func NewTransactionPool(tp modules.TransactionPool) bus.TransactionPool {
+func NewTransactionPool(tp modules.TransactionPool) node.TransactionPool {
 	return &txpool{tp: tp}
 }
 
@@ -162,7 +162,7 @@ var (
 
 type chainManager struct {
 	cs      modules.ConsensusSet
-	tp      bus.TransactionPool
+	tp      node.TransactionPool
 	network *consensus.Network
 
 	close  chan struct{}
@@ -274,7 +274,7 @@ func synced(timestamp stypes.Timestamp) bool {
 }
 
 // NewManager creates a new chain manager.
-func NewChainManager(cs modules.ConsensusSet, tp bus.TransactionPool, network *consensus.Network) (*chainManager, error) {
+func NewChainManager(cs modules.ConsensusSet, tp node.TransactionPool, network *consensus.Network) (*chainManager, error) {
 	height := cs.Height()
 	block, ok := cs.BlockAtHeight(height)
 	if !ok {
