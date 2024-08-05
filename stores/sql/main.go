@@ -2715,19 +2715,18 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 		return "", fmt.Errorf("failed to delete buffered slab: %w", err)
 	}
 
+	// fetch used contracts
+	usedContracts, err := FetchUsedContracts(ctx, tx, slab.Contracts())
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch used contracts: %w", err)
+	}
+
 	// stmt to add sector
 	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare statement to insert sectors: %w", err)
 	}
 	defer sectorStmt.Close()
-
-	// stmt to get contrat id from fcid
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT id FROM contracts WHERE contracts.fcid = ?")
-	if err != nil {
-		return "", fmt.Errorf("failed to prepare statement to fetch contract id: %w", err)
-	}
-	defer contractIDStmt.Close()
 
 	// stmt to insert contract_sector
 	contractSectorStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)")
@@ -2751,16 +2750,12 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 		// insert contracts for shard
 		for _, fcids := range slab.Shards[i].Contracts {
 			for _, fcid := range fcids {
-				// fetch contract id
-				var contractID int64
-				err := contractIDStmt.QueryRow(ctx, FileContractID(fcid)).Scan(&contractID)
-				if errors.Is(err, dsql.ErrNoRows) {
+				uc, ok := usedContracts[fcid]
+				if !ok {
 					continue
-				} else if err != nil {
-					return "", fmt.Errorf("failed to fetch contract id: %w", err)
 				}
 				// insert contract sector
-				if _, err := contractSectorStmt.Exec(ctx, contractID, sectorID); err != nil {
+				if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
 					return "", fmt.Errorf("failed to insert contract sector: %w", err)
 				}
 			}
