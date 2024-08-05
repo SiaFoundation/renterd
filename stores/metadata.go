@@ -52,9 +52,7 @@ var (
 	pruneDirsAlertID  = frand.Entropy256()
 )
 
-var (
-	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
-)
+var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
 type (
 	contractState uint8
@@ -715,16 +713,11 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	}
 	metrics := make([]api.ContractMetric, 0, len(squashedRecords))
 	for fcid, newSpending := range squashedRecords {
-		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			var contract dbContract
-			err := tx.Model(&dbContract{}).
-				Where("fcid", fileContractID(fcid)).
-				Joins("Host").
-				Take(&contract).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil // contract not found, continue with next one
+		err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			contract, err := tx.Contract(ctx, fcid)
+			if errors.Is(err, api.ErrContractNotFound) {
 			} else if err != nil {
-				return err
+				return fmt.Errorf("failed to fetch contract: %w", err)
 			}
 
 			remainingCollateral := types.ZeroCurrency
@@ -734,38 +727,35 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			m := api.ContractMetric{
 				Timestamp:           api.TimeNow(),
 				ContractID:          fcid,
-				HostKey:             types.PublicKey(contract.Host.PublicKey),
+				HostKey:             contract.HostKey,
 				RemainingCollateral: remainingCollateral,
 				RemainingFunds:      latestValues[fcid].validRenterPayout,
 				RevisionNumber:      latestValues[fcid].revision,
-				UploadSpending:      types.Currency(contract.UploadSpending).Add(newSpending.Uploads),
-				DownloadSpending:    types.Currency(contract.DownloadSpending).Add(newSpending.Downloads),
-				FundAccountSpending: types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount),
-				DeleteSpending:      types.Currency(contract.DeleteSpending).Add(newSpending.Deletions),
-				ListSpending:        types.Currency(contract.ListSpending).Add(newSpending.SectorRoots),
+				UploadSpending:      contract.Spending.Uploads.Add(newSpending.Uploads),
+				DownloadSpending:    contract.Spending.Downloads.Add(newSpending.Downloads),
+				FundAccountSpending: contract.Spending.FundAccount.Add(newSpending.FundAccount),
+				DeleteSpending:      contract.Spending.Deletions.Add(newSpending.Deletions),
+				ListSpending:        contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
 			}
 			metrics = append(metrics, m)
 
-			updates := make(map[string]interface{})
+			var updates api.ContractSpending
 			if !newSpending.Uploads.IsZero() {
-				updates["upload_spending"] = currency(m.UploadSpending)
+				updates.Uploads = m.UploadSpending
 			}
 			if !newSpending.Downloads.IsZero() {
-				updates["download_spending"] = currency(m.DownloadSpending)
+				updates.Downloads = m.DownloadSpending
 			}
 			if !newSpending.FundAccount.IsZero() {
-				updates["fund_account_spending"] = currency(m.FundAccountSpending)
+				updates.FundAccount = m.FundAccountSpending
 			}
 			if !newSpending.Deletions.IsZero() {
-				updates["delete_spending"] = currency(m.DeleteSpending)
+				updates.Deletions = m.DeleteSpending
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates["list_spending"] = currency(m.ListSpending)
+				updates.SectorRoots = m.ListSpending
 			}
-			updates["revision_number"] = latestValues[fcid].revision
-			updates["size"] = latestValues[fcid].size
-			err = tx.Model(&contract).Updates(updates).Error
-			return err
+			return tx.RecordContractSpending(ctx, fcid, latestValues[fcid].revision, latestValues[fcid].size, updates)
 		})
 		if err != nil {
 			return err

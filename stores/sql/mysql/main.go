@@ -611,6 +611,10 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
+	return ssql.RecordContractSpending(ctx, tx, fcid, revisionNumber, size, newSpending)
+}
+
 func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
 	return ssql.RecordHostScans(ctx, tx, scans)
 }

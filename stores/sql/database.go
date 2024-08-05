@@ -235,6 +235,9 @@ type (
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
 
+		// RecordContractSpending records new spending for a contract
+		RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error
+
 		// RecordHostScans records the results of host scans in the database
 		// such as recording the settings and price table of a host in case of
 		// success and updating the uptime and downtime of a host.

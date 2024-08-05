@@ -2763,3 +2763,42 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	}
 	return bufferFileName, nil
 }
+
+func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
+	var updateKeys []string
+	var updateValues []interface{}
+
+	if !newSpending.Uploads.IsZero() {
+		updateKeys = append(updateKeys, "upload_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.Uploads))
+	}
+	if !newSpending.Downloads.IsZero() {
+		updateKeys = append(updateKeys, "download_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.Downloads))
+	}
+	if !newSpending.FundAccount.IsZero() {
+		updateKeys = append(updateKeys, "fund_account_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.FundAccount))
+	}
+	if !newSpending.Deletions.IsZero() {
+		updateKeys = append(updateKeys, "delete_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.Deletions))
+	}
+	if !newSpending.SectorRoots.IsZero() {
+		updateKeys = append(updateKeys, "list_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.SectorRoots))
+	}
+	updateKeys = append(updateKeys, "revision_number = ?", "size = ?")
+	updateValues = append(updateValues, revisionNumber, size)
+
+	updateValues = append(updateValues, FileContractID(fcid))
+	_, err := tx.Exec(ctx, fmt.Sprintf(`
+    UPDATE contracts
+    SET %s
+    WHERE fcid = ?
+  `, strings.Join(updateKeys, ",")), updateValues...)
+	if err != nil {
+		return fmt.Errorf("failed to record contract spending: %w", err)
+	}
+	return nil
+}
