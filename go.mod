@@ -3,28 +3,28 @@ module go.sia.tech/renterd
 go 1.22.5
 
 require (
-	github.com/gabriel-vasile/mimetype v1.4.4
+	github.com/gabriel-vasile/mimetype v1.4.5
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
-	github.com/klauspost/reedsolomon v1.12.2
-	github.com/minio/minio-go/v7 v7.0.73
+	github.com/klauspost/reedsolomon v1.12.3
+	github.com/minio/minio-go/v7 v7.0.74
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.4.2-0.20240723013228-2b1c3d890e25
-	go.sia.tech/coreutils v0.2.2-0.20240730054727-7d6abd98d419
+	go.sia.tech/coreutils v0.2.2-0.20240802164332-71608c6ec7b9
 	go.sia.tech/gofakes3 v0.0.4
-	go.sia.tech/hostd v1.1.3-0.20240731005712-74d2d87e491a
+	go.sia.tech/hostd v1.1.3-0.20240802205204-a4485201659c
 	go.sia.tech/jape v0.12.0
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/web/renterd v0.57.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.25.0
-	golang.org/x/sys v0.22.0
+	golang.org/x/sys v0.23.0
 	golang.org/x/term v0.22.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/driver/sqlite v1.5.6
-	gorm.io/gorm v1.25.10
+	gorm.io/gorm v1.25.11
 	lukechampine.com/frand v1.4.2
 	moul.io/zapgorm2 v1.3.0
 )

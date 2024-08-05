@@ -1,11 +1,13 @@
 package contractor
 
 import (
+	"context"
+
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
-func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeriod uint64) types.Currency {
+func currentPeriodSpending(contracts []api.ContractMetadata, currentPeriod uint64) types.Currency {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
 		totalCosts[c.ID] = c.TotalCost
@@ -15,7 +17,7 @@ func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	var filtered []api.ContractMetadata
 	for _, contract := range contracts {
 		if contract.WindowStart <= currentPeriod {
-			filtered = append(filtered, contract.ContractMetadata)
+			filtered = append(filtered, contract)
 		}
 	}
 
@@ -27,14 +29,19 @@ func (c *Contractor) currentPeriodSpending(contracts []api.Contract, currentPeri
 	return totalAllocated
 }
 
-func (c *Contractor) remainingFunds(contracts []api.Contract, state *MaintenanceState) types.Currency {
+func remainingAllowance(ctx context.Context, bus Bus, state *MaintenanceState) (types.Currency, error) {
+	contracts, err := bus.Contracts(ctx, api.ContractsOpts{})
+	if err != nil {
+		return types.Currency{}, err
+	}
+
 	// find out how much we spent in the current period
-	spent := c.currentPeriodSpending(contracts, state.Period())
+	spent := currentPeriodSpending(contracts, state.Period())
 
 	// figure out remaining funds
 	var remaining types.Currency
 	if state.Allowance().Cmp(spent) > 0 {
 		remaining = state.Allowance().Sub(spent)
 	}
-	return remaining
+	return remaining, nil
 }

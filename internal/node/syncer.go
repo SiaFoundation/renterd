@@ -23,11 +23,13 @@ type Syncer interface {
 }
 
 type nodeSyncer struct {
+	cancel context.CancelFunc
 	*syncer.Syncer
 	l net.Listener
 }
 
 func (s *nodeSyncer) Close() error {
+	s.cancel()
 	return s.l.Close()
 }
 
@@ -74,10 +76,11 @@ func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logge
 	}
 
 	// start the syncer
+	syncerCtx, syncerCancel := context.WithCancel(context.Background())
 	s := syncer.New(l, cm, ps, header, options(cfg, logger)...)
-	go s.Run()
+	go s.Run(syncerCtx)
 
-	return &nodeSyncer{s, l}, nil
+	return &nodeSyncer{syncerCancel, s, l}, nil
 }
 
 func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {

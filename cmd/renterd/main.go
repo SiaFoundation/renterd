@@ -132,14 +132,14 @@ var (
 		},
 		Autopilot: config.Autopilot{
 			Enabled:                        true,
-			RevisionSubmissionBuffer:       144,
+			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
 			AccountsRefillInterval:         defaultAccountRefillInterval,
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
 			RevisionBroadcastInterval:      7 * 24 * time.Hour,
-			ScannerBatchSize:               1000,
-			ScannerInterval:                24 * time.Hour,
-			ScannerNumThreads:              100,
+			ScannerBatchSize:               100,
+			ScannerInterval:                4 * time.Hour,
+			ScannerNumThreads:              10,
 			MigratorParallelSlabsPerWorker: 1,
 		},
 		S3: config.S3{
@@ -520,7 +520,11 @@ func main() {
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
 		}
-		setupBusFn = setupFn
+		setupBusFn = func(_ context.Context) error {
+			setupFn()
+			return nil
+		}
+
 		shutdownFns = append(shutdownFns, shutdownFnEntry{
 			name: "Bus",
 			fn:   shutdownFn,

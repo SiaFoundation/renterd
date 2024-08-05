@@ -1068,41 +1068,15 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 // UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
 // in the given contract set. These slabs need to be migrated to good contracts
 // so they are restored to full health.
-func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
+func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) (slabs []api.UnhealthySlab, err error) {
 	if limit <= -1 {
 		limit = math.MaxInt
 	}
-
-	var rows []struct {
-		Key    []byte
-		Health float64
-	}
-
-	if err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Select("slabs.key, slabs.health").
-			Joins("INNER JOIN contract_sets cs ON slabs.db_contract_set_id = cs.id").
-			Model(&dbSlab{}).
-			Where("health <= ? AND cs.name = ?", healthCutoff, set).
-			Order("health ASC").
-			Limit(limit).
-			Find(&rows).
-			Error
-	}); err != nil {
-		return nil, err
-	}
-
-	slabs := make([]api.UnhealthySlab, len(rows))
-	for i, row := range rows {
-		var key object.EncryptionKey
-		if err := key.UnmarshalBinary(row.Key); err != nil {
-			return nil, err
-		}
-		slabs[i] = api.UnhealthySlab{
-			Key:    key,
-			Health: row.Health,
-		}
-	}
-	return slabs, nil
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		slabs, err = tx.UnhealthySlabs(ctx, healthCutoff, set, limit)
+		return err
+	})
+	return
 }
 
 // object retrieves an object from the store.

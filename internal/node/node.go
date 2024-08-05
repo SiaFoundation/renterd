@@ -63,7 +63,7 @@ type AutopilotConfig struct {
 
 type (
 	RunFn         = func() error
-	BusSetupFn    = func(context.Context) error
+	BusSetupFn    = func()
 	WorkerSetupFn = func(context.Context, string, string) error
 	ShutdownFn    = func(context.Context) error
 )
@@ -186,8 +186,17 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	}
 
+	// reset chain state if blockchain.db does not exist to make sure deleting
+	// it forces a resync
+	chainPath := filepath.Join(consensusDir, "blockchain.db")
+	if _, err := os.Stat(chainPath); os.IsNotExist(err) {
+		if err := sqlStore.ResetChainState(context.Background()); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	}
+
 	// create chain database
-	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "blockchain.db"))
+	bdb, err := coreutils.OpenBoltChainDB(chainPath)
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}

@@ -332,6 +332,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract sizes: %w", err)
 	}
+	defer rows.Close()
 
 	sizes := make(map[types.FileContractID]api.ContractSize)
 	for rows.Next() {
@@ -2211,6 +2212,7 @@ func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query settings: %w", err)
 	}
+	defer rows.Close()
 	var settings []string
 	for rows.Next() {
 		var setting string
@@ -2351,6 +2353,37 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 		ID:     types.BlockID(id),
 		Height: height,
 	}, nil
+}
+
+func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT sla.key, sla.health
+		FROM slabs sla
+		INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id
+		WHERE sla.health <= ? AND cs.name = ? AND sla.health_valid_until > ? AND sla.db_buffered_slab_id IS NULL
+		ORDER BY sla.health ASC
+		LIMIT ?
+	`, healthCutoff, set, time.Now().Unix(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
+	}
+	defer rows.Close()
+
+	var slabs []api.UnhealthySlab
+	for rows.Next() {
+		var slab api.UnhealthySlab
+		var key SecretKey
+		if err := rows.Scan(&key, &slab.Health); err != nil {
+			return nil, fmt.Errorf("failed to scan unhealthy slab: %w", err)
+		}
+		var ec object.EncryptionKey
+		if err := ec.UnmarshalBinary(key); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal encryption key: %w", err)
+		}
+		slab.Key = ec
+		slabs = append(slabs, slab)
+	}
+	return slabs, nil
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {

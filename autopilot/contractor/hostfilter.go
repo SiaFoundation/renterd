@@ -102,53 +102,37 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, rs api.RedundancySettings, ci contractInfo, inSet bool, bh uint64, f *ipFilter) (usable, recoverable, refresh, renew bool, reasons []string) {
-	contract, s, pt := ci.contract, ci.host.Settings, ci.host.PriceTable.HostPriceTable
-
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract api.Contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
 	usable = true
 	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
 		usable = false
-		recoverable = false
 		refresh = false
 		renew = false
 	} else if contract.Revision.RevisionNumber == math.MaxUint64 {
 		reasons = append(reasons, errContractMaxRevisionNumber.Error())
 		usable = false
-		recoverable = false
 		refresh = false
 		renew = false
 	} else {
 		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
-			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
 			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
-			recoverable = !usable // only needs to be recoverable if !usable
 			refresh = true
 			renew = false
 		}
 		if shouldRenew, secondHalf := isUpForRenewal(cfg, *contract.Revision, bh); shouldRenew {
 			reasons = append(reasons, fmt.Errorf("%w; second half: %t", errContractUpForRenewal, secondHalf).Error())
 			usable = usable && !secondHalf // only unusable if in second half of renew window
-			recoverable = true
 			refresh = false
 			renew = true
 		}
-	}
-
-	// IP check should be last since it modifies the filter
-	shouldFilter := !cfg.Hosts.AllowRedundantIPs && (usable || recoverable)
-	if shouldFilter && f.HasRedundantIP(ci.host) {
-		reasons = append(reasons, api.ErrUsabilityHostRedundantIP.Error())
-		usable = false
-		recoverable = false // do not use in the contract set, but keep it around for downloads
-		renew = false       // do not renew, but allow refreshes so the contracts stays funded
 	}
 	return
 }
@@ -236,14 +220,11 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.GougingChecker, h api.Host, minScore float64) *api.HostCheck {
-	if rs.Validate() != nil {
-		panic("invalid redundancy settings were supplied - developer error")
-	}
+func checkHost(gc worker.GougingChecker, sh scoredHost, minScore float64) *api.HostCheck {
+	h := sh.host
 
 	// prepare host breakdown fields
 	var gb api.HostGougingBreakdown
-	var sb api.HostScoreBreakdown
 	var ub api.HostUsabilityBreakdown
 
 	// blocked status does not influence what host info is calculated
@@ -267,27 +248,30 @@ func checkHost(cfg api.AutopilotConfig, rs api.RedundancySettings, gc worker.Gou
 			ub.NotAcceptingContracts = true
 		}
 
-		// perform gouging checks
+		// perform gouging and score checks
 		gb = gc.Check(&h.Settings, &h.PriceTable.HostPriceTable)
 		if gb.Gouging() {
 			ub.Gouging = true
-		} else if minScore > 0 {
-			// perform scoring checks
-			//
-			// NOTE: only perform these scoring checks if we know the host is
-			// not gouging, this because the core package does not have overflow
-			// checks in its cost calculations needed to calculate the period
-			// cost
-			sb = hostScore(cfg, h, rs.Redundancy())
-			if sb.Score() < minScore {
-				ub.LowScore = true
-			}
+		} else if minScore > 0 && !(sh.score > minScore) {
+			ub.LowScore = true
 		}
 	}
 
 	return &api.HostCheck{
 		Usability: ub,
 		Gouging:   gb,
-		Score:     sb,
+		Score:     sh.sb,
 	}
+}
+
+func newScoredHost(h api.Host, sb api.HostScoreBreakdown) scoredHost {
+	return scoredHost{
+		host:  h,
+		sb:    sb,
+		score: sb.Score(),
+	}
+}
+
+func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
+	return newScoredHost(h, hostScore(cfg, h, expectedRedundancy))
 }

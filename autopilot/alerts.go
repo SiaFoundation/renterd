@@ -14,6 +14,7 @@ import (
 
 var (
 	alertAccountRefillID = alerts.RandomAlertID() // constant until restarted
+	alertHealthRefreshID = alerts.RandomAlertID() // constant until restarted
 	alertLowBalanceID    = alerts.RandomAlertID() // constant until restarted
 	alertMigrationID     = alerts.RandomAlertID() // constant until restarted
 	alertPruningID       = alerts.RandomAlertID() // constant until restarted
@@ -166,12 +167,11 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objec
 
 func newRefreshHealthFailedAlert(err error) alerts.Alert {
 	return alerts.Alert{
-		ID:       alerts.RandomAlertID(),
+		ID:       alertHealthRefreshID,
 		Severity: alerts.SeverityCritical,
 		Message:  "Health refresh failed",
 		Data: map[string]interface{}{
-			"migrationsInterrupted": true,
-			"error":                 err.Error(),
+			"error": err.Error(),
 		},
 		Timestamp: time.Now(),
 	}

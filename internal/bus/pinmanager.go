@@ -11,6 +11,7 @@ import (
 	"github.com/montanaflynn/stats"
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -26,7 +27,7 @@ type (
 	// PinManager is a service that manages price pinning.
 	PinManager interface {
 		Close(context.Context) error
-		Run(context.Context) error
+		Run()
 		TriggerUpdate()
 	}
 
@@ -39,6 +40,7 @@ type (
 
 type (
 	pinManager struct {
+		a           alerts.Alerter
 		as          AutopilotStore
 		ss          SettingStore
 		broadcaster webhooks.Broadcaster
@@ -58,8 +60,12 @@ type (
 	}
 )
 
-func NewPinManager(broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+// NewPinManager returns a new PinManager, responsible for pinning prices to a
+// fixed value in an underlying currency. Note that the manager that is being
+// returned is not running, this can be done by calling Run().
+func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	return &pinManager{
+		a:           alerts,
 		as:          as,
 		ss:          ss,
 		broadcaster: broadcaster,
@@ -91,13 +97,7 @@ func (pm *pinManager) Close(ctx context.Context) error {
 	}
 }
 
-func (pm *pinManager) Run(ctx context.Context) error {
-	// try to update prices
-	if err := pm.updatePrices(ctx, true); err != nil {
-		return err
-	}
-
-	// start the update loop
+func (pm *pinManager) Run() {
 	pm.wg.Add(1)
 	go func() {
 		defer pm.wg.Done()
@@ -111,6 +111,9 @@ func (pm *pinManager) Run(ctx context.Context) error {
 			err := pm.updatePrices(ctx, forced)
 			if err != nil {
 				pm.logger.Warn("failed to update prices", zap.Error(err))
+				pm.a.RegisterAlert(ctx, newPricePinningFailedAlert(err))
+			} else {
+				pm.a.DismissAlerts(ctx, alertPricePinningID)
 			}
 			cancel()
 
@@ -124,8 +127,6 @@ func (pm *pinManager) Run(ctx context.Context) error {
 			}
 		}
 	}()
-
-	return nil
 }
 
 func (pm *pinManager) TriggerUpdate() {
@@ -174,7 +175,7 @@ func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
 	exceeded := delta.GreaterThan(cur.Mul(pct))
 
 	// log the result
-	pm.logger.Debugw("rate exceeds threshold",
+	pm.logger.Debugw("checking if rate exceeds threshold",
 		"last", cur,
 		"average", avg,
 		"percentage", threshold,

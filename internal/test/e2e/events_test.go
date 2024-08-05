@@ -25,6 +25,7 @@ func TestEvents(t *testing.T) {
 		api.WebhookContractArchive,
 		api.WebhookContractRenew,
 		api.WebhookContractSetUpdate,
+		api.WebhookHostUpdate,
 		api.WebhookSettingDelete,
 		api.WebhookSettingUpdate,
 	}
@@ -47,6 +48,15 @@ func TestEvents(t *testing.T) {
 		// ignore pings
 		if event.Event == webhooks.WebhookEventPing {
 			return nil
+		}
+
+		// ignore host updates with net address diff. from the update we assert to receive
+		if event.Module == api.ModuleHost && event.Event == api.EventUpdate {
+			if parsed, err := api.ParseEventWebhook(event); err != nil {
+				t.Fatal(err)
+			} else if parsed.(api.EventHostUpdate).NetAddr != "127.0.0.1:0" {
+				return nil
+			}
 		}
 
 		// check if the event is expected
@@ -120,6 +130,12 @@ func TestEvents(t *testing.T) {
 	// delete setting
 	tt.OK(b.DeleteSetting(context.Background(), api.SettingRedundancy))
 
+	// update host setting
+	h := cluster.hosts[0]
+	settings := h.settings.Settings()
+	settings.NetAddress = "127.0.0.1:0"
+	tt.OK(h.UpdateSettings(settings))
+
 	// wait until we received the events
 	tt.Retry(10, time.Second, func() error {
 		mu.Lock()
@@ -150,6 +166,10 @@ func TestEvents(t *testing.T) {
 			}
 		case api.EventConsensusUpdate:
 			if e.TransactionFee.IsZero() || e.BlockHeight == 0 || e.Timestamp.IsZero() || !e.Synced {
+				t.Fatalf("unexpected event %+v", e)
+			}
+		case api.EventHostUpdate:
+			if e.HostKey != h.PublicKey() || e.NetAddr != "127.0.0.1:0" || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventSettingUpdate:

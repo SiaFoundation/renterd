@@ -22,7 +22,7 @@ const (
 	minValidScore = math.SmallestNonzeroFloat64
 )
 
-func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) api.HostScoreBreakdown {
+func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) (sb api.HostScoreBreakdown) {
 	cCfg := cfg.Contracts
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across

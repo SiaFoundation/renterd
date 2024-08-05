@@ -243,8 +243,10 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		NetAddress: l.Addr().String(),
 	})
 	syncErrChan := make(chan error, 1)
-	go func() { syncErrChan <- s.Run() }()
+	syncerCtx, syncerCancel := context.WithCancel(context.Background())
+	go func() { syncErrChan <- s.Run(syncerCtx) }()
 	closeSyncer := func() error {
+		syncerCancel()
 		l.Close()
 		return <-syncErrChan
 	}

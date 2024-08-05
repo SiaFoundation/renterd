@@ -1748,6 +1748,12 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// add a partial slab
+	_, _, err = ss.AddPartialSlab(context.Background(), []byte{1, 2, 3}, 1, 3, testContractSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}

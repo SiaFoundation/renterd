@@ -85,4 +85,10 @@ func TestAutopilotStore(t *testing.T) {
 	if updated.Config.Contracts.Amount != 99 {
 		t.Fatal("expected amount to be 99")
 	}
+
+	// update the autopilot with the same config and assert it does not fail
+	err = ss.UpdateAutopilot(context.Background(), updated)
+	if err != nil {
+		t.Fatal(err)
+	}
 }

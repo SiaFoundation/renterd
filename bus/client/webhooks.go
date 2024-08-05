@@ -13,16 +13,12 @@ func (c *Client) BroadcastAction(ctx context.Context, action webhooks.Event) err
 	return err
 }
 
-// DeleteWebhook deletes the webhook with the given ID.
-func (c *Client) DeleteWebhook(ctx context.Context, url, module, event string) error {
-	return c.c.POST("/webhook/delete", webhooks.Webhook{
-		URL:    url,
-		Module: module,
-		Event:  event,
-	}, nil)
+// UnregisterWebhook unregisters the given webhook.
+func (c *Client) UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
+	return c.c.POST("/webhook/delete", webhook, nil)
 }
 
-// RegisterWebhook registers a new webhook for the given URL.
+// RegisterWebhook registers the given webhook.
 func (c *Client) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
 	err := c.c.WithContext(ctx).POST("/webhooks", webhook, nil)
 	return err
