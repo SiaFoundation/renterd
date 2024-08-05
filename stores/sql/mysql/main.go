@@ -514,6 +514,10 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	return dirID, nil
 }
 
+func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
+	return ssql.MarkPackedSlabUploaded(ctx, tx, slab)
+}
+
 func (tx *MainDatabaseTx) MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error) {
 	return ssql.MultipartUpload(ctx, tx, uploadID)
 }
