@@ -2698,7 +2698,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	if err := tx.QueryRow(ctx, `
 		SELECT sla.id, bs.id, bs.filename 
 		FROM slabs sla
-		INNER JOIN buffered_slabs bs ON buffered_slabs.id = sla.db_buffered_slab_id
+		INNER JOIN buffered_slabs bs ON bs.id = sla.db_buffered_slab_id
 		WHERE sla.db_buffered_slab_id = ?
 	`, slab.BufferID).
 		Scan(&slabID, &bufferedSlabID, &bufferFileName); err != nil {
