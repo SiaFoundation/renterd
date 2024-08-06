@@ -107,10 +107,9 @@ type Host struct {
 	dir     string
 	privKey types.PrivateKey
 
-	s           *syncer.Syncer
-	closeSyncer func() error
-	cm          *chain.Manager
-	chainDB     *coreutils.BoltChainDB
+	s       *syncer.Syncer
+	cm      *chain.Manager
+	chainDB *coreutils.BoltChainDB
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
@@ -158,7 +157,7 @@ func (h *Host) Close() error {
 	h.contracts.Close()
 	h.storage.Close()
 	h.store.Close()
-	h.closeSyncer()
+	h.s.Close()
 	h.chainDB.Close()
 	return nil
 }
@@ -243,13 +242,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		NetAddress: l.Addr().String(),
 	})
 	syncErrChan := make(chan error, 1)
-	syncerCtx, syncerCancel := context.WithCancel(context.Background())
-	go func() { syncErrChan <- s.Run(syncerCtx) }()
-	closeSyncer := func() error {
-		syncerCancel()
-		l.Close()
-		return <-syncErrChan
-	}
+	go func() { syncErrChan <- s.Run(context.Background()) }()
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
@@ -311,10 +304,9 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		dir:     dir,
 		privKey: privKey,
 
-		s:           s,
-		closeSyncer: closeSyncer,
-		cm:          cm,
-		chainDB:     chainDB,
+		s:       s,
+		cm:      cm,
+		chainDB: chainDB,
 
 		store:     db,
 		wallet:    wallet,
