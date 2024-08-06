@@ -203,6 +203,10 @@ type (
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
 
+		// ObjectsBySlabKey returns all objects that contain a reference to the
+		// slab with the given slabKey.
+		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error)
+
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 
@@ -293,6 +297,10 @@ type (
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
+
+		// SetContractSet creates the contract set with the given name and
+		// associates it with the provided contract IDs.
+		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)

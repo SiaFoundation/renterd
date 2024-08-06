@@ -234,16 +234,6 @@ type (
 		FCID    fileContractID
 		HostKey publicKey
 	}
-
-	// rawObjectMetadata is used for hydrating object metadata.
-	rawObjectMetadata struct {
-		ETag       string
-		Health     float64
-		MimeType   string
-		ModTime    datetime
-		ObjectName string
-		Size       int64
-	}
 )
 
 func (s *contractState) LoadString(state string) error {
@@ -352,17 +342,6 @@ func (c dbContract) convert() api.ContractMetadata {
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 	}
-}
-
-func (raw rawObjectMetadata) convert() api.ObjectMetadata {
-	return newObjectMetadata(
-		raw.ObjectName,
-		raw.ETag,
-		raw.MimeType,
-		raw.Health,
-		time.Time(raw.ModTime),
-		raw.Size,
-	)
 }
 
 func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
@@ -615,57 +594,40 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (c
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	var wantedIds []fileContractID
-	wanted := make(map[fileContractID]struct{})
+	wanted := make(map[types.FileContractID]struct{})
 	for _, fcid := range contractIds {
-		wantedIds = append(wantedIds, fileContractID(fcid))
-		wanted[fileContractID(fcid)] = struct{}{}
+		wanted[types.FileContractID(fcid)] = struct{}{}
 	}
 
 	var diff []types.FileContractID
 	var nContractsAfter int
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// fetch contract set
-		var cs dbContractSet
-		err := tx.
-			Where(dbContractSet{Name: name}).
-			Preload("Contracts").
-			FirstOrCreate(&cs).
-			Error
-		if err != nil {
-			return err
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		// build diff
+		prevContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
+		if err != nil && !errors.Is(err, api.ErrContractSetNotFound) {
+			return fmt.Errorf("failed to fetch contracts: %w", err)
 		}
-
-		// fetch contracts
-		var dbContracts []dbContract
-		err = tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", wantedIds).
-			Find(&dbContracts).
-			Error
-		if err != nil {
-			return err
-		}
-		nContractsAfter = len(dbContracts)
-
-		// add removals to the diff
-		for _, contract := range cs.Contracts {
-			if _, ok := wanted[contract.FCID]; !ok {
-				diff = append(diff, types.FileContractID(contract.FCID))
+		diff = nil // reset
+		for _, c := range prevContracts {
+			if _, exists := wanted[c.ID]; !exists {
+				diff = append(diff, c.ID) // removal
+			} else {
+				delete(wanted, c.ID)
 			}
-			delete(wanted, contract.FCID)
 		}
-
-		// add additions to the diff
 		for fcid := range wanted {
-			diff = append(diff, types.FileContractID(fcid))
+			diff = append(diff, fcid) // addition
 		}
-
-		// update the association
-		if err := tx.Model(&cs).Association("Contracts").Replace(&dbContracts); err != nil {
-			return err
+		// update contract set
+		if err := tx.SetContractSet(ctx, name, contractIds); err != nil {
+			return fmt.Errorf("failed to set contract set: %w", err)
 		}
-
+		// fetch contracts after update
+		afterContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
+		if err != nil {
+			return fmt.Errorf("failed to fetch contracts after update: %w", err)
+		}
+		nContractsAfter = len(afterContracts)
 		return nil
 	})
 	if err != nil {
@@ -1245,32 +1207,10 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 }
 
 func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
-	var rows []rawObjectMetadata
-	key, err := slabKey.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Raw(`
-SELECT DISTINCT obj.object_id as ObjectName, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
-FROM slabs sla
-INNER JOIN slices sli ON sli.db_slab_id = sla.id
-INNER JOIN objects obj ON sli.db_object_id = obj.id
-INNER JOIN buckets b ON obj.db_bucket_id = b.id AND b.name = ?
-WHERE sla.key = ?
-	`, bucket, key).
-			Scan(&rows).
-			Error
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		metadata, err = tx.ObjectsBySlabKey(ctx, bucket, slabKey)
+		return err
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	// convert rows
-	for _, row := range rows {
-		metadata = append(metadata, row.convert())
-	}
 	return
 }
 
