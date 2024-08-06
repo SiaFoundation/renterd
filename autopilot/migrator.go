@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +32,7 @@ type (
 		parallelSlabsPerWorker    uint64
 		signalConsensusNotSynced  chan struct{}
 		signalMaintenanceFinished chan struct{}
-		statsSlabMigrationSpeedMS *stats.DataPoints
+		statsSlabMigrationSpeedMS *utils.DataPoints
 
 		mu                 sync.Mutex
 		migrating          bool
@@ -74,7 +73,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uin
 		parallelSlabsPerWorker:    parallelSlabsPerWorker,
 		signalConsensusNotSynced:  make(chan struct{}, 1),
 		signalMaintenanceFinished: make(chan struct{}, 1),
-		statsSlabMigrationSpeedMS: stats.New(time.Hour),
+		statsSlabMigrationSpeedMS: utils.NewDataPoints(time.Hour),
 	}
 }
 
