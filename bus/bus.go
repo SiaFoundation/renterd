@@ -36,6 +36,8 @@ import (
 const (
 	defaultPinUpdateInterval = 5 * time.Minute
 	defaultPinRateWindow     = 6 * time.Hour
+
+	stdTxnSize = 1200 // bytes
 )
 
 // Client re-exports the client from the client package.
@@ -59,6 +61,7 @@ type (
 	ChainManager interface {
 		AddBlocks(blocks []types.Block) error
 		AddPoolTransactions(txns []types.Transaction) (bool, error)
+		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		Block(id types.BlockID) (types.Block, bool)
 		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
 		PoolTransactions() []types.Transaction
@@ -203,6 +206,7 @@ type (
 		Addr() string
 		BroadcastHeader(h gateway.BlockHeader)
 		BroadcastTransactionSet([]types.Transaction)
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
 		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 		Peers() []*syncer.Peer
 	}
@@ -212,9 +216,11 @@ type (
 		Balance() (wallet.Balance, error)
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
+		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (consensus.State, []int, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
+		SignV2Inputs(state consensus.State, txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
 		UnconfirmedEvents() ([]wallet.Event, error)
@@ -389,6 +395,7 @@ func (b *bus) Handler() http.Handler {
 		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
+		"POST   /wallet/send":          b.walletSendSiacoinsHandler,
 		"POST   /wallet/sign":          b.walletSignHandler,
 		"GET    /wallet/transactions":  b.walletTransactionsHandler,
 
@@ -718,6 +725,79 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 		ToSign:      toSign,
 		DependsOn:   b.cm.UnconfirmedParents(txn),
 	})
+}
+
+func (b *bus) walletSendSiacoinsHandler(jc jape.Context) {
+	var req api.WalletSendRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req.Address == types.VoidAddress {
+		jc.Error(errors.New("cannot send to void address"), http.StatusBadRequest)
+		return
+	}
+
+	// estimate miner fee
+	feePerByte := b.cm.RecommendedFee()
+	minerFee := feePerByte.Mul64(stdTxnSize)
+	if req.SubtractMinerFee {
+		var underflow bool
+		req.Amount, underflow = req.Amount.SubWithUnderflow(minerFee)
+		if underflow {
+			jc.Error(fmt.Errorf("amount must be greater than miner fee: %s", minerFee), http.StatusBadRequest)
+			return
+		}
+	}
+
+	state := b.cm.TipState()
+	// if the current height is below the v2 hardfork height, send a v1
+	// transaction
+	if state.Index.Height < state.Network.HardforkV2.AllowHeight {
+		// build transaction
+		txn := types.Transaction{
+			MinerFees: []types.Currency{minerFee},
+			SiacoinOutputs: []types.SiacoinOutput{
+				{Address: req.Address, Value: req.Amount},
+			},
+		}
+		toSign, err := b.w.FundTransaction(&txn, req.Amount.Add(minerFee), false)
+		if jc.Check("failed to fund transaction", err) != nil {
+			return
+		}
+		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
+		// shouldn't be necessary to get parents since the transaction is
+		// not using unconfirmed outputs, but good practice
+		txnset := append(b.cm.UnconfirmedParents(txn), txn)
+		// verify the transaction and add it to the transaction pool
+		if _, err := b.cm.AddPoolTransactions(txnset); jc.Check("failed to add transaction set", err) != nil {
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+			return
+		}
+		// broadcast the transaction
+		b.s.BroadcastTransactionSet(txnset)
+		jc.Encode(txn.ID())
+	} else {
+		txn := types.V2Transaction{
+			MinerFee: minerFee,
+			SiacoinOutputs: []types.SiacoinOutput{
+				{Address: req.Address, Value: req.Amount},
+			},
+		}
+		// fund and sign transaction
+		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), false)
+		if jc.Check("failed to fund transaction", err) != nil {
+			return
+		}
+		b.w.SignV2Inputs(state, &txn, toSign)
+		txnset := []types.V2Transaction{txn}
+		// verify the transaction and add it to the transaction pool
+		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return
+		}
+		// broadcast the transaction
+		b.s.BroadcastV2TransactionSet(state.Index, txnset)
+		jc.Encode(txn.ID())
+	}
 }
 
 func (b *bus) walletSignHandler(jc jape.Context) {

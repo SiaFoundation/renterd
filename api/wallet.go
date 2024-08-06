@@ -98,6 +98,13 @@ type (
 		Immature    types.Currency `json:"immature"`
 	}
 
+	WalletSendRequest struct {
+		Address          types.Address  `json:"address"`
+		Amount           types.Currency `json:"amount"`
+		SubtractMinerFee bool           `json:"subtractMinerFee"`
+		UseUnconfirmed   bool           `json:"useUnconfirmed"`
+	}
+
 	// WalletSignRequest is the request type for the /wallet/sign endpoint.
 	WalletSignRequest struct {
 		Transaction   types.Transaction   `json:"transaction"`
