@@ -220,6 +220,7 @@ type (
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (consensus.State, []int, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
+		RedistributeV2(outputs int, amount, feePerByte types.Currency) (txns []types.V2Transaction, toSign [][]int, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SignV2Inputs(state consensus.State, txn *types.V2Transaction, toSign []int)
@@ -822,26 +823,51 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
-	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
-		return
-	}
-
 	var ids []types.TransactionID
-	if len(txns) == 0 {
-		jc.Encode(ids)
-		return
-	}
+	if state := b.cm.TipState(); state.Index.Height < state.Network.HardforkV2.AllowHeight {
+		// v1 redistribution
+		txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
+			return
+		}
 
-	for i := 0; i < len(txns); i++ {
-		b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
-		ids = append(ids, txns[i].ID())
-	}
+		if len(txns) == 0 {
+			jc.Encode(ids)
+			return
+		}
 
-	_, err = b.cm.AddPoolTransactions(txns)
-	if jc.Check("couldn't broadcast the transaction", err) != nil {
-		b.w.ReleaseInputs(txns, nil)
-		return
+		for i := 0; i < len(txns); i++ {
+			b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
+			ids = append(ids, txns[i].ID())
+		}
+
+		_, err = b.cm.AddPoolTransactions(txns)
+		if jc.Check("couldn't broadcast the transaction", err) != nil {
+			b.w.ReleaseInputs(txns, nil)
+			return
+		}
+	} else {
+		// v2 redistribution
+		txns, toSign, err := b.w.RedistributeV2(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
+			return
+		}
+
+		if len(txns) == 0 {
+			jc.Encode(ids)
+			return
+		}
+
+		for i := 0; i < len(txns); i++ {
+			b.w.SignV2Inputs(state, &txns[i], toSign[i])
+			ids = append(ids, txns[i].ID())
+		}
+
+		_, err = b.cm.AddV2PoolTransactions(state.Index, txns)
+		if jc.Check("couldn't broadcast the transaction", err) != nil {
+			b.w.ReleaseInputs(nil, txns)
+			return
+		}
 	}
 
 	jc.Encode(ids)
