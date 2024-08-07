@@ -186,6 +186,11 @@ type (
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
 
+		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
+		// database, causing the provided shards to be associated with the slab.
+		// The returned string contains the filename of the slab buffer on disk.
+		MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error)
+
 		// MultipartUpload returns the multipart upload with the given ID or
 		// api.ErrMultipartUploadNotFound if the upload doesn't exist.
 		MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error)

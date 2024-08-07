@@ -2690,3 +2690,76 @@ func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.
 	}
 	return objects, nil
 }
+
+func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedSlab) (string, error) {
+	// fetch relevant slab info
+	var slabID, bufferedSlabID int64
+	var bufferFileName string
+	if err := tx.QueryRow(ctx, `
+		SELECT sla.id, bs.id, bs.filename 
+		FROM slabs sla
+		INNER JOIN buffered_slabs bs ON bs.id = sla.db_buffered_slab_id
+		WHERE sla.db_buffered_slab_id = ?
+	`, slab.BufferID).
+		Scan(&slabID, &bufferedSlabID, &bufferFileName); err != nil {
+		return "", fmt.Errorf("failed to fetch slab id: %w", err)
+	}
+
+	// set 'db_buffered_slab_id' to NULL
+	if _, err := tx.Exec(ctx, "UPDATE slabs SET db_buffered_slab_id = NULL WHERE id = ?", slabID); err != nil {
+		return "", fmt.Errorf("failed to update slab: %w", err)
+	}
+
+	// delete buffer slab
+	if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", bufferedSlabID); err != nil {
+		return "", fmt.Errorf("failed to delete buffered slab: %w", err)
+	}
+
+	// fetch used contracts
+	usedContracts, err := FetchUsedContracts(ctx, tx, slab.Contracts())
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch used contracts: %w", err)
+	}
+
+	// stmt to add sector
+	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement to insert sectors: %w", err)
+	}
+	defer sectorStmt.Close()
+
+	// stmt to insert contract_sector
+	contractSectorStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement to insert contract sectors: %w", err)
+	}
+	defer contractSectorStmt.Close()
+
+	// insert shards
+	for i := range slab.Shards {
+		// insert shard
+		res, err := sectorStmt.Exec(ctx, slabID, i+1, PublicKey(slab.Shards[i].LatestHost), slab.Shards[i].Root[:])
+		if err != nil {
+			return "", fmt.Errorf("failed to insert sector: %w", err)
+		}
+		sectorID, err := res.LastInsertId()
+		if err != nil {
+			return "", fmt.Errorf("failed to get sector id: %w", err)
+		}
+
+		// insert contracts for shard
+		for _, fcids := range slab.Shards[i].Contracts {
+			for _, fcid := range fcids {
+				uc, ok := usedContracts[fcid]
+				if !ok {
+					continue
+				}
+				// insert contract sector
+				if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
+					return "", fmt.Errorf("failed to insert contract sector: %w", err)
+				}
+			}
+		}
+	}
+	return bufferFileName, nil
+}
