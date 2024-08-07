@@ -208,14 +208,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 	cm := chain.NewManager(store, state)
 
-	// create chain subscriber
-	cs, err := chain.NewChainSubscriber(wh, cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger)
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	// create wallet
-	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	// create chain subscriber
+	cs, err := chain.NewChainSubscriber(wh, cm, sqlStore, w, time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
