@@ -13,12 +13,15 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
 const (
 	migratorBatchSize = math.MaxInt // TODO: change once we have a fix for the infinite loop
+
+	// migrationAlertRegisterInterval is the interval at which we update the
+	// ongoing migrations alert to indicate progress
+	migrationAlertRegisterInterval = 30 * time.Second
 )
 
 type (
@@ -29,7 +32,7 @@ type (
 		parallelSlabsPerWorker    uint64
 		signalConsensusNotSynced  chan struct{}
 		signalMaintenanceFinished chan struct{}
-		statsSlabMigrationSpeedMS *stats.DataPoints
+		statsSlabMigrationSpeedMS *utils.DataPoints
 
 		mu                 sync.Mutex
 		migrating          bool
@@ -70,7 +73,7 @@ func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uin
 		parallelSlabsPerWorker:    parallelSlabsPerWorker,
 		signalConsensusNotSynced:  make(chan struct{}, 1),
 		signalMaintenanceFinished: make(chan struct{}, 1),
-		statsSlabMigrationSpeedMS: stats.New(time.Hour),
+		statsSlabMigrationSpeedMS: utils.NewDataPoints(time.Hour),
 	}
 }
 
@@ -260,6 +263,9 @@ func (m *migrator) performMigrations(p *workerPool) {
 		})
 	}
 
+	// unregister the migration alert when we're done
+	defer m.ap.alerts.DismissAlerts(m.ap.shutdownCtx, alertMigrationID)
+
 OUTER:
 	for {
 		// recompute health.
@@ -281,10 +287,14 @@ OUTER:
 			return
 		}
 
-		// register an alert to notify users about ongoing migrations
-		m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(len(toMigrate), m.slabMigrationEstimate(len(toMigrate))))
-
+		var lastRegister time.Time
 		for i, slab := range toMigrate {
+			if time.Since(lastRegister) > migrationAlertRegisterInterval {
+				// register an alert to notify users about ongoing migrations
+				remaining := len(toMigrate) - i
+				m.ap.RegisterAlert(m.ap.shutdownCtx, newOngoingMigrationsAlert(remaining, m.slabMigrationEstimate(remaining)))
+				lastRegister = time.Now()
+			}
 			select {
 			case <-m.ap.shutdownCtx.Done():
 				return

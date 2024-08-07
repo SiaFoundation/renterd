@@ -697,3 +697,7 @@ type webhookStoreMock struct{}
 func (*webhookStoreMock) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
 	return nil
 }
+
+func (*webhookStoreMock) UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
+	return nil
+}

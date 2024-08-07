@@ -17,8 +17,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
@@ -51,8 +51,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrivePct              *stats.DataPoints
-		statsSlabUploadSpeedBytesPerMS *stats.DataPoints
+		statsOverdrivePct              *utils.DataPoints
+		statsSlabUploadSpeedBytesPerMS *utils.DataPoints
 
 		shutdownCtx context.Context
 
@@ -317,8 +317,8 @@ func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrivePct:              stats.NoDecay(),
-		statsSlabUploadSpeedBytesPerMS: stats.NoDecay(),
+		statsOverdrivePct:              utils.NewDataPoints(0),
+		statsSlabUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		shutdownCtx: ctx,
 
@@ -341,8 +341,8 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs Cont
 		signalNewUpload: make(chan struct{}, 1),
 
 		// stats
-		statsSectorUploadEstimateInMS:    stats.Default(),
-		statsSectorUploadSpeedBytesPerMS: stats.NoDecay(),
+		statsSectorUploadEstimateInMS:    utils.NewDataPoints(10 * time.Minute),
+		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
 		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),

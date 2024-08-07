@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
@@ -50,8 +49,8 @@ type (
 		consecutiveFailures uint64
 		lastRecompute       time.Time
 
-		statsSectorUploadEstimateInMS    *stats.DataPoints
-		statsSectorUploadSpeedBytesPerMS *stats.DataPoints
+		statsSectorUploadEstimateInMS    *utils.DataPoints
+		statsSectorUploadSpeedBytesPerMS *utils.DataPoints
 	}
 )
 

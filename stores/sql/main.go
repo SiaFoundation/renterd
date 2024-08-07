@@ -2657,3 +2657,148 @@ func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset,
 	}
 	return objects, nil
 }
+
+func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
+	key, err := slabKey.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal encryption key: %w", err)
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM objects o
+		INNER JOIN buckets b ON o.db_bucket_id = b.id
+		WHERE b.name = ? AND EXISTS (
+			SELECT 1
+			FROM objects o2
+			INNER JOIN slices sli ON sli.db_object_id = o2.id
+			INNER JOIN slabs sla ON sla.id = sli.db_slab_id
+			WHERE o2.id = o.id AND sla.key = ?
+		)
+	`, tx.SelectObjectMetadataExpr()), bucket, SecretKey(key))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := tx.ScanObjectMetadata(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+	return objects, nil
+}
+
+func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedSlab) (string, error) {
+	// fetch relevant slab info
+	var slabID, bufferedSlabID int64
+	var bufferFileName string
+	if err := tx.QueryRow(ctx, `
+		SELECT sla.id, bs.id, bs.filename 
+		FROM slabs sla
+		INNER JOIN buffered_slabs bs ON bs.id = sla.db_buffered_slab_id
+		WHERE sla.db_buffered_slab_id = ?
+	`, slab.BufferID).
+		Scan(&slabID, &bufferedSlabID, &bufferFileName); err != nil {
+		return "", fmt.Errorf("failed to fetch slab id: %w", err)
+	}
+
+	// set 'db_buffered_slab_id' to NULL
+	if _, err := tx.Exec(ctx, "UPDATE slabs SET db_buffered_slab_id = NULL WHERE id = ?", slabID); err != nil {
+		return "", fmt.Errorf("failed to update slab: %w", err)
+	}
+
+	// delete buffer slab
+	if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", bufferedSlabID); err != nil {
+		return "", fmt.Errorf("failed to delete buffered slab: %w", err)
+	}
+
+	// fetch used contracts
+	usedContracts, err := FetchUsedContracts(ctx, tx, slab.Contracts())
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch used contracts: %w", err)
+	}
+
+	// stmt to add sector
+	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement to insert sectors: %w", err)
+	}
+	defer sectorStmt.Close()
+
+	// stmt to insert contract_sector
+	contractSectorStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement to insert contract sectors: %w", err)
+	}
+	defer contractSectorStmt.Close()
+
+	// insert shards
+	for i := range slab.Shards {
+		// insert shard
+		res, err := sectorStmt.Exec(ctx, slabID, i+1, PublicKey(slab.Shards[i].LatestHost), slab.Shards[i].Root[:])
+		if err != nil {
+			return "", fmt.Errorf("failed to insert sector: %w", err)
+		}
+		sectorID, err := res.LastInsertId()
+		if err != nil {
+			return "", fmt.Errorf("failed to get sector id: %w", err)
+		}
+
+		// insert contracts for shard
+		for _, fcids := range slab.Shards[i].Contracts {
+			for _, fcid := range fcids {
+				uc, ok := usedContracts[fcid]
+				if !ok {
+					continue
+				}
+				// insert contract sector
+				if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
+					return "", fmt.Errorf("failed to insert contract sector: %w", err)
+				}
+			}
+		}
+	}
+	return bufferFileName, nil
+}
+
+func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
+	var updateKeys []string
+	var updateValues []interface{}
+
+	if !newSpending.Uploads.IsZero() {
+		updateKeys = append(updateKeys, "upload_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.Uploads))
+	}
+	if !newSpending.Downloads.IsZero() {
+		updateKeys = append(updateKeys, "download_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.Downloads))
+	}
+	if !newSpending.FundAccount.IsZero() {
+		updateKeys = append(updateKeys, "fund_account_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.FundAccount))
+	}
+	if !newSpending.Deletions.IsZero() {
+		updateKeys = append(updateKeys, "delete_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.Deletions))
+	}
+	if !newSpending.SectorRoots.IsZero() {
+		updateKeys = append(updateKeys, "list_spending = ?")
+		updateValues = append(updateValues, Currency(newSpending.SectorRoots))
+	}
+	updateKeys = append(updateKeys, "revision_number = ?", "size = ?")
+	updateValues = append(updateValues, revisionNumber, size)
+
+	updateValues = append(updateValues, FileContractID(fcid))
+	_, err := tx.Exec(ctx, fmt.Sprintf(`
+    UPDATE contracts
+    SET %s
+    WHERE fcid = ?
+  `, strings.Join(updateKeys, ",")), updateValues...)
+	if err != nil {
+		return fmt.Errorf("failed to record contract spending: %w", err)
+	}
+	return nil
+}

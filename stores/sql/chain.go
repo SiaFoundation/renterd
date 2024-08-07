@@ -138,7 +138,7 @@ func UpdateFailedContracts(ctx context.Context, tx sql.Tx, blockHeight uint64, l
 	return nil
 }
 
-func UpdateStateElements(ctx context.Context, tx sql.Tx, elements []types.StateElement) error {
+func UpdateWalletStateElements(ctx context.Context, tx sql.Tx, elements []types.StateElement) error {
 	if len(elements) == 0 {
 		return nil
 	}

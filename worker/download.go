@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
@@ -39,8 +38,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrivePct                *stats.DataPoints
-		statsSlabDownloadSpeedBytesPerMS *stats.DataPoints
+		statsOverdrivePct                *utils.DataPoints
+		statsSlabDownloadSpeedBytesPerMS *utils.DataPoints
 
 		shutdownCtx context.Context
 
@@ -146,8 +145,8 @@ func newDownloadManager(ctx context.Context, hm HostManager, mm MemoryManager, o
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrivePct:                stats.NoDecay(),
-		statsSlabDownloadSpeedBytesPerMS: stats.NoDecay(),
+		statsOverdrivePct:                utils.NewDataPoints(0),
+		statsSlabDownloadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		shutdownCtx: ctx,
 

@@ -514,6 +514,10 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	return dirID, nil
 }
 
+func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
+	return ssql.MarkPackedSlabUploaded(ctx, tx, slab)
+}
+
 func (tx *MainDatabaseTx) MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error) {
 	return ssql.MultipartUpload(ctx, tx, uploadID)
 }
@@ -532,6 +536,10 @@ func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefi
 
 func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
 	return ssql.ObjectMetadata(ctx, tx, bucket, path)
+}
+
+func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
+	return ssql.ObjectsBySlabKey(ctx, tx, bucket, slabKey)
 }
 
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
@@ -601,6 +609,10 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
+	return ssql.RecordContractSpending(ctx, tx, fcid, revisionNumber, size, newSpending)
 }
 
 func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
@@ -752,6 +764,57 @@ func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring s
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag"
+}
+
+func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
+	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
+	if err != nil {
+		return fmt.Errorf("failed to insert contract set: %w", err)
+	}
+
+	csID, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+
+	// handle empty set
+	if len(contractIds) == 0 {
+		_, err := tx.Exec(ctx, "DELETE FROM contract_set_contracts WHERE db_contract_set_id = ?", csID)
+		return err
+	}
+
+	// prepare fcid args and query
+	fcidQuery := strings.Repeat("?, ", len(contractIds)-1) + "?"
+	fcidArgs := make([]interface{}, len(contractIds))
+	for i, fcid := range contractIds {
+		fcidArgs[i] = ssql.FileContractID(fcid)
+	}
+
+	// remove unwanted contracts
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+		DELETE csc
+		FROM contract_set_contracts csc
+		INNER JOIN contracts c ON c.id = csc.db_contract_id
+		WHERE c.fcid NOT IN (%s)
+	`, fcidQuery), fcidArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to delete contract set contracts: %w", err)
+	}
+
+	// add missing contracts
+	args := []interface{}{csID}
+	args = append(args, fcidArgs...)
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
+		SELECT ?, c.id
+		FROM contracts c
+		WHERE c.fcid IN (%s)
+		ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
+	`, fcidQuery), args...)
+	if err != nil {
+		return fmt.Errorf("failed to add contract set contracts: %w", err)
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {

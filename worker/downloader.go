@@ -10,7 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/stats"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 const (
@@ -26,8 +26,8 @@ type (
 	downloader struct {
 		host Host
 
-		statsDownloadSpeedBytesPerMS    *stats.DataPoints // keep track of this separately for stats (no decay is applied)
-		statsSectorDownloadEstimateInMS *stats.DataPoints
+		statsDownloadSpeedBytesPerMS    *utils.DataPoints // keep track of this separately for stats (no decay is applied)
+		statsSectorDownloadEstimateInMS *utils.DataPoints
 
 		signalWorkChan chan struct{}
 		shutdownCtx    context.Context
@@ -44,8 +44,8 @@ func newDownloader(ctx context.Context, host Host) *downloader {
 	return &downloader{
 		host: host,
 
-		statsSectorDownloadEstimateInMS: stats.Default(),
-		statsDownloadSpeedBytesPerMS:    stats.NoDecay(),
+		statsSectorDownloadEstimateInMS: utils.NewDataPoints(10 * time.Minute),
+		statsDownloadSpeedBytesPerMS:    utils.NewDataPoints(0),
 
 		signalWorkChan: make(chan struct{}, 1),
 		shutdownCtx:    ctx,

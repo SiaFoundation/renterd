@@ -137,9 +137,9 @@ var (
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
 			RevisionBroadcastInterval:      7 * 24 * time.Hour,
-			ScannerBatchSize:               1000,
-			ScannerInterval:                24 * time.Hour,
-			ScannerNumThreads:              100,
+			ScannerBatchSize:               100,
+			ScannerInterval:                4 * time.Hour,
+			ScannerNumThreads:              10,
 			MigratorParallelSlabsPerWorker: 1,
 		},
 		S3: config.S3{

@@ -298,3 +298,10 @@ func ParseDownloadRange(req *http.Request) (DownloadRange, error) {
 	}
 	return dr, nil
 }
+
+func (r RHPScanResponse) Error() error {
+	if r.ScanError != "" {
+		return errors.New(r.ScanError)
+	}
+	return nil
+}

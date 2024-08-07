@@ -37,7 +37,6 @@ import (
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
-	stypes "go.sia.tech/siad/types"
 )
 
 const (
@@ -65,16 +64,17 @@ type TestCluster struct {
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
 
-	network *consensus.Network
-	cm      *chain.Manager
-	cs      *chain.ChainSubscriber
-	apID    string
-	dbName  string
-	dir     string
-	logger  *zap.Logger
-	tt      test.TT
-	wk      types.PrivateKey
-	wg      sync.WaitGroup
+	network      *consensus.Network
+	genesisBlock types.Block
+	cm           *chain.Manager
+	cs           *chain.ChainSubscriber
+	apID         string
+	dbName       string
+	dir          string
+	logger       *zap.Logger
+	tt           test.TT
+	wk           types.PrivateKey
+	wg           sync.WaitGroup
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -362,15 +362,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
 
 	cluster := &TestCluster{
-		apID:    apCfg.ID,
-		dir:     dir,
-		dbName:  busCfg.Database.MySQL.Database,
-		logger:  logger,
-		network: busCfg.Network,
-		cm:      cm,
-		cs:      cs,
-		tt:      tt,
-		wk:      wk,
+		apID:         apCfg.ID,
+		dir:          dir,
+		dbName:       busCfg.Database.MySQL.Database,
+		logger:       logger,
+		network:      busCfg.Network,
+		genesisBlock: busCfg.Genesis,
+		cm:           cm,
+		cs:           cs,
+		tt:           tt,
+		wk:           wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,
@@ -572,7 +573,7 @@ func (c *TestCluster) sync() {
 		}
 
 		for _, h := range c.hosts {
-			if hh := h.cs.Height(); uint64(hh) < cs.BlockHeight {
+			if hh := h.cm.Tip().Height; hh < cs.BlockHeight {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
 			}
 		}
@@ -690,11 +691,11 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, false)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock, false)
 	c.tt.OK(err)
 
 	// Connect gateways.
-	c.tt.OK(c.Bus.SyncerConnect(context.Background(), h.GatewayAddr()))
+	c.tt.OK(c.Bus.SyncerConnect(context.Background(), h.SyncerAddr()))
 	return h
 }
 
@@ -709,6 +710,16 @@ func (c *TestCluster) AddHost(h *Host) {
 
 	// Mine transaction.
 	c.MineBlocks(1)
+
+	// Wait for host's wallet to be funded
+	c.tt.Retry(100, 100*time.Millisecond, func() error {
+		balance, err := h.wallet.Balance()
+		c.tt.OK(err)
+		if balance.Confirmed.IsZero() {
+			return errors.New("host wallet not funded")
+		}
+		return nil
+	})
 
 	// Announce hosts.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -873,8 +884,6 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkV2.AllowHeight = HardforkV2AllowHeight
 	n.HardforkV2.RequireHeight = HardforkV2RequireHeight
 
-	// TODO: remove once we got rid of all siad dependencies
-	utils.ConvertToCore(stypes.GenesisBlock, (*types.V1Block)(&genesis))
 	return n, genesis
 }
 

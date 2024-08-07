@@ -24,7 +24,6 @@ var zeroCurrency = currency(types.ZeroCurrency)
 
 type (
 	unixTimeMS     time.Time
-	datetime       time.Time
 	currency       types.Currency
 	bCurrency      types.Currency
 	fileContractID types.FileContractID
@@ -220,49 +219,6 @@ var SQLiteTimestampFormats = []string{
 	"2006-01-02 15:04",
 	"2006-01-02T15:04",
 	"2006-01-02",
-}
-
-// GormDataType implements gorm.GormDataTypeInterface.
-func (datetime) GormDataType() string {
-	return "string"
-}
-
-// Scan scan value into datetime, implements sql.Scanner interface.
-func (dt *datetime) Scan(value interface{}) error {
-	var s string
-	switch value := value.(type) {
-	case string:
-		s = value
-	case []byte:
-		s = string(value)
-	case time.Time:
-		*dt = datetime(value)
-		return nil
-	default:
-		return fmt.Errorf("failed to unmarshal time.Time value: %v %T", value, value)
-	}
-
-	var ok bool
-	var t time.Time
-	s = strings.TrimSuffix(s, "Z")
-	for _, format := range SQLiteTimestampFormats {
-		if timeVal, err := time.ParseInLocation(format, s, time.UTC); err == nil {
-			ok = true
-			t = timeVal
-			break
-		}
-	}
-	if !ok {
-		return fmt.Errorf("failed to parse datetime value: %v", s)
-	}
-
-	*dt = datetime(t)
-	return nil
-}
-
-// Value returns a datetime value, implements driver.Valuer interface.
-func (dt datetime) Value() (driver.Value, error) {
-	return (time.Time)(dt).Format(SQLiteTimestampFormats[0]), nil
 }
 
 // GormDataType implements gorm.GormDataTypeInterface.
