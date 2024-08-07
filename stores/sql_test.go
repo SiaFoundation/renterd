@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -25,7 +23,6 @@ import (
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"lukechampine.com/frand"
@@ -386,70 +383,5 @@ func TestQueryPlan(t *testing.T) {
 				t.Fatalf("query '%s' should use an index, instead the plan was %+v", query, explain)
 			}
 		}
-	}
-}
-
-func TestRetryTransaction(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// create custom logger to capture logs
-	observedZapCore, observedLogs := observer.New(zap.InfoLevel)
-	ss.logger = zap.New(observedZapCore).Sugar()
-
-	// collectLogs returns all logs
-	collectLogs := func() (logs []string) {
-		t.Helper()
-		for _, entry := range observedLogs.All() {
-			logs = append(logs, entry.Message)
-		}
-		return
-	}
-
-	// disable retries and retry a transaction that fails
-	ss.retryTransactionIntervals = nil
-	ss.retryTransaction(context.Background(), func(tx *gorm.DB) error { return errors.New("database locked") })
-
-	// assert transaction is attempted once and not retried
-	got := collectLogs()
-	want := []string{"transaction attempt 1/1 failed, err: database locked"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatal("unexpected logs", cmp.Diff(got, want))
-	}
-
-	// enable retries and retry the same transaction
-	ss.retryTransactionIntervals = []time.Duration{
-		5 * time.Millisecond,
-		10 * time.Millisecond,
-		15 * time.Millisecond,
-	}
-	ss.retryTransaction(context.Background(), func(tx *gorm.DB) error { return errors.New("database locked") })
-
-	// assert transaction is retried 4 times in total
-	got = collectLogs()
-	want = append(want,
-		"transaction attempt 1/4 failed, retry in 5ms,  err: database locked",
-		"transaction attempt 2/4 failed, retry in 10ms,  err: database locked",
-		"transaction attempt 3/4 failed, retry in 15ms,  err: database locked",
-		"transaction attempt 4/4 failed, err: database locked",
-	)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatal("unexpected logs", cmp.Diff(got, want))
-	}
-
-	// retry transaction with cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
-	if len(observedLogs.All()) != len(want) {
-		t.Fatal("expected no logs")
-	}
-
-	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Microsecond)
-	defer cancel()
-	time.Sleep(time.Millisecond)
-	ss.retryTransaction(ctx, func(tx *gorm.DB) error { return nil })
-	if len(observedLogs.All()) != len(want) {
-		t.Fatal("expected no logs")
 	}
 }
