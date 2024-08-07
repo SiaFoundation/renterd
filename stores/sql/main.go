@@ -1223,18 +1223,21 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 
 func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, parts []api.MultipartCompletedPart) (multipartUpload, []multipartUploadPart, int64, string, error) {
 	// fetch upload
+	var ec []byte
 	var mpu multipartUpload
 	err := tx.QueryRow(ctx, `
 		SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id
 		FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id
 		WHERE mu.upload_id = ?`, uploadID).
-		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
+		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &ec, &mpu.Bucket, &mpu.BucketID)
 	if err != nil {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch upload: %w", err)
 	} else if mpu.Key != key {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("object id mismatch: %v != %v: %w", mpu.Key, key, api.ErrObjectNotFound)
 	} else if mpu.Bucket != bucket {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("bucket name mismatch: %v != %v: %w", mpu.Bucket, bucket, api.ErrBucketNotFound)
+	} else if err := mpu.EC.UnmarshalBinary(ec); err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to unmarshal encryption key: %w", err)
 	}
 
 	// find relevant parts
