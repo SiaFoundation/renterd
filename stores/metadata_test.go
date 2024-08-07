@@ -289,8 +289,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -540,12 +539,10 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ss.announceHost(hk2, "address2")
-	if err != nil {
+	if err := ss.announceHost(hk2, "address2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2315,8 +2312,7 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 

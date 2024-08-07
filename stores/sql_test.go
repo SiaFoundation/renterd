@@ -188,6 +188,18 @@ func (s *testSQLStore) DB() *isql.DB {
 	panic("unreachable")
 }
 
+func (s *testSQLStore) ExecConditional(sqliteQuery, mysqlQuery string) (dsql.Result, error) {
+	switch db := s.db.(type) {
+	case *sqlite.MainDatabase:
+		return db.DB().Exec(context.Background(), sqliteQuery)
+	case *mysql.MainDatabase:
+		return db.DB().Exec(context.Background(), mysqlQuery)
+	default:
+		s.t.Fatal("unknown db type", db)
+	}
+	panic("unreachable")
+}
+
 func (s *testSQLStore) DBMetrics() *isql.DB {
 	switch db := s.dbMetrics.(type) {
 	case *sqlite.MetricsDatabase:

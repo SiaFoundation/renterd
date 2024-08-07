@@ -25,14 +25,11 @@ func TestTypeCurrency(t *testing.T) {
 	defer ss.Close()
 
 	// prepare the table
-	if isSQLite(ss.gormDB) {
-		if err := ss.gormDB.Exec("CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);").Error; err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		if err := ss.gormDB.Exec("CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);").Error; err != nil {
-			t.Fatal(err)
-		}
+	if _, err := ss.ExecConditional(
+		"CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);", // sqlite
+		"CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);",   // mysql
+	); err != nil {
+		t.Fatal(err)
 	}
 
 	// insert currencies in random order

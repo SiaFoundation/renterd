@@ -5,12 +5,9 @@ import (
 	dsql "database/sql"
 	"errors"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
@@ -113,31 +110,7 @@ type (
 		Entry string   `gorm:"unique;index;NOT NULL"`
 		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
 	}
-
-	// dbAnnouncement is a table used for storing all announcements. It
-	// doesn't have any relations to dbHost which means it won't
-	// automatically prune when a host is deleted.
-	dbAnnouncement struct {
-		Model
-		HostKey publicKey `gorm:"NOT NULL"`
-
-		BlockHeight uint64
-		BlockID     string
-		NetAddress  string
-	}
-
-	// announcement describes an announcement for a single host.
-	announcement struct {
-		chain.HostAnnouncement
-		blockHeight uint64
-		blockID     types.BlockID
-		hk          types.PublicKey
-		timestamp   time.Time
-	}
 )
-
-// TableName implements the gorm.Tabler interface.
-func (dbAnnouncement) TableName() string { return "host_announcements" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbHost) TableName() string { return "hosts" }
@@ -238,21 +211,6 @@ func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
 		DoNothing: true,
 	})
 	return nil
-}
-
-func (e *dbBlocklistEntry) blocks(h dbHost) bool {
-	values := []string{h.NetAddress}
-	host, _, err := net.SplitHostPort(h.NetAddress)
-	if err == nil {
-		values = append(values, host)
-	}
-
-	for _, value := range values {
-		if value == e.Entry || strings.HasSuffix(value, "."+e.Entry) {
-			return true
-		}
-	}
-	return false
 }
 
 // Host returns information about a host.
@@ -361,46 +319,4 @@ func (s *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.RecordPriceTables(ctx, priceTableUpdate)
 	})
-}
-
-func insertAnnouncements(tx *gorm.DB, as []announcement) error {
-	var hosts []dbHost
-	var announcements []dbAnnouncement
-	for _, a := range as {
-		hosts = append(hosts, dbHost{
-			PublicKey:        publicKey(a.hk),
-			LastAnnouncement: a.timestamp.UTC(),
-			NetAddress:       a.NetAddress,
-		})
-		announcements = append(announcements, dbAnnouncement{
-			HostKey:     publicKey(a.hk),
-			BlockHeight: a.blockHeight,
-			BlockID:     a.blockID.String(),
-			NetAddress:  a.NetAddress,
-		})
-	}
-	if err := tx.Create(&announcements).Error; err != nil {
-		return err
-	}
-	return tx.Create(&hosts).Error
-}
-
-func getBlocklists(tx *gorm.DB) ([]dbAllowlistEntry, []dbBlocklistEntry, error) {
-	var allowlist []dbAllowlistEntry
-	if err := tx.
-		Model(&dbAllowlistEntry{}).
-		Find(&allowlist).
-		Error; err != nil {
-		return nil, nil, err
-	}
-
-	var blocklist []dbBlocklistEntry
-	if err := tx.
-		Model(&dbBlocklistEntry{}).
-		Find(&blocklist).
-		Error; err != nil {
-		return nil, nil, err
-	}
-
-	return allowlist, blocklist, nil
 }
