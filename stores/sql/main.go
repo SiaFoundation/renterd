@@ -2817,24 +2817,16 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT * FROM (
-			SELECT 0, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, sec.slab_index, sec.root, sec.latest_host, c.fcid, h.public_key
-			FROM slices sli
-			INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-			LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
-			LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
-			LEFT JOIN contracts c ON c.id = csec.db_contract_id
-			LEFT JOIN hosts h ON h.id = c.host_id
-			WHERE sli.db_object_id = ? AND sla.db_buffered_slab_id IS NULL
-			UNION ALL
-			SELECT 1, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, 0, ?, ?, ?, ?
-			FROM slices sli
-			INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-			INNER JOIN buffered_slabs bs ON bs.id = sla.db_buffered_slab_id
-			WHERE sli.db_object_id = ?
-		) AS ss
-		ORDER BY ss.object_index ASC, ss.slab_index ASC
-	`, objID, Hash256{}, Hash256{}, Hash256{}, Hash256{}, objID)
+		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(sec.latest_host, ?), COALESCE(c.fcid, ?), COALESCE(h.public_key, ?)
+		FROM slices sli
+		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
+		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
+		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
+		LEFT JOIN contracts c ON c.id = csec.db_contract_id
+		LEFT JOIN hosts h ON h.id = c.host_id
+		WHERE sli.db_object_id = ?
+		ORDER BY sli.object_index ASC, sec.slab_index ASC
+	`, Hash256{}, PublicKey{}, FileContractID{}, PublicKey{}, objID)
 	if err != nil {
 		return api.Object{}, fmt.Errorf("failed to fetch slabs: %w", err)
 	}
@@ -2863,10 +2855,11 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 		// sanity check object for corruption
 		isFirst := current == nil && objectIndex == 1 && slabIndex == 1
-		isNewSlab := isFirst || (current != nil && objectIndex == currObjIdx+1 && slabIndex == 1)
+		isBuffered := bufferedSlab && objectIndex == currObjIdx+1 && slabIndex == 0
+		isNewSlab := isFirst || isBuffered || (current != nil && objectIndex == currObjIdx+1 && slabIndex == 1)
 		isNewShard := isNewSlab || (objectIndex == currObjIdx && slabIndex == currSlaIdx+1)
 		isNewContract := isNewShard || (objectIndex == currObjIdx && slabIndex == currSlaIdx)
-		if !isFirst && !isNewSlab && !isNewShard && !isNewContract {
+		if !isFirst && !isBuffered && !isNewSlab && !isNewShard && !isNewContract {
 			return api.Object{}, fmt.Errorf("%w: object index %d, slab index %d, current object index %d, current slab index %d", api.ErrObjectCorrupted, objectIndex, slabIndex, currObjIdx, currSlaIdx)
 		}
 

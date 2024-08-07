@@ -163,7 +163,7 @@ func TestObjectBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(*got.Object, want) {
-		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
+		t.Fatal("object mismatch", got.Object, want)
 	}
 
 	// update the sector to have a non-consecutive slab index
