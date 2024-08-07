@@ -760,7 +760,7 @@ func (b *bus) walletSendSiacoinsHandler(jc jape.Context) {
 				{Address: req.Address, Value: req.Amount},
 			},
 		}
-		toSign, err := b.w.FundTransaction(&txn, req.Amount.Add(minerFee), false)
+		toSign, err := b.w.FundTransaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
 		if jc.Check("failed to fund transaction", err) != nil {
 			return
 		}
@@ -784,7 +784,7 @@ func (b *bus) walletSendSiacoinsHandler(jc jape.Context) {
 			},
 		}
 		// fund and sign transaction
-		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), false)
+		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
 		if jc.Check("failed to fund transaction", err) != nil {
 			return
 		}
