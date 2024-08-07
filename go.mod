@@ -11,9 +11,9 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.4.2-0.20240723013228-2b1c3d890e25
-	go.sia.tech/coreutils v0.2.2-0.20240806150708-4e91667be360
+	go.sia.tech/coreutils v0.2.2-0.20240806154714-201436821413
 	go.sia.tech/gofakes3 v0.0.4
-	go.sia.tech/hostd v1.1.3-0.20240805182232-cf5cd37985f5
+	go.sia.tech/hostd v1.1.3-0.20240806202647-0a8ca94d6e22
 	go.sia.tech/jape v0.12.0
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/web/renterd v0.57.0
@@ -31,16 +31,14 @@ require (
 
 require (
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.55.4 // indirect
-	github.com/cloudflare/cloudflare-go v0.100.0 // indirect
+	github.com/aws/aws-sdk-go v1.55.5 // indirect
+	github.com/cloudflare/cloudflare-go v0.101.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -58,7 +56,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.27.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
-	golang.org/x/time v0.5.0 // indirect
+	golang.org/x/time v0.6.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
 	nhooyr.io/websocket v1.8.11 // indirect
 )
