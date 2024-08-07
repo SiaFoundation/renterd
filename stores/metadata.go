@@ -342,63 +342,6 @@ func (c dbContract) convert() api.ContractMetadata {
 	}
 }
 
-func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
-	if len(raw) == 0 {
-		return object.SlabSlice{}, errors.New("no sectors found")
-	} else if raw[0].SlabBuffered && len(raw) != 1 {
-		return object.SlabSlice{}, errors.New("buffered slab with multiple sectors")
-	}
-
-	// unmarshal key
-	if err := slice.Slab.Key.UnmarshalBinary(raw[0].SlabKey); err != nil {
-		return object.SlabSlice{}, err
-	}
-
-	// handle partial slab
-	if raw[0].SlabBuffered {
-		slice.Offset = raw[0].SliceOffset
-		slice.Length = raw[0].SliceLength
-		slice.Slab.MinShards = raw[0].SlabMinShards
-		slice.Slab.Health = raw[0].SlabHealth
-		return
-	}
-
-	// hydrate all sectors
-	slabID := raw[0].SlabID
-	sectors := make([]object.Sector, 0, len(raw))
-	secIdx := uint(0)
-	for _, sector := range raw {
-		if sector.SlabID != slabID {
-			return object.SlabSlice{}, errors.New("sectors from different slabs") // developer error
-		}
-		latestHost := types.PublicKey(sector.LatestHost)
-		fcid := types.FileContractID(sector.FCID)
-
-		// next sector
-		if sector.SectorIndex != secIdx {
-			sectors = append(sectors, object.Sector{
-				Contracts:  make(map[types.PublicKey][]types.FileContractID),
-				LatestHost: latestHost,
-				Root:       *(*types.Hash256)(sector.SectorRoot),
-			})
-			secIdx = sector.SectorIndex
-		}
-
-		// add host+contract to sector
-		if fcid != (types.FileContractID{}) {
-			sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)], fcid)
-		}
-	}
-
-	// hydrate all fields
-	slice.Slab.Health = raw[0].SlabHealth
-	slice.Slab.Shards = sectors
-	slice.Slab.MinShards = raw[0].SlabMinShards
-	slice.Offset = raw[0].SliceOffset
-	slice.Length = raw[0].SliceLength
-	return slice, nil
-}
-
 func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		b, err = tx.Bucket(ctx, bucket)
@@ -681,8 +624,8 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 }
 
 func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		obj, err = s.object(tx, bucket, path)
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		obj, err = tx.Object(ctx, bucket, path)
 		return err
 	})
 	return
@@ -1031,99 +974,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return
 }
 
-// object retrieves an object from the store.
-func (s *SQLStore) object(tx *gorm.DB, bucket, path string) (api.Object, error) {
-	// fetch raw object data
-	raw, err := s.objectRaw(tx, bucket, path)
-	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && len(raw) == 0) {
-		return api.Object{}, api.ErrObjectNotFound
-	} else if err != nil {
-		return api.Object{}, err
-	}
-
-	// hydrate raw object data
-	return s.objectHydrate(tx, bucket, path, raw)
-}
-
-// objectHydrate hydrates a raw object and returns an api.Object.
-func (s *SQLStore) objectHydrate(tx *gorm.DB, bucket, path string, obj rawObject) (api.Object, error) {
-	// parse object key
-	var key object.EncryptionKey
-	if err := key.UnmarshalBinary(obj[0].ObjectKey); err != nil {
-		return api.Object{}, err
-	}
-
-	// filter out slabs without slab ID and buffered slabs - this is expected
-	// for an empty object or objects that end with a partial slab.
-	var filtered rawObject
-	minHealth := math.MaxFloat64
-	for _, sector := range obj {
-		if sector.SlabID != 0 {
-			filtered = append(filtered, sector)
-			if sector.SlabHealth < minHealth {
-				minHealth = sector.SlabHealth
-			}
-		}
-	}
-
-	// hydrate all slabs
-	slabs := make([]object.SlabSlice, 0, len(filtered))
-	if len(filtered) > 0 {
-		var start int
-		// create a helper function to add a slab and update the state
-		addSlab := func(end int) error {
-			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
-				return err
-			} else {
-				slabs = append(slabs, slab)
-				start = end
-			}
-			return nil
-		}
-
-		curr := filtered[0]
-		for j, sector := range filtered {
-			if sector.ObjectIndex == 0 {
-				return api.Object{}, api.ErrObjectCorrupted
-			} else if sector.SectorIndex == 0 && !sector.SlabBuffered {
-				return api.Object{}, api.ErrObjectCorrupted
-			}
-			if sector.ObjectIndex != curr.ObjectIndex {
-				if err := addSlab(j); err != nil {
-					return api.Object{}, err
-				}
-				curr = sector
-			}
-		}
-		if err := addSlab(len(filtered)); err != nil {
-			return api.Object{}, err
-		}
-	}
-
-	// fetch object metadata
-	metadata, err := s.objectMetadata(tx, bucket, path)
-	if err != nil {
-		return api.Object{}, err
-	}
-
-	// return object
-	return api.Object{
-		Metadata: metadata,
-		ObjectMetadata: newObjectMetadata(
-			obj[0].ObjectName,
-			obj[0].ObjectETag,
-			obj[0].ObjectMimeType,
-			obj[0].ObjectHealth,
-			obj[0].ObjectModTime,
-			obj[0].ObjectSize,
-		),
-		Object: &object.Object{
-			Key:   key,
-			Slabs: slabs,
-		},
-	}, nil
-}
-
 // ObjectMetadata returns an object's metadata
 func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj api.Object, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
@@ -1131,37 +981,6 @@ func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj
 		return err
 	})
 	return
-}
-
-func (s *SQLStore) objectMetadata(tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {
-	var rows []dbObjectUserMetadata
-	err := tx.
-		Model(&dbObjectUserMetadata{}).
-		Table("object_user_metadata oum").
-		Joins("INNER JOIN objects o ON oum.db_object_id = o.id").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Where("o.object_id = ? AND b.name = ?", path, bucket).
-		Find(&rows).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	metadata := make(api.ObjectUserMetadata)
-	for _, row := range rows {
-		metadata[row.Key] = row.Value
-	}
-	return metadata, nil
-}
-
-func newObjectMetadata(name, etag, mimeType string, health float64, modTime time.Time, size int64) api.ObjectMetadata {
-	return api.ObjectMetadata{
-		ETag:     etag,
-		Health:   health,
-		ModTime:  api.TimeRFC3339(modTime.UTC()),
-		Name:     name,
-		Size:     size,
-		MimeType: mimeType,
-	}
 }
 
 func (s *SQLStore) objectRaw(txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {

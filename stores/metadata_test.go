@@ -166,14 +166,10 @@ func TestObjectBasic(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
 	}
 
-	// delete a sector
-	var sectors []dbSector
-	if err := ss.gormDB.Find(&sectors).Error; err != nil {
-		t.Fatal(err)
-	} else if len(sectors) != 2 {
-		t.Fatal("unexpected number of sectors")
-	} else if tx := ss.gormDB.Delete(sectors[0]); tx.Error != nil || tx.RowsAffected != 1 {
-		t.Fatal("unexpected number of sectors deleted", tx.Error, tx.RowsAffected)
+	// update the sector to have a non-consecutive slab index
+	_, err = ss.DB().Exec(context.Background(), "UPDATE sectors SET slab_index = 100 WHERE slab_index = 1")
+	if err != nil {
+		t.Fatalf("failed to update sector: %v", err)
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted

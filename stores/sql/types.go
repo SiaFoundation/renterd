@@ -16,11 +16,11 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 )
 
 const (
 	proofHashSize = 32
-	secretKeySize = 32
 )
 
 var (
@@ -38,7 +38,7 @@ type (
 	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
-	SecretKey       []byte
+	EncryptionKey   object.EncryptionKey
 	Uint64Str       uint64
 	UnixTimeMS      time.Time
 	UnixTimeNS      time.Time
@@ -61,7 +61,7 @@ var (
 	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
-	_ scannerValuer = (*SecretKey)(nil)
+	_ scannerValuer = (*EncryptionKey)(nil)
 	_ scannerValuer = (*UnixTimeMS)(nil)
 	_ scannerValuer = (*UnixTimeNS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
@@ -241,25 +241,27 @@ func (mp MerkleProof) Value() (driver.Value, error) {
 
 // String implements fmt.Stringer to prevent the key from getting leaked in
 // logs.
-func (k SecretKey) String() string {
+func (k EncryptionKey) String() string {
 	return "*****"
 }
 
 // Scan scans value into key, implements sql.Scanner interface.
-func (k *SecretKey) Scan(value interface{}) error {
+func (k *EncryptionKey) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal secretKey value:", value))
-	} else if len(bytes) != secretKeySize {
-		return fmt.Errorf("failed to unmarshal secretKey value due to invalid number of bytes %v != %v: %v", len(bytes), secretKeySize, value)
+		return errors.New(fmt.Sprint("failed to unmarshal EncryptionKey value:", value))
 	}
-	*k = append(SecretKey{}, SecretKey(bytes)...)
+	var ec object.EncryptionKey
+	if err := ec.UnmarshalBinary(bytes); err != nil {
+		return fmt.Errorf("failed to unmarshal EncryptionKey value): %w", err)
+	}
+	*k = EncryptionKey(ec)
 	return nil
 }
 
 // Value returns an key value, implements driver.Valuer interface.
-func (k SecretKey) Value() (driver.Value, error) {
-	return []byte(k), nil
+func (k EncryptionKey) Value() (driver.Value, error) {
+	return object.EncryptionKey(k).MarshalBinary()
 }
 
 // String implements fmt.Stringer to prevent "s3authentication" settings from
