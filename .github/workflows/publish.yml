@@ -21,6 +21,9 @@ env:
 jobs:
   docker:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        network: ["mainnet" , "zen"]
     permissions:
       packages: write
     steps:
@@ -34,8 +37,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare environment variables
         run: |
-          echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
-          echo "DOCKER_METADATA_SUFFIX=" >> $GITHUB_ENV
+          echo "RENTERD_NETWORK=${{ matrix.network }}" >> $GITHUB_ENV
+          echo "DOCKER_METADATA_SUFFIX=-${{ matrix.network }}" >> $GITHUB_ENV
       - uses: docker/metadata-action@v4
         name: Generate tags
         id: meta
@@ -51,7 +54,7 @@ jobs:
         with:
           context: .
           build-args: |
-            BUILD_TAGS=${{ env.BUILD_TAGS }}
+            RENTERD_NETWORK=${{ env.RENTERD_NETWORK }}
           file: ./docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true

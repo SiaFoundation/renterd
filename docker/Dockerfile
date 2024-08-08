@@ -37,15 +37,14 @@ LABEL maintainer="The Sia Foundation <info@sia.tech>" \
 ENV PUID=0
 ENV PGID=0
 
-# Entrypoint env args
-ARG BUILD_TAGS
-ENV BUILD_TAGS=$BUILD_TAGS
+# Default network of container
+ARG RENTERD_NETWORK=
 
 # Renterd env args
 ENV RENTERD_API_PASSWORD= 
 ENV RENTERD_SEED=
 ENV RENTERD_CONFIG_FILE=/data/renterd.yml
-ENV RENTERD_NETWORK=
+ENV RENTERD_NETWORK=${RENTERD_NETWORK}
 
 # Copy binary and prepare data dir.
 COPY --from=builder /renterd/renterd /usr/bin/renterd
