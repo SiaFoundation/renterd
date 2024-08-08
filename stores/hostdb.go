@@ -15,47 +15,6 @@ var (
 	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
 
-type (
-	// dbHostCheck contains information about a host that is collected and used
-	// by the autopilot.
-	dbHostCheck struct {
-		Model
-
-		DBAutopilotID uint
-
-		DBHostID uint
-
-		// usability
-		UsabilityBlocked               bool
-		UsabilityOffline               bool
-		UsabilityLowScore              bool
-		UsabilityRedundantIP           bool
-		UsabilityGouging               bool
-		UsabilityNotAcceptingContracts bool
-		UsabilityNotAnnounced          bool
-		UsabilityNotCompletingScan     bool
-
-		// score
-		ScoreAge              float64
-		ScoreCollateral       float64
-		ScoreInteractions     float64
-		ScoreStorageRemaining float64
-		ScoreUptime           float64
-		ScoreVersion          float64
-		ScorePrices           float64
-
-		// gouging
-		GougingContractErr string
-		GougingDownloadErr string
-		GougingGougingErr  string
-		GougingPruneErr    string
-		GougingUploadErr   string
-	}
-)
-
-// TableName implements the gorm.Tabler interface.
-func (dbHostCheck) TableName() string { return "host_checks" }
-
 // Host returns information about a host.
 func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
 	hosts, err := s.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)

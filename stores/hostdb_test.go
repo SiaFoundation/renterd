@@ -316,11 +316,14 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert there are currently 3 checks
-	var cnt int64
-	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
-	if err != nil {
-		t.Fatal(err)
-	} else if cnt != 3 {
+	checkCount := func() (n int) {
+		t.Helper()
+		if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM host_checks").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if cnt := checkCount(); cnt != 3 {
 		t.Fatal("unexpected", cnt)
 	}
 
@@ -397,10 +400,7 @@ func TestSearchHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
-	if err != nil {
-		t.Fatal(err)
-	} else if cnt != 2 {
+	if cnt := checkCount(); cnt != 2 {
 		t.Fatal("unexpected", cnt)
 	}
 
@@ -409,10 +409,7 @@ func TestSearchHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
-	if err != nil {
-		t.Fatal(err)
-	} else if cnt != 0 {
+	if cnt := checkCount(); cnt != 0 {
 		t.Fatal("unexpected", cnt)
 	}
 }

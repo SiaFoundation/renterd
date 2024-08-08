@@ -3623,12 +3623,6 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// get all contracts
-	var dbContracts []dbContract
-	if err := ss.gormDB.Model(&dbContract{}).Preload("Host").Find(&dbContracts).Error; err != nil {
-		t.Fatal(err)
-	}
-
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	key, _ := object.GenerateEncryptionKey().MarshalBinary()
 	root := types.Hash256{1, 2, 3}
@@ -3640,7 +3634,12 @@ func TestDeleteHostSector(t *testing.T) {
 		TotalShards:      1,
 		Shards: []dbSector{
 			{
-				Contracts:  dbContracts,
+				Contracts: []dbContract{
+					{Model: Model{ID: 1}},
+					{Model: Model{ID: 2}},
+					{Model: Model{ID: 3}},
+					{Model: Model{ID: 4}},
+				},
 				Root:       root[:],
 				LatestHost: publicKey(hk1), // hk1 is latest host
 			},
