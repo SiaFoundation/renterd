@@ -38,14 +38,13 @@ jobs:
       - name: Prepare environment variables
         run: |
           echo "RENTERD_NETWORK=${{ matrix.network }}" >> $GITHUB_ENV
-          echo "DOCKER_METADATA_SUFFIX=-${{ matrix.network }}" >> $GITHUB_ENV
       - uses: docker/metadata-action@v4
         name: Generate tags
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
-            suffix=${{ env.DOCKER_METADATA_SUFFIX }},onlatest=true
+            suffix=-${{ env.RENTERD_NETWORK }},onlatest=true
           tags: |
             type=ref,event=branch
             type=sha,prefix=
