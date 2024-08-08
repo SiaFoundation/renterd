@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/chain"
@@ -444,7 +443,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}))
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
-		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
+		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
 	}))
 
 	// Fund the bus.

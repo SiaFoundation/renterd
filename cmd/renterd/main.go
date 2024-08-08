@@ -18,7 +18,9 @@ import (
 	"syscall"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
@@ -77,8 +79,9 @@ var (
 		Directory:     ".",
 		Seed:          os.Getenv("RENTERD_SEED"),
 		AutoOpenWebUI: true,
+		Network:       "mainnet",
 		HTTP: config.HTTP{
-			Address:  build.DefaultAPIAddress,
+			Address:  "", // default determined by network
 			Password: os.Getenv("RENTERD_API_PASSWORD"),
 		},
 		ShutdownTimeout: 5 * time.Minute,
@@ -111,7 +114,7 @@ var (
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     true,
-			GatewayAddr:                   build.DefaultGatewayAddress,
+			GatewayAddr:                   "", // default determined by network
 			UsedUTXOExpiry:                24 * time.Hour,
 			SlabBufferCompletionThreshold: 1 << 12,
 		},
@@ -143,7 +146,7 @@ var (
 			MigratorParallelSlabsPerWorker: 1,
 		},
 		S3: config.S3{
-			Address:     build.DefaultS3Address,
+			Address:     "", // default determined by network
 			Enabled:     true,
 			DisableAuth: false,
 			KeypairsV4:  nil,
@@ -240,6 +243,7 @@ func main() {
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
 	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
 	flag.BoolVar(&cfg.AutoOpenWebUI, "openui", cfg.AutoOpenWebUI, "automatically open the web UI on startup")
+	flag.StringVar(&cfg.Network, "network", cfg.Network, "Network to connect to (mainnet|zen|anagami)")
 
 	// logger
 	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
@@ -311,21 +315,6 @@ func main() {
 
 	flag.Parse()
 
-	// NOTE: update the usage header when adding new commands
-	if flag.Arg(0) == "version" {
-		cmdVersion()
-		return
-	} else if flag.Arg(0) == "seed" {
-		cmdSeed()
-		return
-	} else if flag.Arg(0) == "config" {
-		cmdBuildConfig()
-		return
-	} else if flag.Arg(0) != "" {
-		flag.Usage()
-		return
-	}
-
 	// Overwrite flags from environment if set.
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
 	parseEnvVar("RENTERD_BUS_API_PASSWORD", &cfg.Bus.RemotePassword)
@@ -371,6 +360,64 @@ func main() {
 	parseEnvVar("RENTERD_LOG_DATABASE_LEVEL", &cfg.Log.Database.Level)
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
+
+	// check network
+	var network *consensus.Network
+	var genesis types.Block
+	switch cfg.Network {
+	case "mainnet":
+		network, genesis = chain.Mainnet()
+	case "zen":
+		network, genesis = chain.TestnetZen()
+	default:
+		log.Fatalf("unknown network '%s'", cfg.Network)
+	}
+
+	// enforce network-specific defaults unless manually specified by user
+	if cfg.HTTP.Address == "" {
+		switch cfg.Network {
+		case "zen":
+			cfg.HTTP.Address = "localhost:9880"
+		default:
+			// mainnet and unknown networks
+			cfg.HTTP.Address = "localhost:9980"
+		}
+	}
+
+	if cfg.Bus.GatewayAddr == "" {
+		switch cfg.Network {
+		case "zen":
+			cfg.HTTP.Address = ":9881"
+		default:
+			// mainnet and unknown networks
+			cfg.HTTP.Address = ":9981"
+		}
+	}
+
+	if cfg.S3.Address == "" {
+		switch cfg.Network {
+		case "zen":
+			cfg.HTTP.Address = "localhost:7070"
+		default:
+			// mainnet and unknown networks
+			cfg.HTTP.Address = "localhost:8080"
+		}
+	}
+
+	// NOTE: update the usage header when adding new commands
+	if flag.Arg(0) == "version" {
+		cmdVersion(network.Name)
+		return
+	} else if flag.Arg(0) == "seed" {
+		cmdSeed()
+		return
+	} else if flag.Arg(0) == "config" {
+		cmdBuildConfig()
+		return
+	} else if flag.Arg(0) != "" {
+		flag.Usage()
+		return
+	}
 
 	// parse remotes
 	var workerRemotePassStr string
@@ -444,7 +491,7 @@ func main() {
 	}
 	defer closeFn(context.Background())
 
-	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", build.NetworkName()), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
+	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", network.Name), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
 	if runtime.GOARCH == "amd64" && !cpu.X86.HasAVX2 {
 		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
 	}
@@ -453,7 +500,6 @@ func main() {
 		cfg.Log.Database.Level = cfg.Log.Level
 	}
 
-	network, genesis := build.Network()
 	busCfg := node.BusConfig{
 		Bus:         cfg.Bus,
 		Database:    cfg.Database,
