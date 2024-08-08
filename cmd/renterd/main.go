@@ -243,7 +243,7 @@ func main() {
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
 	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
 	flag.BoolVar(&cfg.AutoOpenWebUI, "openui", cfg.AutoOpenWebUI, "automatically open the web UI on startup")
-	flag.StringVar(&cfg.Network, "network", cfg.Network, "Network to connect to (mainnet|zen|anagami)")
+	flag.StringVar(&cfg.Network, "network", cfg.Network, "Network to connect to (mainnet|zen|anagami). Defaults to 'mainnet' (overrides with RENTERD_NETWORK)")
 
 	// logger
 	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
@@ -316,6 +316,8 @@ func main() {
 	flag.Parse()
 
 	// Overwrite flags from environment if set.
+	parseEnvVar("RENTERD_NETWORK", &cfg.Network)
+
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
 	parseEnvVar("RENTERD_BUS_API_PASSWORD", &cfg.Bus.RemotePassword)
 	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &cfg.Bus.GatewayAddr)

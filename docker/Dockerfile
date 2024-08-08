@@ -28,10 +28,10 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
 # Build image that will be used to run renterd.
 FROM alpine:3
 LABEL maintainer="The Sia Foundation <info@sia.tech>" \
-      org.opencontainers.image.description.vendor="The Sia Foundation" \
-      org.opencontainers.image.description="A renterd container - next-generation Sia renter" \
-      org.opencontainers.image.source="https://github.com/SiaFoundation/renterd" \
-      org.opencontainers.image.licenses=MIT
+    org.opencontainers.image.description.vendor="The Sia Foundation" \
+    org.opencontainers.image.description="A renterd container - next-generation Sia renter" \
+    org.opencontainers.image.source="https://github.com/SiaFoundation/renterd" \
+    org.opencontainers.image.licenses=MIT
 
 # User to run renterd as. Defaults to root.
 ENV PUID=0
@@ -45,6 +45,7 @@ ENV BUILD_TAGS=$BUILD_TAGS
 ENV RENTERD_API_PASSWORD= 
 ENV RENTERD_SEED=
 ENV RENTERD_CONFIG_FILE=/data/renterd.yml
+ENV RENTERD_NETWORK=
 
 # Copy binary and prepare data dir.
 COPY --from=builder /renterd/renterd /usr/bin/renterd

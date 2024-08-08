@@ -21,9 +21,6 @@ env:
 jobs:
   docker:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        network: ["mainnet" , "zen"]
     permissions:
       packages: write
     steps:
@@ -37,13 +34,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare environment variables
         run: |
-          if [[ "${{ matrix.network }}" == "zen" ]]; then
-            echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
-            echo "DOCKER_METADATA_SUFFIX=-zen" >> $GITHUB_ENV
-          else
-            echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
-            echo "DOCKER_METADATA_SUFFIX=" >> $GITHUB_ENV
-          fi
+          echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+          echo "DOCKER_METADATA_SUFFIX=" >> $GITHUB_ENV
       - uses: docker/metadata-action@v4
         name: Generate tags
         id: meta
@@ -68,7 +60,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        network: ["mainnet" , "zen"]
         arch: [ amd64, arm64 ]
     steps:
       - uses: actions/checkout@v4
@@ -85,13 +76,7 @@ jobs:
           fi
       - name: Set build tag environment variable
         run: |
-          if [[ "${{ matrix.network }}" == "zen" ]]; then
-            echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
-            echo "ZIP_OUTPUT_SUFFIX=_zen" >> $GITHUB_ENV
-          else
-            echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
-            echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
-          fi
+          echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
       - name: Build ${{ matrix.arch }}
         env:
           CGO_ENABLED: 1
@@ -99,7 +84,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p release
-          ZIP_OUTPUT=release/renterd${{ env.ZIP_OUTPUT_SUFFIX }}_${GOOS}_${GOARCH}.zip
+          ZIP_OUTPUT=release/renterd_${GOOS}_${GOARCH}.zip
           go build -tags="$BUILD_TAGS" -trimpath -o bin/ -a -ldflags '-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
           cp README.md LICENSE bin/
           zip -qj $ZIP_OUTPUT bin/*
@@ -108,19 +93,11 @@ jobs:
         id: get_release_asset
         env:
           ARCH: ${{ matrix.arch }}
-          NETWORK: ${{ matrix.network }}
         with:
           result-encoding: string
           script: |
-            const arch = process.env.ARCH,
-              network = process.env.NETWORK;
-
-            switch (network) {
-            case 'mainnet':
-              return `renterd_linux_${arch}`;
-            default:
-              return `renterd_${network}_linux_${arch}`;
-            }
+            const arch = process.env.ARCH;
+            return `renterd_linux_${arch}`;
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.get_release_asset.outputs.result }}
@@ -129,7 +106,6 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        network: ["mainnet" , "zen"]
         arch: [ amd64, arm64 ]
     steps:
       - uses: actions/checkout@v4
@@ -171,13 +147,8 @@ jobs:
           go generate ./...
       - name: Set build tag environment variable
         run: |
-          if [[ "${{ matrix.network }}" == "zen" ]]; then
-              echo "BUILD_TAGS=testnet netgo" >> $GITHUB_ENV
-              echo "ZIP_OUTPUT_SUFFIX=_zen" >> $GITHUB_ENV
-          else
-              echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
-              echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
-          fi
+          echo "BUILD_TAGS=netgo" >> $GITHUB_ENV
+          echo "ZIP_OUTPUT_SUFFIX=" >> $GITHUB_ENV
       - name: Build ${{ matrix.arch }}
         env:
           APPLE_CERT_ID: ${{ secrets.APPLE_CERT_ID }}
@@ -203,19 +174,11 @@ jobs:
         id: get_release_asset
         env:
           ARCH: ${{ matrix.arch }}
-          NETWORK: ${{ matrix.network }}
         with:
           result-encoding: string
           script: |
-            const arch = process.env.ARCH,
-              network = process.env.NETWORK;
-
-            switch (network) {
-            case 'mainnet':
-              return `renterd_darwin_${arch}`;
-            default:
-              return `renterd_${network}_darwin_${arch}`;
-            }
+            const arch = process.env.ARCH;
+            return `renterd_darwin_${arch}`;
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.get_release_asset.outputs.result }}
@@ -224,7 +187,6 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        network: ["mainnet" , "zen"]
         arch: [ amd64 ]
     steps:
       - uses: actions/checkout@v4
@@ -233,13 +195,8 @@ jobs:
           go-version: 'stable'
       - name: Set build tag environment variable
         run: |
-          if ( "${{ matrix.network }}" -eq "zen" ) {
-            "BUILD_TAGS=testnet netgo" >> $env:GITHUB_ENV
-            "ZIP_OUTPUT_SUFFIX=_zen" >> $env:GITHUB_ENV
-          } else {
-            "BUILD_TAGS=netgo" >> $env:GITHUB_ENV
-            "ZIP_OUTPUT_SUFFIX=" >> $env:GITHUB_ENV
-          }
+          "BUILD_TAGS=netgo" >> $env:GITHUB_ENV
+          "ZIP_OUTPUT_SUFFIX=" >> $env:GITHUB_ENV
       - name: Setup
         shell: bash
         run: |
@@ -263,19 +220,11 @@ jobs:
         id: get_release_asset
         env:
           ARCH: ${{ matrix.arch }}
-          NETWORK: ${{ matrix.network }}
         with:
           result-encoding: string
           script: |
-            const arch = process.env.ARCH,
-              network = process.env.NETWORK;
-
-            switch (network) {
-            case 'mainnet':
-              return `renterd_windows_${arch}`;
-            default:
-              return `renterd_${network}_windows_${arch}`;
-            }
+            const arch = process.env.ARCH;
+            return `renterd_windows_${arch}`;
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.get_release_asset.outputs.result }}
