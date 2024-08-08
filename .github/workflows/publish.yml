@@ -21,9 +21,6 @@ env:
 jobs:
   docker:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        network: ["mainnet" , "zen"]
     permissions:
       packages: write
     steps:
@@ -35,16 +32,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Prepare environment variables
-        run: |
-          echo "RENTERD_NETWORK=${{ matrix.network }}" >> $GITHUB_ENV
       - uses: docker/metadata-action@v4
         name: Generate tags
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
-            suffix=-${{ env.RENTERD_NETWORK }},onlatest=true
+            onlatest=true
           tags: |
             type=ref,event=branch
             type=sha,prefix=
@@ -52,8 +46,6 @@ jobs:
       - uses: docker/build-push-action@v4
         with:
           context: .
-          build-args: |
-            RENTERD_NETWORK=${{ env.RENTERD_NETWORK }}
           file: ./docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true

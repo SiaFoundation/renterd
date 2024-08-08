@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
     CGO_ENABLED=1 go build -ldflags='-s -w -linkmode external -extldflags "-static"' -tags="${BUILD_TAGS}" ./cmd/renterd
 
 # Build image that will be used to run renterd.
-FROM alpine:3
+FROM scratch
 LABEL maintainer="The Sia Foundation <info@sia.tech>" \
     org.opencontainers.image.description.vendor="The Sia Foundation" \
     org.opencontainers.image.description="A renterd container - next-generation Sia renter" \
@@ -37,14 +37,11 @@ LABEL maintainer="The Sia Foundation <info@sia.tech>" \
 ENV PUID=0
 ENV PGID=0
 
-# Default network of container
-ARG RENTERD_NETWORK='mainnet'
-
 # Renterd env args
 ENV RENTERD_API_PASSWORD= 
 ENV RENTERD_SEED=
 ENV RENTERD_CONFIG_FILE=/data/renterd.yml
-ENV RENTERD_NETWORK=${RENTERD_NETWORK}
+ENV RENTERD_NETWORK='mainnet'
 
 # Copy binary and prepare data dir.
 COPY --from=builder /renterd/renterd /usr/bin/renterd
@@ -53,6 +50,4 @@ VOLUME [ "/data" ]
 USER ${PUID}:${PGID}
 
 # Copy the script and set it as the entrypoint.
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh", "-dir", "./data"]
+ENTRYPOINT ["renterd", "-env", "-http", ":9980", "-s3.address", ":8080", "-dir", "./data"]
