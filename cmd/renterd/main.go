@@ -81,7 +81,7 @@ var (
 		AutoOpenWebUI: true,
 		Network:       "mainnet",
 		HTTP: config.HTTP{
-			Address:  "", // default determined by network
+			Address:  "localhost:9980",
 			Password: os.Getenv("RENTERD_API_PASSWORD"),
 		},
 		ShutdownTimeout: 5 * time.Minute,
@@ -114,7 +114,7 @@ var (
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     true,
-			GatewayAddr:                   "", // default determined by network
+			GatewayAddr:                   ":9981",
 			UsedUTXOExpiry:                24 * time.Hour,
 			SlabBufferCompletionThreshold: 1 << 12,
 		},
@@ -146,7 +146,7 @@ var (
 			MigratorParallelSlabsPerWorker: 1,
 		},
 		S3: config.S3{
-			Address:     "", // default determined by network
+			Address:     "localhost:8080",
 			Enabled:     true,
 			DisableAuth: false,
 			KeypairsV4:  nil,
@@ -367,43 +367,14 @@ func main() {
 	var network *consensus.Network
 	var genesis types.Block
 	switch cfg.Network {
+	case "anagami":
+		network, genesis = chain.TestnetAnagami()
 	case "mainnet":
 		network, genesis = chain.Mainnet()
 	case "zen":
 		network, genesis = chain.TestnetZen()
 	default:
 		log.Fatalf("unknown network '%s'", cfg.Network)
-	}
-
-	// enforce network-specific defaults unless manually specified by user
-	if cfg.HTTP.Address == "" {
-		switch cfg.Network {
-		case "zen":
-			cfg.HTTP.Address = "localhost:9880"
-		default:
-			// mainnet and unknown networks
-			cfg.HTTP.Address = "localhost:9980"
-		}
-	}
-
-	if cfg.Bus.GatewayAddr == "" {
-		switch cfg.Network {
-		case "zen":
-			cfg.HTTP.Address = ":9881"
-		default:
-			// mainnet and unknown networks
-			cfg.HTTP.Address = ":9981"
-		}
-	}
-
-	if cfg.S3.Address == "" {
-		switch cfg.Network {
-		case "zen":
-			cfg.HTTP.Address = "localhost:7070"
-		default:
-			// mainnet and unknown networks
-			cfg.HTTP.Address = "localhost:8080"
-		}
 	}
 
 	// NOTE: update the usage header when adding new commands
