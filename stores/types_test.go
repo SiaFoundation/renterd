@@ -25,7 +25,7 @@ func TestTypeCurrency(t *testing.T) {
 	defer ss.Close()
 
 	// prepare the table
-	if _, err := ss.ExecConditional(
+	if _, err := ss.ExecDBSpecific(
 		"CREATE TABLE currencies (id INTEGER PRIMARY KEY AUTOINCREMENT,c BLOB);", // sqlite
 		"CREATE TABLE currencies (id INT AUTO_INCREMENT PRIMARY KEY, c BLOB);",   // mysql
 	); err != nil {

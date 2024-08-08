@@ -188,7 +188,7 @@ func (s *testSQLStore) DB() *isql.DB {
 	panic("unreachable")
 }
 
-func (s *testSQLStore) ExecConditional(sqliteQuery, mysqlQuery string) (dsql.Result, error) {
+func (s *testSQLStore) ExecDBSpecific(sqliteQuery, mysqlQuery string) (dsql.Result, error) {
 	switch db := s.db.(type) {
 	case *sqlite.MainDatabase:
 		return db.DB().Exec(context.Background(), sqliteQuery)

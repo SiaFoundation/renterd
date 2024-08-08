@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	dsql "database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -10,8 +9,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	sql "go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var (
@@ -19,47 +16,6 @@ var (
 )
 
 type (
-	// dbHost defines a api.Interaction as persisted in the DB. Deleting a
-	// host from the db will cascade the deletion and also delete the
-	// corresponding announcements and interactions with that host.
-	//
-	// NOTE: updating the host entity requires an update to the field map passed
-	// to 'Update' when recording host interactions
-	dbHost struct {
-		Model
-
-		PublicKey        publicKey `gorm:"unique;index;NOT NULL;size:32"`
-		Settings         hostSettings
-		PriceTable       hostPriceTable
-		PriceTableExpiry dsql.NullTime
-
-		TotalScans              uint64
-		LastScan                int64 `gorm:"index"` // unix nano
-		LastScanSuccess         bool
-		SecondToLastScanSuccess bool
-		Scanned                 bool `gorm:"index"`
-		Uptime                  time.Duration
-		Downtime                time.Duration
-
-		// RecentDowntime and RecentScanFailures are used to determine whether a
-		// host is eligible for pruning.
-		RecentDowntime     time.Duration `gorm:"index"`
-		RecentScanFailures uint64        `gorm:"index"`
-
-		SuccessfulInteractions float64
-		FailedInteractions     float64
-
-		LostSectors uint64
-
-		LastAnnouncement time.Time
-		NetAddress       string `gorm:"index"`
-		Subnets          string
-
-		Allowlist []dbAllowlistEntry `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
-		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
-		Checks    []dbHostCheck      `gorm:"foreignKey:DBHostID;constraint:OnDelete:CASCADE"`
-	}
-
 	// dbHostCheck contains information about a host that is collected and used
 	// by the autopilot.
 	dbHostCheck struct {
@@ -68,7 +24,6 @@ type (
 		DBAutopilotID uint
 
 		DBHostID uint
-		DBHost   dbHost
 
 		// usability
 		UsabilityBlocked               bool
@@ -96,122 +51,10 @@ type (
 		GougingPruneErr    string
 		GougingUploadErr   string
 	}
-
-	// dbAllowlistEntry defines a table that stores the host blocklist.
-	dbAllowlistEntry struct {
-		Model
-		Entry publicKey `gorm:"unique;index;NOT NULL;size:32"`
-		Hosts []dbHost  `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
-	}
-
-	// dbBlocklistEntry defines a table that stores the host blocklist.
-	dbBlocklistEntry struct {
-		Model
-		Entry string   `gorm:"unique;index;NOT NULL"`
-		Hosts []dbHost `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`
-	}
 )
 
 // TableName implements the gorm.Tabler interface.
-func (dbHost) TableName() string { return "hosts" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbHostCheck) TableName() string { return "host_checks" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbAllowlistEntry) TableName() string { return "host_allowlist_entries" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbBlocklistEntry) TableName() string { return "host_blocklist_entries" }
-
-func (h *dbHost) BeforeCreate(tx *gorm.DB) (err error) {
-	tx.Statement.AddClause(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "public_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"last_announcement", "net_address"}),
-	})
-	return nil
-}
-
-func (e *dbAllowlistEntry) AfterCreate(tx *gorm.DB) error {
-	// NOTE: the ID is zero here if we ignore a conflict on create
-	if e.ID == 0 {
-		return nil
-	}
-
-	params := map[string]interface{}{
-		"entry_id":    e.ID,
-		"exact_entry": publicKey(e.Entry),
-	}
-
-	// insert entries into the allowlist
-	if isSQLite(tx) {
-		return tx.Exec(`INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
-SELECT @entry_id, id FROM (
-SELECT id
-FROM hosts
-WHERE public_key = @exact_entry
-)`, params).Error
-	}
-
-	return tx.Exec(`INSERT IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id)
-SELECT @entry_id, id FROM (
-	SELECT id
-	FROM hosts
-	WHERE public_key=@exact_entry
-) AS _`, params).Error
-}
-
-func (e *dbAllowlistEntry) BeforeCreate(tx *gorm.DB) (err error) {
-	tx.Statement.AddClause(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "entry"}},
-		DoNothing: true,
-	})
-	return nil
-}
-
-func (e *dbBlocklistEntry) AfterCreate(tx *gorm.DB) error {
-	// NOTE: the ID is zero here if we ignore a conflict on create
-	if e.ID == 0 {
-		return nil
-	}
-
-	params := map[string]interface{}{
-		"entry_id":    e.ID,
-		"exact_entry": e.Entry,
-		"like_entry":  fmt.Sprintf("%%.%s", e.Entry),
-	}
-
-	// insert entries into the blocklist
-	if isSQLite(tx) {
-		return tx.Exec(`
-INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-SELECT @entry_id, id FROM (
-	SELECT id
-	FROM hosts
-	WHERE net_address == @exact_entry OR
-		rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == @exact_entry OR
-		rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE @like_entry
-)`, params).Error
-	}
-
-	return tx.Exec(`
-INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-SELECT @entry_id, id FROM (
-	SELECT id
-	FROM hosts
-	WHERE net_address=@exact_entry OR
-		SUBSTRING_INDEX(net_address,':',1)=@exact_entry OR
-		SUBSTRING_INDEX(net_address,':',1) LIKE @like_entry
-) AS _`, params).Error
-}
-
-func (e *dbBlocklistEntry) BeforeCreate(tx *gorm.DB) (err error) {
-	tx.Statement.AddClause(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "entry"}},
-		DoNothing: true,
-	})
-	return nil
-}
 
 // Host returns information about a host.
 func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
