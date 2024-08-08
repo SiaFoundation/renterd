@@ -38,7 +38,7 @@ ENV PUID=0
 ENV PGID=0
 
 # Default network of container
-ARG RENTERD_NETWORK=
+ARG RENTERD_NETWORK='mainnet'
 
 # Renterd env args
 ENV RENTERD_API_PASSWORD= 
