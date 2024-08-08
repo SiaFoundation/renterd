@@ -1173,50 +1173,7 @@ func newTestHostCheck() api.HostCheck {
 
 // addCustomTestHost ensures a host with given hostkey and net address exists.
 func (s *testSQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
-	// announce the host
 	if err := s.announceHost(hk, na); err != nil {
-		return err
-	}
-	var hostID uint
-	err := s.DB().QueryRow(context.Background(), "SELECT id FROM hosts WHERE public_key = ?", sql.PublicKey(hk)).
-		Scan(&hostID)
-	if err != nil {
-		return err
-	}
-
-	// fetch blocklists
-	var allowlist []types.PublicKey
-	rows, err := s.DB().Query(context.Background(), "SELECT entry FROM host_allowlist_entries")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var entry types.PublicKey
-		if err := rows.Scan((*sql.PublicKey)(&entry)); err != nil {
-			return err
-		}
-	}
-
-	var blocklist []string
-	rows, err = s.DB().Query(context.Background(), "SELECT entry FROM host_blocklist_entries")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var entry string
-		if err := rows.Scan(&entry); err != nil {
-			return err
-		}
-	}
-
-	// update lists
-	if err := s.UpdateHostAllowlistEntries(context.Background(), allowlist, nil, true); err != nil {
-		return err
-	} else if err := s.UpdateHostBlocklistEntries(context.Background(), blocklist, nil, true); err != nil {
 		return err
 	}
 	return nil

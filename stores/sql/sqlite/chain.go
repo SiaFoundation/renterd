@@ -312,6 +312,14 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 			); err != nil {
 				return fmt.Errorf("failed to insert host into blocklist: %w", err)
 			}
+		} else {
+			if _, err := c.tx.Exec(c.ctx,
+				"DELETE FROM host_blocklist_entry_hosts WHERE db_blocklist_entry_id = ? AND db_host_id = ?",
+				id,
+				hostID,
+			); err != nil {
+				return fmt.Errorf("failed to remove host from blocklist: %w", err)
+			}
 		}
 	}
 
