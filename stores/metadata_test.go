@@ -1028,14 +1028,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj1Slab0Key, err := obj1.Slabs[0].Key.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj1Slab1Key, err := obj1.Slabs[1].Key.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
+	obj1Slab0Key := obj1.Slabs[0].Key
+	obj1Slab1Key := obj1.Slabs[1].Key
 
 	// Set the Model fields to zero before comparing. These are set by gorm
 	// itself and contain a few timestamps which would make the following
@@ -1115,108 +1109,112 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
-	expectedObjSlab1 := dbSlab{
-		DBContractSetID: 1,
-		Health:          1,
-		Key:             obj1Slab0Key,
-		MinShards:       1,
-		TotalShards:     1,
-		Shards: []dbSector{
+	expectedObjSlab1 := object.Slab{
+		Health:    1,
+		Key:       obj1Slab0Key,
+		MinShards: 1,
+		Shards: []object.Sector{
 			{
-				DBSlabID:   3,
-				SlabIndex:  1,
-				Root:       obj1.Slabs[0].Shards[0].Root[:],
-				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
-				Contracts: []dbContract{
-					{
-						HostID: 1,
-						Host: dbHost{
-							PublicKey: publicKey(hk1),
-						},
-
-						ContractCommon: ContractCommon{
-							FCID: fileContractID(fcid1),
-
-							TotalCost:      currency(totalCost1),
-							RevisionNumber: "0",
-							StartHeight:    startHeight1,
-							WindowStart:    400,
-							WindowEnd:      500,
-							Size:           4096,
-							State:          contractStatePending,
-
-							UploadSpending:      zeroCurrency,
-							DownloadSpending:    zeroCurrency,
-							FundAccountSpending: zeroCurrency,
-						},
-					},
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk1: {fcid1},
 				},
+				LatestHost: hk1,
+				Root:       types.Hash256{1},
 			},
 		},
 	}
 
-	expectedObjSlab2 := dbSlab{
-		DBContractSetID: 1,
-		Health:          1,
-		Key:             obj1Slab1Key,
-		MinShards:       2,
-		TotalShards:     1,
-		Shards: []dbSector{
+	expectedContract1 := api.ContractMetadata{
+		ID:             fcid1,
+		HostIP:         "",
+		HostKey:        hk1,
+		SiamuxAddr:     "",
+		ProofHeight:    0,
+		RevisionHeight: 0,
+		RevisionNumber: 0,
+		Size:           4096,
+		StartHeight:    startHeight1,
+		State:          api.ContractStatePending,
+		WindowStart:    400,
+		WindowEnd:      500,
+		ContractPrice:  types.ZeroCurrency,
+		RenewedFrom:    types.FileContractID{},
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
+		},
+		TotalCost:    totalCost1,
+		ContractSets: nil,
+	}
+
+	expectedObjSlab2 := object.Slab{
+		Health:    1,
+		Key:       obj1Slab1Key,
+		MinShards: 2,
+		Shards: []object.Sector{
 			{
-				DBSlabID:   4,
-				SlabIndex:  1,
-				Root:       obj1.Slabs[1].Shards[0].Root[:],
-				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
-				Contracts: []dbContract{
-					{
-						HostID: 2,
-						Host: dbHost{
-							PublicKey: publicKey(hk2),
-						},
-						ContractCommon: ContractCommon{
-							FCID: fileContractID(fcid2),
-
-							TotalCost:      currency(totalCost2),
-							RevisionNumber: "0",
-							StartHeight:    startHeight2,
-							WindowStart:    400,
-							WindowEnd:      500,
-							Size:           4096,
-							State:          contractStatePending,
-
-							UploadSpending:      zeroCurrency,
-							DownloadSpending:    zeroCurrency,
-							FundAccountSpending: zeroCurrency,
-						},
-					},
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk2: {fcid2},
 				},
+				LatestHost: hk2,
+				Root:       types.Hash256{2},
 			},
 		},
+	}
+
+	expectedContract2 := api.ContractMetadata{
+		ID:             fcid2,
+		HostIP:         "",
+		HostKey:        hk2,
+		SiamuxAddr:     "",
+		ProofHeight:    0,
+		RevisionHeight: 0,
+		RevisionNumber: 0,
+		Size:           4096,
+		StartHeight:    startHeight2,
+		State:          api.ContractStatePending,
+		WindowStart:    400,
+		WindowEnd:      500,
+		ContractPrice:  types.ZeroCurrency,
+		RenewedFrom:    types.FileContractID{},
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
+		},
+		TotalCost:    totalCost2,
+		ContractSets: nil,
 	}
 
 	// Compare slabs.
-	slab1, err := ss.dbSlab(obj1Slab0Key)
+	slab1, err := ss.Slab(context.Background(), obj1Slab0Key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slab2, err := ss.dbSlab(obj1Slab1Key)
+	contract1, err := ss.Contract(context.Background(), fcid1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slabs := []*dbSlab{&slab1, &slab2}
-	for i := range slabs {
-		slabs[i].Model = Model{}
-		slabs[i].Shards[0].Model = Model{}
-		slabs[i].Shards[0].Contracts[0].Model = Model{}
-		slabs[i].Shards[0].Contracts[0].Host.Model = Model{}
-		slabs[i].Shards[0].Contracts[0].Host.LastAnnouncement = time.Time{}
-		slabs[i].HealthValidUntil = 0
+	slab2, err := ss.Slab(context.Background(), obj1Slab1Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract2, err := ss.Contract(context.Background(), fcid2)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(slab1, expectedObjSlab1) {
 		t.Fatal("mismatch", cmp.Diff(slab1, expectedObjSlab1))
 	}
 	if !reflect.DeepEqual(slab2, expectedObjSlab2) {
 		t.Fatal("mismatch", cmp.Diff(slab2, expectedObjSlab2))
+	}
+	if !reflect.DeepEqual(contract1, expectedContract1) {
+		t.Fatal("mismatch", cmp.Diff(contract1, expectedContract1))
+	}
+	if !reflect.DeepEqual(contract2, expectedContract2) {
+		t.Fatal("mismatch", cmp.Diff(contract2, expectedContract2))
 	}
 
 	// Remove the first slab of the object.
