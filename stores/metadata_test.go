@@ -2500,6 +2500,16 @@ func TestRenameObjects(t *testing.T) {
 		},
 	}
 
+	err = test.Retry(100, 100*time.Millisecond, func() error {
+		if n := ss.Count("directories"); n != int64(len(expectedDirs)) {
+			return fmt.Errorf("unexpected number of directories, %v != %v", n, len(expectedDirs))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	type row struct {
 		ID       int64
 		ParentID int64
@@ -2509,8 +2519,8 @@ func TestRenameObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var nDirs int
-	for i := 0; rows.Next(); i++ {
+	var i int
+	for rows.Next() {
 		var dir row
 		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
 			t.Fatal(err)
@@ -2521,10 +2531,10 @@ func TestRenameObjects(t *testing.T) {
 		} else if dir.Name != expectedDirs[i].name {
 			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
 		}
-		nDirs++
+		i++
 	}
-	if len(expectedDirs) != nDirs {
-		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), nDirs)
+	if len(expectedDirs) != i {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), i)
 	}
 }
 
