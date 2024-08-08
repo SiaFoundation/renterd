@@ -107,13 +107,6 @@ type (
 		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
-	dbDirectory struct {
-		Model
-
-		Name       string
-		DBParentID uint
-	}
-
 	dbObject struct {
 		Model
 
@@ -286,9 +279,6 @@ func (dbContractSector) TableName() string { return "contract_sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbContractSet) TableName() string { return "contract_sets" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbDirectory) TableName() string { return "directories" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }

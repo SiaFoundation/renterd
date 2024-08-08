@@ -316,12 +316,9 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert there are currently 3 checks
-	checkCount := func() (n int) {
+	checkCount := func() int64 {
 		t.Helper()
-		if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM host_checks").Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		return
+		return ss.Count("host_checks")
 	}
 	if cnt := checkCount(); cnt != 3 {
 		t.Fatal("unexpected", cnt)
@@ -1183,10 +1180,7 @@ func (s *testSQLStore) addTestHost(hk types.PublicKey) error {
 
 // addTestHosts adds 'n' hosts to the db and returns their keys.
 func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
-	cnt, err := s.contractsCount()
-	if err != nil {
-		return nil, err
-	}
+	cnt := s.Count("contracts")
 
 	for i := 0; i < n; i++ {
 		keys = append(keys, types.PublicKey{byte(int(cnt) + i + 1)})

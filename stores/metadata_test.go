@@ -2484,8 +2484,8 @@ func TestRenameObjects(t *testing.T) {
 
 	// Assert directories are correct
 	expectedDirs := []struct {
-		id       uint
-		parentID uint
+		id       int64
+		parentID int64
 		name     string
 	}{
 		{
@@ -2499,24 +2499,32 @@ func TestRenameObjects(t *testing.T) {
 			name:     "/fileś/",
 		},
 	}
-	var directories []dbDirectory
-	test.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.gormDB.Find(&directories).Error; err != nil {
-			return err
-		} else if len(directories) != len(expectedDirs) {
-			return fmt.Errorf("unexpected number of directories, %v != %v", len(directories), len(expectedDirs))
-		}
-		return nil
-	})
 
-	for i, dir := range directories {
-		if dir.ID != expectedDirs[i].id {
+	type row struct {
+		ID       int64
+		ParentID int64
+		Name     string
+	}
+	rows, err := ss.DB().Query(context.Background(), "SELECT id, parent_id, name FROM dirs ORDER BY id ASC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nDirs int
+	for i := 0; rows.Next(); i++ {
+		var dir row
+		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
+			t.Fatal(err)
+		} else if dir.ID != expectedDirs[i].id {
 			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
-		} else if dir.DBParentID != expectedDirs[i].parentID {
-			t.Fatalf("unexpected directory parent id, %v != %v", dir.DBParentID, expectedDirs[i].parentID)
+		} else if dir.ParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected directory parent id, %v != %v", dir.ParentID, expectedDirs[i].parentID)
 		} else if dir.Name != expectedDirs[i].name {
 			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
 		}
+		nDirs++
+	}
+	if len(expectedDirs) != nDirs {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), nDirs)
 	}
 }
 
@@ -4610,8 +4618,8 @@ func TestDirectories(t *testing.T) {
 
 	expectedDirs := []struct {
 		name     string
-		id       uint
-		parentID uint
+		id       int64
+		parentID int64
 	}{
 		{
 			name:     "/",
@@ -4640,19 +4648,31 @@ func TestDirectories(t *testing.T) {
 		},
 	}
 
-	var dbDirs []dbDirectory
-	if err := ss.gormDB.Find(&dbDirs).Error; err != nil {
-		t.Fatal(err)
-	} else if len(dbDirs) != len(expectedDirs) {
-		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), len(dbDirs))
+	type row struct {
+		ID       int64
+		ParentID int64
+		Name     string
 	}
-
-	for i, dbDir := range dbDirs {
-		if dbDir.ID != uint(i+1) {
-			t.Fatalf("unexpected id %v", dbDir.ID)
-		} else if dbDir.Name != expectedDirs[i].name {
-			t.Fatalf("unexpected name '%v' != '%v'", dbDir.Name, expectedDirs[i].name)
+	rows, err := ss.DB().Query(context.Background(), "SELECT id, parent_id, name FROM dirs ORDER BY id ASC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nDirs int
+	for i := 0; rows.Next(); i++ {
+		var dir row
+		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
+			t.Fatal(err)
+		} else if dir.ID != expectedDirs[i].id {
+			t.Fatalf("unexpected id %v", dir.ID)
+		} else if dir.ParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected parent id %v", dir.ParentID)
+		} else if dir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected name '%v' != '%v'", dir.Name, expectedDirs[i].name)
 		}
+		nDirs++
+	}
+	if len(expectedDirs) != nDirs {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), nDirs)
 	}
 
 	now := time.Now()
@@ -4661,10 +4681,7 @@ func TestDirectories(t *testing.T) {
 		return ss.waitForPruneLoop(now)
 	})
 
-	var n int64
-	if err := ss.gormDB.Model(&dbDirectory{}).Count(&n).Error; err != nil {
-		t.Fatal(err)
-	} else if n != 1 {
+	if n := ss.Count("directories"); n != 1 {
 		t.Fatal("expected 1 dir, got", n)
 	}
 }
