@@ -280,7 +280,7 @@ func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, 
 }
 
 func (s *testSQLStore) Count(table string) (n int64) {
-	if err := s.DB().QueryRow(context.Background(), "SELECT COUNT(*) FROM ?", table).
+	if err := s.DB().QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).
 		Scan(&n); err != nil {
 		s.t.Fatal(err)
 	}

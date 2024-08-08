@@ -2505,7 +2505,7 @@ func TestRenameObjects(t *testing.T) {
 		ParentID int64
 		Name     string
 	}
-	rows, err := ss.DB().Query(context.Background(), "SELECT id, parent_id, name FROM dirs ORDER BY id ASC")
+	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4643,7 +4643,7 @@ func TestDirectories(t *testing.T) {
 		},
 		{
 			name:     "/dir/",
-			id:       2,
+			id:       5,
 			parentID: 1,
 		},
 	}
@@ -4653,7 +4653,7 @@ func TestDirectories(t *testing.T) {
 		ParentID int64
 		Name     string
 	}
-	rows, err := ss.DB().Query(context.Background(), "SELECT id, parent_id, name FROM dirs ORDER BY id ASC")
+	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
 	if err != nil {
 		t.Fatal(err)
 	}
