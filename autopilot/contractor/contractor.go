@@ -980,7 +980,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		}
 
 		// extend logger
-		logger = logger.With("subnets", host.Subnets).
+		logger = logger.With("addresses", host.ResolvedAddresses).
 			With("blocked", host.Blocked)
 
 		// check if host is blocked
@@ -1205,7 +1205,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		// prepare a gouging checker
 		logger := logger.With("hostKey", candidate.host.PublicKey).
 			With("remainingBudget", remainingFunds).
-			With("subnets", candidate.host.Subnets)
+			With("addresses", candidate.host.ResolvedAddresses)
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
 		if breakdown := gc.Check(nil, &candidate.host.PriceTable.HostPriceTable); breakdown.Gouging() {
@@ -1213,7 +1213,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 			continue
 		}
 
-		// check if we already have a contract with a host on that subnet
+		// check if we already have a contract with a host on that address
 		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
 			logger.Info("host has redundant IP")
 			continue
@@ -1357,8 +1357,8 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 	// STEP 2: perform contract maintenance
 	ipFilter := &hostSet{
-		logger:          logger.Named("ipFilter"),
-		subnetToHostKey: make(map[string]string),
+		logger:           logger.Named("ipFilter"),
+		addressToHostKey: make(map[string]string),
 	}
 	keptContracts, churnReasons, err := performContractChecks(ctx, alerter, bus, w, cc, cr, ipFilter, logger, &remaining)
 	if err != nil {

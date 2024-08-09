@@ -1755,7 +1755,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
-			len(scan.Subnets) > 0, strings.Join(scan.Subnets, ","),
+			len(scan.ResolvedAddresses) > 0, strings.Join(scan.ResolvedAddresses, ","),
 			PublicKey(scan.HostKey),
 		)
 		if err != nil {
@@ -2121,20 +2121,20 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var h api.Host
 		var hostID int64
 		var pte dsql.NullTime
-		var subnets string
+		var resolvedAddresses string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &subnets, &h.Blocked,
+			&h.Scanned, &resolvedAddresses, &h.Blocked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		if subnets != "" {
-			h.Subnets = strings.Split(subnets, ",")
+		if resolvedAddresses != "" {
+			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
 		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[hostID]

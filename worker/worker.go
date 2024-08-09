@@ -1491,9 +1491,9 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// Otherwise scans that time out won't be recorded.
 	scanErr := w.bus.RecordHostScans(ctx, []api.HostScan{
 		{
-			HostKey:    hostKey,
-			PriceTable: pt,
-			Subnets:    subnets,
+			HostKey:           hostKey,
+			PriceTable:        pt,
+			ResolvedAddresses: subnets,
 
 			// NOTE: A scan is considered successful if both fetching the price
 			// table and the settings succeeded. Right now scanning can't fail
