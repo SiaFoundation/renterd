@@ -68,6 +68,7 @@ type (
 		RecommendedFee() types.Currency
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
+		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
@@ -789,7 +790,7 @@ func (b *bus) walletSendSiacoinsHandler(jc jape.Context) {
 			return
 		}
 		b.w.SignV2Inputs(state, &txn, toSign)
-		txnset := []types.V2Transaction{txn}
+		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
 		// verify the transaction and add it to the transaction pool
 		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
 			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
