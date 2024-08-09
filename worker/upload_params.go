@@ -2,7 +2,6 @@ package worker
 
 import (
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/object"
 )
 
@@ -26,7 +25,7 @@ type uploadParameters struct {
 	metadata api.ObjectUserMetadata
 }
 
-func defaultParameters(bucket, path string) uploadParameters {
+func defaultParameters(bucket, path string, rs api.RedundancySettings) uploadParameters {
 	return uploadParameters{
 		bucket: bucket,
 		path:   path,
@@ -34,7 +33,7 @@ func defaultParameters(bucket, path string) uploadParameters {
 		ec:               object.GenerateEncryptionKey(), // random key
 		encryptionOffset: 0,                              // from the beginning
 
-		rs: build.DefaultRedundancySettings,
+		rs: rs,
 	}
 }
 
@@ -79,12 +78,6 @@ func WithPacking(packing bool) UploadOption {
 func WithPartNumber(partNumber int) UploadOption {
 	return func(up *uploadParameters) {
 		up.partNumber = partNumber
-	}
-}
-
-func WithRedundancySettings(rs api.RedundancySettings) UploadOption {
-	return func(up *uploadParameters) {
-		up.rs = rs
 	}
 }
 

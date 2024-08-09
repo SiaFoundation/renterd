@@ -32,6 +32,54 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
+
+	// DefaultGougingSettings define the default gouging settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	//
+	DefaultGougingSettings = GougingSettings{
+		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
+		MaxContractPrice:              types.Siacoins(15),                                  // 15 SC per contract
+		MaxDownloadPrice:              types.Siacoins(3000),                                // 3000 SC per 1 TiB
+		MaxUploadPrice:                types.Siacoins(3000),                                // 3000 SC per 1 TiB
+		MaxStoragePrice:               types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
+		HostBlockHeightLeeway:         6,                                                   // 6 blocks
+		MinPriceTableValidity:         5 * time.Minute,                                     // 5 minutes
+		MinAccountExpiry:              24 * time.Hour,                                      // 1 day
+		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
+		MigrationSurchargeMultiplier:  10,                                                  // 10x
+	}
+
+	// DefaultPricePinSettings define the default price pin settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultPricePinSettings = PricePinSettings{
+		Enabled: false,
+	}
+
+	// DefaultUploadPackingSettings define the default upload packing settings
+	// the bus is configured with on startup.
+	DefaultUploadPackingSettings = UploadPackingSettings{
+		Enabled:               true,
+		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
+	}
+
+	// DefaultRedundancySettings define the default redundancy settings the bus
+	// is configured with on startup. These values can be adjusted using the
+	// settings API.
+	//
+	// NOTE: default redundancy settings for testnet are different from mainnet.
+	DefaultRedundancySettings = RedundancySettings{
+		MinShards:   10,
+		TotalShards: 30,
+	}
+
+	// Same as DefaultRedundancySettings but for running on testnet networks due
+	// to their reduced number of hosts.
+	DefaultRedundancySettingsTestnet = RedundancySettings{
+		MinShards:   2,
+		TotalShards: 6,
+	}
 )
 
 type (

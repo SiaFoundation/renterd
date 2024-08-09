@@ -11,6 +11,7 @@ type (
 		Seed          string `yaml:"seed,omitempty"`
 		Directory     string `yaml:"directory,omitempty"`
 		AutoOpenWebUI bool   `yaml:"autoOpenWebUI,omitempty"`
+		Network       string `yaml:"network,omitempty"`
 
 		ShutdownTimeout time.Duration `yaml:"shutdownTimeout,omitempty"`
 

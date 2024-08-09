@@ -1268,7 +1268,6 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 		ID:        w.id,
 		StartTime: api.TimeRFC3339(w.startTime),
 		BuildState: api.BuildState{
-			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
@@ -1658,12 +1657,11 @@ func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	}
 
 	// upload
-	eTag, err := w.upload(ctx, bucket, path, r, contracts,
+	eTag, err := w.upload(ctx, bucket, path, up.RedundancySettings, r, contracts,
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithMimeType(opts.MimeType),
 		WithPacking(up.UploadPacking),
-		WithRedundancySettings(up.RedundancySettings),
 		WithObjectUserMetadata(opts.Metadata),
 	)
 	if err != nil {
@@ -1699,7 +1697,6 @@ func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
-		WithRedundancySettings(up.RedundancySettings),
 		WithCustomKey(upload.Key),
 		WithPartNumber(partNumber),
 		WithUploadID(uploadID),
@@ -1721,7 +1718,7 @@ func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	}
 
 	// upload
-	eTag, err := w.upload(ctx, bucket, path, r, contracts, uploadOpts...)
+	eTag, err := w.upload(ctx, bucket, path, up.RedundancySettings, r, contracts, uploadOpts...)
 	if err != nil {
 		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
 		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {

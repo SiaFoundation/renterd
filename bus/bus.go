@@ -2236,12 +2236,12 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
-			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
+		Network: b.cm.TipState().Network.Name,
 	})
 }
 
@@ -2605,12 +2605,18 @@ func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainSto
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// testnets have different redundancy settings
+	defaultRedundancySettings := api.DefaultRedundancySettings
+	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
+		defaultRedundancySettings = api.DefaultRedundancySettingsTestnet
+	}
+
 	// load default settings if the setting is not already set
 	for key, value := range map[string]interface{}{
-		api.SettingGouging:       build.DefaultGougingSettings,
-		api.SettingPricePinning:  build.DefaultPricePinSettings,
-		api.SettingRedundancy:    build.DefaultRedundancySettings,
-		api.SettingUploadPacking: build.DefaultUploadPackingSettings,
+		api.SettingGouging:       api.DefaultGougingSettings,
+		api.SettingPricePinning:  api.DefaultPricePinSettings,
+		api.SettingRedundancy:    defaultRedundancySettings,
+		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
 	} {
 		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
@@ -2629,7 +2635,7 @@ func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainSto
 		return nil, err
 	} else if err := rs.Validate(); err != nil {
 		l.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(build.DefaultRedundancySettings)
+		bytes, _ := json.Marshal(defaultRedundancySettings)
 		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
 			return nil, err
 		}
@@ -2643,9 +2649,9 @@ func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainSto
 		return nil, err
 	} else if err := gs.Validate(); err != nil {
 		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = build.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = build.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = build.DefaultGougingSettings.MinAccountExpiry
+		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
+		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
+		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
 		if err := gs.Validate(); err == nil {
 			l.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
 			bytes, _ := json.Marshal(gs)
@@ -2654,7 +2660,7 @@ func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainSto
 			}
 		} else {
 			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = build.DefaultGougingSettings.HostBlockHeightLeeway
+			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
 			if err := gs.Validate(); err == nil {
 				l.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
 				bytes, _ := json.Marshal(gs)
@@ -2663,7 +2669,7 @@ func New(am *alerts.Manager, whm *webhooks.Manager, cm ChainManager, cs ChainSto
 				}
 			} else {
 				l.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(build.DefaultGougingSettings)
+				bytes, _ := json.Marshal(api.DefaultGougingSettings)
 				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 					return nil, err
 				}
