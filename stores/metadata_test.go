@@ -27,6 +27,22 @@ import (
 	"lukechampine.com/frand"
 )
 
+func (s *testSQLStore) InsertSlab(slab object.Slab) {
+	s.t.Helper()
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: object.SlabSlices{
+			object.SlabSlice{
+				Slab: slab,
+			},
+		},
+	}
+	err := s.UpdateObject(context.Background(), api.DefaultBucketName, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+}
+
 func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string) error {
 	ts := time.Now()
 	time.Sleep(time.Millisecond)
@@ -455,18 +471,8 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Make sure the db was cleaned up properly through the CASCADE delete.
-	tableCountCheck := func(table interface{}, tblCount int64) error {
-		var count int64
-		if err := ss.gormDB.Model(table).Count(&count).Error; err != nil {
-			return err
-		}
-		if count != tblCount {
-			return fmt.Errorf("expected %v objects in table %v but got %v", tblCount, table.(schema.Tabler).TableName(), count)
-		}
-		return nil
-	}
-	if err := tableCountCheck(&dbContract{}, 0); err != nil {
-		t.Fatal(err)
+	if count := ss.Count("contracts"); count != 0 {
+		t.Fatalf("expected %v rows in contracts but got %v", 0, count)
 	}
 
 	// Check join table count as well.
@@ -2143,7 +2149,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Helper()
 		if err = ss.gormDB.
 			Where(&dbSlab{Key: key}).
-			Preload("Shards.Contracts").
+			Preload("Shards").
 			Take(&slab).
 			Error; err != nil {
 			t.Fatal(err)
@@ -2151,10 +2157,26 @@ func TestUpdateSlab(t *testing.T) {
 		return
 	}
 
-	// helper to extract the FCID from a list of contracts
-	contractIds := func(contracts []dbContract) (ids []fileContractID) {
-		for _, c := range contracts {
-			ids = append(ids, fileContractID(c.FCID))
+	// helper to fetch contract ids for a sector
+	contractIds := func(root types.Hash256) (fcids []types.FileContractID) {
+		t.Helper()
+		rows, err := ss.DB().Query(context.Background(), `
+			SELECT fcid
+			FROM contracts c
+			INNER JOIN contract_sectors cs ON c.id = cs.db_contract_id
+			INNER JOIN sectors s ON s.id = cs.db_sector_id
+			WHERE s.root = ?
+		`, sql.Hash256(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var fcid types.FileContractID
+			if err := rows.Scan((*sql.FileContractID)(&fcid)); err != nil {
+				t.Fatal(err)
+			}
+			fcids = append(fcids, fcid)
 		}
 		return
 	}
@@ -2164,7 +2186,7 @@ func TestUpdateSlab(t *testing.T) {
 
 	// assert both sectors were upload to one contract/host
 	for i := 0; i < 2; i++ {
-		if cids := contractIds(inserted.Shards[i].Contracts); len(cids) != 1 {
+		if cids := contractIds(types.Hash256(inserted.Shards[i].Root)); len(cids) != 1 {
 			t.Fatalf("sector %d was uploaded to unexpected amount of contracts, %v!=1", i+1, len(cids))
 		} else if inserted.Shards[i].LatestHost != publicKey(hks[i]) {
 			t.Fatalf("sector %d was uploaded to unexpected amount of hosts, %v!=1", i+1, len(hks))
@@ -2203,7 +2225,7 @@ func TestUpdateSlab(t *testing.T) {
 	updated := fetchSlab()
 
 	// assert the first sector is still only on one host, also assert it's h1
-	if cids := contractIds(updated.Shards[0].Contracts); len(cids) != 1 {
+	if cids := contractIds(types.Hash256(updated.Shards[0].Root)); len(cids) != 1 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
@@ -2214,7 +2236,7 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// assert the second sector however is uploaded to two hosts, assert it's h2 and h3
-	if cids := contractIds(updated.Shards[1].Contracts); len(cids) != 2 {
+	if cids := contractIds(types.Hash256(updated.Shards[1].Root)); len(cids) != 2 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
@@ -2254,18 +2276,18 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.SetContractSet(ctx, "other", nil); err != nil {
 		t.Fatal(err)
 	}
+	csID := ss.ContractSetID("other")
 	err = ss.UpdateSlab(ctx, slab, "other")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var s dbSlab
 	if err := ss.gormDB.Where(&dbSlab{Key: key}).
-		Joins("DBContractSet").
 		Preload("Shards").
 		Take(&s).
 		Error; err != nil {
 		t.Fatal(err)
-	} else if s.DBContractSet.Name != "other" {
+	} else if s.DBContractSetID != uint(csID) {
 		t.Fatal("contract set was not updated")
 	}
 }
@@ -3636,36 +3658,26 @@ func TestDeleteHostSector(t *testing.T) {
 	hk1, hk2 := hks[0], hks[1]
 
 	// create 2 contracts with each
-	_, _, err = ss.addTestContracts([]types.PublicKey{hk1, hk1, hk2, hk2})
+	fcids, _, err := ss.addTestContracts([]types.PublicKey{hk1, hk1, hk2, hk2})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// create a healthy slab with one sector that is uploaded to all contracts.
-	key, _ := object.GenerateEncryptionKey().MarshalBinary()
 	root := types.Hash256{1, 2, 3}
-	slab := dbSlab{
-		DBContractSetID:  1,
-		Key:              key,
-		Health:           1.0,
-		HealthValidUntil: time.Now().Add(time.Hour).Unix(),
-		TotalShards:      1,
-		Shards: []dbSector{
+	ss.InsertSlab(object.Slab{
+		Key:       object.GenerateEncryptionKey(),
+		MinShards: 1,
+		Shards: []object.Sector{
 			{
-				Contracts: []dbContract{
-					{Model: Model{ID: 1}},
-					{Model: Model{ID: 2}},
-					{Model: Model{ID: 3}},
-					{Model: Model{ID: 4}},
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk1: fcids,
 				},
-				Root:       root[:],
-				LatestHost: publicKey(hk1), // hk1 is latest host
+				Root:       root,
+				LatestHost: hk1,
 			},
 		},
-	}
-	if err := ss.gormDB.Create(&slab).Error; err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// Make sure 4 contractSector entries exist.
 	var n int64
@@ -3703,14 +3715,28 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
 	}
 
+	sectorContractCnt := func(root types.Hash256) (n int) {
+		t.Helper()
+		err := ss.DB().QueryRow(context.Background(), `
+			SELECT COUNT(*)
+			FROM contract_sectors cs
+			INNER JOIN sectors s ON s.id = cs.db_sector_id
+			WHERE s.root = ?
+		`, (*sql.Hash256)(&root)).Scan(&n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	// Fetch the sector and assert the contracts association.
 	var sectors []dbSector
-	if err := ss.gormDB.Model(&dbSector{}).Preload("Contracts").Find(&sectors).Preload("Contracts").Error; err != nil {
+	if err := ss.gormDB.Model(&dbSector{}).Find(&sectors).Error; err != nil {
 		t.Fatal(err)
 	} else if len(sectors) != 1 {
 		t.Fatal("expected 1 sector", len(sectors))
-	} else if sector := sectors[0]; len(sector.Contracts) != 2 {
-		t.Fatal("expected 2 contracts", len(sector.Contracts))
+	} else if cnt := sectorContractCnt(types.Hash256(sectors[0].Root)); cnt != 2 {
+		t.Fatal("expected 2 contracts", cnt)
 	}
 
 	hi, err := ss.Host(context.Background(), hk1)
@@ -4121,10 +4147,13 @@ func TestSlabCleanup(t *testing.T) {
 	defer ss.Close()
 
 	// create contract set
-	cs := dbContractSet{}
-	if err := ss.gormDB.Create(&cs).Error; err != nil {
+	err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		return tx.SetContractSet(context.Background(), testContractSet, nil)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	csID := ss.ContractSetID(testContractSet)
 
 	// create buffered slab
 	bsID := uint(1)
@@ -4133,7 +4162,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	var dirID int64
-	err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
 		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
 		return err
@@ -4165,7 +4194,7 @@ func TestSlabCleanup(t *testing.T) {
 	// create a slab
 	ek, _ := object.GenerateEncryptionKey().MarshalBinary()
 	slab := dbSlab{
-		DBContractSet:    cs,
+		DBContractSetID:  uint(csID),
 		Health:           1,
 		Key:              secretKey(ek),
 		HealthValidUntil: 100,
@@ -4218,7 +4247,7 @@ func TestSlabCleanup(t *testing.T) {
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
 	bufferedSlab := dbSlab{
 		DBBufferedSlabID: bsID,
-		DBContractSet:    cs,
+		DBContractSetID:  uint(csID),
 		Health:           1,
 		Key:              ek,
 		HealthValidUntil: 100,

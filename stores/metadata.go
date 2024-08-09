@@ -67,16 +67,6 @@ type (
 		Reason string
 	}
 
-	dbContract struct {
-		Model
-
-		ContractCommon
-
-		HostID uint `gorm:"index"`
-
-		ContractSets []dbContractSet `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
-	}
-
 	ContractCommon struct {
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
@@ -98,13 +88,6 @@ type (
 		FundAccountSpending currency
 		DeleteSpending      currency
 		ListSpending        currency
-	}
-
-	dbContractSet struct {
-		Model
-
-		Name      string       `gorm:"unique;index;"`
-		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
 	}
 
 	dbObject struct {
@@ -157,7 +140,6 @@ type (
 	dbSlab struct {
 		Model
 		DBContractSetID  uint `gorm:"index"`
-		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
 		Health           float64   `gorm:"index;default:1.0; NOT NULL"`
@@ -178,8 +160,6 @@ type (
 
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
-
-		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbContractSector is a join table between dbContract and dbSector.
@@ -272,13 +252,7 @@ func (dbArchivedContract) TableName() string { return "archived_contracts" }
 func (dbBucket) TableName() string { return "buckets" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbContract) TableName() string { return "contracts" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbContractSet) TableName() string { return "contract_sets" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
