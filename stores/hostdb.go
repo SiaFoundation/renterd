@@ -283,11 +283,8 @@ func (s *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, 
 }
 
 func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
-	return s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Model(&dbHost{}).
-			Where("public_key", publicKey(hk)).
-			Update("lost_sectors", 0).
-			Error
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.ResetLostSectors(ctx, hk)
 	})
 }
 

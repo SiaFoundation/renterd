@@ -9,10 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/stores/sql/mysql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
@@ -244,50 +241,4 @@ func (s *SQLStore) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 	return nil
-}
-
-func (s *SQLStore) retryTransaction(ctx context.Context, fc func(tx *gorm.DB) error) error {
-	return retryTransaction(ctx, s.gormDB, s.logger, s.retryTransactionIntervals, fc, s.retryAbortFn)
-}
-
-func (s *SQLStore) retryAbortFn(err error) bool {
-	return err == nil ||
-		utils.IsErr(err, context.Canceled) ||
-		utils.IsErr(err, context.DeadlineExceeded) ||
-		utils.IsErr(err, gorm.ErrRecordNotFound) ||
-		utils.IsErr(err, api.ErrContractNotFound) ||
-		utils.IsErr(err, api.ErrObjectNotFound) ||
-		utils.IsErr(err, api.ErrObjectCorrupted) ||
-		utils.IsErr(err, api.ErrBucketExists) ||
-		utils.IsErr(err, api.ErrBucketNotFound) ||
-		utils.IsErr(err, api.ErrBucketNotEmpty) ||
-		utils.IsErr(err, api.ErrMultipartUploadNotFound) ||
-		utils.IsErr(err, api.ErrObjectExists) ||
-		utils.IsErr(err, api.ErrPartNotFound) ||
-		utils.IsErr(err, api.ErrSlabNotFound) ||
-		utils.IsErr(err, syncer.ErrPeerNotFound)
-}
-
-func retryTransaction(ctx context.Context, db *gorm.DB, logger *zap.SugaredLogger, intervals []time.Duration, fn func(tx *gorm.DB) error, abortFn func(error) bool) error {
-	var err error
-	attempts := len(intervals) + 1
-	for i := 0; i < attempts; i++ {
-		// execute the transaction
-		err = db.WithContext(ctx).Transaction(fn)
-		if abortFn(err) {
-			return err
-		}
-
-		// if this was the last attempt, return the error
-		if i == len(intervals) {
-			logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, err: %v", i+1, attempts, err))
-			return err
-		}
-
-		// log the failed attempt and sleep before retrying
-		interval := intervals[i]
-		logger.Warn(fmt.Sprintf("transaction attempt %d/%d failed, retry in %v,  err: %v", i+1, attempts, interval, err))
-		time.Sleep(interval)
-	}
-	return fmt.Errorf("retryTransaction failed: %w", err)
 }
