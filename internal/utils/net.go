@@ -8,11 +8,6 @@ import (
 	"sort"
 )
 
-const (
-	ipv4FilterRange = 24
-	ipv6FilterRange = 32
-)
-
 var (
 	privateSubnets []*net.IPNet
 

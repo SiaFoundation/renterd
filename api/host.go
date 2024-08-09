@@ -159,7 +159,7 @@ type (
 		Blocked           bool                 `json:"blocked"`
 		Checks            map[string]HostCheck `json:"checks"`
 		StoredData        uint64               `json:"storedData"`
-		ResolvedAddresses []string             `json:"ResolvedAddresses"`
+		ResolvedAddresses []string             `json:"resolvedAddresses"`
 	}
 
 	HostAddress struct {
