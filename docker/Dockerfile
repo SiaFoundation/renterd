@@ -2,8 +2,7 @@
 FROM golang:1.22 AS builder
 
 # Define arguments for build tags and to skip running go generate.
-ARG BUILD_TAGS='netgo' \
-    BUILD_RUN_GO_GENERATE='true'
+ARG BUILD_RUN_GO_GENERATE='true'
 
 # Set the working directory.
 WORKDIR /renterd
@@ -23,7 +22,7 @@ RUN if [ "$BUILD_RUN_GO_GENERATE" = "true" ] ; then go generate ./... ; fi
 # Build renterd.
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags='-s -w -linkmode external -extldflags "-static"' -tags="${BUILD_TAGS}" ./cmd/renterd
+    CGO_ENABLED=1 go build -ldflags='-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
 
 # Build image that will be used to run renterd.
 FROM scratch
