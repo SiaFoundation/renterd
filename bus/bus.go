@@ -1758,6 +1758,8 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 		err = json.Unmarshal([]byte(setting), &pps)
 		if jc.Check("failed to unmarshal price pinning settings", err) != nil {
 			return
+		} else if pps.Autopilots == nil {
+			pps.Autopilots = make(map[string]api.AutopilotPins)
 		}
 		// populate the Autopilots map with the current autopilots
 		aps, err := b.as.Autopilots(jc.Request.Context())
