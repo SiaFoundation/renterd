@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"go.sia.tech/core/types"
 )
 
 // Cache to store resolved IPs
@@ -55,7 +57,7 @@ func newFallbackDialer(bus Bus, dialer net.Dialer) *fallbackDialer {
 	}
 }
 
-func (d *fallbackDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func (d *fallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
@@ -66,12 +68,12 @@ func (d *fallbackDialer) DialContext(ctx context.Context, network, address strin
 	if err == nil {
 		// Cache the resolved IP and dial
 		d.Cache.Set(host, ipAddr.String())
-		return d.Dialer.DialContext(ctx, network, net.JoinHostPort(ipAddr.String(), port))
+		return d.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(ipAddr.String(), port))
 	}
 
 	// If resolution fails, check the cache
 	if cachedIP, ok := d.Cache.Get(host); ok {
-		conn, err := d.Dialer.DialContext(ctx, network, net.JoinHostPort(cachedIP, port))
+		conn, err := d.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(cachedIP, port))
 		if err == nil {
 			return conn, nil
 		}
@@ -80,19 +82,19 @@ func (d *fallbackDialer) DialContext(ctx context.Context, network, address strin
 	}
 
 	// Attempt to resolve using the bus
-	// hostInfo, err := d.Bus.Host(ctx, host)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	hostInfo, err := d.Bus.Host(ctx, hk)
+	if err != nil {
+		return nil, err
+	}
 
-	// for _, addr := range hostInfo.ResolvedAddresses {
-	// 	conn, err := d.Dialer.DialContext(ctx, network, net.JoinHostPort(addr, port))
-	// 	if err == nil {
-	// 		// Update cache on successful dial
-	// 		d.Cache.Set(host, addr)
-	// 		return conn, nil
-	// 	}
-	// }
+	for _, addr := range hostInfo.ResolvedAddresses {
+		conn, err := d.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr, port))
+		if err == nil {
+			// Update cache on successful dial
+			d.Cache.Set(host, addr)
+			return conn, nil
+		}
+	}
 
 	return nil, fmt.Errorf("failed to dial %s with all methods", address)
 }

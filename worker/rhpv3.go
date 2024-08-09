@@ -226,7 +226,7 @@ func newTransportPoolV3(dialer *fallbackDialer) *transportPoolV3 {
 
 func dialTransport(ctx context.Context, dialer *fallbackDialer, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
 	// Dial host.
-	conn, err := dialer.DialContext(ctx, "tcp", siamuxAddr)
+	conn, err := dialer.Dial(ctx, hostKey, siamuxAddr)
 	if err != nil {
 		return nil, err
 	}
