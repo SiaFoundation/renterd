@@ -54,9 +54,9 @@ type (
 
 		LostSectors uint64
 
-		LastAnnouncement time.Time
-		NetAddress       string `gorm:"index"`
-		Subnets          string
+		LastAnnouncement  time.Time
+		NetAddress        string `gorm:"index"`
+		ResolvedAddresses string
 
 		Allowlist []dbAllowlistEntry `gorm:"many2many:host_allowlist_entry_hosts;constraint:OnDelete:CASCADE"`
 		Blocklist []dbBlocklistEntry `gorm:"many2many:host_blocklist_entry_hosts;constraint:OnDelete:CASCADE"`

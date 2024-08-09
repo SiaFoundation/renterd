@@ -514,7 +514,7 @@ func TestRecordScan(t *testing.T) {
 	}
 
 	// Record another scan 1 hour after the previous one. We don't pass any
-	// subnets this time.
+	// addresses this time.
 	secondScanTime := firstScanTime.Add(time.Hour)
 	pt.HostBlockHeight = 456
 	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true, nil)}); err != nil {
@@ -545,7 +545,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	// The host should still have the subnets.
+	// The host should still have the addresses.
 	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
 		t.Fatal("mismatch")
 	}
