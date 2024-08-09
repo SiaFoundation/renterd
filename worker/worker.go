@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -214,6 +215,7 @@ type worker struct {
 	uploadManager   *uploadManager
 
 	accounts        *accounts
+	dialer          *fallbackDialer
 	cache           iworker.WorkerCache
 	priceTables     *priceTables
 	transportPoolV3 *transportPoolV3
@@ -1306,6 +1308,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		cache:                   iworker.NewCache(b, l),
+		dialer:                  newFallbackDialer(b, net.Dialer{}),
 		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
 		id:                      id,
 		bus:                     b,
@@ -1449,8 +1452,8 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type, if it fails for
-	// another reason the host scan won't have subnets
-	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
+	// another reason the host scan won't have addresses
+	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
 	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !w.allowPrivateIPs {
@@ -1492,9 +1495,9 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// Otherwise scans that time out won't be recorded.
 	scanErr := w.bus.RecordHostScans(ctx, []api.HostScan{
 		{
-			HostKey:    hostKey,
-			PriceTable: pt,
-			Subnets:    subnets,
+			HostKey:           hostKey,
+			PriceTable:        pt,
+			ResolvedAddresses: resolvedAddresses,
 
 			// NOTE: A scan is considered successful if both fetching the price
 			// table and the settings succeeded. Right now scanning can't fail

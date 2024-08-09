@@ -446,9 +446,9 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	// The host shouldn't have any subnets.
-	if len(host.Subnets) != 0 {
-		t.Fatal("unexpected", host.Subnets, len(host.Subnets))
+	// The host shouldn't have any addresses.
+	if len(host.ResolvedAddresses) != 0 {
+		t.Fatal("unexpected", host.ResolvedAddresses, len(host.ResolvedAddresses))
 	}
 
 	// Fetch the host directly to get the creation time.
@@ -462,12 +462,12 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
-	subnets := []string{"212.1.96.0/24", "38.135.51.0/24"}
+	resolvedAddresses := []string{"212.1.96.0", "38.135.51.0"}
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
 	pt := rhpv3.HostPriceTable{
 		HostBlockHeight: 123,
 	}
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true, subnets)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true, resolvedAddresses)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -485,8 +485,8 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The host should have the subnets.
-	if !reflect.DeepEqual(host.Subnets, subnets) {
+	// The host should have the addresses.
+	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
 		t.Fatal("mismatch")
 	}
 
@@ -514,7 +514,7 @@ func TestRecordScan(t *testing.T) {
 	}
 
 	// Record another scan 1 hour after the previous one. We don't pass any
-	// subnets this time.
+	// addresses this time.
 	secondScanTime := firstScanTime.Add(time.Hour)
 	pt.HostBlockHeight = 456
 	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true, nil)}); err != nil {
@@ -545,8 +545,8 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	// The host should still have the subnets.
-	if !reflect.DeepEqual(host.Subnets, subnets) {
+	// The host should still have the addresses.
+	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
 		t.Fatal("mismatch")
 	}
 
@@ -1300,14 +1300,14 @@ func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, subnets []string) api.HostScan {
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, resolvedAddresses []string) api.HostScan {
 	return api.HostScan{
-		HostKey:    hk,
-		PriceTable: pt,
-		Settings:   settings,
-		Subnets:    subnets,
-		Success:    success,
-		Timestamp:  scanTime,
+		HostKey:           hk,
+		PriceTable:        pt,
+		Settings:          settings,
+		ResolvedAddresses: resolvedAddresses,
+		Success:           success,
+		Timestamp:         scanTime,
 	}
 }
 
