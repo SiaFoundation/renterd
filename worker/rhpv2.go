@@ -635,7 +635,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 }
 
 func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
-	conn, err := dial(ctx, hostIP)
+	conn, err := w.dialer.DialContext(ctx, "tcp", hostIP)
 	if err != nil {
 		return err
 	}
