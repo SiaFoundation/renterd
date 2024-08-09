@@ -202,6 +202,9 @@ type (
 		// MultipartUploads returns a list of all multipart uploads.
 		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error)
 
+		// Object returns an object from the database.
+		Object(ctx context.Context, bucket, key string) (api.Object, error)
+
 		// ObjectEntries queries the database for objects in a given dir.
 		ObjectEntries(ctx context.Context, bucket, key, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 

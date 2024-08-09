@@ -36,7 +36,7 @@ type (
 		Key      string
 		Bucket   string
 		BucketID int64
-		EC       []byte
+		EC       object.EncryptionKey
 		MimeType string
 	}
 
@@ -53,8 +53,13 @@ type (
 		sql.Tx
 
 		CharLengthExpr() string
+
+		// ScanObjectMetadata scans the object metadata from the given scanner.
+		// The columns required to scan the metadata are returned by the
+		// SelectObjectMetadataExpr helper method. Additional fields can be
+		// selected and scanned by passing them to the method as 'others'.
+		ScanObjectMetadata(s Scanner, others ...any) (md api.ObjectMetadata, err error)
 		SelectObjectMetadataExpr() string
-		ScanObjectMetadata(s Scanner) (md api.ObjectMetadata, err error)
 	}
 )
 
@@ -683,14 +688,10 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 		return 0, fmt.Errorf("failed to fetch buffered slab id: %w", err)
 	}
 
-	key, err := ec.MarshalBinary()
-	if err != nil {
-		return 0, err
-	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO slabs (created_at, db_contract_set_id, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
 			VALUES (?, ?, ?, ?, ?, ?)`,
-		time.Now(), contractSetID, bufferedSlabID, SecretKey(key), minShards, totalShards)
+		time.Now(), contractSetID, bufferedSlabID, EncryptionKey(ec), minShards, totalShards)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert slab: %w", err)
 	}
@@ -764,12 +765,6 @@ func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, e
 		return "", fmt.Errorf("failed to fetch bucket id: %w", err)
 	}
 
-	// marshal key
-	ecBytes, err := ec.MarshalBinary()
-	if err != nil {
-		return "", err
-	}
-
 	// insert multipart upload
 	uploadIDEntropy := frand.Entropy256()
 	uploadID := hex.EncodeToString(uploadIDEntropy[:])
@@ -777,7 +772,7 @@ func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, e
 	res, err := tx.Exec(ctx, `
 		INSERT INTO multipart_uploads (created_at, `+"`key`"+`, upload_id, object_id, db_bucket_id, mime_type)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, time.Now(), SecretKey(ecBytes), uploadID, key, bucketID, mimeType)
+	`, time.Now(), EncryptionKey(ec), uploadID, key, bucketID, mimeType)
 	if err != nil {
 		return "", fmt.Errorf("failed to create multipart upload: %w", err)
 	} else if muID, err = res.LastInsertId(); err != nil {
@@ -791,14 +786,14 @@ func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, e
 	return uploadID, nil
 }
 
-func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec []byte, mimeType, eTag string) (int64, error) {
+func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec object.EncryptionKey, mimeType, eTag string) (int64, error) {
 	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, `+"`key`"+`, size, mime_type, etag)
 						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now(),
 		key,
 		dirID,
 		bucketID,
-		SecretKey(ec),
+		EncryptionKey(ec),
 		size,
 		mimeType,
 		eTag)
@@ -823,11 +818,8 @@ func LoadSlabBuffers(ctx context.Context, db *sql.DB) (bufferedSlabs []LoadedSla
 
 		for rows.Next() {
 			var bs LoadedSlabBuffer
-			var sk SecretKey
-			if err := rows.Scan(&bs.ID, &bs.Filename, &bs.ContractSetID, &sk, &bs.MinShards, &bs.TotalShards); err != nil {
+			if err := rows.Scan(&bs.ID, &bs.Filename, &bs.ContractSetID, (*EncryptionKey)(&bs.Key), &bs.MinShards, &bs.TotalShards); err != nil {
 				return fmt.Errorf("failed to scan buffered slab: %w", err)
-			} else if err := bs.Key.UnmarshalBinary(sk[:]); err != nil {
-				return fmt.Errorf("failed to unmarshal secret key: %w", err)
 			}
 			bufferedSlabs = append(bufferedSlabs, bs)
 		}
@@ -1231,18 +1223,21 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 
 func MultipartUploadForCompletion(ctx context.Context, tx sql.Tx, bucket, key, uploadID string, parts []api.MultipartCompletedPart) (multipartUpload, []multipartUploadPart, int64, string, error) {
 	// fetch upload
+	var ec []byte
 	var mpu multipartUpload
 	err := tx.QueryRow(ctx, `
 		SELECT mu.id, mu.object_id, mu.mime_type, mu.key, b.name, b.id
 		FROM multipart_uploads mu INNER JOIN buckets b ON b.id = mu.db_bucket_id
 		WHERE mu.upload_id = ?`, uploadID).
-		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &mpu.EC, &mpu.Bucket, &mpu.BucketID)
+		Scan(&mpu.ID, &mpu.Key, &mpu.MimeType, &ec, &mpu.Bucket, &mpu.BucketID)
 	if err != nil {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to fetch upload: %w", err)
 	} else if mpu.Key != key {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("object id mismatch: %v != %v: %w", mpu.Key, key, api.ErrObjectNotFound)
 	} else if mpu.Bucket != bucket {
 		return multipartUpload{}, nil, 0, "", fmt.Errorf("bucket name mismatch: %v != %v: %w", mpu.Bucket, bucket, api.ErrBucketNotFound)
+	} else if err := mpu.EC.UnmarshalBinary(ec); err != nil {
+		return multipartUpload{}, nil, 0, "", fmt.Errorf("failed to unmarshal encryption key: %w", err)
 	}
 
 	// find relevant parts
@@ -2233,19 +2228,14 @@ func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
 }
 
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
-	ec, err := key.MarshalBinary()
-	if err != nil {
-		return object.Slab{}, fmt.Errorf("failed to marshal encryption key: %w", err)
-	}
-
 	// fetch slab
 	var slabID int64
 	slab := object.Slab{Key: key}
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT id, health, min_shards 
 		FROM slabs sla
 		WHERE sla.key = ?
-	`, SecretKey(ec)).Scan(&slabID, &slab.Health, &slab.MinShards)
+	`, EncryptionKey(key)).Scan(&slabID, &slab.Health, &slab.MinShards)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return object.Slab{}, api.ErrSlabNotFound
 	} else if err != nil {
@@ -2372,15 +2362,9 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 	var slabs []api.UnhealthySlab
 	for rows.Next() {
 		var slab api.UnhealthySlab
-		var key SecretKey
-		if err := rows.Scan(&key, &slab.Health); err != nil {
+		if err := rows.Scan((*EncryptionKey)(&slab.Key), &slab.Health); err != nil {
 			return nil, fmt.Errorf("failed to scan unhealthy slab: %w", err)
 		}
-		var ec object.EncryptionKey
-		if err := ec.UnmarshalBinary(key); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal encryption key: %w", err)
-		}
-		slab.Key = ec
 		slabs = append(slabs, slab)
 	}
 	return slabs, nil
@@ -2539,14 +2523,11 @@ func scanBucket(s Scanner) (api.Bucket, error) {
 }
 
 func scanMultipartUpload(s Scanner) (resp api.MultipartUpload, _ error) {
-	var key SecretKey
-	err := s.Scan(&resp.Bucket, &key, &resp.Path, &resp.UploadID, &resp.CreatedAt)
+	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.Key), &resp.Path, &resp.UploadID, &resp.CreatedAt)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.MultipartUpload{}, api.ErrMultipartUploadNotFound
 	} else if err != nil {
 		return api.MultipartUpload{}, fmt.Errorf("failed to fetch multipart upload: %w", err)
-	} else if err := resp.Key.UnmarshalBinary(key); err != nil {
-		return api.MultipartUpload{}, fmt.Errorf("failed to unmarshal encryption key: %w", err)
 	}
 	return
 }
@@ -2659,10 +2640,6 @@ func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset,
 }
 
 func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
-	key, err := slabKey.MarshalBinary()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal encryption key: %w", err)
-	}
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM objects o
@@ -2674,7 +2651,7 @@ func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.
 			INNER JOIN slabs sla ON sla.id = sli.db_slab_id
 			WHERE o2.id = o.id AND sla.key = ?
 		)
-	`, tx.SelectObjectMetadataExpr()), bucket, SecretKey(key))
+	`, tx.SelectObjectMetadataExpr()), bucket, EncryptionKey(slabKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query objects: %w", err)
 	}
@@ -2801,4 +2778,132 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 		return fmt.Errorf("failed to record contract spending: %w", err)
 	}
 	return nil
+}
+
+func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {
+	/// fetch object metadata
+	row := tx.QueryRow(ctx, fmt.Sprintf(`
+		SELECT %s, o.id, o.key
+		FROM objects o
+		INNER JOIN buckets b ON o.db_bucket_id = b.id
+		WHERE o.object_id = ? AND b.name = ?
+	`,
+		tx.SelectObjectMetadataExpr()), key, bucket)
+	var objID int64
+	var ec object.EncryptionKey
+	om, err := tx.ScanObjectMetadata(row, &objID, (*EncryptionKey)(&ec))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.Object{}, api.ErrObjectNotFound
+	} else if err != nil {
+		return api.Object{}, err
+	}
+
+	// fetch user metadata
+	rows, err := tx.Query(ctx, `
+		SELECT oum.key, oum.value
+		FROM object_user_metadata oum
+		WHERE oum.db_object_id = ?
+	`, objID)
+	if err != nil {
+		return api.Object{}, fmt.Errorf("failed to fetch user metadata: %w", err)
+	}
+	defer rows.Close()
+
+	oum := make(api.ObjectUserMetadata)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return api.Object{}, fmt.Errorf("failed to scan user metadata: %w", err)
+		}
+		oum[key] = value
+	}
+
+	// fetch slab slices
+	rows, err = tx.Query(ctx, `
+		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(sec.latest_host, ?), COALESCE(c.fcid, ?), COALESCE(h.public_key, ?)
+		FROM slices sli
+		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
+		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
+		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
+		LEFT JOIN contracts c ON c.id = csec.db_contract_id
+		LEFT JOIN hosts h ON h.id = c.host_id
+		WHERE sli.db_object_id = ?
+		ORDER BY sli.object_index ASC, sec.slab_index ASC
+	`, Hash256{}, PublicKey{}, FileContractID{}, PublicKey{}, objID)
+	if err != nil {
+		return api.Object{}, fmt.Errorf("failed to fetch slabs: %w", err)
+	}
+	defer rows.Close()
+
+	slabSlices := object.SlabSlices{}
+	var current *object.SlabSlice
+	var currObjIdx, currSlaIdx int64
+	for rows.Next() {
+		var bufferedSlab bool
+		var objectIndex int64
+		var slabIndex int64
+		var ss object.SlabSlice
+		var sector object.Sector
+		var fcid types.FileContractID
+		var hk types.PublicKey
+		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
+			&objectIndex, &ss.Offset, &ss.Length, // slice info
+			&ss.Health, (*EncryptionKey)(&ss.Key), &ss.MinShards, // slab info
+			&slabIndex, (*Hash256)(&sector.Root), (*PublicKey)(&sector.LatestHost), // sector info
+			(*PublicKey)(&fcid), // contract info
+			(*PublicKey)(&hk),   // host info
+		); err != nil {
+			return api.Object{}, fmt.Errorf("failed to scan slab slice: %w", err)
+		}
+
+		// sanity check object for corruption
+		isFirst := current == nil && objectIndex == 1 && slabIndex == 1
+		isBuffered := bufferedSlab && objectIndex == currObjIdx+1 && slabIndex == 0
+		isNewSlab := isFirst || isBuffered || (current != nil && objectIndex == currObjIdx+1 && slabIndex == 1)
+		isNewShard := isNewSlab || (objectIndex == currObjIdx && slabIndex == currSlaIdx+1)
+		isNewContract := isNewShard || (objectIndex == currObjIdx && slabIndex == currSlaIdx)
+		if !isFirst && !isBuffered && !isNewSlab && !isNewShard && !isNewContract {
+			return api.Object{}, fmt.Errorf("%w: object index %d, slab index %d, current object index %d, current slab index %d", api.ErrObjectCorrupted, objectIndex, slabIndex, currObjIdx, currSlaIdx)
+		}
+
+		// update indices
+		currObjIdx = objectIndex
+		currSlaIdx = slabIndex
+
+		if isNewSlab {
+			if current != nil {
+				slabSlices = append(slabSlices, *current)
+			}
+			current = &ss
+		}
+
+		// if the slab is buffered there are no sectors/contracts to add
+		if bufferedSlab {
+			continue
+		}
+
+		if isNewShard {
+			current.Shards = append(current.Shards, sector)
+		}
+		if isNewContract {
+			if current.Shards[len(current.Shards)-1].Contracts == nil {
+				current.Shards[len(current.Shards)-1].Contracts = make(map[types.PublicKey][]types.FileContractID)
+			}
+			current.Shards[len(current.Shards)-1].Contracts[hk] = append(current.Shards[len(current.Shards)-1].Contracts[hk], fcid)
+		}
+	}
+
+	// add last slab slice
+	if current != nil {
+		slabSlices = append(slabSlices, *current)
+	}
+
+	return api.Object{
+		Metadata:       oum,
+		ObjectMetadata: om,
+		Object: &object.Object{
+			Key:   ec,
+			Slabs: slabSlices,
+		},
+	}, nil
 }

@@ -407,11 +407,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert object
-	objKey, err := o.Key.MarshalBinary()
-	if err != nil {
-		return fmt.Errorf("failed to marshal object key: %w", err)
-	}
-	objID, err := ssql.InsertObject(ctx, tx, key, dirID, bucketID, o.TotalSize(), objKey, mimeType, eTag)
+	objID, err := ssql.InsertObject(ctx, tx, key, dirID, bucketID, o.TotalSize(), o.Key, mimeType, eTag)
 	if err != nil {
 		return fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -525,6 +521,10 @@ func (tx *MainDatabaseTx) MultipartUploadParts(ctx context.Context, bucket, key,
 
 func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error) {
 	return ssql.MultipartUploads(ctx, tx, bucket, prefix, keyMarker, uploadIDMarker, limit)
+}
+
+func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.Object, error) {
+	return ssql.Object(ctx, tx, bucket, key)
 }
 
 func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
@@ -745,9 +745,11 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 	return nil
 }
 
-func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner) (md api.ObjectMetadata, err error) {
+func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
 	var createdAt string
-	if err := s.Scan(&md.Name, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag); err != nil {
+	dst := []any{&md.Name, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag}
+	dst = append(dst, others...)
+	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
 	} else if *(*time.Time)(&md.ModTime), err = time.Parse(time.DateTime, createdAt); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to parse created at time: %w", err)
@@ -1019,12 +1021,6 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
 	}
 
-	// extract the slab key
-	key, err := s.Key.MarshalBinary()
-	if err != nil {
-		return fmt.Errorf("failed to marshal slab key: %w", err)
-	}
-
 	// update slab
 	var slabID, totalShards int64
 	err = tx.QueryRow(ctx, `
@@ -1034,10 +1030,10 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		health = ?
 		WHERE key = ?
 		RETURNING id, total_shards
-	`, contractSet, time.Now().Unix(), 1, ssql.SecretKey(key)).
+	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.Key)).
 		Scan(&slabID, &totalShards)
 	if errors.Is(err, dsql.ErrNoRows) {
-		return fmt.Errorf("%w: slab with key '%s' not found: %w", api.ErrSlabNotFound, string(key), err)
+		return api.ErrSlabNotFound
 	} else if err != nil {
 		return err
 	}
@@ -1198,19 +1194,15 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 
 	slabIDs := make([]int64, len(slices))
 	for i := range slices {
-		slabKey, err := slices[i].Key.MarshalBinary()
-		if err != nil {
-			return fmt.Errorf("failed to marshal slab key: %w", err)
-		}
 		err = insertSlabStmt.QueryRow(ctx,
 			time.Now(),
 			contractSetID,
-			ssql.SecretKey(slabKey),
+			ssql.EncryptionKey(slices[i].Key),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
 		).Scan(&slabIDs[i])
 		if errors.Is(err, dsql.ErrNoRows) {
-			if err := querySlabIDStmt.QueryRow(ctx, ssql.SecretKey(slabKey)).Scan(&slabIDs[i]); err != nil {
+			if err := querySlabIDStmt.QueryRow(ctx, ssql.EncryptionKey(slices[i].Key)).Scan(&slabIDs[i]); err != nil {
 				return fmt.Errorf("failed to fetch slab id: %w", err)
 			}
 		} else if err != nil {
