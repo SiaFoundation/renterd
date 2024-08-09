@@ -451,7 +451,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
-	resolvedAddresses := []string{"212.1.96.0/24", "38.135.51.0/24"}
+	resolvedAddresses := []string{"212.1.96.0", "38.135.51.0"}
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
 	pt := rhpv3.HostPriceTable{
 		HostBlockHeight: 123,

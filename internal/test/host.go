@@ -39,7 +39,7 @@ func NewHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSet
 		PriceTable:        api.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
 		Settings:          settings,
 		Scanned:           true,
-		ResolvedAddresses: []string{"38.135.51.0/24"},
+		ResolvedAddresses: []string{"38.135.51.0"},
 	}
 }
 
