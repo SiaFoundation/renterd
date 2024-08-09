@@ -57,16 +57,6 @@ var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 5
 type (
 	contractState uint8
 
-	dbArchivedContract struct {
-		Model
-
-		ContractCommon
-		RenewedTo fileContractID `gorm:"index;size:32"`
-
-		Host   publicKey `gorm:"index;NOT NULL;size:32"`
-		Reason string
-	}
-
 	ContractCommon struct {
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
@@ -244,9 +234,6 @@ func (s contractState) String() string {
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
 }
-
-// TableName implements the gorm.Tabler interface.
-func (dbArchivedContract) TableName() string { return "archived_contracts" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbBucket) TableName() string { return "buckets" }

@@ -739,42 +739,41 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Archived contract should exist.
-	var ac dbArchivedContract
-	err = ss.gormDB.Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid1)).
-		Take(&ac).
-		Error
+	ancestors, err := ss.AncestorContracts(context.Background(), fcid1Renewed, 0)
 	if err != nil {
 		t.Fatal(err)
+	} else if len(ancestors) != 1 {
+		t.Fatalf("expected 1 ancestor but got %v", len(ancestors))
 	}
+	ac := ancestors[0]
 
-	ac.Model = Model{}
-	expectedContract := dbArchivedContract{
-		Host:      publicKey(c.HostKey()),
-		RenewedTo: fileContractID(fcid1Renewed),
-		Reason:    api.ContractArchivalReasonRenewed,
-
-		ContractCommon: ContractCommon{
-			FCID: fileContractID(fcid1),
-
-			ContractPrice:  currency(oldContractPrice),
-			TotalCost:      currency(oldContractTotal),
-			ProofHeight:    0,
-			RevisionHeight: 0,
-			RevisionNumber: "1",
-			StartHeight:    100,
-			WindowStart:    2,
-			WindowEnd:      3,
-			Size:           rhpv2.SectorSize,
-			State:          contractStatePending,
-
-			UploadSpending:      currency(types.Siacoins(1)),
-			DownloadSpending:    currency(types.Siacoins(2)),
-			FundAccountSpending: currency(types.Siacoins(3)),
-			DeleteSpending:      currency(types.Siacoins(4)),
-			ListSpending:        currency(types.Siacoins(5)),
+	expectedContract := api.ArchivedContract{
+		ID:        fcid1,
+		HostIP:    "address",
+		HostKey:   c.HostKey(),
+		RenewedTo: fcid1Renewed,
+		Spending: api.ContractSpending{
+			Uploads:     types.Siacoins(1),
+			Downloads:   types.Siacoins(2),
+			FundAccount: types.Siacoins(3),
+			Deletions:   types.Siacoins(4),
+			SectorRoots: types.ZeroCurrency, // currently not persisted
 		},
+
+		ArchivalReason: api.ContractArchivalReasonRenewed,
+		ContractPrice:  oldContractPrice,
+		ProofHeight:    0,
+		RenewedFrom:    types.FileContractID{},
+		RevisionHeight: 0,
+		RevisionNumber: 1,
+		Size:           rhpv2.SectorSize,
+		StartHeight:    100,
+		State:          contractStatePending.String(),
+		TotalCost:      oldContractTotal,
+		WindowStart:    2,
+		WindowEnd:      3,
 	}
+
 	if !reflect.DeepEqual(ac, expectedContract) {
 		t.Fatal("mismatch", cmp.Diff(ac, expectedContract))
 	}
@@ -903,19 +902,27 @@ func TestArchiveContracts(t *testing.T) {
 	ffcids := make([]fileContractID, 2)
 	ffcids[0] = fileContractID(fcids[1])
 	ffcids[1] = fileContractID(fcids[2])
-	var acs []dbArchivedContract
-	err = ss.gormDB.Model(&dbArchivedContract{}).
-		Where("fcid IN (?)", ffcids).
-		Find(&acs).
-		Error
+	rows, err := ss.DB().Query(context.Background(), "SELECT reason FROM archived_contracts WHERE fcid IN (?, ?)",
+		sql.FileContractID(ffcids[0]), sql.FileContractID(ffcids[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(acs) != 2 {
-		t.Fatal("wrong number of archived contracts", len(acs))
+	defer rows.Close()
+
+	var cnt int
+	for rows.Next() {
+		var reason string
+		if err := rows.Scan(&reason); err != nil {
+			t.Fatal(err)
+		} else if cnt == 0 && reason != "foo" {
+			t.Fatal("unexpected reason", reason)
+		} else if cnt == 1 && reason != "bar" {
+			t.Fatal("unexpected reason", reason)
+		}
+		cnt++
 	}
-	if acs[0].Reason != "foo" || acs[1].Reason != "bar" {
-		t.Fatal("unexpected reason", acs[0].Reason, acs[1].Reason)
+	if cnt != 2 {
+		t.Fatal("wrong number of archived contracts", cnt)
 	}
 }
 
