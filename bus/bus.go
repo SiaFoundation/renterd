@@ -1734,6 +1734,8 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
+	jc.Custom(nil, (any)(nil))
+
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
