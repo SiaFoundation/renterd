@@ -815,9 +815,9 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a chain of 4 contracts.
-	// Their start heights are 0, 1, 2, 3.
-	fcids := []types.FileContractID{{1}, {2}, {3}, {4}}
+	// Create a chain of 6 contracts.
+	// Their start heights are 0, 1, 2, 3, 4, 5, 6.
+	fcids := []types.FileContractID{{1}, {2}, {3}, {4}, {5}, {6}}
 	if _, err := ss.addTestContract(fcids[0], hk); err != nil {
 		t.Fatal(err)
 	}
@@ -837,13 +837,22 @@ func TestAncestorsContracts(t *testing.T) {
 	if len(contracts) != len(fcids)-2 {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
-	for i := 0; i < len(contracts)-1; i++ {
+	for i := 0; i < len(contracts); i++ {
+		var renewedFrom, renewedTo types.FileContractID
+		if j := len(fcids) - 3 - i; j >= 0 {
+			renewedFrom = fcids[j]
+		}
+		if j := len(fcids) - 1 - i; j >= 0 {
+			renewedTo = fcids[j]
+		}
 		expected := api.ArchivedContract{
+			ArchivalReason: api.ContractArchivalReasonRenewed,
 			ID:             fcids[len(fcids)-2-i],
 			HostKey:        hk,
-			RenewedTo:      fcids[len(fcids)-1-i],
+			RenewedFrom:    renewedFrom,
+			RenewedTo:      renewedTo,
 			RevisionNumber: 200,
-			StartHeight:    2,
+			StartHeight:    uint64(len(fcids) - 2 - i),
 			Size:           4096,
 			State:          api.ContractStatePending,
 			WindowStart:    400,
@@ -855,8 +864,8 @@ func TestAncestorsContracts(t *testing.T) {
 		}
 	}
 
-	// Fetch the ancestors with startHeight >= 3. That should return 0 contracts.
-	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 3)
+	// Fetch the ancestors with startHeight >= 5. That should return 0 contracts.
+	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 5)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
