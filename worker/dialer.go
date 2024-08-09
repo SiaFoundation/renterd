@@ -8,54 +8,54 @@ import (
 )
 
 // Cache to store resolved IPs
-type HostCache struct {
+type hostCache struct {
 	mu    sync.RWMutex
 	cache map[string]string // hostname -> IP address
 }
 
-func NewHostCache() *HostCache {
-	return &HostCache{
+func NewhostCache() *hostCache {
+	return &hostCache{
 		cache: make(map[string]string),
 	}
 }
 
-func (hc *HostCache) Get(hostname string) (string, bool) {
+func (hc *hostCache) Get(hostname string) (string, bool) {
 	hc.mu.RLock()
 	defer hc.mu.RUnlock()
 	ip, ok := hc.cache[hostname]
 	return ip, ok
 }
 
-func (hc *HostCache) Set(hostname, ip string) {
+func (hc *hostCache) Set(hostname, ip string) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 	hc.cache[hostname] = ip
 }
 
-func (hc *HostCache) Clear(hostname string) {
+func (hc *hostCache) Clear(hostname string) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 	delete(hc.cache, hostname)
 }
 
-// CustomDialer implements a custom net.Dialer with a fallback mechanism
-type CustomDialer struct {
-	Cache *HostCache
+// fallbackDialer implements a custom net.Dialer with a fallback mechanism
+type fallbackDialer struct {
+	Cache *hostCache
 
 	Bus    Bus
 	Dialer net.Dialer
 }
 
-func NewCustomDialer(bus Bus, dialer net.Dialer) *CustomDialer {
-	return &CustomDialer{
-		Cache: NewHostCache(),
+func newFallbackDialer(bus Bus, dialer net.Dialer) *fallbackDialer {
+	return &fallbackDialer{
+		Cache: NewhostCache(),
 
 		Bus:    bus,
 		Dialer: dialer,
 	}
 }
 
-func (d *CustomDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func (d *fallbackDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
