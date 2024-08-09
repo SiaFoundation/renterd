@@ -19,6 +19,7 @@ type Syncer interface {
 	Addr() string
 	BroadcastHeader(h gateway.BlockHeader)
 	BroadcastTransactionSet([]types.Transaction)
+	BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
 	Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 	Peers() []*syncer.Peer
 }
