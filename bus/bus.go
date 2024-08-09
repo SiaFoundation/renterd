@@ -1744,20 +1744,37 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	}
-	if err != nil {
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+	resp := []byte(setting)
 
-	var resp interface{}
-	err = json.Unmarshal([]byte(setting), &resp)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
-		return
+	// populate autopilots of price pinning settings with defaults for better DX
+	if key == api.SettingPricePinning {
+		var pps api.PricePinSettings
+		err = json.Unmarshal([]byte(setting), &pps)
+		if jc.Check("failed to unmarshal price pinning settings", err) != nil {
+			return
+		}
+		// populate the Autopilots map with the current autopilots
+		aps, err := b.as.Autopilots(jc.Request.Context())
+		if jc.Check("failed to fetch autopilots", err) != nil {
+			return
+		}
+		for _, ap := range aps {
+			if _, exists := pps.Autopilots[ap.ID]; !exists {
+				pps.Autopilots[ap.ID] = api.AutopilotPins{}
+			}
+		}
+		// encode the settings back
+		resp, err = json.Marshal(pps)
+		if jc.Check("failed to marshal price pinning settings", err) != nil {
+			return
+		}
 	}
-
-	jc.Encode(resp)
+	jc.ResponseWriter.Header().Set("Content-Type", "application/json")
+	jc.ResponseWriter.Write(resp)
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
