@@ -30,7 +30,6 @@ import (
 	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
-	"go.sia.tech/siad/modules"
 	"go.uber.org/zap"
 )
 
@@ -73,7 +72,6 @@ type (
 		AcceptTransactionSet(txns []types.Transaction) error
 		Close() error
 		RecommendedFee() types.Currency
-		Subscribe(subscriber modules.TransactionPoolSubscriber)
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
@@ -676,7 +674,6 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	} else {
 		jc.Encode(convertToTransactions(events[offset : offset+limit]))
 	}
-	return
 }
 
 func (b *bus) walletOutputsHandler(jc jape.Context) {
