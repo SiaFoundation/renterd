@@ -36,7 +36,7 @@ func init() {
 	}
 }
 
-func ResolveHostIP(ctx context.Context, hostIP string) (subnets []string, private bool, _ error) {
+func ResolveHostIP(ctx context.Context, hostIP string) (ips []string, private bool, _ error) {
 	// resolve host address
 	host, _, err := net.SplitHostPort(hostIP)
 	if err != nil {
@@ -52,30 +52,17 @@ func ResolveHostIP(ctx context.Context, hostIP string) (subnets []string, privat
 		return nil, false, fmt.Errorf("%w: %+v", ErrHostTooManyAddresses, addrs)
 	}
 
-	// parse out subnets
+	// get ips
 	for _, address := range addrs {
 		private = private || isPrivateIP(address.IP)
 
-		// figure out the IP range
-		ipRange := ipv6FilterRange
-		if address.IP.To4() != nil {
-			ipRange = ipv4FilterRange
-		}
-
-		// parse the subnet
-		cidr := fmt.Sprintf("%s/%d", address.String(), ipRange)
-		_, ipnet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			continue
-		}
-
 		// add it
-		subnets = append(subnets, ipnet.String())
+		ips = append(ips, address.IP.String())
 	}
 
-	// sort the subnets
-	sort.Slice(subnets, func(i, j int) bool {
-		return subnets[i] < subnets[j]
+	// sort the ips
+	sort.Slice(ips, func(i, j int) bool {
+		return ips[i] < ips[j]
 	})
 	return
 }
