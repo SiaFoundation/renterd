@@ -127,8 +127,10 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			WHERE archived_contracts.renewed_to = ancestors.fcid
 		)
 		SELECT fcid, host, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
-		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end
+		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
+		COALESCE(h.net_address, ''), contract_price, renewed_from, total_cost, reason
 		FROM ancestors
+		LEFT JOIN hosts h ON h.public_key = ancestors.host
 		WHERE start_height >= ?
 	`, FileContractID(fcid), startHeight)
 	if err != nil {
@@ -144,7 +146,8 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			(*Currency)(&c.Spending.Uploads), (*Currency)(&c.Spending.Downloads), (*Currency)(&c.Spending.FundAccount),
 			(*Currency)(&c.Spending.Deletions), &c.ProofHeight,
 			&c.RevisionHeight, &c.RevisionNumber, &c.Size, &c.StartHeight, &state, &c.WindowStart,
-			&c.WindowEnd)
+			&c.WindowEnd, &c.HostIP, (*Currency)(&c.ContractPrice), (*FileContractID)(&c.RenewedFrom),
+			(*Currency)(&c.TotalCost), &c.ArchivalReason)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan contract: %w", err)
 		}
@@ -2563,8 +2566,6 @@ func scanWalletEvent(s Scanner) (wallet.Event, error) {
 			ID:     types.BlockID(blockID),
 			Height: height,
 		},
-		Inflow:         types.Currency(inflow),
-		Outflow:        types.Currency(outflow),
 		Type:           etype,
 		Data:           data,
 		MaturityHeight: maturityHeight,

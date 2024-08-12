@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/hostd/host/settings/pin"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -123,9 +122,9 @@ func newTestStore() *mockStore {
 	}
 
 	// add default price pin - and gouging settings
-	b, _ := json.Marshal(build.DefaultPricePinSettings)
+	b, _ := json.Marshal(api.DefaultPricePinSettings)
 	s.settings[api.SettingPricePinning] = string(b)
-	b, _ = json.Marshal(build.DefaultGougingSettings)
+	b, _ = json.Marshal(api.DefaultGougingSettings)
 	s.settings[api.SettingGouging] = string(b)
 
 	// add default autopilot
@@ -217,7 +216,7 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// enable price pinning
-	pps := build.DefaultPricePinSettings
+	pps := api.DefaultPricePinSettings
 	pps.Enabled = true
 	pps.Currency = "usd"
 	pps.Threshold = 0.5

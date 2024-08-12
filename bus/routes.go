@@ -13,9 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+
+	ibus "go.sia.tech/renterd/internal/bus"
+
+	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/gofakes3"
@@ -23,7 +26,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -225,7 +227,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
 		case wallet.EventTypeV1Transaction:
 			v1Txn, _ := data.(wallet.EventV1Transaction)
-			txn = types.Transaction(v1Txn)
+			txn = types.Transaction(v1Txn.Transaction)
 		case wallet.EventTypeV1ContractResolution:
 			fce, _ := data.(wallet.EventV1ContractResolution)
 			txn = types.Transaction{
@@ -247,8 +249,8 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 					Raw:       txn,
 					Index:     e.Index,
 					ID:        types.TransactionID(e.ID),
-					Inflow:    e.Inflow,
-					Outflow:   e.Outflow,
+					Inflow:    e.SiacoinInflow(),
+					Outflow:   e.SiacoinOutflow(),
 					Timestamp: e.Timestamp,
 				})
 			}
@@ -283,7 +285,6 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	} else {
 		jc.Encode(convertToTransactions(events[offset : offset+limit]))
 	}
-	return
 }
 
 func (b *bus) walletOutputsHandler(jc jape.Context) {
@@ -1344,6 +1345,8 @@ func (b *bus) settingsHandlerGET(jc jape.Context) {
 }
 
 func (b *bus) settingKeyHandlerGET(jc jape.Context) {
+	jc.Custom(nil, (any)(nil))
+
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
@@ -1354,20 +1357,39 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	if errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	}
-	if err != nil {
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+	resp := []byte(setting)
 
-	var resp interface{}
-	err = json.Unmarshal([]byte(setting), &resp)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't unmarshal the setting, error: %v", err), http.StatusInternalServerError)
-		return
+	// populate autopilots of price pinning settings with defaults for better DX
+	if key == api.SettingPricePinning {
+		var pps api.PricePinSettings
+		err = json.Unmarshal([]byte(setting), &pps)
+		if jc.Check("failed to unmarshal price pinning settings", err) != nil {
+			return
+		} else if pps.Autopilots == nil {
+			pps.Autopilots = make(map[string]api.AutopilotPins)
+		}
+		// populate the Autopilots map with the current autopilots
+		aps, err := b.as.Autopilots(jc.Request.Context())
+		if jc.Check("failed to fetch autopilots", err) != nil {
+			return
+		}
+		for _, ap := range aps {
+			if _, exists := pps.Autopilots[ap.ID]; !exists {
+				pps.Autopilots[ap.ID] = api.AutopilotPins{}
+			}
+		}
+		// encode the settings back
+		resp, err = json.Marshal(pps)
+		if jc.Check("failed to marshal price pinning settings", err) != nil {
+			return
+		}
 	}
-
-	jc.Encode(resp)
+	jc.ResponseWriter.Header().Set("Content-Type", "application/json")
+	jc.ResponseWriter.Write(resp)
 }
 
 func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
@@ -1846,12 +1868,12 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
-			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
+		Network: b.cm.TipState().Network.Name,
 	})
 }
 

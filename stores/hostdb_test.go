@@ -12,10 +12,9 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/chain"
 	sql "go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm"
 )
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory
@@ -49,24 +48,22 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert an announcement for the host and another one for an unknown
 	// host.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Fetch the host
-	var h dbHost
-	tx := ss.gormDB.Where("net_address = ?", "address").Find(&h)
-	if tx.Error != nil {
-		t.Fatal(tx.Error)
-	} else if types.PublicKey(h.PublicKey) != hk {
-		t.Fatal("wrong host returned")
+	h, err := ss.Host(ctx, hk)
+	if err != nil {
+		t.Fatal(err)
+	} else if h.NetAddress != "address" {
+		t.Fatalf("unexpected address: %v", h.NetAddress)
 	} else if h.LastAnnouncement.IsZero() {
 		t.Fatal("last announcement not set")
 	}
 
 	// Same thing again but with hosts.
-	hosts, err := ss.hosts()
+	hosts, err := ss.Hosts(ctx, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +91,7 @@ func TestSQLHostDB(t *testing.T) {
 
 	// Insert another announcement for an unknown host.
 	randomHK := types.PublicKey{1, 4, 7}
-	_, err = ss.announceHost(types.PublicKey{1, 4, 7}, "na")
-	if err != nil {
+	if err := ss.announceHost(types.PublicKey{1, 4, 7}, "na"); err != nil {
 		t.Fatal(err)
 	}
 	h3, err := ss.Host(ctx, randomHK)
@@ -320,11 +316,11 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert there are currently 3 checks
-	var cnt int64
-	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
-	if err != nil {
-		t.Fatal(err)
-	} else if cnt != 3 {
+	checkCount := func() int64 {
+		t.Helper()
+		return ss.Count("host_checks")
+	}
+	if cnt := checkCount(); cnt != 3 {
 		t.Fatal("unexpected", cnt)
 	}
 
@@ -401,10 +397,7 @@ func TestSearchHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
-	if err != nil {
-		t.Fatal(err)
-	} else if cnt != 2 {
+	if cnt := checkCount(); cnt != 2 {
 		t.Fatal("unexpected", cnt)
 	}
 
@@ -413,10 +406,7 @@ func TestSearchHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ss.gormDB.Model(&dbHostCheck{}).Count(&cnt).Error
-	if err != nil {
-		t.Fatal(err)
-	} else if cnt != 0 {
+	if cnt := checkCount(); cnt != 0 {
 		t.Fatal("unexpected", cnt)
 	}
 }
@@ -452,12 +442,11 @@ func TestRecordScan(t *testing.T) {
 	}
 
 	// Fetch the host directly to get the creation time.
-	h, err := hostByPubKey(ss.gormDB, hk)
+	h, err := ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if h.CreatedAt.IsZero() {
-		t.Fatal("creation time not set")
+	} else if h.KnownSince.IsZero() {
+		t.Fatal("known since not set")
 	}
 
 	// Record a scan.
@@ -578,77 +567,6 @@ func TestRecordScan(t *testing.T) {
 	}
 }
 
-// TestInsertAnnouncements is a test for insertAnnouncements.
-func TestInsertAnnouncements(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// Create announcements for 3 hosts.
-	ann1 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "foo.bar:1000")
-	ann2 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
-	ann3 := newTestAnnouncement(types.GeneratePrivateKey().PublicKey(), "")
-
-	// Insert the first one and check that all fields are set.
-	if err := insertAnnouncements(ss.gormDB, []announcement{ann1}); err != nil {
-		t.Fatal(err)
-	}
-	var ann dbAnnouncement
-	if err := ss.gormDB.Find(&ann).Error; err != nil {
-		t.Fatal(err)
-	}
-	ann.Model = Model{} // ignore
-	expectedAnn := dbAnnouncement{
-		HostKey:     publicKey(ann1.hk),
-		BlockHeight: ann1.blockHeight,
-		BlockID:     ann1.blockID.String(),
-		NetAddress:  "foo.bar:1000",
-	}
-	if ann != expectedAnn {
-		t.Fatal("mismatch", cmp.Diff(ann, expectedAnn))
-	}
-	// Insert the first and second one.
-	if err := insertAnnouncements(ss.gormDB, []announcement{ann1, ann2}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert the first one twice. The second one again and the third one.
-	if err := insertAnnouncements(ss.gormDB, []announcement{ann1, ann2, ann1, ann3}); err != nil {
-		t.Fatal(err)
-	}
-
-	// There should be 3 hosts in the db.
-	hosts, err := ss.hosts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hosts) != 3 {
-		t.Fatal("invalid number of hosts")
-	}
-
-	// There should be 7 announcements total.
-	var announcements []dbAnnouncement
-	if err := ss.gormDB.Find(&announcements).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(announcements) != 7 {
-		t.Fatal("invalid number of announcements")
-	}
-
-	// Add an entry to the blocklist to block host 1
-	entry1 := "foo.bar"
-	err = ss.UpdateHostBlocklistEntries(context.Background(), []string{entry1}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert multiple announcements for host 1 - this asserts that the UNIQUE
-	// constraint on the blocklist table isn't triggered when inserting multiple
-	// announcements for a host that's on the blocklist
-	if err := insertAnnouncements(ss.gormDB, []announcement{ann1, ann1}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestRemoveHosts(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -660,12 +578,11 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch the host and assert the recent downtime is zero
-	h, err := hostByPubKey(ss.gormDB, hk)
+	// fetch the host and assert the downtime is zero
+	h, err := ss.Host(context.Background(), hk)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if h.RecentDowntime != 0 {
+	} else if h.Interactions.Downtime != 0 {
 		t.Fatal("downtime is not zero")
 	}
 
@@ -690,16 +607,16 @@ func TestRemoveHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch the host and assert the recent downtime is 30 minutes and he has 2 recent scan failures
-	h, err = hostByPubKey(ss.gormDB, hk)
+	// fetch the host and assert the downtime is 30 minutes and he has 2 recent scan failures
+	h, err = ss.Host(context.Background(), hk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.RecentDowntime.Minutes() != 30 {
-		t.Fatal("downtime is not 30 minutes", h.RecentDowntime.Minutes())
+	if h.Interactions.Downtime.Minutes() != 30 {
+		t.Fatal("downtime is not 30 minutes", h.Interactions.Downtime.Minutes())
 	}
-	if h.RecentScanFailures != 2 {
-		t.Fatal("recent scan failures is not 2", h.RecentScanFailures)
+	if h.Interactions.FailedInteractions != 2 {
+		t.Fatal("recent scan failures is not 2", h.Interactions.FailedInteractions)
 	}
 
 	// assert no hosts are removed
@@ -746,7 +663,7 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	// assert host is removed from the database
-	if _, err = hostByPubKey(ss.gormDB, hk); err != gorm.ErrRecordNotFound {
+	if _, err = ss.Host(context.Background(), hk); !errors.Is(err, api.ErrHostNotFound) {
 		t.Fatal("expected record not found error")
 	}
 }
@@ -883,7 +800,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 	}
 
 	// remove host 1
-	if err = ss.gormDB.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk1)}).Delete(&dbHost{}).Error; err != nil {
+	if err := ss.DeleteHost(hk1); err != nil {
 		t.Fatal(err)
 	}
 	if numHosts() != 0 {
@@ -1067,7 +984,7 @@ func TestSQLHostBlocklist(t *testing.T) {
 	}
 
 	// delete host 2 and assert the delete cascaded properly
-	if err = ss.gormDB.Model(&dbHost{}).Where(&dbHost{PublicKey: publicKey(hk2)}).Delete(&dbHost{}).Error; err != nil {
+	if err = ss.DeleteHost(hk2); err != nil {
 		t.Fatal(err)
 	}
 	if numHosts() != 2 {
@@ -1204,101 +1121,6 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 	}
 }
 
-// addTestHosts adds 'n' hosts to the db and returns their keys.
-func (s *SQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
-	cnt, err := s.contractsCount()
-	if err != nil {
-		return nil, err
-	}
-
-	for i := 0; i < n; i++ {
-		keys = append(keys, types.PublicKey{byte(int(cnt) + i + 1)})
-		if err := s.addTestHost(keys[len(keys)-1]); err != nil {
-			return nil, err
-		}
-	}
-	return
-}
-
-// addTestHost ensures a host with given hostkey exists.
-func (s *SQLStore) addTestHost(hk types.PublicKey) error {
-	return s.addCustomTestHost(hk, "")
-}
-
-// addCustomTestHost ensures a host with given hostkey and net address exists.
-func (s *SQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
-	// announce the host
-	host, err := s.announceHost(hk, na)
-	if err != nil {
-		return err
-	}
-
-	// fetch blocklists
-	allowlist, blocklist, err := getBlocklists(s.gormDB)
-	if err != nil {
-		return err
-	}
-
-	// update host allowlist
-	var dbAllowlist []dbAllowlistEntry
-	for _, entry := range allowlist {
-		if entry.Entry == host.PublicKey {
-			dbAllowlist = append(dbAllowlist, entry)
-		}
-	}
-	if err := s.gormDB.Model(&host).Association("Allowlist").Replace(&dbAllowlist); err != nil {
-		return err
-	}
-
-	// update host blocklist
-	var dbBlocklist []dbBlocklistEntry
-	for _, entry := range blocklist {
-		if entry.blocks(host) {
-			dbBlocklist = append(dbBlocklist, entry)
-		}
-	}
-	return s.gormDB.Model(&host).Association("Blocklist").Replace(&dbBlocklist)
-}
-
-// announceHost adds a host announcement to the database.
-func (s *SQLStore) announceHost(hk types.PublicKey, na string) (host dbHost, err error) {
-	err = s.gormDB.Transaction(func(tx *gorm.DB) error {
-		host = dbHost{
-			PublicKey:        publicKey(hk),
-			LastAnnouncement: time.Now().UTC().Round(time.Second),
-			NetAddress:       na,
-		}
-		if err := s.gormDB.Create(&host).Error; err != nil {
-			return err
-		}
-		return s.gormDB.Create(&dbAnnouncement{
-			HostKey:     publicKey(hk),
-			BlockHeight: 42,
-			BlockID:     types.BlockID{1, 2, 3}.String(),
-			NetAddress:  na,
-		}).Error
-	})
-	return
-}
-
-// hosts returns all hosts in the db. Only used in testing since preloading all
-// interactions for all hosts is expensive in production.
-func (db *SQLStore) hosts() ([]dbHost, error) {
-	var hosts []dbHost
-	tx := db.gormDB.Find(&hosts)
-	if tx.Error != nil {
-		return nil, tx.Error
-	}
-	return hosts, nil
-}
-
-func hostByPubKey(tx *gorm.DB, hostKey types.PublicKey) (dbHost, error) {
-	var h dbHost
-	err := tx.Where("public_key", publicKey(hostKey)).
-		Take(&h).Error
-	return h, err
-}
-
 // newTestScan returns a host interaction with given parameters.
 func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, subnets []string) api.HostScan {
 	return api.HostScan{
@@ -1308,18 +1130,6 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 		Subnets:    subnets,
 		Success:    success,
 		Timestamp:  scanTime,
-	}
-}
-
-func newTestAnnouncement(hk types.PublicKey, na string) announcement {
-	return announcement{
-		blockHeight: 42,
-		blockID:     types.BlockID{1, 2, 3},
-		hk:          hk,
-		timestamp:   time.Now().UTC().Round(time.Second),
-		HostAnnouncement: chain.HostAnnouncement{
-			NetAddress: na,
-		},
 	}
 }
 
@@ -1353,4 +1163,46 @@ func newTestHostCheck() api.HostCheck {
 			NotCompletingScan:     false,
 		},
 	}
+}
+
+// addCustomTestHost ensures a host with given hostkey and net address exists.
+func (s *testSQLStore) addCustomTestHost(hk types.PublicKey, na string) error {
+	if err := s.announceHost(hk, na); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addTestHost ensures a host with given hostkey exists.
+func (s *testSQLStore) addTestHost(hk types.PublicKey) error {
+	return s.addCustomTestHost(hk, "")
+}
+
+// addTestHosts adds 'n' hosts to the db and returns their keys.
+func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
+	cnt := s.Count("contracts")
+
+	for i := 0; i < n; i++ {
+		keys = append(keys, types.PublicKey{byte(int(cnt) + i + 1)})
+		if err := s.addTestHost(keys[len(keys)-1]); err != nil {
+			return nil, err
+		}
+	}
+	return
+}
+
+// announceHost adds a host announcement to the database.
+func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
+	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+			return tx.UpdateHost(hk, chain.HostAnnouncement{
+				NetAddress: na,
+			}, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))
+		})
+	})
+}
+
+func (s *testSQLStore) DeleteHost(hk types.PublicKey) error {
+	_, err := s.DB().Exec(context.Background(), "DELETE FROM hosts WHERE public_key = ?", sql.PublicKey(hk))
+	return err
 }
