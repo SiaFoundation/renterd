@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.uber.org/zap"
 )
 
 // Cache to store resolved IPs
@@ -50,14 +51,16 @@ type FallbackDialer struct {
 	cache *hostCache
 
 	bus    DialerBus
+	logger *zap.SugaredLogger
 	dialer net.Dialer
 }
 
-func NewFallbackDialer(bus DialerBus, dialer net.Dialer) *FallbackDialer {
+func NewFallbackDialer(bus DialerBus, logger *zap.Logger, dialer net.Dialer) *FallbackDialer {
 	return &FallbackDialer{
 		cache: newHostCache(),
 
 		bus:    bus,
+		logger: logger.Sugar().Named("fallbackdialer"),
 		dialer: dialer,
 	}
 }
@@ -78,6 +81,7 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 
 	// If resolution fails, check the cache
 	if cachedIP, ok := d.cache.Get(host); ok {
+		d.logger.Warn("Failed to resolve host, using cached IP", zap.String("host", host))
 		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(cachedIP, port))
 		if err == nil {
 			return conn, nil
@@ -87,6 +91,7 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 	}
 
 	// Attempt to resolve using the bus
+	d.logger.Warn("Cache not available or cached IP stale, retrieving host resolved addresses from bus", zap.String("host", host))
 	hostInfo, err := d.bus.Host(ctx, hk)
 	if err != nil {
 		return nil, err
