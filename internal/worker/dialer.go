@@ -74,9 +74,13 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 	// Try to resolve IP
 	ipAddr, err := net.ResolveIPAddr("ip", host)
 	if err == nil {
-		// Cache the resolved IP and dial
+		// Dial and cache the resolved IP
+		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(ipAddr.String(), port))
+		if err != nil {
+			return nil, err
+		}
 		d.cache.Set(host, ipAddr.String())
-		return d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(ipAddr.String(), port))
+		return conn, nil
 	}
 
 	// If resolution fails, check the cache
