@@ -2318,7 +2318,7 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	}
 
 	// send the full balance back to the weallet
-	toSend := wr.Confirmed.Sub(types.Siacoins(1).Div64(100)) // leave some for the fee
+	toSend := wr.Confirmed.Sub(types.Siacoins(1)) // leave some for the fee
 	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, false))
 
 	// the unconfirmed balance should have changed to slightly more than toSend
