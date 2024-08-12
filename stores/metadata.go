@@ -57,27 +57,6 @@ var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 5
 type (
 	contractState uint8
 
-	dbArchivedContract struct {
-		Model
-
-		ContractCommon
-		RenewedTo fileContractID `gorm:"index;size:32"`
-
-		Host   publicKey `gorm:"index;NOT NULL;size:32"`
-		Reason string
-	}
-
-	dbContract struct {
-		Model
-
-		ContractCommon
-
-		HostID uint `gorm:"index"`
-		Host   dbHost
-
-		ContractSets []dbContractSet `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
-	}
-
 	ContractCommon struct {
 		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
 		RenewedFrom fileContractID `gorm:"index;size:32"`
@@ -99,20 +78,6 @@ type (
 		FundAccountSpending currency
 		DeleteSpending      currency
 		ListSpending        currency
-	}
-
-	dbContractSet struct {
-		Model
-
-		Name      string       `gorm:"unique;index;"`
-		Contracts []dbContract `gorm:"many2many:contract_set_contracts;constraint:OnDelete:CASCADE"`
-	}
-
-	dbDirectory struct {
-		Model
-
-		Name       string
-		DBParentID uint
 	}
 
 	dbObject struct {
@@ -165,7 +130,6 @@ type (
 	dbSlab struct {
 		Model
 		DBContractSetID  uint `gorm:"index"`
-		DBContractSet    dbContractSet
 		DBBufferedSlabID uint `gorm:"index;default: NULL"`
 
 		Health           float64   `gorm:"index;default:1.0; NOT NULL"`
@@ -186,8 +150,6 @@ type (
 
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
-
-		Contracts []dbContract `gorm:"many2many:contract_sectors;constraint:OnDelete:CASCADE"`
 	}
 
 	// dbContractSector is a join table between dbContract and dbSector.
@@ -274,22 +236,10 @@ func (s dbSlab) HealthValid() bool {
 }
 
 // TableName implements the gorm.Tabler interface.
-func (dbArchivedContract) TableName() string { return "archived_contracts" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbBucket) TableName() string { return "buckets" }
 
 // TableName implements the gorm.Tabler interface.
-func (dbContract) TableName() string { return "contracts" }
-
-// TableName implements the gorm.Tabler interface.
 func (dbContractSector) TableName() string { return "contract_sectors" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbContractSet) TableName() string { return "contract_sets" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbDirectory) TableName() string { return "directories" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
@@ -305,42 +255,6 @@ func (dbSlab) TableName() string { return "slabs" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlice) TableName() string { return "slices" }
-
-// convert converts a dbContract to a ContractMetadata.
-func (c dbContract) convert() api.ContractMetadata {
-	var revisionNumber uint64
-	_, _ = fmt.Sscan(c.RevisionNumber, &revisionNumber)
-	var contractSets []string
-	for _, cs := range c.ContractSets {
-		contractSets = append(contractSets, cs.Name)
-	}
-	return api.ContractMetadata{
-		ContractPrice: types.Currency(c.ContractPrice),
-		ID:            types.FileContractID(c.FCID),
-		HostIP:        c.Host.NetAddress,
-		HostKey:       types.PublicKey(c.Host.PublicKey),
-		SiamuxAddr:    rhpv2.HostSettings(c.Host.Settings).SiamuxAddr(),
-
-		RenewedFrom: types.FileContractID(c.RenewedFrom),
-		TotalCost:   types.Currency(c.TotalCost),
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(c.UploadSpending),
-			Downloads:   types.Currency(c.DownloadSpending),
-			FundAccount: types.Currency(c.FundAccountSpending),
-			Deletions:   types.Currency(c.DeleteSpending),
-			SectorRoots: types.Currency(c.ListSpending),
-		},
-		ProofHeight:    c.ProofHeight,
-		RevisionHeight: c.RevisionHeight,
-		RevisionNumber: revisionNumber,
-		ContractSets:   contractSets,
-		Size:           c.Size,
-		StartHeight:    c.StartHeight,
-		State:          c.State.String(),
-		WindowStart:    c.WindowStart,
-		WindowEnd:      c.WindowEnd,
-	}
-}
 
 func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
@@ -710,38 +624,6 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 		}
 	}
 	return nil
-}
-
-func fetchUsedContracts(tx *gorm.DB, usedContractsByHost map[types.PublicKey]map[types.FileContractID]struct{}) (map[types.FileContractID]dbContract, error) {
-	// flatten map to get all used contract ids
-	fcids := make([]fileContractID, 0, len(usedContractsByHost))
-	for _, hostFCIDs := range usedContractsByHost {
-		for fcid := range hostFCIDs {
-			fcids = append(fcids, fileContractID(fcid))
-		}
-	}
-
-	// fetch all contracts, take into account renewals
-	var contracts []dbContract
-	err := tx.Model(&dbContract{}).
-		Joins("Host").
-		Where("fcid IN (?) OR renewed_from IN (?)", fcids, fcids).
-		Find(&contracts).Error
-	if err != nil {
-		return nil, err
-	}
-
-	// build map of used contracts
-	usedContracts := make(map[types.FileContractID]dbContract, len(contracts))
-	for _, c := range contracts {
-		if _, used := usedContractsByHost[types.PublicKey(c.Host.PublicKey)][types.FileContractID(c.FCID)]; used {
-			usedContracts[types.FileContractID(c.FCID)] = c
-		}
-		if _, used := usedContractsByHost[types.PublicKey(c.Host.PublicKey)][types.FileContractID(c.RenewedFrom)]; used {
-			usedContracts[types.FileContractID(c.RenewedFrom)] = c
-		}
-	}
-	return usedContracts, nil
 }
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {

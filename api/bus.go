@@ -48,6 +48,7 @@ type (
 	// BusStateResponse is the response type for the /bus/state endpoint.
 	BusStateResponse struct {
 		StartTime TimeRFC3339 `json:"startTime"`
+		Network   string      `json:"network"`
 		BuildState
 	}
 )

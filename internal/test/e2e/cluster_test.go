@@ -184,6 +184,17 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
 
+	// Autopilot shouldn't have its prices pinned
+	pps, err := b.PricePinningSettings(context.Background())
+	tt.OK(err)
+	if len(pps.Autopilots) != 1 {
+		t.Fatalf("expected 1 autopilot, got %v", len(pps.Autopilots))
+	} else if pin, exists := pps.Autopilots[api.DefaultAutopilotID]; !exists {
+		t.Fatalf("expected autopilot %v to exist", api.DefaultAutopilotID)
+	} else if pin.Allowance != (api.Pin{}) {
+		t.Fatalf("expected autopilot %v to have no pinned allowance, got %v", api.DefaultAutopilotID, pin.Allowance)
+	}
+
 	// See if autopilot is running by triggering the loop.
 	_, err = cluster.Autopilot.Trigger(false)
 	tt.OK(err)

@@ -95,8 +95,8 @@ func (c ChainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 				ssql.Hash256(e.ID),
 				e.Index.Height,
 				ssql.Hash256(e.Index.ID),
-				ssql.Currency(e.Inflow),
-				ssql.Currency(e.Outflow),
+				ssql.Currency(e.SiacoinInflow()),
+				ssql.Currency(e.SiacoinOutflow()),
 				e.Type,
 				data,
 				e.MaturityHeight,
@@ -278,16 +278,24 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		return fmt.Errorf("failed to fetch block list: %w", err)
 	}
 	defer rows.Close()
+
+	type row struct {
+		id    int64
+		entry string
+	}
+	var entries []row
 	for rows.Next() {
-		var id int64
-		var entry string
-		if err := rows.Scan(&id, &entry); err != nil {
+		var r row
+		if err := rows.Scan(&r.id, &r.entry); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
+		entries = append(entries, r)
+	}
 
+	for _, row := range entries {
 		var blocked bool
 		for _, value := range values {
-			if value == entry || strings.HasSuffix(value, "."+entry) {
+			if value == row.entry || strings.HasSuffix(value, "."+row.entry) {
 				blocked = true
 				break
 			}
@@ -295,10 +303,18 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		if blocked {
 			if _, err := c.tx.Exec(c.ctx,
 				"INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id) VALUES (?,?)",
-				id,
+				row.id,
 				hostID,
 			); err != nil {
 				return fmt.Errorf("failed to insert host into blocklist: %w", err)
+			}
+		} else {
+			if _, err := c.tx.Exec(c.ctx,
+				"DELETE FROM host_blocklist_entry_hosts WHERE db_blocklist_entry_id = ? AND db_host_id = ?",
+				row.id,
+				hostID,
+			); err != nil {
+				return fmt.Errorf("failed to remove host from blocklist: %w", err)
 			}
 		}
 	}

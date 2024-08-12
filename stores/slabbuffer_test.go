@@ -8,6 +8,14 @@ import (
 	"lukechampine.com/frand"
 )
 
+func (s *testSQLStore) ContractSetID(name string) (id int64) {
+	if err := s.DB().QueryRow(context.Background(), "SELECT id FROM contract_sets WHERE name = ?", name).
+		Scan(&id); err != nil {
+		s.t.Fatal(err)
+	}
+	return
+}
+
 func TestRecordAppendToCompletedBuffer(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -20,19 +28,16 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 	defer mgr.Close()
 
 	// get contract set for its id
-	var set dbContractSet
-	if err := ss.gormDB.Where("name", testContractSet).Take(&set).Error; err != nil {
-		t.Fatal(err)
-	}
+	csID := ss.ContractSetID(testContractSet)
 
 	// compute gid
-	gid := bufferGID(1, 2, uint32(set.ID))
+	gid := bufferGID(1, 2, uint32(csID))
 
 	// add a slab that immediately fills a buffer but has 100 bytes left
 	minShards := uint8(1)
 	totalShards := uint8(2)
 	maxSize := bufferedSlabSize(minShards)
-	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(maxSize-100), minShards, totalShards, set.Name)
+	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(maxSize-100), minShards, totalShards, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mgr.completeBuffers[gid]) != 1 {
@@ -52,7 +57,7 @@ func TestRecordAppendToCompletedBuffer(t *testing.T) {
 
 	// add a slab that should fit in the buffer but since the first buffer is
 	// complete we ignore it
-	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), minShards, totalShards, set.Name)
+	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), minShards, totalShards, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mgr.completeBuffers[gid]) != 1 {
@@ -73,16 +78,13 @@ func TestMarkBufferCompleteTwice(t *testing.T) {
 	defer mgr.Close()
 
 	// get contract set for its id
-	var set dbContractSet
-	if err := ss.gormDB.Where("name", testContractSet).Take(&set).Error; err != nil {
-		t.Fatal(err)
-	}
+	csID := ss.ContractSetID(testContractSet)
 
 	// compute gid
-	gid := bufferGID(1, 2, uint32(set.ID))
+	gid := bufferGID(1, 2, uint32(csID))
 
 	// create an incomplete buffer
-	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), 1, 2, set.Name)
+	_, _, err = mgr.AddPartialSlab(context.Background(), frand.Bytes(1), 1, 2, testContractSet)
 	if err != nil {
 		t.Fatal(err)
 	}
