@@ -51,8 +51,7 @@ type (
 
 		DBDirectoryID uint
 
-		DBBucketID uint `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
-		DBBucket   dbBucket
+		DBBucketID uint   `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
 		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
 
 		Key      secretKey
@@ -72,13 +71,6 @@ type (
 		DBMultipartUploadID *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
 		Key                 string `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
 		Value               string
-	}
-
-	dbBucket struct {
-		Model
-
-		Policy api.BucketPolicy `gorm:"serializer:json"`
-		Name   string           `gorm:"unique;index;NOT NULL"`
 	}
 
 	dbSlice struct {
@@ -122,9 +114,6 @@ type (
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
 }
-
-// TableName implements the gorm.Tabler interface.
-func (dbBucket) TableName() string { return "buckets" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }
