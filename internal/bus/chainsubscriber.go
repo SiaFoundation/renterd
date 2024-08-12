@@ -92,7 +92,7 @@ type (
 
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
-// running and can be stopped by calling Close.
+// running and can be stopped by calling Shutdown.
 func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &chainSubscriber{

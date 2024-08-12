@@ -53,7 +53,7 @@ type (
 
 // NewPinManager returns a new PinManager, responsible for pinning prices to a
 // fixed value in an underlying currency. The returned pin manager is already
-// running and can be stopped by calling Close.
+// running and can be stopped by calling Shutdown.
 func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	pm := &pinManager{
 		a:           alerts,
