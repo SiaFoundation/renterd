@@ -44,6 +44,7 @@ ENV RENTERD_NETWORK='mainnet'
 
 # Copy binary and prepare data dir.
 COPY --from=builder /renterd/renterd /usr/bin/renterd
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 VOLUME [ "/data" ]
 
 USER ${PUID}:${PGID}
