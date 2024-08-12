@@ -198,7 +198,7 @@ func TestPinManager(t *testing.T) {
 	// create a pinmanager
 	pm := NewPinManager(a, eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
 	defer func() {
-		if err := pm.Close(context.Background()); err != nil {
+		if err := pm.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}()

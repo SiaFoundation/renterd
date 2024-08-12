@@ -453,8 +453,8 @@ func (b *bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
 		b.saveAccounts(ctx),
 		b.webhooksMgr.Shutdown(ctx),
-		b.pinMgr.Close(ctx),
-		b.cs.Close(ctx),
+		b.pinMgr.Shutdown(ctx),
+		b.cs.Shutdown(ctx),
 	)
 }
 
