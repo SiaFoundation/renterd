@@ -127,12 +127,6 @@ type (
 		LatestHost publicKey `gorm:"NOT NULL"`
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 	}
-
-	// dbContractSector is a join table between dbContract and dbSector.
-	dbContractSector struct {
-		DBSectorID   uint `gorm:"primaryKey;index"`
-		DBContractID uint `gorm:"primaryKey;index"`
-	}
 )
 
 func (s *contractState) LoadString(state string) error {
@@ -176,9 +170,6 @@ func (s dbSlab) HealthValid() bool {
 
 // TableName implements the gorm.Tabler interface.
 func (dbBucket) TableName() string { return "buckets" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbContractSector) TableName() string { return "contract_sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObject) TableName() string { return "objects" }

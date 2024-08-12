@@ -1940,7 +1940,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.gormDB.Table("contract_sectors").Where("TRUE").Delete(&dbContractSector{}).Error; err != nil {
+	if _, err := ss.DB().Exec(context.Background(), "DELETE FROM contract_sectors"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2078,12 +2078,8 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Check the join table. Should be empty.
-	var css []dbContractSector
-	if err := ss.gormDB.Find(&css).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(css) != 0 {
-		t.Fatal("table should be empty", len(css))
+	if n := ss.Count("contract_sectors"); n != 0 {
+		t.Fatal("table should be empty", n)
 	}
 
 	// Add the contract back.
@@ -2105,12 +2101,8 @@ func TestContractSectors(t *testing.T) {
 	// Delete the sector.
 	if err := ss.gormDB.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
 		t.Fatal(err)
-	}
-	if err := ss.gormDB.Find(&css).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(css) != 0 {
-		t.Fatal("table should be empty")
+	} else if n := ss.Count("contract_sectors"); n != 0 {
+		t.Fatal("table should be empty", n)
 	}
 }
 
@@ -2627,11 +2619,6 @@ func TestObjectsStats(t *testing.T) {
 
 	// Get all entries in contract_sectors and store them again with a different
 	// contract id. This should cause the uploaded size to double.
-	var contractSectors []dbContractSector
-	err = ss.gormDB.Find(&contractSectors).Error
-	if err != nil {
-		t.Fatal(err)
-	}
 	var newContractID types.FileContractID
 	frand.Read(newContractID[:])
 	hks, err := ss.addTestHosts(1)
@@ -2644,10 +2631,14 @@ func TestObjectsStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	totalUploadedSize += c.Size
-	for _, contractSector := range contractSectors {
-		if _, err := ss.DB().Exec(context.Background(), "INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES ((SELECT id FROM contracts WHERE fcid = ?), ?)", sql.FileContractID(newContractID), contractSector.DBSectorID); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := ss.DB().Exec(context.Background(), `
+		INSERT INTO contract_sectors (db_contract_id, db_sector_id)
+		SELECT (
+			SELECT id FROM contracts WHERE fcid = ?
+		), db_sector_id
+		FROM contract_sectors
+	`, sql.FileContractID(newContractID)); err != nil {
+		t.Fatal(err)
 	}
 
 	// Check sizes.
@@ -3543,12 +3534,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	var count int64
-	if err := ss.gormDB.Model(&dbContractSector{}).Count(&count).Error; err != nil {
-		t.Fatal(err)
-	} else if count != 1 {
+	} else if count := ss.Count("contract_sectors"); count != 1 {
 		t.Fatal("expected 1 sector", count)
 	}
 }
@@ -3696,12 +3682,7 @@ func TestDeleteHostSector(t *testing.T) {
 	})
 
 	// Make sure 4 contractSector entries exist.
-	var n int64
-	if err := ss.gormDB.Model(&dbContractSector{}).
-		Count(&n).
-		Error; err != nil {
-		t.Fatal(err)
-	} else if n != 4 {
+	if n := ss.Count("contract_sectors"); n != 4 {
 		t.Fatal("expected 4 contract-sector links", n)
 	}
 
@@ -3713,11 +3694,7 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Make sure 2 contractSector entries exist.
-	if err := ss.gormDB.Model(&dbContractSector{}).
-		Count(&n).
-		Error; err != nil {
-		t.Fatal(err)
-	} else if n != 2 {
+	if n := ss.Count("contract_sectors"); n != 2 {
 		t.Fatal("expected 2 contract-sector links", n)
 	}
 
@@ -4531,16 +4508,30 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal("wrong slab")
 	}
 
-	var contractSectors []dbContractSector
-	if err := ss.gormDB.Find(&contractSectors).Error; err != nil {
+	type contractSector struct {
+		ContractID int64
+		SectorID   int64
+	}
+	var contractSectors []contractSector
+	rows, err := ss.DB().Query(context.Background(), "SELECT db_contract_id, db_sector_id FROM contract_sectors")
+	if err != nil {
 		t.Fatal(err)
-	} else if len(contractSectors) != 3*totalShards {
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cs contractSector
+		if err := rows.Scan(&cs.ContractID, &cs.SectorID); err != nil {
+			t.Fatal(err)
+		}
+		contractSectors = append(contractSectors, cs)
+	}
+	if len(contractSectors) != 3*totalShards {
 		t.Fatal("invalid number of contract sectors", len(contractSectors))
 	}
 	for i, cs := range contractSectors {
-		if cs.DBContractID != uint(i+1) {
+		if cs.ContractID != int64(i+1) {
 			t.Fatal("invalid contract id")
-		} else if cs.DBSectorID != uint(i+1) {
+		} else if cs.SectorID != int64(i+1) {
 			t.Fatal("invalid sector id")
 		}
 	}
