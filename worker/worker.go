@@ -1452,11 +1452,16 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type, if it fails for
 	// another reason the host scan won't have subnets
-	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
+	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
 	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !w.allowPrivateIPs {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
+	}
+
+	subnets, err := utils.AddressesToSubnets(resolvedAddresses)
+	if err != nil {
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, fmt.Errorf("failed to convert addresses to subnets: %w", err)
 	}
 
 	// scan: first try
@@ -1496,7 +1501,8 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		{
 			HostKey:           hostKey,
 			PriceTable:        pt,
-			ResolvedAddresses: subnets,
+			ResolvedAddresses: resolvedAddresses,
+			Subnets:           subnets,
 
 			// NOTE: A scan is considered successful if both fetching the price
 			// table and the settings succeeded. Right now scanning can't fail

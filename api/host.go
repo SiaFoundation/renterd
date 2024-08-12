@@ -160,6 +160,7 @@ type (
 		Checks            map[string]HostCheck `json:"checks"`
 		StoredData        uint64               `json:"storedData"`
 		ResolvedAddresses []string             `json:"resolvedAddresses"`
+		Subnets           []string             `json:"subnets"`
 	}
 
 	HostAddress struct {
@@ -185,6 +186,7 @@ type (
 		PriceTable        rhpv3.HostPriceTable
 		Settings          rhpv2.HostSettings
 		ResolvedAddresses []string
+		Subnets           []string
 		Success           bool
 		Timestamp         time.Time
 	}

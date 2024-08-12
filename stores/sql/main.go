@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
@@ -2135,6 +2136,10 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 
 		if resolvedAddresses != "" {
 			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
+			h.Subnets, err = utils.AddressesToSubnets(h.ResolvedAddresses)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert addresses to subnets: %w", err)
+			}
 		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[hostID]

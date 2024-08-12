@@ -8,6 +8,11 @@ import (
 	"sort"
 )
 
+const (
+	ipv4FilterRange = 24
+	ipv6FilterRange = 32
+)
+
 var (
 	privateSubnets []*net.IPNet
 
@@ -29,6 +34,33 @@ func init() {
 		}
 		privateSubnets = append(privateSubnets, subnet)
 	}
+}
+
+func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
+	var subnets []string
+	for _, addr := range resolvedAddresses {
+		parsed := net.ParseIP(addr)
+		if parsed == nil {
+			return nil, errors.New("failed to parse address")
+		}
+
+		// figure out the IP range
+		ipRange := ipv6FilterRange
+		if parsed.To4() != nil {
+			ipRange = ipv4FilterRange
+		}
+
+		// parse the subnet
+		cidr := fmt.Sprintf("%s/%d", parsed.String(), ipRange)
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, err
+		}
+
+		subnets = append(subnets, ipnet.String())
+	}
+
+	return subnets, nil
 }
 
 func ResolveHostIP(ctx context.Context, hostIP string) (ips []string, private bool, _ error) {
