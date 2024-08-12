@@ -35,7 +35,7 @@ func (hc *hostCache) Set(hostname, ip string) {
 	hc.cache[hostname] = ip
 }
 
-func (hc *hostCache) Clear(hostname string) {
+func (hc *hostCache) Delete(hostname string) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 	delete(hc.cache, hostname)
@@ -82,8 +82,8 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 		if err == nil {
 			return conn, nil
 		}
-		// Clear the cache if the cached IP doesn't work
-		d.cache.Clear(host)
+		// Delete the cache if the cached IP doesn't work
+		d.cache.Delete(host)
 	}
 
 	// Attempt to resolve using the bus
