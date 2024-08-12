@@ -15,7 +15,7 @@ type hostCache struct {
 	cache map[string]string // hostname -> IP address
 }
 
-func NewhostCache() *hostCache {
+func newHostCache() *hostCache {
 	return &hostCache{
 		cache: make(map[string]string),
 	}
@@ -42,18 +42,18 @@ func (hc *hostCache) Clear(hostname string) {
 
 // fallbackDialer implements a custom net.Dialer with a fallback mechanism
 type fallbackDialer struct {
-	Cache *hostCache
+	cache *hostCache
 
-	Bus    Bus
-	Dialer net.Dialer
+	bus    Bus
+	dialer net.Dialer
 }
 
 func newFallbackDialer(bus Bus, dialer net.Dialer) *fallbackDialer {
 	return &fallbackDialer{
-		Cache: NewhostCache(),
+		cache: newHostCache(),
 
-		Bus:    bus,
-		Dialer: dialer,
+		bus:    bus,
+		dialer: dialer,
 	}
 }
 
@@ -67,31 +67,31 @@ func (d *fallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 	ipAddr, err := net.ResolveIPAddr("ip", host)
 	if err == nil {
 		// Cache the resolved IP and dial
-		d.Cache.Set(host, ipAddr.String())
-		return d.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(ipAddr.String(), port))
+		d.cache.Set(host, ipAddr.String())
+		return d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(ipAddr.String(), port))
 	}
 
 	// If resolution fails, check the cache
-	if cachedIP, ok := d.Cache.Get(host); ok {
-		conn, err := d.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(cachedIP, port))
+	if cachedIP, ok := d.cache.Get(host); ok {
+		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(cachedIP, port))
 		if err == nil {
 			return conn, nil
 		}
 		// Clear the cache if the cached IP doesn't work
-		d.Cache.Clear(host)
+		d.cache.Clear(host)
 	}
 
 	// Attempt to resolve using the bus
-	hostInfo, err := d.Bus.Host(ctx, hk)
+	hostInfo, err := d.bus.Host(ctx, hk)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, addr := range hostInfo.ResolvedAddresses {
-		conn, err := d.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr, port))
+		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr, port))
 		if err == nil {
 			// Update cache on successful dial
-			d.Cache.Set(host, addr)
+			d.cache.Set(host, addr)
 			return conn, nil
 		}
 	}
