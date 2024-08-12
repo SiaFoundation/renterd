@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/stores/sql"
 )
 
@@ -23,13 +21,6 @@ func (s *SQLStore) ChainIndex(ctx context.Context) (ci types.ChainIndex, err err
 func (s *SQLStore) ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(ctx, applyFn)
-	})
-}
-
-// UpdateChainState process the given revert and apply updates.
-func (s *SQLStore) UpdateChainState(reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
-	return s.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		return wallet.UpdateChainState(tx, s.walletAddress, applied, reverted)
 	})
 }
 

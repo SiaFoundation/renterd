@@ -30,7 +30,7 @@ type chainUpdateTx struct {
 	l   *zap.SugaredLogger
 }
 
-func (c chainUpdateTx) ApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event) error {
+func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
 	c.l.Debugw("applying index", "height", index.Height, "block_id", index.ID)
 
 	if len(spent) > 0 {
@@ -118,7 +118,7 @@ func (c chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractSta
 	return ssql.GetContractState(c.ctx, c.tx, fcid)
 }
 
-func (c chainUpdateTx) RevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement) error {
+func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement, timestamp time.Time) error {
 	c.l.Debugw("reverting index", "height", index.Height, "block_id", index.ID)
 
 	if len(removed) > 0 {
@@ -320,8 +320,8 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	return nil
 }
 
-func (c chainUpdateTx) UpdateStateElements(elements []types.StateElement) error {
-	return ssql.UpdateStateElements(c.ctx, c.tx, elements)
+func (c chainUpdateTx) UpdateWalletStateElements(elements []types.StateElement) error {
+	return ssql.UpdateWalletStateElements(c.ctx, c.tx, elements)
 }
 
 func (c chainUpdateTx) WalletStateElements() ([]types.StateElement, error) {

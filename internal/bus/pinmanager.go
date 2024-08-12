@@ -76,7 +76,7 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as A
 	return pm
 }
 
-func (pm *pinManager) Close(ctx context.Context) error {
+func (pm *pinManager) Shutdown(ctx context.Context) error {
 	close(pm.closedChan)
 
 	doneChan := make(chan struct{})

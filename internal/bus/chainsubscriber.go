@@ -45,10 +45,14 @@ type (
 
 	WebhookManager interface {
 		webhooks.Broadcaster
-		Close(context.Context) error
 		Delete(context.Context, webhooks.Webhook) error
 		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
 		Register(context.Context, webhooks.Webhook) error
+		Shutdown(context.Context) error
+	}
+
+	Wallet interface {
+		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}
 
 	chainSubscriber struct {
@@ -58,7 +62,7 @@ type (
 		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
-		walletAddress      types.Address
+		wallet             Wallet
 
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelCauseFunc
@@ -89,7 +93,7 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be stopped by calling Close.
-func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, walletAddress types.Address, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
+func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &chainSubscriber{
 		cm:     cm,
@@ -98,7 +102,7 @@ func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, wall
 		logger: logger.Sugar().Named("chainsubscriber"),
 
 		announcementMaxAge: announcementMaxAge,
-		walletAddress:      walletAddress,
+		wallet:             w,
 
 		shutdownCtx:       ctx,
 		shutdownCtxCancel: cancel,
@@ -126,7 +130,7 @@ func (s *chainSubscriber) ChainIndex(ctx context.Context) (types.ChainIndex, err
 	return s.cs.ChainIndex(ctx)
 }
 
-func (s *chainSubscriber) Close(ctx context.Context) error {
+func (s *chainSubscriber) Shutdown(ctx context.Context) error {
 	// cancel shutdown context
 	s.shutdownCtxCancel(errClosed)
 
@@ -321,7 +325,7 @@ func (s *chainSubscriber) sync() error {
 func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, tip types.Block, _ error) {
 	if err := s.cs.ProcessChainUpdate(ctx, func(tx sql.ChainUpdateTx) error {
 		// process wallet updates
-		if err := wallet.UpdateChainState(tx, s.walletAddress, caus, crus); err != nil {
+		if err := s.wallet.UpdateChainState(tx, crus, caus); err != nil {
 			return fmt.Errorf("failed to process wallet updates: %w", err)
 		}
 

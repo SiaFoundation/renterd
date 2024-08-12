@@ -74,6 +74,6 @@ type (
 	}
 )
 
-func (s UploadedPackedSlab) Contracts() map[types.PublicKey]map[types.FileContractID]struct{} {
+func (s UploadedPackedSlab) Contracts() []types.FileContractID {
 	return object.ContractsFromShards(s.Shards)
 }

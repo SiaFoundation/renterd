@@ -128,21 +128,6 @@ func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
 	return nil
 }
 
-func (m *Manager) Close(ctx context.Context) error {
-	m.shutdownCtxCancel()
-	waitChan := make(chan struct{})
-	go func() {
-		m.wg.Wait()
-		close(waitChan)
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-waitChan:
-	}
-	return nil
-}
-
 func (m *Manager) Delete(ctx context.Context, wh Webhook) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -197,6 +182,23 @@ func (m *Manager) Register(ctx context.Context, wh Webhook) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.webhooks[wh.String()] = wh
+	return nil
+}
+
+func (m *Manager) Shutdown(ctx context.Context) error {
+	m.shutdownCtxCancel()
+
+	waitChan := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(waitChan)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waitChan:
+	}
 	return nil
 }
 

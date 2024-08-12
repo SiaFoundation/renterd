@@ -64,12 +64,21 @@ type (
 
 	ChainSubscriber interface {
 		ChainIndex(context.Context) (types.ChainIndex, error)
-		Close(context.Context) error
+		Shutdown(context.Context) error
 	}
 
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
+	}
+
+	// A TransactionPool can validate and relay unconfirmed transactions.
+	TransactionPool interface {
+		AcceptTransactionSet(txns []types.Transaction) error
+		Close() error
+		RecommendedFee() types.Currency
+		Transactions() []types.Transaction
+		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
 	// A HostDB stores information about hosts.
@@ -191,7 +200,7 @@ type (
 	}
 
 	PinManager interface {
-		Close(context.Context) error
+		Shutdown(context.Context) error
 		TriggerUpdate()
 	}
 
@@ -214,15 +223,16 @@ type (
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
 		UnconfirmedTransactions() ([]wallet.Event, error)
+		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)
 	}
 
 	WebhooksManager interface {
 		webhooks.Broadcaster
-		Close(context.Context) error
 		Delete(context.Context, webhooks.Webhook) error
 		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
 		Register(context.Context, webhooks.Webhook) error
+		Shutdown(context.Context) error
 	}
 )
 
@@ -291,7 +301,7 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
-	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w.Address(), announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w, announcementMaxAge, l)
 
 	return b, nil
 }
@@ -442,7 +452,7 @@ func (b *bus) Handler() http.Handler {
 func (b *bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
 		b.saveAccounts(ctx),
-		b.webhooksMgr.Close(ctx),
+		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Close(ctx),
 		b.cs.Close(ctx),
 	)
