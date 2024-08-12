@@ -2566,8 +2566,6 @@ func scanWalletEvent(s Scanner) (wallet.Event, error) {
 			ID:     types.BlockID(blockID),
 			Height: height,
 		},
-		Inflow:         types.Currency(inflow),
-		Outflow:        types.Currency(outflow),
 		Type:           etype,
 		Data:           data,
 		MaturityHeight: maturityHeight,

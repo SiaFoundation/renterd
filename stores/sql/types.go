@@ -377,19 +377,28 @@ func UnmarshalEventData(b []byte, t string) (dst wallet.EventData, err error) {
 	case wallet.EventTypeMinerPayout,
 		wallet.EventTypeSiafundClaim,
 		wallet.EventTypeFoundationSubsidy:
-		dst = new(wallet.EventPayout)
+		var e wallet.EventPayout
+		err = json.Unmarshal(b, &e)
+		dst = e
 	case wallet.EventTypeV1ContractResolution:
-		dst = new(wallet.EventV1ContractResolution)
+		var e wallet.EventV1ContractResolution
+		err = json.Unmarshal(b, &e)
+		dst = e
 	case wallet.EventTypeV2ContractResolution:
-		dst = new(wallet.EventV2ContractResolution)
+		var e wallet.EventV2ContractResolution
+		err = json.Unmarshal(b, &e)
+		dst = e
 	case wallet.EventTypeV1Transaction:
-		dst = new(wallet.EventV1Transaction)
+		var e wallet.EventV1Transaction
+		err = json.Unmarshal(b, &e)
+		dst = e
 	case wallet.EventTypeV2Transaction:
-		dst = new(wallet.EventV2Transaction)
+		var e wallet.EventV2Transaction
+		err = json.Unmarshal(b, &e)
+		dst = e
 	default:
 		return nil, fmt.Errorf("unknown event type %v", t)
 	}
-	err = json.Unmarshal(b, dst)
 	return
 }
 

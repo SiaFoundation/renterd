@@ -35,6 +35,10 @@ func TestnetZen() (*consensus.Network, types.Block) {
 	return chain.TestnetZen()
 }
 
+func Mainnet() (*consensus.Network, types.Block) {
+	return chain.Mainnet()
+}
+
 func NewDBStore(db chain.DB, n *consensus.Network, genesisBlock types.Block) (_ *chain.DBStore, _ consensus.State, err error) {
 	return chain.NewDBStore(db, n, genesisBlock)
 }
