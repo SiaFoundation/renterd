@@ -768,7 +768,7 @@ func TestRenewedContract(t *testing.T) {
 		RevisionNumber: 1,
 		Size:           rhpv2.SectorSize,
 		StartHeight:    100,
-		State:          contractStatePending.String(),
+		State:          api.ContractStatePending,
 		TotalCost:      oldContractTotal,
 		WindowStart:    2,
 		WindowEnd:      3,

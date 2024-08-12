@@ -38,14 +38,6 @@ const (
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
-const (
-	contractStateInvalid contractState = iota
-	contractStatePending
-	contractStateActive
-	contractStateComplete
-	contractStateFailed
-)
-
 var (
 	pruneSlabsAlertID = frand.Entropy256()
 	pruneDirsAlertID  = frand.Entropy256()
@@ -54,8 +46,6 @@ var (
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
 type (
-	contractState uint8
-
 	dbObject struct {
 		Model
 
@@ -128,41 +118,6 @@ type (
 		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 	}
 )
-
-func (s *contractState) LoadString(state string) error {
-	switch strings.ToLower(state) {
-	case api.ContractStateInvalid:
-		*s = contractStateInvalid
-	case api.ContractStatePending:
-		*s = contractStatePending
-	case api.ContractStateActive:
-		*s = contractStateActive
-	case api.ContractStateComplete:
-		*s = contractStateComplete
-	case api.ContractStateFailed:
-		*s = contractStateFailed
-	default:
-		*s = contractStateInvalid
-	}
-	return nil
-}
-
-func (s contractState) String() string {
-	switch s {
-	case contractStateInvalid:
-		return api.ContractStateInvalid
-	case contractStatePending:
-		return api.ContractStatePending
-	case contractStateActive:
-		return api.ContractStateActive
-	case contractStateComplete:
-		return api.ContractStateComplete
-	case contractStateFailed:
-		return api.ContractStateFailed
-	default:
-		return api.ContractStateUnknown
-	}
-}
 
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
