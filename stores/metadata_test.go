@@ -23,7 +23,6 @@ import (
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
 	"lukechampine.com/frand"
 )
 
@@ -1041,55 +1040,74 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it using get and verify every field.
-	obj, err := ss.dbObject(objID)
+	obj, err := ss.Object(context.Background(), api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	obj1Key, err := obj1.Key.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
+	// compare timestamp separately
+	if obj.ModTime.IsZero() {
+		t.Fatal("unexpected", obj.ModTime)
 	}
+	obj.ModTime = api.TimeRFC3339{}
+
 	obj1Slab0Key := obj1.Slabs[0].Key
 	obj1Slab1Key := obj1.Slabs[1].Key
 
-	// Set the Model fields to zero before comparing. These are set by gorm
-	// itself and contain a few timestamps which would make the following
-	// code a lot more verbose.
-	obj.Model = Model{}
-	for i := range obj.Slabs {
-		obj.Slabs[i].Model = Model{}
-	}
-
-	one := uint(1)
-	expectedObj := dbObject{
-		DBDirectoryID: 1,
-		DBBucketID:    uint(ss.DefaultBucketID()),
-		Health:        1,
-		ObjectID:      objID,
-		Key:           obj1Key,
-		Size:          obj1.TotalSize(),
-		Slabs: []dbSlice{
-			{
-				DBObjectID:  &one,
-				DBSlabID:    1,
-				ObjectIndex: 1,
-				Offset:      10,
-				Length:      100,
-			},
-			{
-				DBObjectID:  &one,
-				DBSlabID:    2,
-				ObjectIndex: 2,
-				Offset:      20,
-				Length:      200,
+	expectedObj := api.Object{
+		ObjectMetadata: api.ObjectMetadata{
+			ETag:     testETag,
+			Health:   1,
+			ModTime:  api.TimeRFC3339{},
+			Name:     objID,
+			Size:     obj1.TotalSize(),
+			MimeType: testMimeType,
+		},
+		Metadata: testMetadata,
+		Object: &object.Object{
+			Key: obj1.Key,
+			Slabs: []object.SlabSlice{
+				{
+					Offset: 10,
+					Length: 100,
+					Slab: object.Slab{
+						Health:    1,
+						Key:       obj1Slab0Key,
+						MinShards: 1,
+						Shards: []object.Sector{
+							{
+								LatestHost: hk1,
+								Root:       types.Hash256{1},
+								Contracts: map[types.PublicKey][]types.FileContractID{
+									hk1: {fcid1},
+								},
+							},
+						},
+					},
+				},
+				{
+					Offset: 20,
+					Length: 200,
+					Slab: object.Slab{
+						Health:    1,
+						Key:       obj1Slab1Key,
+						MinShards: 2,
+						Shards: []object.Sector{
+							{
+								LatestHost: hk2,
+								Root:       types.Hash256{2},
+								Contracts: map[types.PublicKey][]types.FileContractID{
+									hk2: {fcid2},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
-		MimeType: testMimeType,
-		Etag:     testETag,
 	}
 	if !reflect.DeepEqual(obj, expectedObj) {
-		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
+		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj, cmp.AllowUnexported(object.EncryptionKey{}), cmp.Comparer(api.CompareTimeRFC3339)))
 	}
 
 	// Try to store it again. Should work.
@@ -1098,28 +1116,20 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it again and verify.
-	obj, err = ss.dbObject(objID)
+	obj, err = ss.Object(context.Background(), api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Set the Model fields to zero before comparing. These are set by gorm
-	// itself and contain a few timestamps which would make the following
-	// code a lot more verbose.
-	obj.Model = Model{}
-	for i := range obj.Slabs {
-		obj.Slabs[i].Model = Model{}
+	// compare timestamp separately
+	if obj.ModTime.IsZero() {
+		t.Fatal("unexpected", obj.ModTime)
 	}
+	obj.ModTime = api.TimeRFC3339{}
 
-	// The expected object is the same except for some ids which were
-	// incremented due to the object and slab being overwritten.
-	two := uint(2)
-	expectedObj.Slabs[0].DBObjectID = &two
-	expectedObj.Slabs[0].DBSlabID = 3
-	expectedObj.Slabs[1].DBObjectID = &two
-	expectedObj.Slabs[1].DBSlabID = 4
+	// The expected object is the same.
 	if !reflect.DeepEqual(obj, expectedObj) {
-		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj))
+		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj, cmp.AllowUnexported(object.EncryptionKey{}), cmp.Comparer(api.CompareTimeRFC3339)))
 	}
 
 	// Fetch it and verify again.
@@ -1254,27 +1264,23 @@ func TestSQLMetadataStore(t *testing.T) {
 	// - 1 element in the slices table for the same reason
 	// - 1 element in the sectors table for the same reason
 	countCheck := func(objCount, sliceCount, slabCount, sectorCount int64) error {
-		tableCountCheck := func(table interface{}, tblCount int64) error {
-			var count int64
-			if err := ss.gormDB.Model(table).Count(&count).Error; err != nil {
-				return err
-			}
-			if count != tblCount {
-				return fmt.Errorf("expected %v objects in table %v but got %v", tblCount, table.(schema.Tabler).TableName(), count)
+		tableCountCheck := func(table string, tblCount int64) error {
+			if count := ss.Count(table); count != tblCount {
+				return fmt.Errorf("expected %v objects in table %v but got %v", tblCount, table, count)
 			}
 			return nil
 		}
 		// Check all tables.
-		if err := tableCountCheck(&dbObject{}, objCount); err != nil {
+		if err := tableCountCheck("objects", objCount); err != nil {
 			return err
 		}
-		if err := tableCountCheck(&dbSlice{}, sliceCount); err != nil {
+		if err := tableCountCheck("slices", sliceCount); err != nil {
 			return err
 		}
-		if err := tableCountCheck(&dbSlab{}, slabCount); err != nil {
+		if err := tableCountCheck("slabs", slabCount); err != nil {
 			return err
 		}
-		if err := tableCountCheck(&dbSector{}, sectorCount); err != nil {
+		if err := tableCountCheck("sectors", sectorCount); err != nil {
 			return err
 		}
 		return nil
