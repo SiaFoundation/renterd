@@ -19,7 +19,6 @@ const (
 
 type (
 	unixTimeMS     time.Time
-	currency       types.Currency
 	bCurrency      types.Currency
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
@@ -112,34 +111,6 @@ func (fcid *fileContractID) Scan(value interface{}) error {
 // Value returns a fileContractID value, implements driver.Valuer interface.
 func (fcid fileContractID) Value() (driver.Value, error) {
 	return fcid[:], nil
-}
-
-func (currency) GormDataType() string {
-	return "string"
-}
-
-// Scan scan value into currency, implements sql.Scanner interface.
-func (c *currency) Scan(value interface{}) error {
-	var s string
-	switch value := value.(type) {
-	case string:
-		s = value
-	case []byte:
-		s = string(value)
-	default:
-		return fmt.Errorf("failed to unmarshal currency value: %v %t", value, value)
-	}
-	curr, err := types.ParseCurrency(s)
-	if err != nil {
-		return err
-	}
-	*c = currency(curr)
-	return nil
-}
-
-// Value returns a publicKey value, implements driver.Valuer interface.
-func (c currency) Value() (driver.Value, error) {
-	return types.Currency(c).ExactString(), nil
 }
 
 func (publicKey) GormDataType() string {

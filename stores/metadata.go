@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 	"lukechampine.com/frand"
 )
 
@@ -56,29 +55,6 @@ var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 5
 
 type (
 	contractState uint8
-
-	ContractCommon struct {
-		FCID        fileContractID `gorm:"unique;index;NOT NULL;column:fcid;size:32"`
-		RenewedFrom fileContractID `gorm:"index;size:32"`
-
-		ContractPrice  currency
-		State          contractState `gorm:"index;NOT NULL;default:0"`
-		TotalCost      currency
-		ProofHeight    uint64 `gorm:"index;default:0"`
-		RevisionHeight uint64 `gorm:"index;default:0"`
-		RevisionNumber string `gorm:"NOT NULL;default:'0'"` // string since db can't store math.MaxUint64
-		Size           uint64
-		StartHeight    uint64 `gorm:"index;NOT NULL"`
-		WindowStart    uint64 `gorm:"index;NOT NULL;default:0"`
-		WindowEnd      uint64 `gorm:"index;NOT NULL;default:0"`
-
-		// spending fields
-		UploadSpending      currency
-		DownloadSpending    currency
-		FundAccountSpending currency
-		DeleteSpending      currency
-		ListSpending        currency
-	}
 
 	dbObject struct {
 		Model
@@ -156,43 +132,6 @@ type (
 	dbContractSector struct {
 		DBSectorID   uint `gorm:"primaryKey;index"`
 		DBContractID uint `gorm:"primaryKey;index"`
-	}
-
-	// rawObject is used for hydration and is made up of one or many raw sectors.
-	rawObject []rawObjectSector
-
-	// rawObjectRow contains all necessary information to reconstruct the object.
-	rawObjectSector struct {
-		// object
-		ObjectID       uint
-		ObjectIndex    uint64
-		ObjectKey      []byte
-		ObjectName     string
-		ObjectSize     int64
-		ObjectModTime  time.Time
-		ObjectMimeType string
-		ObjectHealth   float64
-		ObjectETag     string
-
-		// slice
-		SliceOffset uint32
-		SliceLength uint32
-
-		// slab
-		SlabBuffered  bool
-		SlabID        uint
-		SlabHealth    float64
-		SlabKey       []byte
-		SlabMinShards uint8
-
-		// sector
-		SectorIndex uint
-		SectorRoot  []byte
-		LatestHost  publicKey
-
-		// contract
-		FCID    fileContractID
-		HostKey publicKey
 	}
 )
 
@@ -862,31 +801,6 @@ func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj
 		obj, err = tx.ObjectMetadata(ctx, bucket, path)
 		return err
 	})
-	return
-}
-
-func (s *SQLStore) objectRaw(txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {
-	// NOTE: we LEFT JOIN here because empty objects are valid and need to be
-	// included in the result set, when we convert the rawObject before
-	// returning it we'll check for SlabID and/or SectorID being 0 and act
-	// accordingly
-	err = txn.
-		Select("o.id as ObjectID, o.health as ObjectHealth, sli.object_index as ObjectIndex, o.key as ObjectKey, o.object_id as ObjectName, o.size as ObjectSize, o.mime_type as ObjectMimeType, o.created_at as ObjectModTime, o.etag as ObjectETag, sli.object_index, sli.offset as SliceOffset, sli.length as SliceLength, sla.id as SlabID, sla.health as SlabHealth, sla.key as SlabKey, sla.min_shards as SlabMinShards, bs.id IS NOT NULL AS SlabBuffered, sec.slab_index as SectorIndex, sec.root as SectorRoot, sec.latest_host as LatestHost, c.fcid as FCID, h.public_key as HostKey").
-		Model(&dbObject{}).
-		Table("objects o").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Joins("LEFT JOIN slices sli ON o.id = sli.`db_object_id`").
-		Joins("LEFT JOIN slabs sla ON sli.db_slab_id = sla.`id`").
-		Joins("LEFT JOIN sectors sec ON sla.id = sec.`db_slab_id`").
-		Joins("LEFT JOIN contract_sectors cs ON sec.id = cs.`db_sector_id`").
-		Joins("LEFT JOIN contracts c ON cs.`db_contract_id` = c.`id`").
-		Joins("LEFT JOIN hosts h ON c.host_id = h.id").
-		Joins("LEFT JOIN buffered_slabs bs ON sla.db_buffered_slab_id = bs.`id`").
-		Where("o.object_id = ? AND b.name = ?", path, bucket).
-		Order("sli.object_index ASC").
-		Order("sec.slab_index ASC").
-		Scan(&rows).
-		Error
 	return
 }
 

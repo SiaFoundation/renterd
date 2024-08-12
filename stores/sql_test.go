@@ -219,16 +219,12 @@ func (s *testSQLStore) Close() error {
 	return nil
 }
 
-func (s *testSQLStore) DefaultBucketID() uint {
-	var b dbBucket
-	if err := s.gormDB.
-		Model(&dbBucket{}).
-		Where("name = ?", api.DefaultBucketName).
-		Take(&b).
-		Error; err != nil {
+func (s *testSQLStore) DefaultBucketID() (id int64) {
+	if err := s.DB().QueryRow(context.Background(), "SELECT id FROM buckets WHERE name = ?", api.DefaultBucketName).
+		Scan(&id); err != nil {
 		s.t.Fatal(err)
 	}
-	return b.ID
+	return
 }
 
 func (s *testSQLStore) Reopen() *testSQLStore {

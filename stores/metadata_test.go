@@ -1064,7 +1064,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	one := uint(1)
 	expectedObj := dbObject{
 		DBDirectoryID: 1,
-		DBBucketID:    ss.DefaultBucketID(),
+		DBBucketID:    uint(ss.DefaultBucketID()),
 		Health:        1,
 		ObjectID:      objID,
 		Key:           obj1Key,
@@ -3414,16 +3414,13 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// See if we can fetch the object by slab.
-	var ec object.EncryptionKey
-	if obj, err := ss.objectRaw(ss.gormDB, b1, "/bar"); err != nil {
+	if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
-	} else if err := ec.UnmarshalBinary(obj[0].SlabKey); err != nil {
-		t.Fatal(err)
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, ec); err != nil {
+	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].Key); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 1 {
 		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, ec); err != nil {
+	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].Key); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
@@ -4194,7 +4191,7 @@ func TestSlabCleanup(t *testing.T) {
 	obj1 := dbObject{
 		DBDirectoryID: uint(dirID),
 		ObjectID:      "1",
-		DBBucketID:    ss.DefaultBucketID(),
+		DBBucketID:    uint(ss.DefaultBucketID()),
 		Health:        1,
 	}
 	if err := ss.gormDB.Create(&obj1).Error; err != nil {
@@ -4203,7 +4200,7 @@ func TestSlabCleanup(t *testing.T) {
 	obj2 := dbObject{
 		DBDirectoryID: uint(dirID),
 		ObjectID:      "2",
-		DBBucketID:    ss.DefaultBucketID(),
+		DBBucketID:    uint(ss.DefaultBucketID()),
 		Health:        1,
 	}
 	if err := ss.gormDB.Create(&obj2).Error; err != nil {
@@ -4277,7 +4274,7 @@ func TestSlabCleanup(t *testing.T) {
 	obj3 := dbObject{
 		DBDirectoryID: uint(dirID),
 		ObjectID:      "3",
-		DBBucketID:    ss.DefaultBucketID(),
+		DBBucketID:    uint(ss.DefaultBucketID()),
 		Health:        1,
 	}
 	if err := ss.gormDB.Create(&obj3).Error; err != nil {
@@ -4367,7 +4364,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if dbObj.ID != 1 {
 		t.Fatal("unexpected id", dbObj.ID)
-	} else if dbObj.DBBucketID != ss.DefaultBucketID() {
+	} else if dbObj.DBBucketID != uint(ss.DefaultBucketID()) {
 		t.Fatal("bucket id mismatch", dbObj.DBBucketID)
 	} else if dbObj.ObjectID != "1" {
 		t.Fatal("object id mismatch", dbObj.ObjectID)
