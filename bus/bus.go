@@ -212,10 +212,10 @@ type (
 
 	WebhooksManager interface {
 		webhooks.Broadcaster
-		Close(context.Context) error
 		Delete(context.Context, webhooks.Webhook) error
 		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
 		Register(context.Context, webhooks.Webhook) error
+		Shutdown(context.Context) error
 	}
 )
 
@@ -436,7 +436,7 @@ func (b *bus) Setup() {
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
-		b.webhooksMgr.Close(ctx),
+		b.webhooksMgr.Shutdown(ctx),
 		b.saveAccounts(ctx),
 		b.pinMgr.Close(ctx),
 	)
