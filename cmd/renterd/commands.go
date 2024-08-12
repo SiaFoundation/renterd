@@ -78,9 +78,9 @@ func cmdSeed() {
 	fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
 }
 
-func cmdVersion() {
+func cmdVersion(network string) {
 	fmt.Println("renterd", build.Version())
-	fmt.Println("Network", build.NetworkName())
+	fmt.Println("Network", network)
 	fmt.Println("Commit:", build.Commit())
 	fmt.Println("Build Date:", build.BuildTime())
 }

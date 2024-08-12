@@ -825,7 +825,6 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 
 		StartTime: api.TimeRFC3339(ap.StartTime()),
 		BuildState: api.BuildState{
-			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
