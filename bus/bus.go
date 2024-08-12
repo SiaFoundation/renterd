@@ -217,7 +217,7 @@ type (
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
-		UnconfirmedTransactions() ([]wallet.Event, error)
+		UnconfirmedEvents() ([]wallet.Event, error)
 		Events(offset, limit int) ([]wallet.Event, error)
 	}
 
@@ -616,7 +616,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
 		case wallet.EventTypeV1Transaction:
 			v1Txn, _ := data.(wallet.EventV1Transaction)
-			txn = types.Transaction(v1Txn)
+			txn = types.Transaction(v1Txn.Transaction)
 		case wallet.EventTypeV1ContractResolution:
 			fce, _ := data.(wallet.EventV1ContractResolution)
 			txn = types.Transaction{
@@ -638,8 +638,8 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 					Raw:       txn,
 					Index:     e.Index,
 					ID:        types.TransactionID(e.ID),
-					Inflow:    e.Inflow,
-					Outflow:   e.Outflow,
+					Inflow:    e.SiacoinInflow(),
+					Outflow:   e.SiacoinOutflow(),
 					Timestamp: e.Timestamp,
 				})
 			}
