@@ -439,6 +439,8 @@ func TestRecordScan(t *testing.T) {
 	// The host shouldn't have any addresses.
 	if len(host.ResolvedAddresses) != 0 {
 		t.Fatal("unexpected", host.ResolvedAddresses, len(host.ResolvedAddresses))
+	} else if len(host.Subnets) != 0 {
+		t.Fatal("unexpected", host.Subnets, len(host.Subnets))
 	}
 
 	// Fetch the host directly to get the creation time.
@@ -452,11 +454,12 @@ func TestRecordScan(t *testing.T) {
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
 	resolvedAddresses := []string{"212.1.96.0", "38.135.51.0"}
+	subnets := []string{"212.1.96.0/24", "38.135.51.0/24"}
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
 	pt := rhpv3.HostPriceTable{
 		HostBlockHeight: 123,
 	}
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true, resolvedAddresses)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true, resolvedAddresses, subnets)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -476,7 +479,9 @@ func TestRecordScan(t *testing.T) {
 
 	// The host should have the addresses.
 	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
-		t.Fatal("mismatch")
+		t.Fatal("resolved addresses mismatch")
+	} else if !reflect.DeepEqual(host.Subnets, subnets) {
+		t.Fatal("subnets mismatch")
 	}
 
 	// We expect no uptime or downtime from only a single scan.
@@ -506,7 +511,7 @@ func TestRecordScan(t *testing.T) {
 	// subnets this time.
 	secondScanTime := firstScanTime.Add(time.Hour)
 	pt.HostBlockHeight = 456
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true, nil)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true, nil, nil)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -536,12 +541,14 @@ func TestRecordScan(t *testing.T) {
 
 	// The host should still have the subnets.
 	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
-		t.Fatal("mismatch")
+		t.Fatal("resolved addresses mismatch")
+	} else if !reflect.DeepEqual(host.Subnets, subnets) {
+		t.Fatal("subnets mismatch")
 	}
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false, nil)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false, nil, nil)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -599,8 +606,8 @@ func TestRemoveHosts(t *testing.T) {
 	pt := rhpv3.HostPriceTable{}
 	t1 := now.Add(-time.Minute * 120) // 2 hours ago
 	t2 := now.Add(-time.Minute * 90)  // 1.5 hours ago (30min downtime)
-	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil)
-	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil)
+	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil, nil)
+	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil, nil)
 
 	// record interactions
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
@@ -630,7 +637,7 @@ func TestRemoveHosts(t *testing.T) {
 
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
-	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil)
+	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil, nil)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
@@ -1110,12 +1117,13 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, resolvedAddresses []string) api.HostScan {
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, resolvedAddresses, subnets []string) api.HostScan {
 	return api.HostScan{
 		HostKey:           hk,
 		PriceTable:        pt,
 		Settings:          settings,
 		ResolvedAddresses: resolvedAddresses,
+		Subnets:           subnets,
 		Success:           success,
 		Timestamp:         scanTime,
 	}
